@@ -1,0 +1,59 @@
+[MASTER]
+# A comma-separated list of package or module names from where C extensions may
+# be loaded. Extensions are loading into the active Python interpreter and may
+# run arbitrary code.
+extension-pkg-whitelist=pydantic.fields
+
+[MESSAGES CONTROL]
+disable =
+  # gets angry when you declare a module-level logger
+  invalid-name,
+  # we use black for continuations
+  bad-continuation,
+  # missing-*-docstring: we have no intention to require docstrings on everything
+  C0111,
+  # wrong-import-order classifies relative imports differently from the
+  # reorder_python_imports git hook. We'll defer to the git hook.
+  wrong-import-order,
+  # Covered by flake8 E402
+  wrong-import-position,
+  # duplicate-code triggers on duplicated imports in different files!?
+  duplicate-code,
+  # gets angry when you declare a BaseModel or a Dataclass!?
+  too-few-public-methods,
+  # pylint apparently can't understand that pydantic.BaseModel exists?
+  no-name-in-module,
+  # same as above
+  no-member,
+  # we'd prefer to see TODOs and FIXMEs, rather than discouraging people from adding
+  # them
+  fixme,
+  # can't distinguish pytest fixtures from real issues
+  redefined-outer-name,
+  # Don't tell me what to do
+  no-else-return,
+  # We'll use flake8 to detect too-long lines.
+  line-too-long,
+  # Prevents use of 'foo', 'bar', and 'baz', especially in tests
+  blacklisted-name,
+  # Throws up false positives https://github.com/PyCQA/pylint/issues/1498
+  unsubscriptable-object,
+  # This is not actually a bad pattern in Python, where you can name every argument.
+  # There is a separate message 'too-many-function-args' which catches the pattern
+  # which is actually bad.
+  too-many-arguments,
+  # the flake8 F401 check catches this
+  unused-import,
+  # The docs say this catches when you assign to a None object, but it also appears
+  # to flag situations where pylint incorrectly assumes that a value is None, but
+  # it actually is the return value of a decorator-wrapped function
+  unsupported-assignment-operation,
+  # Covered by flake8 E722
+  bare-except,
+  # Not always accurate
+  using-constant-test,
+  # Hidden imports are often useful for avoiding optional dep imports
+  import-outside-toplevel
+
+[DESIGN]
+max-attributes=12

@@ -1,0 +1,18 @@
+[flake8]
+ignore = D10,D400,D401,W503,D202,D205
+# "Since E203 is not PEP 8 compliant, you should tell Flake8 to ignore these warnings."
+# -- https://github.com/psf/black/blob/master/README.md
+extend-ignore = E203
+exclude =
+    *.egg-info,
+    *.pyc,
+    .cache,
+    .coverage.*,
+    .gradle,
+    .tox,
+    build,
+    dist,
+    htmlcov.*
+max-complexity = 10
+max-line-length = 88
+application-import-names = flake8

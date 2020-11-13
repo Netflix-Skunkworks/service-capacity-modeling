@@ -1,0 +1,26 @@
+{
+  "us-east-1": {
+    "instances": {
+      "m5.xlarge":    {"annual_cost": 632.3},
+      "m5.2xlarge":   {"annual_cost": 1264.6},
+      "m5.4xlarge":   {"annual_cost": 2529.7},
+      "m5.8xlarge":   {"annual_cost": 5059.33},
+      "r5.2xlarge":   {"annual_cost": 1660},
+      "r5.4xlarge":   {"annual_cost": 3320},
+      "r5.8xlarge":   {"annual_cost": 6640.3},
+      "i3.2xlarge":   {"annual_cost": 2312},
+      "i3.4xlarge":   {"annual_cost": 4624.3},
+      "i3en.2xlarge": {"annual_cost": 2999},
+      "i3en.3xlarge": {"annual_cost": 4498},
+      "m5d.2xlarge":  {"annual_cost": 1488.6},
+      "m5d.4xlarge":  {"annual_cost": 2977.7},
+      "m5d.8xlarge":  {"annual_cost": 5955},
+      "r5d.2xlarge":  {"annual_cost": 1897},
+      "r5d.4xlarge":  {"annual_cost": 3794},
+      "r5d.8xlarge":  {"annual_cost": 7588}
+    },
+    "drives": {
+      "gp2": {"annual_cost_per_gib": 1.2}
+    }
+  }
+}

@@ -1,0 +1,149 @@
+{
+  "core_reference_ghz": 2.3,
+  "instances": {
+    "m5.xlarge": {
+      "name": "m5.xlarge",
+      "cpu": 4,
+      "cpu_ghz": 3.1,
+      "ram_gib": 16,
+      "net_mbps": 1000,
+      "drive": null
+    },
+    "m5.2xlarge": {
+      "name": "m5.2xlarge",
+      "cpu": 8,
+      "cpu_ghz": 3.1,
+      "ram_gib": 32,
+      "net_mbps": 2000,
+      "drive": null
+    },
+    "m5.4xlarge": {
+      "name": "m5.4xlarge",
+      "cpu": 16,
+      "cpu_ghz": 3.1,
+      "ram_gib": 64,
+      "net_mbps": 4000,
+      "drive": null
+    },
+    "m5.8xlarge": {
+      "name": "m5.8xlarge",
+      "cpu": 32,
+      "cpu_ghz": 3.1,
+      "ram_gib": 128,
+      "net_mbps": 10000,
+      "drive": null
+    },
+    "r5.2xlarge": {
+      "name": "r5.2xlarge",
+      "cpu": 8,
+      "cpu_ghz": 3.1,
+      "ram_gib": 64,
+      "net_mbps": 2000,
+      "drive": null
+    },
+    "r5.4xlarge": {
+      "name": "r5.4xlarge",
+      "cpu": 16,
+      "cpu_ghz": 3.1,
+      "ram_gib": 128,
+      "net_mbps": 4000,
+      "drive": null
+    },
+    "r5.8xlarge": {
+      "name": "r5.4xlarge",
+      "cpu": 32,
+      "cpu_ghz": 3.1,
+      "ram_gib": 256,
+      "net_mbps": 10000,
+      "drive": null
+    },
+    "i3.2xlarge": {
+      "name": "i3.2xlarge",
+      "cpu": 8,
+      "cpu_ghz": 2.3,
+      "ram_gib": 61,
+      "net_mbps": 2000,
+      "drive": {"name": "ephem", "size_gib": 1900, "avg_read_latency_ms": 0.3}
+    },
+    "i3.4xlarge": {
+      "name": "i3.4xlarge",
+      "cpu": 16,
+      "cpu_ghz": 2.3,
+      "ram_gib": 122,
+      "net_mbps": 4000,
+      "drive": {"name": "ephem", "size_gib": 3800, "avg_read_latency_ms": 0.3}
+    },
+    "i3en.2xlarge": {
+      "name": "i3en.2xlarge",
+      "cpu": 8,
+      "cpu_ghz": 3.1,
+      "ram_gib": 64,
+      "net_mbps": 8000,
+      "drive": {"name": "ephem", "size_gib": 5000, "avg_read_latency_ms": 0.2}
+    },
+    "i3en.3xlarge": {
+      "name": "i3en.3xlarge",
+      "cpu": 12,
+      "cpu_ghz": 3.1,
+      "ram_gib": 96,
+      "net_mbps": 12000,
+      "drive": {"name": "ephem", "size_gib": 7500, "avg_read_latency_ms": 0.2}
+    },
+    "m5d.2xlarge": {
+      "name": "m5d.2xlarge",
+      "cpu": 8,
+      "cpu_ghz": 3.1,
+      "ram_gib": 32,
+      "net_mbps": 2000,
+      "drive": {"name": "ephem", "size_gib": 300, "avg_read_latency_ms": 0.3},
+      "annual_cost": 1488.6
+    },
+    "m5d.4xlarge": {
+      "name": "m5d.4xlarge",
+      "cpu": 16,
+      "cpu_ghz": 3.1,
+      "ram_gib": 64,
+      "net_mbps": 4000,
+      "drive": {"name": "ephem", "size_gib": 600, "avg_read_latency_ms": 0.3},
+      "annual_cost": 2977.7
+    },
+    "m5d.8xlarge": {
+      "name": "m5d.4xlarge",
+      "cpu": 32,
+      "cpu_ghz": 3.1,
+      "ram_gib": 128,
+      "net_mbps": 10000,
+      "drive": {"name": "ephem", "size_gib": 1200, "avg_read_latency_ms": 0.3},
+      "annual_cost": 5955
+    },
+    "r5d.2xlarge": {
+      "name": "r5d.2xlarge",
+      "cpu": 8,
+      "cpu_ghz": 3.1,
+      "ram_gib": 64,
+      "net_mbps": 2000,
+      "drive": {"name": "ephem", "size_gib": 300, "avg_read_latency_ms": 0.3}
+    },
+    "r5d.4xlarge": {
+      "name": "r5d.4xlarge",
+      "cpu": 16,
+      "cpu_ghz": 3.1,
+      "ram_gib": 128,
+      "net_mbps": 4000,
+      "drive": {"name": "ephem", "size_gib": 600, "avg_read_latency_ms": 0.3}
+    },
+    "r5d.8xlarge": {
+      "name": "r5d.8xlarge",
+      "cpu": 32,
+      "cpu_ghz": 3.1,
+      "ram_gib": 256,
+      "net_mbps": 10000,
+      "drive": {"name": "ephem", "size_gib": 1200, "avg_read_latency_ms": 0.3}
+    }
+  },
+  "drives": {
+    "gp2": {
+      "name": "gp2"
+    }
+  }
+}
