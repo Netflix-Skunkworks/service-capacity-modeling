@@ -18,3 +18,6 @@ Run IPython for interactively using the library:
 ```
 tox -e dev -- ipython
 ```
+
+## Release
+TODO
