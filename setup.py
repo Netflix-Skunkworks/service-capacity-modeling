@@ -7,7 +7,7 @@ setuptools.setup(
     versioning="distance",
     setup_requires="setupmeta",
     description="Contains utilities for modeling database capacity on a cloud",
-    packages=setuptools.find_packages(),
+    packages=setuptools.find_packages("service_capacity_modeling"),
     install_requires=[
         "pydantic",
         'importlib_resources; python_version < "3.7"',
