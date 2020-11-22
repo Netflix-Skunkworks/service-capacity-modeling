@@ -141,6 +141,22 @@ class Interval(BaseModel):
     # How confident are we of this interval
     confidence: float = 1.0
 
+    minimum_value: Optional[float] = None
+    maximum_value: Optional[float] = None
+
+    @property
+    def minimum(self):
+        if self.minimum_value is None:
+            return self.low / 2
+
+        return self.minimum_value
+
+    @property
+    def maximum(self):
+        if self.maximum_value is None:
+            return self.high * 2
+        return self.maximum_value
+
 
 def certain_int(x: int) -> Interval:
     return Interval(low=x, mid=x, high=x, confidence=1.0)

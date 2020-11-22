@@ -10,6 +10,7 @@ setuptools.setup(
     packages=setuptools.find_packages(exclude=("tests*",)),
     install_requires=[
         "pydantic",
+        "scipy",
         'importlib_resources; python_version < "3.7"',
     ],
     extras_require={
