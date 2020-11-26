@@ -148,7 +148,7 @@ def compute_stateful_zone(
     count = max(count, math.ceil(needed_network_mbps / instance.net_mbps))
 
     # How many instances do we need for the disk
-    if instance.drive is not None:
+    if instance.drive is not None and instance.drive.size_gib > 0:
         count = max(count, needed_disk_gib // instance.drive.size_gib)
 
     count = cluster_size(count)

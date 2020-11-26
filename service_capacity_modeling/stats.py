@@ -45,7 +45,7 @@ def _gamma_dist_from_interval(interval: Interval) -> Tuple[float, rv_continuous]
     mean = interval.mid - minimum
 
     f = _gamma_fn_from_params(lower, mean, interval.high, interval.confidence)
-    shape = fsolve(f, 1)
+    shape = fsolve(f, 2)
 
     return (shape, gamma_dist(shape, loc=minimum, scale=(mean / shape)))
 

@@ -1,4 +1,4 @@
-from service_capacity_modeling.capacity import planner
+from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.models import CapacityDesires
 from service_capacity_modeling.models import certain_float
 from service_capacity_modeling.models import certain_int
@@ -51,13 +51,13 @@ large_footprint = CapacityDesires(
 
 def test_capacity_small_fast():
     for allow_ebs in (True, False):
-        cap_plan = planner.plan(
+        cap_plan = planner.plan_certain(
             model_name="nflx_cassandra",
             region="us-east-1",
             desires=small_but_high_qps,
             allow_gp2=allow_ebs,
         )
-        small_result = cap_plan.clusters[0]
+        small_result = cap_plan.candidate_clusters[0].zonal[0]
         # We really should just pay for CPU here
         assert small_result.instance.name.startswith("m5")
 
@@ -70,20 +70,20 @@ def test_capacity_small_fast():
 
 
 def test_capacity_high_writes():
-    cap_plan = planner.plan(
+    cap_plan = planner.plan_certain(
         model_name="nflx_cassandra",
         region="us-east-1",
         desires=high_writes,
         copies_per_region=2,
     )
-    high_writes_result = cap_plan.clusters[0]
+    high_writes_result = cap_plan.candidate_clusters[0].zonal[0]
     assert high_writes_result.instance.name == "m5.2xlarge"
     assert high_writes_result.count == 4
     assert high_writes_result.attached_drives[0].size_gib >= 500
 
 
 def test_capacity_large_footprint():
-    cap_plan = planner.plan(
+    cap_plan = planner.plan_certain(
         model_name="nflx_cassandra",
         region="us-east-1",
         desires=large_footprint,
@@ -91,16 +91,16 @@ def test_capacity_large_footprint():
         required_cluster_size=4,
     )
 
-    large_footprint_result = cap_plan.clusters[0]
+    large_footprint_result = cap_plan.candidate_clusters[0].zonal[0]
     assert large_footprint_result.instance.name == "i3en.3xlarge"
     assert large_footprint_result.count == 4
 
-    java_cap_plan = planner.plan(
+    java_cap_plan = planner.plan_certain(
         model_name="nflx_stateless_java_app",
         region="us-east-1",
         desires=large_footprint,
     )
-    java_result = java_cap_plan.clusters[0]
+    java_result = java_cap_plan.candidate_clusters[0].regional[0]
     cores = java_result.count * java_result.instance.cpu
     assert java_result.instance.name.startswith("m5")
     assert 100 <= cores <= 200

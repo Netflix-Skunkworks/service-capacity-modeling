@@ -19,7 +19,7 @@ class Drive(BaseModel):
     """
 
     name: str
-    size_gib: Optional[int]
+    size_gib: int = 0
     read_io_per_s: Optional[int]
     write_io_per_s: Optional[int]
     # If this drive has single tenant IO capacity, for example a single
@@ -77,10 +77,6 @@ class Hardware(BaseModel):
         drives: ebs type -> Drive(cost per _GiB year_, etc...)
     """
 
-    # When users are providing latency estimates, what is the typical
-    # instance ghz we are comparing to. Databases use i3s a lot hence this
-    # default
-    core_reference_ghz: float = 2.3
     # Per instance shape information e.g. cpu, ram, cpu etc ...
     instances: Dict[str, Instance]
     # Per drive type information and cost
@@ -94,10 +90,6 @@ class GlobalHardware(BaseModel):
         region -> region
     """
 
-    # When users are providing latency estimates, what is the typical
-    # instance ghz we are comparing to. Databases use i3s a lot hence this
-    # default
-    core_reference_ghz: float = 2.3
     # Per region hardware shapes
     regions: Dict[str, Hardware]
 
@@ -216,14 +208,20 @@ class CapacityDesires(BaseModel):
     # What will the state look like
     data_shape: DataShape = DataShape()
 
+    # When users are providing latency estimates, what is the typical
+    # instance core frequency we are comparing to. Databases use i3s a lot
+    # hence this default
+    core_reference_ghz: float = 2.3
+
 
 class CapacityRequirement(BaseModel):
-    cpu_reference_ghz: float
+    core_reference_ghz: float
     # Ranges of capacity requirements, typically [10%, mean, 90%]
     cpu_cores: Interval
-    mem_gib: Optional[Interval]
-    disk_gib: Optional[Interval]
-    network_mbps: Optional[Interval]
+    mem_gib: Interval = certain_int(0)
+    network_mbps: Interval = certain_int(0)
+    disk_gib: Interval = certain_int(0)
+    context: Dict = dict()
 
 
 class ClusterCapacity(BaseModel):
@@ -245,6 +243,12 @@ class RegionClusterCapacity(ClusterCapacity):
     pass
 
 
+class Clusters(BaseModel):
+    total_annual_cost: Interval
+    zonal: Sequence[ZoneClusterCapacity] = list()
+    regional: Sequence[RegionClusterCapacity] = list()
+
+
 class CapacityPlan(BaseModel):
-    capacity_requirement: CapacityRequirement
-    clusters: Sequence[ClusterCapacity]
+    requirement: CapacityRequirement
+    candidate_clusters: Sequence[Clusters]

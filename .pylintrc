@@ -5,6 +5,9 @@
 extension-pkg-whitelist=pydantic.fields
 
 [MESSAGES CONTROL]
+# Should be able to have unused args and kwargs
+ignored-argument-names=args|kwargs
+
 disable =
   # gets angry when you declare a module-level logger
   invalid-name,

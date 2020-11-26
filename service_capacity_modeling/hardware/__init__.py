@@ -29,26 +29,23 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
         priced_instances: Dict[str, Instance] = {}
         priced_drives: Dict[str, Drive] = {}
 
-        for instance, price in region_pricing.instances.items():
+        for instance, iprice in region_pricing.instances.items():
             priced_instances[instance] = hardware.instances[instance].copy()
-            priced_instances[instance].annual_cost = price.annual_cost
+            priced_instances[instance].annual_cost = iprice.annual_cost
 
-        for drive, price in region_pricing.drives.items():
+        for drive, dprice in region_pricing.drives.items():
             priced_drives[drive] = hardware.drives[drive].copy()
             pd = priced_drives[drive]
-            pd.annual_cost_per_gib = price.annual_cost_per_gib
-            pd.annual_cost_per_read_io = price.annual_cost_per_read_io
-            pd.annual_cost_per_write_io = price.annual_cost_per_write_io
+            pd.annual_cost_per_gib = dprice.annual_cost_per_gib
+            pd.annual_cost_per_read_io = dprice.annual_cost_per_read_io
+            pd.annual_cost_per_write_io = dprice.annual_cost_per_write_io
 
         regions[region] = Hardware(
-            core_reference_ghz=hardware.core_reference_ghz,
             instances=priced_instances,
             drives=priced_drives,
         )
 
-    return GlobalHardware(
-        core_reference_ghz=hardware.core_reference_ghz, regions=regions
-    )
+    return GlobalHardware(regions=regions)
 
 
 def load_hardware_from_disk(
@@ -64,7 +61,7 @@ def load_hardware_from_disk(
 
         return price_hardware(hardware=hardware, pricing=pricing)
     else:
-        return None
+        return GlobalHardware(regions={})
 
 
 def load_hardware_from_s3(bucket, path) -> GlobalHardware:
@@ -75,7 +72,7 @@ def load_hardware_from_s3(bucket, path) -> GlobalHardware:
             import boto3
             import botocore
         except ImportError:
-            return None
+            return GlobalHardware(regions={})
 
         s3 = boto3.resource("s3")
         obj = s3.Object(bucket, path)
@@ -83,7 +80,7 @@ def load_hardware_from_s3(bucket, path) -> GlobalHardware:
         return GlobalHardware(**data)
     except botocore.exceptions.ClientError as exp:
         logger.exception(exp)
-        return None
+        return GlobalHardware(regions={})
 
 
 class HardwareShapes:
