@@ -3,6 +3,7 @@ from service_capacity_modeling.models import CapacityDesires
 from service_capacity_modeling.models import certain_float
 from service_capacity_modeling.models import certain_int
 from service_capacity_modeling.models import DataShape
+from service_capacity_modeling.models import Interval
 from service_capacity_modeling.models import QueryPattern
 
 
@@ -80,6 +81,37 @@ def test_capacity_high_writes():
     assert high_writes_result.instance.name == "m5.2xlarge"
     assert high_writes_result.count == 4
     assert high_writes_result.attached_drives[0].size_gib >= 500
+
+
+uncertain = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=Interval(
+            low=1000, mid=10000, high=100000, confidence=0.9
+        ),
+        estimated_write_per_second=Interval(
+            low=1000, mid=10000, high=100000, confidence=0.9
+        ),
+        estimated_mean_read_latency_ms=Interval(
+            low=0.1, mid=1, high=10, confidence=0.9
+        ),
+        estimated_mean_write_latency_ms=certain_float(1),
+    ),
+    data_shape=DataShape(
+        estimated_state_size_gb=certain_int(500),
+        estimated_working_set_percent=certain_float(0.1),
+    ),
+)
+
+
+def test_uncertain_planning():
+    cap_plan = planner.plan(
+        model_name="nflx_cassandra",
+        region="us-east-1",
+        desires=uncertain,
+        allow_gp2=True,
+    )
+    assert False
 
 
 def test_capacity_large_footprint():

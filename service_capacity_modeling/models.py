@@ -4,8 +4,8 @@ from typing import Optional
 from typing import Sequence
 from typing import TypeVar
 
+import numpy as np
 from pydantic import BaseModel
-
 
 ###############################################################################
 #              Models (structs) for how we describe hardware                  #
@@ -20,8 +20,8 @@ class Drive(BaseModel):
 
     name: str
     size_gib: int = 0
-    read_io_per_s: Optional[int]
-    write_io_per_s: Optional[int]
+    read_io_per_s: Optional[int] = None
+    write_io_per_s: Optional[int] = None
     # If this drive has single tenant IO capacity, for example a single
     # physical drive versus a virtualised drive
     single_tenant: bool = True
@@ -156,6 +156,26 @@ def certain_int(x: int) -> Interval:
 
 def certain_float(x: float) -> Interval:
     return Interval(low=x, mid=x, high=x, confidence=1.0)
+
+
+def interval(samples: Sequence[float], low_p: int = 5, high_p: int = 95) -> Interval:
+    p = np.percentile(samples, [0, low_p, 50, high_p, 100], interpolation="nearest")
+    conf = (high_p - low_p) / 100
+    return Interval(
+        low=p[1],
+        mid=p[2],
+        high=p[3],
+        minimum_value=p[0],
+        maximum_value=p[4],
+        confidence=conf,
+    )
+
+
+def interval_percentile(
+    samples: Sequence[float], percentiles: Sequence[int]
+) -> Sequence[Interval]:
+    p = np.percentile(samples, percentiles, interpolation="nearest")
+    return [certain_float(i) for i in p]
 
 
 class QueryPattern(BaseModel):

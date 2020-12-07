@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import json
 import logging
 from typing import Callable
 from typing import Dict
@@ -30,6 +31,8 @@ from service_capacity_modeling.models import Clusters
 from service_capacity_modeling.models import DataShape
 from service_capacity_modeling.models import GlobalHardware
 from service_capacity_modeling.models import Interval
+from service_capacity_modeling.models import interval
+from service_capacity_modeling.models import interval_percentile
 from service_capacity_modeling.models import QueryPattern
 from service_capacity_modeling.stats import gamma_for_interval
 
@@ -54,7 +57,7 @@ def simulate_interval(interval: Interval) -> Callable[[int], Sequence[Interval]]
 
 # Take uncertain inputs and simulate a desired number of certain inputs
 def model_inputs(
-    desires: CapacityDesires, num_sims: int = 100
+    desires: CapacityDesires, num_sims: int = 1000
 ) -> Generator[CapacityDesires, None, None]:
     query_pattern = desires.query_pattern.copy()
     data_shape = desires.data_shape.copy()
@@ -87,6 +90,42 @@ def model_inputs(
         d.query_pattern = query_pattern
         d.data_shape = data_shape
         yield d
+
+
+def percentile_desires(
+    desires: CapacityDesires, percentiles: Sequence[int] = (5, 95)
+) -> Sequence[CapacityDesires]:
+    query_pattern = desires.query_pattern.copy()
+    data_shape = desires.data_shape.copy()
+
+    query_pattern_simulation = {}
+    for field in query_pattern.__fields__:
+        d = getattr(query_pattern, field)
+        if isinstance(d, Interval):
+            samples = gamma_for_interval(d).rvs(10000)
+            query_pattern_simulation[field] = interval_percentile(samples, percentiles)
+        else:
+            query_pattern_simulation[field] = [d] * len(percentiles)
+
+    data_shape_simulation = {}
+    for field in data_shape.__fields__:
+        d = getattr(data_shape, field)
+        if isinstance(d, Interval):
+            data_shape_simulation[field] = interval_percentile(samples, percentiles)
+        else:
+            data_shape_simulation[field] = [d] * len(percentiles)
+
+    for i in range(len(percentiles)):
+        query_pattern = QueryPattern(
+            **{f: query_pattern_simulation[f] for f in query_pattern.__fields__}
+        )
+        data_shape = DataShape(
+            **{f: data_shape_simulation[f] for f in data_shape.__fields__}
+        )
+        d = desires.copy()
+        d.query_pattern = query_pattern
+        d.data_shape = data_shape
+    return d
 
 
 class CapacityPlanner:
@@ -156,8 +195,101 @@ class CapacityPlanner:
         )
         return CapacityPlan(requirement=requirement, candidate_clusters=clusters)
 
-    #        cores, mem, disk, network, cost = [], [], [], [], []
-    #        for sim_desires in model_inputs(desires, self.simulations):
+    def plan(
+        self,
+        model_name: str,
+        region: str,
+        desires: CapacityDesires,
+        bounds: Tuple[int, int] = (5, 95),
+        *args,
+        **kwargs
+    ) -> Tuple[CapacityPlan, Dict[int, CapacityPlan]]:
+        requirements = {}
+        simulated_desires = {}
+        modal_clusters: Dict[str, int] = {}
+
+        for sim_desires in model_inputs(desires, self.simulations):
+            requirement = self.model_capacity(
+                model_name=model_name, desires=sim_desires, *args, **kwargs
+            )
+            clusters = self.provision(
+                model_name=model_name,
+                region=region,
+                requirement=requirement,
+                *args,
+                **kwargs
+            )
+            if len(clusters) == 0:
+                continue
+
+            best_cluster = clusters[0].json(sort_keys=True, exclude_unset=True)
+            if best_cluster not in modal_clusters:
+                modal_clusters[best_cluster] = 0
+            modal_clusters[best_cluster] += 1
+
+            for field in requirement.__fields__:
+                d = getattr(requirement, field)
+                if isinstance(d, Interval):
+                    if field not in requirements:
+                        requirements[field] = [d]
+                    else:
+                        requirements[field].append(d)
+
+        topologies = [
+            Clusters(**json.loads(k))
+            for k, v in sorted(modal_clusters.items(), key=lambda x: -x[1])
+        ]
+
+        low_p, high_p = bounds
+
+        caps = {
+            k: interval(samples=[i.mid for i in v], low_p=low_p, high_p=high_p)
+            for k, v in requirements.items()
+        }
+
+        final_requirement = CapacityRequirement(
+            core_reference_ghz=desires.core_reference_ghz, **caps
+        )
+
+        final_result = reduce_by_family(topologies)[: self.results]
+
+        modal_plan = CapacityPlan(
+            requirement=final_requirement, candidate_clusters=final_result
+        )
+
+        percentile_requirements = {
+            low_p: CapacityRequirement(
+                core_reference_ghz=desires.core_reference_ghz,
+                **{k: certain_float(v.low) for k, v in caps.items()}
+            ),
+            50: CapacityRequirement(
+                core_reference_ghz=desires.core_reference_ghz,
+                **{k: certain_float(v.mid) for k, v in caps.items()}
+            ),
+            high_p: CapacityRequirement(
+                core_reference_ghz=desires.core_reference_ghz,
+                **{k: certain_float(v.high) for k, v in caps.items()}
+            ),
+        }
+
+        # percentile_plans = {
+        #    k: reduce_by_family(
+        #        sorted(
+        #            self.provision(
+        #                model_name=model_name,
+        #                region=region,
+        #                requirement=v,
+        #                *args,
+        #                **kwargs
+        #            ),
+        #            key = lambda c: c.total_annual_cost
+        #        )
+        #    )[:self.results]
+        #    for k, v in percentile_requirements.items()
+        # }
+
+        raise Exception
+
     #            plan = self._models[model_name](
     #                # Pass Hardware
     #                hardware=hardware,
