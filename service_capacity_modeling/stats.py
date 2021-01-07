@@ -1,5 +1,7 @@
+from functools import lru_cache
 from typing import Tuple
 
+import numpy as np
 from scipy.optimize import fsolve
 from scipy.special import gammainc as gammaf
 from scipy.stats import gamma as gamma_dist
@@ -32,7 +34,9 @@ def _gamma_fn_from_params(low, mid, high, confidence):
     return f
 
 
-def _gamma_dist_from_interval(interval: Interval) -> Tuple[float, rv_continuous]:
+def _gamma_dist_from_interval(
+    interval: Interval, seed: float = 0xCAFE
+) -> Tuple[float, rv_continuous]:
     # If we know cdf(high), cdf(low) and mean (mid) we can use an iterative
     # solver to find a possible gamma interval
 
@@ -47,8 +51,12 @@ def _gamma_dist_from_interval(interval: Interval) -> Tuple[float, rv_continuous]
     f = _gamma_fn_from_params(lower, mean, interval.high, interval.confidence)
     shape = fsolve(f, 2)
 
-    return (shape, gamma_dist(shape, loc=minimum, scale=(mean / shape)))
+    dist = gamma_dist(shape, loc=minimum, scale=(mean / shape))
+    dist.random_state = np.random.RandomState(seed=seed)
+    return (shape, dist)
 
 
-def gamma_for_interval(interval: Interval) -> rv_continuous:
-    return _gamma_dist_from_interval(interval)[1]
+# This can be expensive, so cache it
+@lru_cache(maxsize=128)
+def gamma_for_interval(interval: Interval, seed: float = 0xCAFE) -> rv_continuous:
+    return _gamma_dist_from_interval(interval, seed=seed)[1]

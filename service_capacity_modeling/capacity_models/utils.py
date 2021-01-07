@@ -2,10 +2,10 @@ import math
 from typing import List
 from typing import Sequence
 
-from service_capacity_modeling.models import Clusters
+from service_capacity_modeling.models import CapacityPlan
 
 
-def reduce_by_family(clusters: Sequence[Clusters]) -> List[Clusters]:
+def reduce_by_family(plans: Sequence[CapacityPlan]) -> List[CapacityPlan]:
     """Groups a potential set of clusters by hardware family sorted by cost.
 
     Useful for showing different family options.
@@ -13,8 +13,9 @@ def reduce_by_family(clusters: Sequence[Clusters]) -> List[Clusters]:
     zonal_families = set()
     regional_families = set()
 
-    result: List[Clusters] = []
-    for topo in clusters:
+    result: List[CapacityPlan] = []
+    for plan in plans:
+        topo = plan.candidate_clusters
         regional_type, zonal_type = tuple(), tuple()
 
         if topo.regional:
@@ -24,7 +25,7 @@ def reduce_by_family(clusters: Sequence[Clusters]) -> List[Clusters]:
             zonal_type = tuple(sorted({c.instance.family for c in topo.zonal}))
 
         if not (zonal_type in zonal_families and regional_type in regional_families):
-            result.append(topo)
+            result.append(plan)
 
         regional_families.add(regional_type)
         zonal_families.add(zonal_type)

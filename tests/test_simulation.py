@@ -1,6 +1,6 @@
 import numpy as np
 
-from service_capacity_modeling.capacity_planner import model_inputs
+from service_capacity_modeling.capacity_planner import model_desires
 from service_capacity_modeling.models import CapacityDesires
 from service_capacity_modeling.models import certain_float
 from service_capacity_modeling.models import certain_int
@@ -71,14 +71,14 @@ desires = CapacityDesires(
         estimated_mean_write_latency_ms=certain_float(1),
     ),
     data_shape=DataShape(
-        estimated_state_size_gb=certain_int(500),
+        estimated_state_size_gib=certain_int(500),
         estimated_working_set_percent=certain_float(1),
     ),
 )
 
 
-def test_model_inputs():
-    models = model_inputs(desires, 10)
+def test_model_desires():
+    models = model_desires(desires, 10)
     samples = set()
     for model in models:
         rps = model.query_pattern.estimated_read_per_second

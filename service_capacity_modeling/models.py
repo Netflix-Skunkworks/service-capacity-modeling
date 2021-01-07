@@ -2,10 +2,89 @@ from enum import Enum
 from typing import Dict
 from typing import Optional
 from typing import Sequence
-from typing import TypeVar
 
 import numpy as np
 from pydantic import BaseModel
+
+###############################################################################
+#              Models (structs) for how we describe intervals                 #
+###############################################################################
+
+
+class IntervalModel(str, Enum):
+    gamma = "gamma"
+
+
+class Interval(BaseModel):
+    low: float
+    mid: float
+    high: float
+    # How confident are we of this interval
+    confidence: float = 1.0
+    # How to approximate this interval (e.g. with a gamma distribution)
+    model_with: IntervalModel = IntervalModel.gamma
+    # If we should allow simulation of this interval, some models might not
+    # be able to simulate or some properties might not want to
+    allow_simulate: bool = True
+
+    minimum_value: Optional[float] = None
+    maximum_value: Optional[float] = None
+
+    @property
+    def can_simulate(self):
+        return self.confidence <= 0.99 and self.allow_simulate
+
+    @property
+    def minimum(self):
+        if self.minimum_value is None:
+            return self.low / 2
+
+        return self.minimum_value
+
+    @property
+    def maximum(self):
+        if self.maximum_value is None:
+            return self.high * 2
+        return self.maximum_value
+
+    def __hash__(self):
+        return hash((type(self),) + tuple(self.__dict__.values()))
+
+    def __eq__(self, other):
+        return self.__hash__() == other.__hash__()
+
+
+class FixedInterval(Interval):
+    allow_simulate: bool = False
+
+
+def certain_int(x: int) -> Interval:
+    return Interval(low=x, mid=x, high=x, confidence=1.0)
+
+
+def certain_float(x: float) -> Interval:
+    return Interval(low=x, mid=x, high=x, confidence=1.0)
+
+
+def interval(samples: Sequence[float], low_p: int = 5, high_p: int = 95) -> Interval:
+    p = np.percentile(samples, [0, low_p, 50, high_p, 100], interpolation="nearest")
+    conf = (high_p - low_p) / 100
+    return Interval(
+        low=p[1],
+        mid=p[2],
+        high=p[3],
+        minimum_value=p[0],
+        maximum_value=p[4],
+        confidence=conf,
+    )
+
+
+def interval_percentile(
+    samples: Sequence[float], percentiles: Sequence[int]
+) -> Sequence[Interval]:
+    p = np.percentile(samples, percentiles, interpolation="nearest")
+    return [certain_float(i) for i in p]
+
 
 ###############################################################################
 #              Models (structs) for how we describe hardware                  #
@@ -30,10 +109,12 @@ class Drive(BaseModel):
     annual_cost_per_read_io: float = 0
     annual_cost_per_write_io: float = 0
 
-    avg_read_latency_ms: float = 1
-    avg_write_latency_ms: float = 1
-    p99_read_latency_ms: float = 5
-    p99_write_latency_ms: float = 5
+    read_io_latency_ms: FixedInterval = FixedInterval(
+        low=0.5, mid=0.8, high=5, confidence=0.98
+    )
+    write_io_latency_ms: FixedInterval = FixedInterval(
+        low=0.5, mid=1, high=5, confidence=0.98
+    )
 
     @property
     def annual_cost(self):
@@ -123,59 +204,7 @@ class AccessPattern(str, Enum):
     throughput = "throughput"
 
 
-Numeric = TypeVar("Numeric", float, int)
-
-
-class Interval(BaseModel):
-    low: float
-    mid: float
-    high: float
-    # How confident are we of this interval
-    confidence: float = 1.0
-
-    minimum_value: Optional[float] = None
-    maximum_value: Optional[float] = None
-
-    @property
-    def minimum(self):
-        if self.minimum_value is None:
-            return self.low / 2
-
-        return self.minimum_value
-
-    @property
-    def maximum(self):
-        if self.maximum_value is None:
-            return self.high * 2
-        return self.maximum_value
-
-
-def certain_int(x: int) -> Interval:
-    return Interval(low=x, mid=x, high=x, confidence=1.0)
-
-
-def certain_float(x: float) -> Interval:
-    return Interval(low=x, mid=x, high=x, confidence=1.0)
-
-
-def interval(samples: Sequence[float], low_p: int = 5, high_p: int = 95) -> Interval:
-    p = np.percentile(samples, [0, low_p, 50, high_p, 100], interpolation="nearest")
-    conf = (high_p - low_p) / 100
-    return Interval(
-        low=p[1],
-        mid=p[2],
-        high=p[3],
-        minimum_value=p[0],
-        maximum_value=p[4],
-        confidence=conf,
-    )
-
-
-def interval_percentile(
-    samples: Sequence[float], percentiles: Sequence[int]
-) -> Sequence[Interval]:
-    p = np.percentile(samples, percentiles, interpolation="nearest")
-    return [certain_float(i) for i in p]
+AVG_ITEM_SIZE_BYTES: int = 1024
 
 
 class QueryPattern(BaseModel):
@@ -198,20 +227,54 @@ class QueryPattern(BaseModel):
     # For stateful services the amount of data accessed per
     # read and write impacts disk and network provisioniong
     # For stateless services it mostly just impacts memory and network
-    estimated_mean_read_size_bytes: Interval = certain_int(512)
-    estimated_mean_write_size_bytes: Interval = certain_int(128)
+    estimated_mean_read_size_bytes: Interval = certain_int(AVG_ITEM_SIZE_BYTES)
+    estimated_mean_write_size_bytes: Interval = certain_int(AVG_ITEM_SIZE_BYTES / 2)
 
     # The latencies at which oncall engineers get involved. We want
     # to provision such that we don't involve oncall
-    read_latency_slo_p50_ms: float = 5
-    read_latency_slo_p99_ms: float = 100
-    write_latency_slo_p50_ms: float = 5
-    write_latency_slo_p99_ms: float = 100
+    # Note that these summary statistics will be used to create reasonable
+    # distribution approximations of these operations (yielding p25, p99, etc)
+    read_latency_slo_ms: FixedInterval = FixedInterval(
+        low=0.2, mid=5, high=50, confidence=0.98
+    )
+    write_latency_slo_ms: FixedInterval = FixedInterval(
+        low=0.2, mid=5, high=50, confidence=0.98
+    )
 
 
 class DataShape(BaseModel):
-    estimated_state_size_gb: Interval = certain_int(0)
-    estimated_working_set_percent: Interval = certain_float(0.1)
+    estimated_state_size_gib: Interval = certain_int(0)
+    estimated_state_item_count: Optional[Interval] = None
+    estimated_working_set_percent: Optional[Interval] = None
+
+    def item_count(self) -> Interval:
+        if self.estimated_state_item_count is not None:
+            return self.estimated_state_item_count
+
+        return certain_int(
+            (self.estimated_state_size_gib * 1024 * 1024 * 1024) // AVG_ITEM_SIZE_BYTES
+        )
+
+    def working_set_percent(
+        self,
+        # latency distributions of the read SLOs versus the drives
+        # expressed as scipy rv_continuous objects
+        drive_read_latency_dist,
+        read_slo_latency_dist,
+        # what is our target percentile for hitting disk
+        # Note that lower will decrease the amount we hit disk
+        target_percentile: float = 0.10,
+    ) -> Interval:
+        # print(id(drive_read_latency_dist))
+        if self.estimated_working_set_percent is not None:
+            return self.estimated_working_set_percent
+
+        # The inverse CDF, basically what latency do we have to operate at
+        # such that 10% of the lat
+        target_latency = read_slo_latency_dist.ppf(target_percentile)
+
+        # What percent of disk reads will fall below this latency SLO
+        return certain_float(drive_read_latency_dist.sf(target_latency))
 
 
 class CapacityDesires(BaseModel):
@@ -271,4 +334,10 @@ class Clusters(BaseModel):
 
 class CapacityPlan(BaseModel):
     requirement: CapacityRequirement
-    candidate_clusters: Sequence[Clusters]
+    candidate_clusters: Clusters
+
+
+class UncertainCapacityPlan(BaseModel):
+    requirement: CapacityRequirement
+    mean: Sequence[CapacityPlan]
+    percentiles: Dict[int, Sequence[CapacityPlan]]

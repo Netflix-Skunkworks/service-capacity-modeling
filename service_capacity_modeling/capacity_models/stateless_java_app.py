@@ -4,6 +4,7 @@ from service_capacity_modeling.capacity_models.common import compute_stateless_r
 from service_capacity_modeling.capacity_models.common import simple_network_mbps
 from service_capacity_modeling.capacity_models.common import sqrt_staffed_cores
 from service_capacity_modeling.models import CapacityDesires
+from service_capacity_modeling.models import CapacityPlan
 from service_capacity_modeling.models import CapacityRequirement
 from service_capacity_modeling.models import certain_float
 from service_capacity_modeling.models import certain_int
@@ -13,7 +14,7 @@ from service_capacity_modeling.models import Instance
 from service_capacity_modeling.models import RegionClusterCapacity
 
 
-def estimate_java_app_requirement(
+def _estimate_java_app_requirement(
     desires: CapacityDesires,
     failover: bool = True,
     jvm_memory_overhead: float = 2,
@@ -47,14 +48,18 @@ def estimate_java_app_requirement(
 def estimate_java_app_region(
     instance: Instance,
     drive: Drive,
-    requirement: CapacityRequirement,
+    desires: CapacityDesires,
     *args,
+    failover: bool = True,
+    jvm_memory_overhead: float = 2,
     zones_per_region: int = 3,
     **kwargs
-) -> Optional[Clusters]:
+) -> Optional[CapacityPlan]:
 
     if drive.name != "gp2":
         return None
+
+    requirement = _estimate_java_app_requirement(desires, failover, jvm_memory_overhead)
 
     drive = drive.copy()
     drive.size_gib = 20
@@ -76,9 +81,12 @@ def estimate_java_app_region(
     # with such large clusters
 
     if cluster.count <= 256:
-        return Clusters(
-            total_annual_cost=certain_float(cluster.annual_cost),
-            regional=[cluster],
-            zonal=list(),
+        return CapacityPlan(
+            requirement=requirement,
+            candidate_clusters=Clusters(
+                total_annual_cost=certain_float(cluster.annual_cost),
+                regional=[cluster],
+                zonal=list(),
+            ),
         )
     return None

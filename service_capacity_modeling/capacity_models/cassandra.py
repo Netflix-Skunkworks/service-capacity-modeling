@@ -7,23 +7,24 @@ from service_capacity_modeling.capacity_models.common import simple_network_mbps
 from service_capacity_modeling.capacity_models.common import sqrt_staffed_cores
 from service_capacity_modeling.capacity_models.utils import next_power_of_2
 from service_capacity_modeling.models import CapacityDesires
+from service_capacity_modeling.models import CapacityPlan
 from service_capacity_modeling.models import CapacityRequirement
 from service_capacity_modeling.models import certain_float
 from service_capacity_modeling.models import certain_int
 from service_capacity_modeling.models import Clusters
 from service_capacity_modeling.models import Drive
 from service_capacity_modeling.models import Instance
+from service_capacity_modeling.stats import gamma_for_interval
 
 
 logger = logging.getLogger(__name__)
 
 
-def estimate_cassandra_requirement(
-    *args,
+def _estimate_cassandra_requirement(
     desires: CapacityDesires,
+    working_set: float,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
-    **kwargs,
 ) -> CapacityRequirement:
     """Estimate the capacity required for one zone given a regional desire
 
@@ -35,17 +36,19 @@ def estimate_cassandra_requirement(
     # Keep half of the bandwidth available for backup
     needed_network_mbps = simple_network_mbps(desires) * 2
 
-    needed_disk = desires.data_shape.estimated_state_size_gb.mid * copies_per_region
-    needed_memory = desires.data_shape.estimated_working_set_percent.mid * needed_disk
+    needed_disk = desires.data_shape.estimated_state_size_gib.mid * copies_per_region
+    needed_memory = working_set * needed_disk
 
     # Now convert to per zone
     needed_cores = needed_cores // zones_per_region
     needed_disk = needed_disk // zones_per_region
     needed_memory = int(needed_memory // zones_per_region)
-    rps = desires.query_pattern.estimated_read_per_second.mid // zones_per_region
-
     logger.info(
-        "Need (cpu, mem, disk) = (%s, %s, %s)", needed_cores, needed_memory, needed_disk
+        "Need (cpu, mem, disk, working) = (%s, %s, %s, %f)",
+        needed_cores,
+        needed_memory,
+        needed_disk,
+        working_set,
     )
 
     return CapacityRequirement(
@@ -54,21 +57,21 @@ def estimate_cassandra_requirement(
         mem_gib=certain_float(needed_memory),
         disk_gib=certain_float(needed_disk),
         network_mbps=certain_float(needed_network_mbps),
-        context={"rps": rps},
     )
 
 
 # pylint: disable=too-many-locals
-def estimate_cassandra_cluster_zone(
+def estimate_cassandra_cluster_zonal(
     instance: Instance,
     drive: Drive,
-    requirement: CapacityRequirement,
+    desires: CapacityDesires,
     *args,
     zones_per_region: int = 3,
+    copies_per_region: int = 3,
     allow_gp2: bool = True,
     required_cluster_size: Optional[int] = None,
     **kwargs,
-) -> Optional[Clusters]:
+) -> Optional[CapacityPlan]:
 
     if instance.drive is None:
         # if we're not allowed to use gp2, skip EBS only types
@@ -83,15 +86,33 @@ def estimate_cassandra_cluster_zone(
     if instance.cpu < 8:
         return None
 
-    rps = requirement.context["rps"]
+    rps = desires.query_pattern.estimated_read_per_second.mid // zones_per_region
+
+    # Based on the disk latency and the read latency SLOs we adjust our
+    # working set to keep more or less data in RAM. Faster drives need
+    # less fronting RAM.
+    working_set = desires.data_shape.working_set_percent(
+        drive_read_latency_dist=gamma_for_interval(drive.read_io_latency_ms),
+        read_slo_latency_dist=gamma_for_interval(
+            desires.query_pattern.read_latency_slo_ms
+        ),
+        target_percentile=0.10,
+    ).mid
+
+    requirement = _estimate_cassandra_requirement(
+        desires=desires,
+        working_set=working_set,
+        zones_per_region=zones_per_region,
+        copies_per_region=copies_per_region,
+    )
 
     cluster = compute_stateful_zone(
         instance=instance,
         # Only run C* on gp2
         drive=drive,
         needed_cores=int(requirement.cpu_cores.mid),
-        needed_disk_gib=requirement.disk_gib.mid,
-        needed_memory_gib=requirement.mem_gib.mid,
+        needed_disk_gib=int(requirement.disk_gib.mid),
+        needed_memory_gib=int(requirement.mem_gib.mid),
         needed_network_mbps=requirement.network_mbps.mid,
         # Assume that by provisioning enough memory we'll get
         # a 90% hit rate, but take into account the reads per read
@@ -119,12 +140,13 @@ def estimate_cassandra_cluster_zone(
     else:
         return None
 
-    # We only want one kind from each family
-    return Clusters(
+    clusters = Clusters(
         total_annual_cost=certain_float(zones_per_region * cluster.annual_cost),
         zonal=[cluster] * zones_per_region,
         regional=list(),
     )
+
+    return CapacityPlan(requirement=requirement, candidate_clusters=clusters)
 
 
 # C* LCS has 160 MiB sstables by default and 10 sstables per level
