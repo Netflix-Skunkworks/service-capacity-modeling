@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
+import json
 import logging
 from typing import Callable
 from typing import Dict
 from typing import Generator
+from typing import Optional
 from typing import Sequence
 from typing import Tuple
 
@@ -19,6 +21,7 @@ from service_capacity_modeling.models import CapacityDesires
 from service_capacity_modeling.models import CapacityPlan
 from service_capacity_modeling.models import CapacityRequirement
 from service_capacity_modeling.models import certain_float
+from service_capacity_modeling.models import Clusters
 from service_capacity_modeling.models import DataShape
 from service_capacity_modeling.models import GlobalHardware
 from service_capacity_modeling.models import Interval
@@ -87,7 +90,7 @@ def model_desires(
 
 def model_desires_percentiles(
     desires: CapacityDesires,
-    percentiles: Sequence[int] = (5, 95),
+    percentiles: Sequence[int] = (5, 25, 50, 75, 95),
 ) -> Tuple[Sequence[CapacityDesires], CapacityDesires]:
     query_pattern = desires.query_pattern.copy()
     data_shape = desires.data_shape.copy()
@@ -99,7 +102,7 @@ def model_desires_percentiles(
         if isinstance(d, Interval):
             query_pattern_means[field] = certain_float(d.mid)
             if d.confidence < 0.99:
-                samples = gamma_for_interval(d).rvs(20000)
+                samples = gamma_for_interval(d).rvs(10000)
                 query_pattern_simulation[field] = interval_percentile(
                     samples, percentiles
                 )
@@ -114,7 +117,7 @@ def model_desires_percentiles(
         if isinstance(d, Interval):
             data_shape_means[field] = certain_float(d.mid)
             if d.confidence < 0.99:
-                samples = gamma_for_interval(d).rvs(20000)
+                samples = gamma_for_interval(d).rvs(10000)
                 data_shape_simulation[field] = interval_percentile(samples, percentiles)
                 continue
         data_shape_simulation[field] = [d] * len(percentiles)
@@ -149,8 +152,8 @@ class CapacityPlanner:
         self._shapes: HardwareShapes = shapes
         self._models: Dict[str, Callable[..., CapacityPlan]] = dict()
 
-        self.simulations = 1000
-        self.results = 4
+        self._default_num_simulations = 200
+        self._default_num_results = 3
 
     def register_model(self, name: str, capacity_model: Callable[..., CapacityPlan]):
         self._models[name] = capacity_model
@@ -160,9 +163,16 @@ class CapacityPlanner:
         return self._shapes.hardware
 
     def plan_certain(
-        self, model_name: str, region: str, desires: CapacityDesires, *args, **kwargs
+        self,
+        model_name: str,
+        region: str,
+        desires: CapacityDesires,
+        *args,
+        num_results: Optional[int] = None,
+        **kwargs
     ) -> Sequence[CapacityPlan]:
         hardware = self._shapes.region(region)
+        num_results = num_results or self._default_num_results
 
         plans = []
         j = 0
@@ -178,7 +188,7 @@ class CapacityPlanner:
         # lowest cost first
         plans.sort(key=lambda plan: plan.candidate_clusters.total_annual_cost.mid)
 
-        return reduce_by_family(plans)[: self.results]
+        return reduce_by_family(plans)[:num_results]
 
     # pylint: disable-msg=too-many-locals
     def plan(
@@ -187,13 +197,19 @@ class CapacityPlanner:
         region: str,
         desires: CapacityDesires,
         *args,
-        bounds: Tuple[int, int] = (5, 95),
+        percentiles: Tuple[int, int] = (5, 25, 50, 75, 95),
+        simulations: Optional[int] = None,
+        num_results: Optional[int] = None,
         **kwargs
     ) -> UncertainCapacityPlan:
+
+        simulations = simulations or self._default_num_simulations
+        num_results = num_results or self._default_num_results
+
         requirements = {}
         modal_clusters: Dict[str, int] = {}
 
-        for sim_desires in model_desires(desires, self.simulations):
+        for sim_desires in model_desires(desires, simulations):
             plans = self.plan_certain(
                 *args,
                 model_name=model_name,
@@ -224,12 +240,13 @@ class CapacityPlanner:
                     else:
                         requirements[field].append(d)
 
-        # topologies = [
-        #    Clusters(**json.loads(k))
-        #    for k, v in sorted(modal_clusters.items(), key=lambda x: -x[1])
-        # ]
+        topologies = [
+            Clusters(**json.loads(k))
+            for k, v in sorted(modal_clusters.items(), key=lambda x: -x[1])
+        ]
 
-        low_p, high_p = bounds
+        bounds = sorted(percentiles)
+        low_p, high_p = bounds[0], bounds[-1]
 
         caps = {
             k: interval(samples=[i.mid for i in v], low_p=low_p, high_p=high_p)
@@ -240,11 +257,23 @@ class CapacityPlanner:
             core_reference_ghz=desires.core_reference_ghz, **caps
         )
 
+        # TODO: This model of regret is terrible, but it's not useless
+        # We're basically saying "nobody gets blamed for overprovisioning"
+        # but that's pretty wrong ...
+        plan_of_least_regret = None
+        if len(topologies) > 0:
+            plan_of_least_regret = CapacityPlan(
+                requirement=final_requirement,
+                candidate_clusters=sorted(
+                    topologies[:num_results], key=lambda x: x.total_annual_cost.mid
+                )[-1],
+            )
+
         percentile_inputs, mean_desires = model_desires_percentiles(
-            desires=desires, percentiles=(low_p, 50, high_p)
+            desires=desires, percentiles=bounds
         )
         percentile_plans = {}
-        for index, percentile in enumerate((low_p, 50, high_p)):
+        for index, percentile in enumerate(percentiles):
             percentile_plans[percentile] = self.plan_certain(
                 *args,
                 model_name=model_name,
@@ -253,8 +282,9 @@ class CapacityPlanner:
                 **kwargs,
             )
 
-        return UncertainCapacityPlan(
+        result = UncertainCapacityPlan(
             requirement=final_requirement,
+            least_regret=plan_of_least_regret,
             mean=self.plan_certain(
                 *args,
                 model_name=model_name,
@@ -264,6 +294,7 @@ class CapacityPlanner:
             ),
             percentiles=percentile_plans,
         )
+        return result
 
     @property
     def models(self) -> Sequence[str]:

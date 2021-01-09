@@ -1,3 +1,4 @@
+import random
 from enum import Enum
 from typing import Dict
 from typing import Optional
@@ -242,6 +243,45 @@ class QueryPattern(BaseModel):
     )
 
 
+class _WorkingSet:
+    def __init__(self):
+        self._cache = {}
+
+    def working_set_percent(
+        self,
+        # latency distributions of the read SLOs versus the drives
+        # expressed as scipy rv_continuous objects
+        drive_read_latency_dist,
+        read_slo_latency_dist,
+        # what is our target percentile for hitting disk
+        # Note that lower will decrease the amount we hit disk
+        target_percentile: float = 0.10,
+    ) -> Interval:
+        # random cache eviction
+        if len(self._cache) >= 100:
+            self._cache.pop(random.choice(self._cache.keys()))
+
+        cache_key = (
+            id(read_slo_latency_dist),
+            id(read_slo_latency_dist),
+            target_percentile,
+        )
+        if cache_key in self._cache:
+            result = self._cache[cache_key]
+        else:
+            # The inverse CDF, basically what latency do we have to operate at
+            # such that 10% of the lat
+            target_latency = read_slo_latency_dist.ppf(target_percentile)
+
+            # What percent of disk reads will fall below this latency SLO
+            result = certain_float(drive_read_latency_dist.sf(target_latency))
+            self._cache[cache_key] = result
+        return result
+
+
+_working_sets = _WorkingSet()
+
+
 class DataShape(BaseModel):
     estimated_state_size_gib: Interval = certain_int(0)
     estimated_state_item_count: Optional[Interval] = None
@@ -265,16 +305,14 @@ class DataShape(BaseModel):
         # Note that lower will decrease the amount we hit disk
         target_percentile: float = 0.10,
     ) -> Interval:
-        # print(id(drive_read_latency_dist))
         if self.estimated_working_set_percent is not None:
             return self.estimated_working_set_percent
 
-        # The inverse CDF, basically what latency do we have to operate at
-        # such that 10% of the lat
-        target_latency = read_slo_latency_dist.ppf(target_percentile)
-
-        # What percent of disk reads will fall below this latency SLO
-        return certain_float(drive_read_latency_dist.sf(target_latency))
+        return _working_sets.working_set_percent(
+            drive_read_latency_dist=drive_read_latency_dist,
+            read_slo_latency_dist=read_slo_latency_dist,
+            target_percentile=target_percentile,
+        )
 
 
 class CapacityDesires(BaseModel):
@@ -339,5 +377,6 @@ class CapacityPlan(BaseModel):
 
 class UncertainCapacityPlan(BaseModel):
     requirement: CapacityRequirement
+    least_regret: Optional[CapacityPlan]
     mean: Sequence[CapacityPlan]
     percentiles: Dict[int, Sequence[CapacityPlan]]
