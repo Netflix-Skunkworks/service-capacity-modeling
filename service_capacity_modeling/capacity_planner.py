@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import json
 import logging
 from typing import Callable
 from typing import Dict
@@ -8,20 +7,21 @@ from typing import Optional
 from typing import Sequence
 from typing import Tuple
 
+from service_capacity_modeling.capacity_models import CapacityModel
 from service_capacity_modeling.capacity_models.cassandra import (
-    estimate_cassandra_cluster_zonal,
+    NflxCassandraCapacityModel,
 )
 from service_capacity_modeling.capacity_models.stateless_java_app import (
-    estimate_java_app_region,
+    NflxJavaAppCapacityModel,
 )
 from service_capacity_modeling.capacity_models.utils import reduce_by_family
 from service_capacity_modeling.hardware import HardwareShapes
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.models import CapacityDesires
 from service_capacity_modeling.models import CapacityPlan
+from service_capacity_modeling.models import CapacityRegretParameters
 from service_capacity_modeling.models import CapacityRequirement
 from service_capacity_modeling.models import certain_float
-from service_capacity_modeling.models import Clusters
 from service_capacity_modeling.models import DataShape
 from service_capacity_modeling.models import GlobalHardware
 from service_capacity_modeling.models import Interval
@@ -147,15 +147,43 @@ def model_desires_percentiles(
     return results, d
 
 
+def _least_regret(
+    capacity_plans: Sequence[CapacityPlan],
+    regret_params: CapacityRegretParameters,
+    model: CapacityModel,
+) -> Optional[CapacityPlan]:
+    # TODO: This model of regret is terrible, but it's not useless
+    # We're basically saying "nobody gets blamed for overprovisioning"
+    # but that's pretty wrong ...
+    plan_of_least_regret = (None, float("inf"))
+    for i, proposed_plan in enumerate(capacity_plans):
+        regret = 0
+        for j, optimal_plan in enumerate(capacity_plans):
+            if j == i:
+                continue
+
+            regret += model.regret(
+                regret_params=regret_params,
+                optimal_plan=optimal_plan,
+                proposed_plan=proposed_plan,
+            )
+
+        if plan_of_least_regret[0] is None or regret < plan_of_least_regret[1]:
+            plan_of_least_regret = (proposed_plan, regret)
+
+    return plan_of_least_regret[0]
+
+
 class CapacityPlanner:
     def __init__(self):
         self._shapes: HardwareShapes = shapes
-        self._models: Dict[str, Callable[..., CapacityPlan]] = dict()
+        self._models: Dict[str, CapacityModel] = dict()
 
         self._default_num_simulations = 200
         self._default_num_results = 3
+        self._regret_params = CapacityRegretParameters()
 
-    def register_model(self, name: str, capacity_model: Callable[..., CapacityPlan]):
+    def register_model(self, name: str, capacity_model: CapacityModel):
         self._models[name] = capacity_model
 
     @property
@@ -179,7 +207,7 @@ class CapacityPlanner:
         for instance in hardware.instances.values():
             for drive in hardware.drives.values():
                 j += 1
-                plan = self._models[model_name](
+                plan = self._models[model_name].capacity_plan(
                     instance=instance, drive=drive, desires=desires, *args, **kwargs
                 )
                 if plan is not None:
@@ -207,7 +235,8 @@ class CapacityPlanner:
         num_results = num_results or self._default_num_results
 
         requirements = {}
-        modal_clusters: Dict[str, int] = {}
+        # desires -> Optional[CapacityPlan]
+        capacity_plans = []
 
         for sim_desires in model_desires(desires, simulations):
             plans = self.plan_certain(
@@ -220,17 +249,8 @@ class CapacityPlanner:
             if len(plans) == 0:
                 continue
 
-            best_plan = plans[0]
-
-            best_cluster = best_plan.candidate_clusters.json(
-                sort_keys=True, exclude_unset=True
-            )
-
-            requirement = best_plan.requirement
-
-            if best_cluster not in modal_clusters:
-                modal_clusters[best_cluster] = 0
-            modal_clusters[best_cluster] += 1
+            capacity_plans.append(plans[0])
+            requirement = plans[0].requirement
 
             for field in requirement.__fields__:
                 d = getattr(requirement, field)
@@ -240,13 +260,7 @@ class CapacityPlanner:
                     else:
                         requirements[field].append(d)
 
-        topologies = [
-            Clusters(**json.loads(k))
-            for k, v in sorted(modal_clusters.items(), key=lambda x: -x[1])
-        ]
-
-        bounds = sorted(percentiles)
-        low_p, high_p = bounds[0], bounds[-1]
+        low_p, high_p = sorted(percentiles)[0], sorted(percentiles)[-1]
 
         caps = {
             k: interval(samples=[i.mid for i in v], low_p=low_p, high_p=high_p)
@@ -257,20 +271,8 @@ class CapacityPlanner:
             core_reference_ghz=desires.core_reference_ghz, **caps
         )
 
-        # TODO: This model of regret is terrible, but it's not useless
-        # We're basically saying "nobody gets blamed for overprovisioning"
-        # but that's pretty wrong ...
-        plan_of_least_regret = None
-        if len(topologies) > 0:
-            plan_of_least_regret = CapacityPlan(
-                requirement=final_requirement,
-                candidate_clusters=sorted(
-                    topologies[:num_results], key=lambda x: x.total_annual_cost.mid
-                )[-1],
-            )
-
         percentile_inputs, mean_desires = model_desires_percentiles(
-            desires=desires, percentiles=bounds
+            desires=desires, percentiles=sorted(percentiles)
         )
         percentile_plans = {}
         for index, percentile in enumerate(percentiles):
@@ -284,7 +286,9 @@ class CapacityPlanner:
 
         result = UncertainCapacityPlan(
             requirement=final_requirement,
-            least_regret=plan_of_least_regret,
+            least_regret=_least_regret(
+                capacity_plans, self._regret_params, self._models[model_name]
+            ),
             mean=self.plan_certain(
                 *args,
                 model_name=model_name,
@@ -303,9 +307,8 @@ class CapacityPlanner:
 
 planner = CapacityPlanner()
 planner.register_model(
-    name="nflx_stateless_java_app", capacity_model=estimate_java_app_region
+    name="nflx_stateless_java_app", capacity_model=NflxJavaAppCapacityModel()
 )
 planner.register_model(
-    name="nflx_cassandra",
-    capacity_model=estimate_cassandra_cluster_zonal,
+    name="nflx_cassandra", capacity_model=NflxCassandraCapacityModel()
 )

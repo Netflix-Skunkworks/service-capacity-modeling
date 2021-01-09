@@ -1,5 +1,6 @@
 from typing import Optional
 
+from service_capacity_modeling.capacity_models import CapacityModel
 from service_capacity_modeling.capacity_models.common import compute_stateless_region
 from service_capacity_modeling.capacity_models.common import simple_network_mbps
 from service_capacity_modeling.capacity_models.common import sqrt_staffed_cores
@@ -45,15 +46,13 @@ def _estimate_java_app_requirement(
     )
 
 
-def estimate_java_app_region(
+def _estimate_java_app_region(
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,
-    *args,
     failover: bool = True,
     jvm_memory_overhead: float = 2,
     zones_per_region: int = 3,
-    **kwargs
 ) -> Optional[CapacityPlan]:
 
     if drive.name != "gp2":
@@ -90,3 +89,25 @@ def estimate_java_app_region(
             ),
         )
     return None
+
+
+class NflxJavaAppCapacityModel(CapacityModel):
+    @staticmethod
+    def capacity_plan(
+        instance: Instance,
+        drive: Drive,
+        desires: CapacityDesires,
+        **kwargs,
+    ) -> Optional[CapacityPlan]:
+        failover: bool = kwargs.pop("failover", True)
+        jvm_memory_overhead: float = kwargs.pop("jvm_memory_overhead", 2)
+        zones_per_region: int = kwargs.pop("zones_per_region", 3)
+
+        return _estimate_java_app_region(
+            instance=instance,
+            drive=drive,
+            desires=desires,
+            failover=failover,
+            jvm_memory_overhead=jvm_memory_overhead,
+            zones_per_region=zones_per_region,
+        )

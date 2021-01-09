@@ -2,6 +2,7 @@ import logging
 import math
 from typing import Optional
 
+from service_capacity_modeling.capacity_models import CapacityModel
 from service_capacity_modeling.capacity_models.common import compute_stateful_zone
 from service_capacity_modeling.capacity_models.common import simple_network_mbps
 from service_capacity_modeling.capacity_models.common import sqrt_staffed_cores
@@ -61,16 +62,14 @@ def _estimate_cassandra_requirement(
 
 
 # pylint: disable=too-many-locals
-def estimate_cassandra_cluster_zonal(
+def _estimate_cassandra_cluster_zonal(
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,
-    *args,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
     allow_gp2: bool = True,
     required_cluster_size: Optional[int] = None,
-    **kwargs,
 ) -> Optional[CapacityPlan]:
 
     if instance.drive is None:
@@ -156,3 +155,27 @@ def _cass_io_per_read(node_size_gib, sstable_size_mb=160):
     # 10 sstables per level, plus 1 for L0 (avg)
     levels = 1 + int(math.ceil(math.log(sstables, 10)))
     return levels
+
+
+class NflxCassandraCapacityModel(CapacityModel):
+    @staticmethod
+    def capacity_plan(
+        instance: Instance,
+        drive: Drive,
+        desires: CapacityDesires,
+        **kwargs,
+    ) -> Optional[CapacityPlan]:
+        zones_per_region: int = kwargs.pop("zones_per_region", 3)
+        copies_per_region: int = kwargs.pop("copies_per_region", 3)
+        allow_gp2: bool = kwargs.pop("allow_gp2", True)
+        required_cluster_size: Optional[int] = kwargs.pop("required_cluster_size", None)
+
+        return _estimate_cassandra_cluster_zonal(
+            instance=instance,
+            drive=drive,
+            desires=desires,
+            zones_per_region=zones_per_region,
+            copies_per_region=copies_per_region,
+            allow_gp2=allow_gp2,
+            required_cluster_size=required_cluster_size,
+        )

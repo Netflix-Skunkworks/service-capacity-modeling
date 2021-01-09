@@ -380,3 +380,8 @@ class UncertainCapacityPlan(BaseModel):
     least_regret: Optional[CapacityPlan]
     mean: Sequence[CapacityPlan]
     percentiles: Dict[int, Sequence[CapacityPlan]]
+
+
+class CapacityRegretParameters(BaseModel):
+    over_provision_cost: float = 1
+    under_provision_cost: float = 1.5
