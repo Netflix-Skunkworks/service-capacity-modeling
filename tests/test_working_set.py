@@ -5,7 +5,7 @@ from service_capacity_modeling.stats import gamma_for_interval
 
 def test_working_set():
     drive_gp2 = gamma_for_interval(
-        FixedInterval(low=0.4, mid=0.8, high=2, confidence=0.98)
+        FixedInterval(low=0.4, mid=0.6, high=2, confidence=0.98)
     )
 
     drive_ephem = gamma_for_interval(
@@ -13,7 +13,7 @@ def test_working_set():
     )
 
     slo_dist_db = gamma_for_interval(
-        FixedInterval(low=0.4, mid=4, high=10, confidence=0.98)
+        FixedInterval(low=0.4, mid=2, high=10, confidence=0.98)
     )
 
     slo_dist_cache = gamma_for_interval(

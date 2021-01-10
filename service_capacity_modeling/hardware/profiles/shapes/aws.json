@@ -144,7 +144,7 @@
   "drives": {
     "gp2": {
       "name": "gp2",
-      "read_io_latency_ms": {"low": 0.4, "mid": 0.8, "high": 2, "confidence": 0.98},
+      "read_io_latency_ms": {"low": 0.4, "mid": 0.6, "high": 2, "confidence": 0.98},
       "write_io_latency_ms": {"low": 0.5, "mid": 1, "high": 5, "confidence": 0.98}
     }
   }
