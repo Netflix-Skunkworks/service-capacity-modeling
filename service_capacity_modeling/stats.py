@@ -7,7 +7,7 @@ from scipy.special import gammainc as gammaf
 from scipy.stats import gamma as gamma_dist
 from scipy.stats import rv_continuous
 
-from service_capacity_modeling.models import Interval
+from service_capacity_modeling.interface import Interval
 
 
 def _gamma_fn_from_params(low, mid, high, confidence):

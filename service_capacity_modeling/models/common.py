@@ -1,12 +1,12 @@
 import logging
 import math
 
-from service_capacity_modeling.capacity_models import utils
-from service_capacity_modeling.models import CapacityDesires
-from service_capacity_modeling.models import Drive
-from service_capacity_modeling.models import Instance
-from service_capacity_modeling.models import RegionClusterCapacity
-from service_capacity_modeling.models import ZoneClusterCapacity
+from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Instance
+from service_capacity_modeling.interface import RegionClusterCapacity
+from service_capacity_modeling.interface import ZoneClusterCapacity
+from service_capacity_modeling.models import utils
 
 
 logger = logging.getLogger(__name__)

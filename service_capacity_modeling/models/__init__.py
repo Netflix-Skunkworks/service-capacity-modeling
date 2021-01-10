@@ -1,10 +1,10 @@
 from typing import Optional
 
-from service_capacity_modeling.models import CapacityDesires
-from service_capacity_modeling.models import CapacityPlan
-from service_capacity_modeling.models import CapacityRegretParameters
-from service_capacity_modeling.models import Drive
-from service_capacity_modeling.models import Instance
+from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import CapacityRegretParameters
+from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Instance
 
 
 class CapacityModel:

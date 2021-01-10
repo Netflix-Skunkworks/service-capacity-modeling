@@ -2,19 +2,19 @@ import logging
 import math
 from typing import Optional
 
-from service_capacity_modeling.capacity_models import CapacityModel
-from service_capacity_modeling.capacity_models.common import compute_stateful_zone
-from service_capacity_modeling.capacity_models.common import simple_network_mbps
-from service_capacity_modeling.capacity_models.common import sqrt_staffed_cores
-from service_capacity_modeling.capacity_models.utils import next_power_of_2
-from service_capacity_modeling.models import CapacityDesires
-from service_capacity_modeling.models import CapacityPlan
-from service_capacity_modeling.models import CapacityRequirement
-from service_capacity_modeling.models import certain_float
-from service_capacity_modeling.models import certain_int
-from service_capacity_modeling.models import Clusters
-from service_capacity_modeling.models import Drive
-from service_capacity_modeling.models import Instance
+from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import CapacityRequirement
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import Clusters
+from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Instance
+from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import simple_network_mbps
+from service_capacity_modeling.models.common import sqrt_staffed_cores
+from service_capacity_modeling.models.utils import next_power_of_2
 from service_capacity_modeling.stats import gamma_for_interval
 
 
@@ -95,6 +95,8 @@ def _estimate_cassandra_cluster_zonal(
         read_slo_latency_dist=gamma_for_interval(
             desires.query_pattern.read_latency_slo_ms
         ),
+        # This is about right for a database, a cache probably wants
+        # to have less of the SLO latency coming from disk
         target_percentile=0.10,
     ).mid
 

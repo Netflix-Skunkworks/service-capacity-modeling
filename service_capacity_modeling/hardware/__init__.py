@@ -5,11 +5,11 @@ import os
 from typing import Dict
 from typing import Optional
 
-from service_capacity_modeling.models import Drive
-from service_capacity_modeling.models import GlobalHardware
-from service_capacity_modeling.models import Hardware
-from service_capacity_modeling.models import Instance
-from service_capacity_modeling.models import Pricing
+from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import GlobalHardware
+from service_capacity_modeling.interface import Hardware
+from service_capacity_modeling.interface import Instance
+from service_capacity_modeling.interface import Pricing
 
 logger = logging.getLogger(__name__)
 

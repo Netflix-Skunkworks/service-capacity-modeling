@@ -1,12 +1,12 @@
 import numpy as np
 
 from service_capacity_modeling.capacity_planner import model_desires
-from service_capacity_modeling.models import CapacityDesires
-from service_capacity_modeling.models import certain_float
-from service_capacity_modeling.models import certain_int
-from service_capacity_modeling.models import DataShape
-from service_capacity_modeling.models import Interval
-from service_capacity_modeling.models import QueryPattern
+from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import Interval
+from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.stats import _gamma_dist_from_interval
 from service_capacity_modeling.stats import gamma_for_interval
 

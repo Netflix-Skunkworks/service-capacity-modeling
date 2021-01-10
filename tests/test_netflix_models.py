@@ -1,10 +1,10 @@
 from service_capacity_modeling.capacity_planner import planner
-from service_capacity_modeling.models import CapacityDesires
-from service_capacity_modeling.models import certain_float
-from service_capacity_modeling.models import certain_int
-from service_capacity_modeling.models import DataShape
-from service_capacity_modeling.models import Interval
-from service_capacity_modeling.models import QueryPattern
+from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import Interval
+from service_capacity_modeling.interface import QueryPattern
 
 
 small_but_high_qps = CapacityDesires(
@@ -53,7 +53,7 @@ large_footprint = CapacityDesires(
 def test_capacity_small_fast():
     for allow_ebs in (True, False):
         cap_plan = planner.plan_certain(
-            model_name="nflx_cassandra",
+            model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=small_but_high_qps,
             allow_gp2=allow_ebs,
@@ -72,7 +72,7 @@ def test_capacity_small_fast():
 
 def test_capacity_high_writes():
     cap_plan = planner.plan_certain(
-        model_name="nflx_cassandra",
+        model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=high_writes,
         copies_per_region=2,
@@ -108,7 +108,7 @@ uncertain = CapacityDesires(
 def test_uncertain_planning_ebs():
     # with cProfile.Profile() as pr:
     cap_plan = planner.plan(
-        model_name="nflx_cassandra",
+        model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=uncertain,
         allow_gp2=True,
@@ -120,7 +120,7 @@ def test_uncertain_planning_ebs():
 
 def test_capacity_large_footprint():
     cap_plan = planner.plan_certain(
-        model_name="nflx_cassandra",
+        model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=large_footprint,
         allow_gp2=False,
@@ -132,7 +132,7 @@ def test_capacity_large_footprint():
     assert large_footprint_result.count == 4
 
     java_cap_plan = planner.plan_certain(
-        model_name="nflx_stateless_java_app",
+        model_name="org.netflix.stateless_java",
         region="us-east-1",
         desires=large_footprint,
     )[0]

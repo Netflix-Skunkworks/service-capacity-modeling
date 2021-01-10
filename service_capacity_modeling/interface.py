@@ -110,11 +110,13 @@ class Drive(BaseModel):
     annual_cost_per_read_io: float = 0
     annual_cost_per_write_io: float = 0
 
+    # These defaults are assuming a cloud SSD like a gp2 volume
+    # If you disagree please change them in your hardware description
     read_io_latency_ms: FixedInterval = FixedInterval(
-        low=0.5, mid=0.8, high=5, confidence=0.98
+        low=0.4, mid=0.8, high=2, confidence=0.98
     )
     write_io_latency_ms: FixedInterval = FixedInterval(
-        low=0.5, mid=1, high=5, confidence=0.98
+        low=0.5, mid=1, high=2.4, confidence=0.98
     )
 
     @property
@@ -236,14 +238,14 @@ class QueryPattern(BaseModel):
     # Note that these summary statistics will be used to create reasonable
     # distribution approximations of these operations (yielding p25, p99, etc)
     read_latency_slo_ms: FixedInterval = FixedInterval(
-        low=0.2, mid=5, high=50, confidence=0.98
+        low=0.4, mid=4, high=10, confidence=0.98
     )
     write_latency_slo_ms: FixedInterval = FixedInterval(
-        low=0.2, mid=5, high=50, confidence=0.98
+        low=0.4, mid=4, high=10, confidence=0.98
     )
 
 
-class _WorkingSet:
+class WorkingSetEstimator:
     def __init__(self):
         self._cache = {}
 
@@ -262,15 +264,15 @@ class _WorkingSet:
             self._cache.pop(random.choice(self._cache.keys()))
 
         cache_key = (
-            id(read_slo_latency_dist),
+            id(drive_read_latency_dist),
             id(read_slo_latency_dist),
             target_percentile,
         )
         if cache_key in self._cache:
             result = self._cache[cache_key]
         else:
-            # The inverse CDF, basically what latency do we have to operate at
-            # such that 10% of the lat
+            # The inverse CDF, basically what percentile do we want to target
+            # to be all on disk.
             target_latency = read_slo_latency_dist.ppf(target_percentile)
 
             # What percent of disk reads will fall below this latency SLO
@@ -279,7 +281,7 @@ class _WorkingSet:
         return result
 
 
-_working_sets = _WorkingSet()
+_working_set_estimator = WorkingSetEstimator()
 
 
 class DataShape(BaseModel):
@@ -308,7 +310,7 @@ class DataShape(BaseModel):
         if self.estimated_working_set_percent is not None:
             return self.estimated_working_set_percent
 
-        return _working_sets.working_set_percent(
+        return _working_set_estimator.working_set_percent(
             drive_read_latency_dist=drive_read_latency_dist,
             read_slo_latency_dist=read_slo_latency_dist,
             target_percentile=target_percentile,

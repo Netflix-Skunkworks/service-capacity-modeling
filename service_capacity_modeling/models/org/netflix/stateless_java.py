@@ -1,18 +1,18 @@
 from typing import Optional
 
-from service_capacity_modeling.capacity_models import CapacityModel
-from service_capacity_modeling.capacity_models.common import compute_stateless_region
-from service_capacity_modeling.capacity_models.common import simple_network_mbps
-from service_capacity_modeling.capacity_models.common import sqrt_staffed_cores
-from service_capacity_modeling.models import CapacityDesires
-from service_capacity_modeling.models import CapacityPlan
-from service_capacity_modeling.models import CapacityRequirement
-from service_capacity_modeling.models import certain_float
-from service_capacity_modeling.models import certain_int
-from service_capacity_modeling.models import Clusters
-from service_capacity_modeling.models import Drive
-from service_capacity_modeling.models import Instance
-from service_capacity_modeling.models import RegionClusterCapacity
+from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import CapacityRequirement
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import Clusters
+from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Instance
+from service_capacity_modeling.interface import RegionClusterCapacity
+from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models.common import compute_stateless_region
+from service_capacity_modeling.models.common import simple_network_mbps
+from service_capacity_modeling.models.common import sqrt_staffed_cores
 
 
 def _estimate_java_app_requirement(

@@ -7,28 +7,23 @@ from typing import Optional
 from typing import Sequence
 from typing import Tuple
 
-from service_capacity_modeling.capacity_models import CapacityModel
-from service_capacity_modeling.capacity_models.cassandra import (
-    NflxCassandraCapacityModel,
-)
-from service_capacity_modeling.capacity_models.stateless_java_app import (
-    NflxJavaAppCapacityModel,
-)
-from service_capacity_modeling.capacity_models.utils import reduce_by_family
 from service_capacity_modeling.hardware import HardwareShapes
 from service_capacity_modeling.hardware import shapes
-from service_capacity_modeling.models import CapacityDesires
-from service_capacity_modeling.models import CapacityPlan
-from service_capacity_modeling.models import CapacityRegretParameters
-from service_capacity_modeling.models import CapacityRequirement
-from service_capacity_modeling.models import certain_float
-from service_capacity_modeling.models import DataShape
-from service_capacity_modeling.models import GlobalHardware
-from service_capacity_modeling.models import Interval
-from service_capacity_modeling.models import interval
-from service_capacity_modeling.models import interval_percentile
-from service_capacity_modeling.models import QueryPattern
-from service_capacity_modeling.models import UncertainCapacityPlan
+from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import CapacityRegretParameters
+from service_capacity_modeling.interface import CapacityRequirement
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import GlobalHardware
+from service_capacity_modeling.interface import Interval
+from service_capacity_modeling.interface import interval
+from service_capacity_modeling.interface import interval_percentile
+from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.interface import UncertainCapacityPlan
+from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models.org import netflix
+from service_capacity_modeling.models.utils import reduce_by_family
 from service_capacity_modeling.stats import gamma_for_interval
 
 logger = logging.getLogger(__name__)
@@ -183,6 +178,10 @@ class CapacityPlanner:
         self._default_num_results = 3
         self._regret_params = CapacityRegretParameters()
 
+    def register_group(self, group: Callable[[], Dict[str, CapacityModel]]):
+        for name, model in group().items():
+            self.register_model(name, model)
+
     def register_model(self, name: str, capacity_model: CapacityModel):
         self._models[name] = capacity_model
 
@@ -306,9 +305,4 @@ class CapacityPlanner:
 
 
 planner = CapacityPlanner()
-planner.register_model(
-    name="nflx_stateless_java_app", capacity_model=NflxJavaAppCapacityModel()
-)
-planner.register_model(
-    name="nflx_cassandra", capacity_model=NflxCassandraCapacityModel()
-)
+planner.register_group(netflix.models)
