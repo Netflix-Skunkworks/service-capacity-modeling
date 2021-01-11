@@ -1,5 +1,5 @@
 from service_capacity_modeling.interface import FixedInterval
-from service_capacity_modeling.interface import WorkingSetEstimator
+from service_capacity_modeling.models.common import WorkingSetEstimator
 from service_capacity_modeling.stats import gamma_for_interval
 
 

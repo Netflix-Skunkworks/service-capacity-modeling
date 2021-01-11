@@ -88,7 +88,7 @@ requirement = cap_plan.requirement
 least_regret = cap_plan.least_regret
 ```
 
-## Example of provisioning a memcached cluster
+## Example of provisioning a caching cluster
 
 In this example we tweak the QPS up, on CPU time of operations down
 and SLO down. This more closely approximates a caching workload
@@ -122,7 +122,7 @@ cache_desires = CapacityDesires(
     ),
     # Not sure how much data, but we think it'll be below 1000
     data_shape=DataShape(
-        estimated_state_size_gib=Interval(low=100, mid=500, high=1000, confidence=0.9),
+        estimated_state_size_gib=Interval(low=100, mid=200, high=500, confidence=0.9),
     ),
 )
 

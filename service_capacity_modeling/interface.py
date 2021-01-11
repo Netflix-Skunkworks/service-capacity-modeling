@@ -1,4 +1,3 @@
-import random
 from enum import Enum
 from typing import Dict
 from typing import Optional
@@ -13,6 +12,12 @@ from pydantic import BaseModel
 
 
 class IntervalModel(str, Enum):
+    def __str__(self):
+        return str(self.value)
+
+    def __repr__(self):
+        return f"D({self.value})"
+
     gamma = "gamma"
 
 
@@ -245,76 +250,10 @@ class QueryPattern(BaseModel):
     )
 
 
-class WorkingSetEstimator:
-    def __init__(self):
-        self._cache = {}
-
-    def working_set_percent(
-        self,
-        # latency distributions of the read SLOs versus the drives
-        # expressed as scipy rv_continuous objects
-        drive_read_latency_dist,
-        read_slo_latency_dist,
-        # what is our target percentile for hitting disk
-        # Note that lower will decrease the amount we hit disk
-        target_percentile: float = 0.10,
-    ) -> Interval:
-        # random cache eviction
-        if len(self._cache) >= 100:
-            self._cache.pop(random.choice(self._cache.keys()))
-
-        cache_key = (
-            id(drive_read_latency_dist),
-            id(read_slo_latency_dist),
-            target_percentile,
-        )
-        if cache_key in self._cache:
-            result = self._cache[cache_key]
-        else:
-            # The inverse CDF, basically what percentile do we want to target
-            # to be all on disk.
-            target_latency = read_slo_latency_dist.ppf(target_percentile)
-
-            # What percent of disk reads will fall below this latency SLO
-            result = certain_float(drive_read_latency_dist.sf(target_latency))
-            self._cache[cache_key] = result
-        return result
-
-
-_working_set_estimator = WorkingSetEstimator()
-
-
 class DataShape(BaseModel):
     estimated_state_size_gib: Interval = certain_int(0)
     estimated_state_item_count: Optional[Interval] = None
     estimated_working_set_percent: Optional[Interval] = None
-
-    def item_count(self) -> Interval:
-        if self.estimated_state_item_count is not None:
-            return self.estimated_state_item_count
-
-        return certain_int(
-            (self.estimated_state_size_gib * 1024 * 1024 * 1024) // AVG_ITEM_SIZE_BYTES
-        )
-
-    def working_set_percent(
-        self,
-        # latency distributions of the read SLOs versus the drives
-        # expressed as scipy rv_continuous objects
-        drive_read_latency_dist,
-        read_slo_latency_dist,
-        # what is our target percentile for hitting disk
-        # Note that lower will decrease the amount we hit disk
-        target_percentile: float = 0.10,
-    ) -> Interval:
-        if self.estimated_working_set_percent is not None:
-            return self.estimated_working_set_percent
-
-        return _working_set_estimator.working_set_percent(
-            drive_read_latency_dist=drive_read_latency_dist,
-            read_slo_latency_dist=read_slo_latency_dist,
-            target_percentile=target_percentile,
-        )
 
 
 class CapacityDesires(BaseModel):
@@ -379,11 +318,11 @@ class CapacityPlan(BaseModel):
 
 class UncertainCapacityPlan(BaseModel):
     requirement: CapacityRequirement
-    least_regret: Optional[CapacityPlan]
+    least_regret: Sequence[CapacityPlan]
     mean: Sequence[CapacityPlan]
     percentiles: Dict[int, Sequence[CapacityPlan]]
 
 
 class CapacityRegretParameters(BaseModel):
     over_provision_cost: float = 1
-    under_provision_cost: float = 1.5
+    under_provision_cost: float = 1.25

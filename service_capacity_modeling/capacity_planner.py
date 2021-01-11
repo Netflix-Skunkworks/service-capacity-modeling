@@ -146,11 +146,9 @@ def _least_regret(
     capacity_plans: Sequence[CapacityPlan],
     regret_params: CapacityRegretParameters,
     model: CapacityModel,
-) -> Optional[CapacityPlan]:
-    # TODO: This model of regret is terrible, but it's not useless
-    # We're basically saying "nobody gets blamed for overprovisioning"
-    # but that's pretty wrong ...
-    plan_of_least_regret = (None, float("inf"))
+    num_results: int,
+) -> Sequence[CapacityPlan]:
+    plans_by_regret = []
     for i, proposed_plan in enumerate(capacity_plans):
         regret = 0
         for j, optimal_plan in enumerate(capacity_plans):
@@ -163,10 +161,11 @@ def _least_regret(
                 proposed_plan=proposed_plan,
             )
 
-        if plan_of_least_regret[0] is None or regret < plan_of_least_regret[1]:
-            plan_of_least_regret = (proposed_plan, regret)
+        plans_by_regret.append((proposed_plan, regret))
 
-    return plan_of_least_regret[0]
+    plans_by_regret.sort(key=lambda d: d[1])
+    plans = [p[0] for p in plans_by_regret]
+    return reduce_by_family(plans)[:num_results]
 
 
 class CapacityPlanner:
@@ -194,9 +193,8 @@ class CapacityPlanner:
         model_name: str,
         region: str,
         desires: CapacityDesires,
-        *args,
         num_results: Optional[int] = None,
-        **kwargs
+        **model_kwargs
     ) -> Sequence[CapacityPlan]:
         hardware = self._shapes.region(region)
         num_results = num_results or self._default_num_results
@@ -207,7 +205,7 @@ class CapacityPlanner:
             for drive in hardware.drives.values():
                 j += 1
                 plan = self._models[model_name].capacity_plan(
-                    instance=instance, drive=drive, desires=desires, *args, **kwargs
+                    instance=instance, drive=drive, desires=desires, **model_kwargs
                 )
                 if plan is not None:
                     plans.append(plan)
@@ -223,12 +221,14 @@ class CapacityPlanner:
         model_name: str,
         region: str,
         desires: CapacityDesires,
-        *args,
         percentiles: Tuple[int, int] = (5, 25, 50, 75, 95),
         simulations: Optional[int] = None,
         num_results: Optional[int] = None,
-        **kwargs
+        **model_kwargs
     ) -> UncertainCapacityPlan:
+
+        if not all([0 <= p <= 100 for p in percentiles]):
+            raise ValueError("percentiles must be an integer in the range [0, 100]")
 
         simulations = simulations or self._default_num_simulations
         num_results = num_results or self._default_num_results
@@ -239,11 +239,10 @@ class CapacityPlanner:
 
         for sim_desires in model_desires(desires, simulations):
             plans = self.plan_certain(
-                *args,
                 model_name=model_name,
                 region=region,
                 desires=sim_desires,
-                **kwargs,
+                **model_kwargs,
             )
             if len(plans) == 0:
                 continue
@@ -276,24 +275,25 @@ class CapacityPlanner:
         percentile_plans = {}
         for index, percentile in enumerate(percentiles):
             percentile_plans[percentile] = self.plan_certain(
-                *args,
                 model_name=model_name,
                 region=region,
                 desires=percentile_inputs[index],
-                **kwargs,
+                **model_kwargs,
             )
 
         result = UncertainCapacityPlan(
             requirement=final_requirement,
             least_regret=_least_regret(
-                capacity_plans, self._regret_params, self._models[model_name]
+                capacity_plans,
+                self._regret_params,
+                self._models[model_name],
+                num_results,
             ),
             mean=self.plan_certain(
-                *args,
                 model_name=model_name,
                 region=region,
                 desires=mean_desires,
-                **kwargs,
+                **model_kwargs,
             ),
             percentiles=percentile_plans,
         )

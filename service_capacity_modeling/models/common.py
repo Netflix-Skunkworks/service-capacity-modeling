@@ -1,9 +1,15 @@
 import logging
 import math
+import random
+from typing import Optional
 
+from service_capacity_modeling.interface import AVG_ITEM_SIZE_BYTES
 from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Instance
+from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import utils
@@ -197,3 +203,75 @@ def compute_stateful_zone(
 # AWS GP2 gives 3 IOS / gb stored.
 def _gp2_gib_for_io(read_ios) -> int:
     return int(max(1, read_ios // 3))
+
+
+class WorkingSetEstimator:
+    def __init__(self):
+        self._cache = {}
+
+    def working_set_percent(
+        self,
+        # latency distributions of the read SLOs versus the drives
+        # expressed as scipy rv_continuous objects
+        drive_read_latency_dist,
+        read_slo_latency_dist,
+        # what is our target percentile for hitting disk
+        # Note that lower will decrease the amount we hit disk
+        target_percentile: float = 0.10,
+    ) -> Interval:
+        # random cache eviction
+        if len(self._cache) >= 100:
+            self._cache.pop(random.choice(self._cache.keys()))
+
+        cache_key = (
+            id(drive_read_latency_dist),
+            id(read_slo_latency_dist),
+            target_percentile,
+        )
+        # Cached because ppf in particular is _really_ slow
+        if cache_key in self._cache:
+            result = self._cache[cache_key]
+        else:
+            # The inverse CDF, basically what percentile do we want to target
+            # to be all on disk.
+            target_latency = read_slo_latency_dist.ppf(target_percentile)
+
+            # What percent of disk reads will fall below this latency SLO
+            result = certain_float(drive_read_latency_dist.sf(target_latency))
+            self._cache[cache_key] = result
+        return result
+
+
+_working_set_estimator = WorkingSetEstimator()
+
+
+def working_set_from_drive_and_slo(
+    # latency distributions of the read SLOs versus the drives
+    # expressed as scipy rv_continuous objects
+    drive_read_latency_dist,
+    read_slo_latency_dist,
+    estimated_working_set: Optional[Interval] = None,
+    # what is our target percentile slo latency that we allow to hit disk
+    # Note that lower will decrease the amount we hit disk
+    target_percentile: float = 0.10,
+) -> Interval:
+    if estimated_working_set is not None:
+        return estimated_working_set
+
+    return _working_set_estimator.working_set_percent(
+        drive_read_latency_dist=drive_read_latency_dist,
+        read_slo_latency_dist=read_slo_latency_dist,
+        target_percentile=target_percentile,
+    )
+
+
+def item_count_from_state(
+    estimated_state_size_gib: Interval,
+    estimated_state_item_count: Optional[Interval] = None,
+) -> Interval:
+    if estimated_state_item_count is not None:
+        return estimated_state_item_count
+
+    return certain_int(
+        (estimated_state_size_gib * 1024 * 1024 * 1024) // AVG_ITEM_SIZE_BYTES
+    )

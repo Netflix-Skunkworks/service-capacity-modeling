@@ -14,6 +14,7 @@ from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
+from service_capacity_modeling.models.common import working_set_from_drive_and_slo
 from service_capacity_modeling.models.utils import next_power_of_2
 from service_capacity_modeling.stats import gamma_for_interval
 
@@ -90,11 +91,12 @@ def _estimate_cassandra_cluster_zonal(
     # Based on the disk latency and the read latency SLOs we adjust our
     # working set to keep more or less data in RAM. Faster drives need
     # less fronting RAM.
-    working_set = desires.data_shape.working_set_percent(
+    working_set = working_set_from_drive_and_slo(
         drive_read_latency_dist=gamma_for_interval(drive.read_io_latency_ms),
         read_slo_latency_dist=gamma_for_interval(
             desires.query_pattern.read_latency_slo_ms
         ),
+        estimated_working_set=desires.data_shape.estimated_working_set_percent,
         # This is about right for a database, a cache probably wants
         # to have less of the SLO latency coming from disk
         target_percentile=0.10,
