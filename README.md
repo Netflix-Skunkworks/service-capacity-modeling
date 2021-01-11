@@ -10,8 +10,12 @@ consider this repository public when making changes to it.
 ## Trying it out
 
 Run the tests:
-```
-tox -e py38
+```bash
+# Test the capacity planner on included netflix models
+$ tox -e py38
+
+# Verify all type contracts
+$ tox -e mypy
 ```
 
 Run IPython for interactively using the library:

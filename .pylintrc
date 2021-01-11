@@ -9,6 +9,8 @@ extension-pkg-whitelist=pydantic.fields
 ignored-argument-names=args|kwargs
 
 disable =
+  # often useful to be explicit on which returns should return None
+  useless-return,
   # gets angry when you declare a module-level logger
   invalid-name,
   # we use black for continuations

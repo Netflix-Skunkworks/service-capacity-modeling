@@ -52,7 +52,7 @@ def test_simulate_interval():
     solns = [(1.5, 2), (0.05, 0.5), (2.0, 3)]
     for interval, soln in zip((int_1, int_2, int_3), solns):
         shape, d = _gamma_dist_from_interval(interval)
-        assert soln[0] < shape[0] < soln[1]
+        assert soln[0] < shape < soln[1]
         assert abs(d.mean() - interval.mid) < 0.01
 
 

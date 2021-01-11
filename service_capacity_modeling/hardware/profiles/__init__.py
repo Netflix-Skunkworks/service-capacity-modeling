@@ -1,15 +1,19 @@
 try:
     import importlib.resources as pkg_resources
+    from importlib import import_module
 except ImportError:
-    import importlib_resources as pkg_resources
+    import importlib_resources as pkg_resources  # type: ignore[no-redef]
+
+    import_module = __import__  # type: ignore[assignment]
 
 from service_capacity_modeling.hardware import load_hardware_from_disk
-from service_capacity_modeling.hardware import profiles
 from pathlib import Path
 
+
+current_module = import_module(__name__)
 common_profiles = {}
 
-with pkg_resources.path(profiles, "shapes") as shapes:
+with pkg_resources.path(current_module, "shapes") as shapes:
     for fd in shapes.glob("**/*.json"):
         shape = fd.stem
 

@@ -236,7 +236,7 @@ class QueryPattern(BaseModel):
     # read and write impacts disk and network provisioniong
     # For stateless services it mostly just impacts memory and network
     estimated_mean_read_size_bytes: Interval = certain_int(AVG_ITEM_SIZE_BYTES)
-    estimated_mean_write_size_bytes: Interval = certain_int(AVG_ITEM_SIZE_BYTES / 2)
+    estimated_mean_write_size_bytes: Interval = certain_int(AVG_ITEM_SIZE_BYTES // 2)
 
     # The latencies at which oncall engineers get involved. We want
     # to provision such that we don't involve oncall

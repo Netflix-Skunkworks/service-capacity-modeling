@@ -1,3 +1,4 @@
+import math
 from typing import Optional
 
 from service_capacity_modeling.interface import CapacityDesires
@@ -25,8 +26,8 @@ def _estimate_java_app_requirement(
 
     if failover:
         # For failover provision at 40% utilization
-        needed_cores = needed_cores * (1 / 0.4)
-        needed_network_mbps = needed_network_mbps * (1 / 0.4)
+        needed_cores = int(math.ceil(needed_cores * (1 / 0.4)))
+        needed_network_mbps = int(math.ceil(needed_network_mbps * (1 / 0.4)))
 
     # Assume a Java application that can allocate about 1 GiB/s to heap
     # per 2 GiB of memory and assume that we have a ~2x memory overhead
@@ -66,7 +67,7 @@ def _estimate_java_app_region(
 
     cluster: RegionClusterCapacity = compute_stateless_region(
         instance=instance,
-        needed_cores=requirement.cpu_cores.mid,
+        needed_cores=int(requirement.cpu_cores.mid),
         needed_memory_gib=requirement.mem_gib.mid,
         needed_network_mbps=requirement.network_mbps.mid,
         core_reference_ghz=requirement.core_reference_ghz,

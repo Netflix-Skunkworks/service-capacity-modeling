@@ -1,6 +1,8 @@
 import math
 from typing import List
 from typing import Sequence
+from typing import Set
+from typing import Tuple
 
 from service_capacity_modeling.models import CapacityPlan
 
@@ -10,13 +12,14 @@ def reduce_by_family(plans: Sequence[CapacityPlan]) -> List[CapacityPlan]:
 
     Useful for showing different family options.
     """
-    zonal_families = set()
-    regional_families = set()
+    zonal_families: Set[Tuple[str, ...]] = set()
+    regional_families: Set[Tuple[str, ...]] = set()
 
     result: List[CapacityPlan] = []
     for plan in plans:
         topo = plan.candidate_clusters
-        regional_type, zonal_type = tuple(), tuple()
+        regional_type: Tuple[str, ...] = tuple()
+        zonal_type: Tuple[str, ...] = tuple()
 
         if topo.regional:
             regional_type = tuple(sorted({c.instance.family for c in topo.regional}))

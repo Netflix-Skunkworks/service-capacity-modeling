@@ -33,6 +33,7 @@ class CapacityModel:
     ) -> Optional[CapacityPlan]:
         # quiet pylint
         (_, _, _) = (instance, drive, desires)
+        return None
 
     @staticmethod
     def regret(

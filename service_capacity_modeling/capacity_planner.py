@@ -150,7 +150,7 @@ def _least_regret(
 ) -> Sequence[CapacityPlan]:
     plans_by_regret = []
     for i, proposed_plan in enumerate(capacity_plans):
-        regret = 0
+        regret = 0.0
         for j, optimal_plan in enumerate(capacity_plans):
             if j == i:
                 continue
@@ -221,7 +221,7 @@ class CapacityPlanner:
         model_name: str,
         region: str,
         desires: CapacityDesires,
-        percentiles: Tuple[int, int] = (5, 25, 50, 75, 95),
+        percentiles: Tuple[int, ...] = (5, 25, 50, 75, 95),
         simulations: Optional[int] = None,
         num_results: Optional[int] = None,
         **model_kwargs
@@ -301,7 +301,7 @@ class CapacityPlanner:
 
     @property
     def models(self) -> Sequence[str]:
-        return self._models.keys()
+        return sorted(tuple(self._models.keys()))
 
 
 planner = CapacityPlanner()

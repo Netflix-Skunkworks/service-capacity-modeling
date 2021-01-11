@@ -221,7 +221,7 @@ class WorkingSetEstimator:
     ) -> Interval:
         # random cache eviction
         if len(self._cache) >= 100:
-            self._cache.pop(random.choice(self._cache.keys()))
+            self._cache.pop(random.choice(tuple(self._cache.keys())))
 
         cache_key = (
             id(drive_read_latency_dist),
@@ -273,5 +273,5 @@ def item_count_from_state(
         return estimated_state_item_count
 
     return certain_int(
-        (estimated_state_size_gib * 1024 * 1024 * 1024) // AVG_ITEM_SIZE_BYTES
+        int(estimated_state_size_gib.mid * 1024 * 1024 * 1024) // AVG_ITEM_SIZE_BYTES
     )
