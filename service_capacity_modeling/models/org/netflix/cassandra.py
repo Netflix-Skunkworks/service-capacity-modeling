@@ -2,14 +2,19 @@ import logging
 import math
 from typing import Optional
 
+from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
+from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import Instance
+from service_capacity_modeling.interface import Interval
+from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -183,3 +188,71 @@ class NflxCassandraCapacityModel(CapacityModel):
             allow_gp2=allow_gp2,
             required_cluster_size=required_cluster_size,
         )
+
+    def default_desires(self, user_desires):
+        if user_desires.query_pattern.access_pattern == AccessPattern.latency:
+            return CapacityDesires(
+                query_pattern=QueryPattern(
+                    access_pattern=AccessPattern.latency,
+                    estimated_mean_read_size_bytes=Interval(
+                        low=128, mid=1024, high=65536, confidence=0.95
+                    ),
+                    estimated_mean_write_size_bytes=Interval(
+                        low=64, mid=128, high=1024, confidence=0.95
+                    ),
+                    # Cassandra point queries usualy take just around 1ms
+                    # of on CPU time for reads and 0.6ms for writes
+                    estimated_mean_read_latency_ms=Interval(
+                        low=0.2, mid=1, high=10, confidence=0.98
+                    ),
+                    estimated_mean_write_latency_ms=Interval(
+                        low=0.2, mid=0.6, high=2, confidence=0.98
+                    ),
+                    # "Single digit milliseconds SLO"
+                    read_latency_slo_ms=FixedInterval(
+                        low=0.4, mid=4, high=10, confidence=0.98
+                    ),
+                    write_latency_slo_ms=FixedInterval(
+                        low=0.4, mid=4, high=10, confidence=0.98
+                    ),
+                ),
+                # Most latency sensitive cassandra clusters are in the
+                # < 1TiB range
+                data_shape=DataShape(
+                    estimated_state_size_gib=Interval(
+                        low=10, mid=100, high=1000, confidence=0.98
+                    )
+                ),
+            )
+        else:
+            return CapacityDesires(
+                query_pattern=QueryPattern(
+                    access_pattern=AccessPattern.latency,
+                    estimated_mean_read_size_bytes=Interval(
+                        low=128, mid=1024, high=65536, confidence=0.95
+                    ),
+                    estimated_mean_write_size_bytes=Interval(
+                        low=64, mid=128, high=1024, confidence=0.95
+                    ),
+                    # Cassandra point queries usualy take just around 1ms
+                    # of on CPU time
+                    estimated_mean_read_latency_ms=Interval(
+                        low=0.2, mid=1, high=10, confidence=0.98
+                    ),
+                    estimated_mean_write_latency_ms=Interval(
+                        low=0.2, mid=0.6, high=2, confidence=0.98
+                    ),
+                    # "Single digit milliseconds SLO"
+                    read_latency_slo_ms=FixedInterval(
+                        low=0.4, mid=4, high=10, confidence=0.98
+                    ),
+                    write_latency_slo_ms=FixedInterval(
+                        low=0.4, mid=4, high=10, confidence=0.98
+                    ),
+                ),
+                data_shape=DataShape(
+                    estimated_state_size_gib=Interval(
+                        low=100, mid=1000, high=4000, confidence=0.98
+                    )
+                ),
+            )

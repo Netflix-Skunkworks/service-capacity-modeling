@@ -15,7 +15,6 @@ from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import DataShape
-from service_capacity_modeling.interface import GlobalHardware
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import interval
 from service_capacity_modeling.interface import interval_percentile
@@ -185,8 +184,12 @@ class CapacityPlanner:
         self._models[name] = capacity_model
 
     @property
-    def hardware_shapes(self) -> GlobalHardware:
-        return self._shapes.hardware
+    def models(self) -> Dict[str, CapacityModel]:
+        return self._models
+
+    @property
+    def hardware_shapes(self) -> HardwareShapes:
+        return self._shapes
 
     def plan_certain(
         self,
@@ -194,16 +197,17 @@ class CapacityPlanner:
         region: str,
         desires: CapacityDesires,
         num_results: Optional[int] = None,
-        **model_kwargs
+        **model_kwargs,
     ) -> Sequence[CapacityPlan]:
         hardware = self._shapes.region(region)
         num_results = num_results or self._default_num_results
+        model = self._models[model_name]
+
+        desires = desires.merge_with(model.default_desires(desires))
 
         plans = []
-        j = 0
         for instance in hardware.instances.values():
             for drive in hardware.drives.values():
-                j += 1
                 plan = self._models[model_name].capacity_plan(
                     instance=instance, drive=drive, desires=desires, **model_kwargs
                 )
@@ -224,14 +228,20 @@ class CapacityPlanner:
         percentiles: Tuple[int, ...] = (5, 25, 50, 75, 95),
         simulations: Optional[int] = None,
         num_results: Optional[int] = None,
-        **model_kwargs
+        **model_kwargs,
     ) -> UncertainCapacityPlan:
 
         if not all([0 <= p <= 100 for p in percentiles]):
             raise ValueError("percentiles must be an integer in the range [0, 100]")
+        if model_name not in self._models:
+            raise ValueError(
+                f"model_name={model_name} does not exist. "
+                f"Try {sorted(list(self._models.keys()))}"
+            )
 
         simulations = simulations or self._default_num_simulations
         num_results = num_results or self._default_num_results
+        desires = desires.merge_with(self._models[model_name].default_desires(desires))
 
         requirements = {}
         # desires -> Optional[CapacityPlan]
@@ -298,10 +308,6 @@ class CapacityPlanner:
             percentiles=percentile_plans,
         )
         return result
-
-    @property
-    def models(self) -> Sequence[str]:
-        return sorted(tuple(self._models.keys()))
 
 
 planner = CapacityPlanner()

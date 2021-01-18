@@ -1,10 +1,15 @@
 from typing import Optional
 
+from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRegretParameters
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import Instance
+from service_capacity_modeling.interface import QueryPattern
 
 
 class CapacityModel:
@@ -51,3 +56,41 @@ class CapacityModel:
             return (plan_cost - optimal_cost) * regret_params.over_provision_cost
         else:
             return (optimal_cost - plan_cost) * regret_params.under_provision_cost
+
+    @staticmethod
+    def description() -> str:
+        return "No description"
+
+    @staticmethod
+    def default_desires(user_desires: CapacityDesires):
+        if user_desires.query_pattern.access_pattern == AccessPattern.latency:
+            return CapacityDesires(
+                query_pattern=QueryPattern(
+                    access_pattern=AccessPattern.latency,
+                    estimated_mean_read_latency_ms=certain_float(1),
+                    estimated_mean_write_latency_ms=certain_float(1),
+                    # "Single digit milliseconds"
+                    read_latency_slo_ms=FixedInterval(
+                        low=0.4, mid=4, high=10, confidence=0.98
+                    ),
+                    write_latency_slo_ms=FixedInterval(
+                        low=0.4, mid=4, high=10, confidence=0.98
+                    ),
+                ),
+                data_shape=DataShape(),
+            )
+        else:
+            return CapacityDesires(
+                query_pattern=QueryPattern(
+                    access_pattern=AccessPattern.throughput,
+                    estimated_mean_read_latency_ms=certain_float(10),
+                    estimated_mean_write_latency_ms=certain_float(20),
+                    # "Tens of milliseconds"
+                    read_latency_slo_ms=FixedInterval(
+                        low=10, mid=50, high=100, confidence=0.98
+                    ),
+                    write_latency_slo_ms=FixedInterval(
+                        low=10, mid=50, high=100, confidence=0.98
+                    ),
+                )
+            )

@@ -222,8 +222,8 @@ class QueryPattern(BaseModel):
 
     # A main input, how many requests per second will we handle
     # We assume this is the mean of a range of possible outcomes
-    estimated_read_per_second: Interval = certain_int(100)
-    estimated_write_per_second: Interval = certain_int(10)
+    estimated_read_per_second: Interval = certain_int(0)
+    estimated_write_per_second: Interval = certain_int(0)
 
     # A main input, how much _on cpu_ time per operation do you take.
     # This depends heavily on workload, but this is a generally ok default
@@ -274,6 +274,18 @@ class CapacityDesires(BaseModel):
     # instance core frequency we are comparing to. Databases use i3s a lot
     # hence this default
     core_reference_ghz: float = 2.3
+
+    def merge_with(self, defaults: "CapacityDesires") -> "CapacityDesires":
+        desires_dict = self.dict(exclude_unset=True)
+        default_dict = defaults.dict(exclude_unset=True)
+
+        default_dict.get("query_pattern", {}).update(
+            desires_dict.pop("query_pattern", {})
+        )
+        default_dict.get("data_shape", {}).update(desires_dict.pop("data_shape", {}))
+        default_dict.update(desires_dict)
+
+        return CapacityDesires(**default_dict)
 
 
 class CapacityRequirement(BaseModel):
