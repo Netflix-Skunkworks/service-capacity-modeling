@@ -53,9 +53,13 @@ class CapacityModel:
         plan_cost = proposed_plan.candidate_clusters.total_annual_cost.mid
 
         if plan_cost >= optimal_cost:
-            return (plan_cost - optimal_cost) * regret_params.over_provision_cost
+            return (
+                (plan_cost - optimal_cost) * regret_params.over_provision_cost
+            ) ** 1.25
         else:
-            return (optimal_cost - plan_cost) * regret_params.under_provision_cost
+            return (
+                (optimal_cost - plan_cost) * regret_params.under_provision_cost
+            ) ** 1.25
 
     @staticmethod
     def description() -> str:

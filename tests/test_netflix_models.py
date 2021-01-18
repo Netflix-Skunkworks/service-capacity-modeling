@@ -83,7 +83,7 @@ def test_capacity_high_writes():
     assert high_writes_result.attached_drives[0].size_gib >= 500
 
 
-uncertain = CapacityDesires(
+uncertain_mid = CapacityDesires(
     service_tier=1,
     query_pattern=QueryPattern(
         estimated_read_per_second=Interval(
@@ -92,30 +92,89 @@ uncertain = CapacityDesires(
         estimated_write_per_second=Interval(
             low=1000, mid=10000, high=100000, confidence=0.9
         ),
-        estimated_mean_read_latency_ms=Interval(
-            low=0.1, mid=1, high=10, confidence=0.9
-        ),
-        estimated_mean_write_latency_ms=Interval(
-            low=0.1, mid=1, high=2, confidence=0.9
-        ),
     ),
     data_shape=DataShape(
         estimated_state_size_gib=Interval(low=100, mid=500, high=1000, confidence=0.9),
     ),
 )
 
+uncertain_tiny = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=Interval(low=1, mid=10, high=100, confidence=0.9),
+        estimated_write_per_second=Interval(low=1, mid=10, high=100, confidence=0.9),
+    ),
+    data_shape=DataShape(
+        estimated_state_size_gib=Interval(low=1, mid=10, high=30, confidence=0.9),
+    ),
+)
+
 
 def test_uncertain_planning_ebs():
     # with cProfile.Profile() as pr:
-    cap_plan = planner.plan(
+    mid_plan = planner.plan(
         model_name="org.netflix.cassandra",
         region="us-east-1",
-        desires=uncertain,
+        desires=uncertain_mid,
         allow_gp2=True,
     )
-    # pr.print_stats()
-    assert cap_plan is not None
-    # TODO: actually test this
+    lr = mid_plan.least_regret[0]
+    lr_cluster = lr.candidate_clusters.zonal[0]
+    assert 12 < lr_cluster.count * lr_cluster.instance.cpu < 64
+    assert 5_000 < lr.candidate_clusters.total_annual_cost.mid < 30_000
+
+    tiny_plan = planner.plan(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=uncertain_tiny,
+        allow_gp2=True,
+    )
+    lr = tiny_plan.least_regret[0]
+    lr_cluster = lr.candidate_clusters.zonal[0]
+    assert 4 < lr_cluster.count * lr_cluster.instance.cpu < 16
+    assert 2_000 < lr.candidate_clusters.total_annual_cost.mid < 8_000
+
+
+def test_increasing_qps_simple():
+    qps_values = (100, 1000, 10_000, 100_000)
+    result = []
+    for qps in qps_values:
+        simple = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=Interval(
+                    low=qps // 10, mid=qps, high=qps * 10, confidence=0.9
+                ),
+                estimated_write_per_second=Interval(
+                    low=qps // 10, mid=qps, high=qps * 10, confidence=0.9
+                ),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=Interval(
+                    low=10, mid=100, high=200, confidence=0.9
+                ),
+            ),
+        )
+
+        cap_plan = planner.plan(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=simple,
+            allow_gp2=True,
+        )
+        # pr.print_stats()
+
+        lr = cap_plan.least_regret[0].candidate_clusters.zonal[0]
+        lr_cpu = lr.count * lr.instance.cpu
+        lr_cost = cap_plan.least_regret[0].candidate_clusters.total_annual_cost
+        lr_family = lr.instance.family
+        result.append((lr_family, lr_cpu, lr_cost))
+
+    # As the QPS dominates the storage we should switch to paying for CPU
+    assert [r[0] for r in result] == ["r5d", "r5d", "m5d", "m5"]
+
+    # Should have more capacity as requirement increases
+    assert sorted([r[1] for r in result]) == [r[1] for r in result]
 
 
 def test_capacity_large_footprint():

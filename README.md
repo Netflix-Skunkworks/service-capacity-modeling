@@ -43,27 +43,6 @@ db_desires = CapacityDesires(
         estimated_write_per_second=Interval(
             low=1000, mid=10000, high=100000, confidence=0.9
         ),
-        # Some queries will be more expensive than others, some
-        # might take up to 10 milliseconds of on CPU time
-        estimated_mean_read_latency_ms=Interval(
-            low=0.1, mid=1, high=10, confidence=0.9
-        ),
-        estimated_mean_write_latency_ms=Interval(
-            low=0.1, mid=1, high=2, confidence=0.9
-        ),
-        # We want single digit latency, note that this is not a p99 of 10ms
-        # but defines the interval where 98% of latency falls to be between
-        # 0.4 and 10 milliseconds. Think of:
-        #   low = "the minimum reasonable latency"
-        #   high = "the maximum reasonable latency"
-        #   mid = "value between low and high such that I want my distribution
-        #          to skew left or right"
-        read_latency_slo_ms=FixedInterval(
-            low=0.4, mid=4, high=10, confidence=0.98
-        ),
-        write_latency_slo_ms=FixedInterval(
-            low=0.4, mid=4, high=10, confidence=0.98
-        )
     ),
     # Not sure how much data, but we think it'll be below 1 TiB
     data_shape=DataShape(
@@ -90,6 +69,53 @@ cap_plan = planner.plan(
 
 requirement = cap_plan.requirement
 least_regret = cap_plan.least_regret
+```
+
+Note that we _can_ customize more information given what we know about the
+use case, but each model (e.g. Cassandra) supplies reasonable defaults.
+
+For example we can specify a lot more information
+```
+db_desires = CapacityDesires(
+    # This service is important to the business, not critical (tier 0)
+    service_tier=1,
+    query_pattern=QueryPattern(
+        # Not sure exactly how much QPS we will do, but we think around
+        # 10,000 reads and 10,000 writes per second.
+        estimated_read_per_second=Interval(
+            low=40_000, mid=50_000, high=60_000, confidence=0.9
+        ),
+        estimated_write_per_second=Interval(
+            low=42_000, mid=45_000, high=50_000, confidence=0.9
+        ),
+        # This use case might do some partition scan queries that are
+        # somewhat expensive
+        estimated_mean_read_latency_ms=Interval(
+            low=0.1, mid=4, high=20, confidence=0.9
+        ),
+        # Writes at LOCAL_ONE
+        estimated_mean_write_latency_ms=Interval(
+            low=0.1, mid=0.4, high=0.8, confidence=0.9
+        ),
+        # We want single digit latency, note that this is not a p99 of 10ms
+        # but defines the interval where 98% of latency falls to be between
+        # 0.4 and 10 milliseconds. Think of:
+        #   low = "the minimum reasonable latency"
+        #   high = "the maximum reasonable latency"
+        #   mid = "value between low and high such that I want my distribution
+        #          to skew left or right"
+        read_latency_slo_ms=FixedInterval(
+            low=0.4, mid=4, high=10, confidence=0.98
+        ),
+        write_latency_slo_ms=FixedInterval(
+            low=0.4, mid=4, high=10, confidence=0.98
+        )
+    ),
+    # Not sure how much data, but we think it'll be below 1 TiB
+    data_shape=DataShape(
+        estimated_state_size_gib=Interval(low=100, mid=500, high=1000, confidence=0.9),
+    ),
+)
 ```
 
 ## Example of provisioning a caching cluster
