@@ -73,7 +73,7 @@ def _estimate_java_app_region(
         core_reference_ghz=requirement.core_reference_ghz,
         num_zones=zones_per_region,
     )
-    cluster.cluster_type = "java_app"
+    cluster.cluster_type = "nflx-java-app"
     cluster.attached_drives = attached_drives
 
     # Generally don't want giant clusters

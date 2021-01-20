@@ -189,7 +189,12 @@ class NflxCassandraCapacityModel(CapacityModel):
             required_cluster_size=required_cluster_size,
         )
 
-    def default_desires(self, user_desires):
+    @staticmethod
+    def description():
+        return "Netflix Streaming Cassandra Model"
+
+    @staticmethod
+    def default_desires(user_desires):
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(
@@ -234,10 +239,9 @@ class NflxCassandraCapacityModel(CapacityModel):
                     estimated_mean_write_size_bytes=Interval(
                         low=64, mid=128, high=1024, confidence=0.95
                     ),
-                    # Cassandra point queries usualy take just around 1ms
-                    # of on CPU time
+                    # Cassandra scan queries usually take longer
                     estimated_mean_read_latency_ms=Interval(
-                        low=0.2, mid=1, high=10, confidence=0.98
+                        low=0.2, mid=5, high=20, confidence=0.98
                     ),
                     estimated_mean_write_latency_ms=Interval(
                         low=0.2, mid=0.6, high=2, confidence=0.98

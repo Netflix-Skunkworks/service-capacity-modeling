@@ -1,12 +1,16 @@
 import logging
 import math
 import random
+from typing import Callable
 from typing import Optional
 
 from service_capacity_modeling.interface import AVG_ITEM_SIZE_BYTES
 from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
@@ -274,4 +278,80 @@ def item_count_from_state(
 
     return certain_int(
         int(estimated_state_size_gib.mid * 1024 * 1024 * 1024) // AVG_ITEM_SIZE_BYTES
+    )
+
+
+def _add_optional_float(
+    left: Optional[float], right: Optional[float]
+) -> Optional[float]:
+    if left is None and right is None:
+        return None
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return left + right
+
+
+def _add_interval(left: Interval, right: Interval) -> Interval:
+    return Interval(
+        low=(left.low + right.low),
+        mid=(left.mid + right.mid),
+        high=(left.high + right.high),
+        confidence=min(left.confidence, right.confidence),
+        model_with=left.model_with,
+        minimum_value=_add_optional_float(left.minimum_value, right.minimum_value),
+        maximum_value=_add_optional_float(left.maximum_value, right.maximum_value),
+    )
+
+
+def _noop_zone(x: ZoneClusterCapacity) -> ZoneClusterCapacity:
+    return x
+
+
+def _noop_region(x: RegionClusterCapacity) -> RegionClusterCapacity:
+    return x
+
+
+def merge_plan(
+    left: Optional[CapacityPlan],
+    right: Optional[CapacityPlan],
+    zonal_transform: Callable[[ZoneClusterCapacity], ZoneClusterCapacity] = _noop_zone,
+    regional_transform: Callable[
+        [RegionClusterCapacity], RegionClusterCapacity
+    ] = _noop_region,
+) -> Optional[CapacityPlan]:
+    if left is None or right is None:
+        return None
+
+    left_req = left.requirement
+    right_req = right.requirement
+
+    merged_requirement = CapacityRequirement(
+        core_reference_ghz=min(
+            left_req.core_reference_ghz, right_req.core_reference_ghz
+        ),
+        cpu_cores=_add_interval(left_req.cpu_cores, right_req.cpu_cores),
+        mem_gib=_add_interval(left_req.mem_gib, right_req.mem_gib),
+        network_mbps=_add_interval(left_req.network_mbps, right_req.network_mbps),
+        disk_gib=_add_interval(left_req.disk_gib, right_req.disk_gib),
+    )
+    left_cluster = left.candidate_clusters
+    right_cluster = right.candidate_clusters
+
+    merged_clusters = Clusters(
+        total_annual_cost=_add_interval(
+            left_cluster.total_annual_cost, right_cluster.total_annual_cost
+        ),
+        zonal=(
+            [zonal_transform(z) for z in left_cluster.zonal]
+            + [zonal_transform(z) for z in right_cluster.zonal]
+        ),
+        regional=(
+            [regional_transform(z) for z in left_cluster.regional]
+            + [regional_transform(z) for z in right_cluster.regional]
+        ),
+    )
+    return CapacityPlan(
+        requirement=merged_requirement, candidate_clusters=merged_clusters
     )

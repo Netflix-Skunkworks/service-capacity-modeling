@@ -191,7 +191,7 @@ def test_capacity_large_footprint():
     assert large_footprint_result.count == 4
 
     java_cap_plan = planner.plan_certain(
-        model_name="org.netflix.stateless_java",
+        model_name="org.netflix.stateless-java",
         region="us-east-1",
         desires=large_footprint,
     )[0]
