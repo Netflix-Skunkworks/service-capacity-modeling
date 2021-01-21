@@ -190,11 +190,23 @@ def test_capacity_large_footprint():
     assert large_footprint_result.instance.name == "i3en.3xlarge"
     assert large_footprint_result.count == 4
 
+
+def test_java_app():
     java_cap_plan = planner.plan_certain(
         model_name="org.netflix.stateless-java",
         region="us-east-1",
         desires=large_footprint,
     )[0]
+    java_result = java_cap_plan.candidate_clusters.regional[0]
+    cores = java_result.count * java_result.instance.cpu
+    assert java_result.instance.name.startswith("m5")
+    assert 100 <= cores <= 300
+
+    java_cap_plan = planner.plan(
+        model_name="org.netflix.stateless-java",
+        region="us-east-1",
+        desires=small_but_high_qps,
+    ).least_regret[0]
     java_result = java_cap_plan.candidate_clusters.regional[0]
     cores = java_result.count * java_result.instance.cpu
     assert java_result.instance.name.startswith("m5")

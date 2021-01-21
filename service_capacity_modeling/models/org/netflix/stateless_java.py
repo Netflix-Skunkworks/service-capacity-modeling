@@ -101,7 +101,7 @@ class NflxJavaAppCapacityModel(CapacityModel):
         **kwargs,
     ) -> Optional[CapacityPlan]:
         failover: bool = kwargs.pop("failover", True)
-        jvm_memory_overhead: float = kwargs.pop("jvm_memory_overhead", 2)
+        jvm_memory_overhead: float = kwargs.pop("jvm_memory_overhead", 1.2)
         zones_per_region: int = kwargs.pop("zones_per_region", 3)
 
         return _estimate_java_app_region(
