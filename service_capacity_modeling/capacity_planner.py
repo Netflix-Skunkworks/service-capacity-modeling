@@ -53,7 +53,7 @@ def model_desires(
     data_shape = desires.data_shape.copy()
 
     query_pattern_simulation = {}
-    for field in query_pattern.__fields__:
+    for field in sorted(query_pattern.__fields__):
         d = getattr(query_pattern, field)
         if isinstance(d, Interval):
             query_pattern_simulation[field] = simulate_interval(d)(num_sims)
@@ -61,7 +61,7 @@ def model_desires(
             query_pattern_simulation[field] = [d] * num_sims
 
     data_shape_simulation = {}
-    for field in data_shape.__fields__:
+    for field in sorted(data_shape.__fields__):
         d = getattr(data_shape, field)
         if isinstance(d, Interval):
             data_shape_simulation[field] = simulate_interval(d)(num_sims)
@@ -70,10 +70,13 @@ def model_desires(
 
     for sim in range(num_sims):
         query_pattern = QueryPattern(
-            **{f: query_pattern_simulation[f][sim] for f in query_pattern.__fields__}
+            **{
+                f: query_pattern_simulation[f][sim]
+                for f in sorted(query_pattern.__fields__)
+            }
         )
         data_shape = DataShape(
-            **{f: data_shape_simulation[f][sim] for f in data_shape.__fields__}
+            **{f: data_shape_simulation[f][sim] for f in sorted(data_shape.__fields__)}
         )
 
         d = desires.copy()
@@ -91,12 +94,12 @@ def model_desires_percentiles(
 
     query_pattern_simulation = {}
     query_pattern_means = {}
-    for field in query_pattern.__fields__:
+    for field in sorted(query_pattern.__fields__):
         d = getattr(query_pattern, field)
         if isinstance(d, Interval):
             query_pattern_means[field] = certain_float(d.mid)
-            if d.confidence < 0.99:
-                samples = gamma_for_interval(d).rvs(10000)
+            if d.confidence <= 0.99:
+                samples = gamma_for_interval(d).rvs(1028)
                 query_pattern_simulation[field] = interval_percentile(
                     samples, percentiles
                 )
@@ -106,12 +109,12 @@ def model_desires_percentiles(
 
     data_shape_simulation = {}
     data_shape_means = {}
-    for field in data_shape.__fields__:
+    for field in sorted(data_shape.__fields__):
         d = getattr(data_shape, field)
         if isinstance(d, Interval):
             data_shape_means[field] = certain_float(d.mid)
-            if d.confidence < 0.99:
-                samples = gamma_for_interval(d).rvs(10000)
+            if d.confidence <= 0.99:
+                samples = gamma_for_interval(d).rvs(1028)
                 data_shape_simulation[field] = interval_percentile(samples, percentiles)
                 continue
         data_shape_simulation[field] = [d] * len(percentiles)
@@ -120,10 +123,13 @@ def model_desires_percentiles(
     results = []
     for i in range(len(percentiles)):
         query_pattern = QueryPattern(
-            **{f: query_pattern_simulation[f][i] for f in query_pattern.__fields__}
+            **{
+                f: query_pattern_simulation[f][i]
+                for f in sorted(query_pattern.__fields__)
+            }
         )
         data_shape = DataShape(
-            **{f: data_shape_simulation[f][i] for f in data_shape.__fields__}
+            **{f: data_shape_simulation[f][i] for f in sorted(data_shape.__fields__)}
         )
         d = desires.copy()
         d.query_pattern = query_pattern
@@ -131,9 +137,11 @@ def model_desires_percentiles(
         results.append(d)
 
     mean_qp = QueryPattern(
-        **{f: query_pattern_means[f] for f in query_pattern.__fields__}
+        **{f: query_pattern_means[f] for f in sorted(query_pattern.__fields__)}
     )
-    mean_ds = DataShape(**{f: data_shape_means[f] for f in data_shape.__fields__})
+    mean_ds = DataShape(
+        **{f: data_shape_means[f] for f in sorted(data_shape.__fields__)}
+    )
     d = desires.copy()
     d.query_pattern = mean_qp
     d.data_shape = mean_ds
@@ -260,7 +268,7 @@ class CapacityPlanner:
             capacity_plans.append(plans[0])
             requirement = plans[0].requirement
 
-            for field in requirement.__fields__:
+            for field in sorted(requirement.__fields__):
                 d = getattr(requirement, field)
                 if isinstance(d, Interval):
                     if field not in requirements:

@@ -58,5 +58,12 @@ def _gamma_dist_from_interval(
 
 # This can be expensive, so cache it
 @lru_cache(maxsize=128)
-def gamma_for_interval(interval: Interval, seed: float = 0xCAFE) -> rv_continuous:
+def _gamma_for_interval(interval: Interval, seed: float = 0xCAFE) -> rv_continuous:
     return _gamma_dist_from_interval(interval, seed=seed)[1]
+
+
+# This can be expensive, so cache it
+def gamma_for_interval(interval: Interval, seed: float = 0xCAFE) -> rv_continuous:
+    result = _gamma_for_interval(interval, seed)
+    result.random_state = np.random.RandomState(seed=seed)
+    return result
