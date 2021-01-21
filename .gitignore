@@ -32,3 +32,6 @@ debian/*.bak
 debian/*.log
 debian/*.debhelper
 .nox
+
+# Notebooks
+notebooks/.ipynb_checkpoints/

@@ -167,5 +167,13 @@ requirement = cache_cap_plan.requirement
 least_regret = cache_cap_plan.least_regret
 ```
 
+## Notebooks
+
+We have a demo notebook in `notebooks` you can use to experiment. Start it with
+
+```
+tox -e notebook jupyter notebook notebooks/demo.ipynb
+```
+
 ## Release
 TODO
