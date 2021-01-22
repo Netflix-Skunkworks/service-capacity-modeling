@@ -120,8 +120,8 @@ def test_uncertain_planning_ebs():
     )
     lr = mid_plan.least_regret[0]
     lr_cluster = lr.candidate_clusters.zonal[0]
-    assert 12 < lr_cluster.count * lr_cluster.instance.cpu < 64
-    assert 5_000 < lr.candidate_clusters.total_annual_cost.mid < 30_000
+    assert 12 < lr_cluster.count * lr_cluster.instance.cpu <= 64
+    assert 5_000 < lr.candidate_clusters.total_annual_cost.mid < 50_000
 
     tiny_plan = planner.plan(
         model_name="org.netflix.cassandra",
@@ -171,7 +171,7 @@ def test_increasing_qps_simple():
         result.append((lr_family, lr_cpu, lr_cost))
 
     # As the QPS dominates the storage we should switch to paying for CPU
-    assert [r[0] for r in result] == ["r5d", "r5d", "m5d", "m5"]
+    assert [r[0] for r in result] == ["r5", "r5", "r5d", "m5"]
 
     # Should have more capacity as requirement increases
     assert sorted([r[1] for r in result]) == [r[1] for r in result]

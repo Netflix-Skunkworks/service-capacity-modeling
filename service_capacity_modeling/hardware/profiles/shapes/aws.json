@@ -63,7 +63,7 @@
       "cpu_ghz": 2.3,
       "ram_gib": 61,
       "net_mbps": 2000,
-      "drive": {"name": "ephem", "size_gib": 1900, "read_io_latency_ms": {"low":0.2, "mid":0.3, "high":1, "confidence":0.98}}
+      "drive": {"name": "ephem", "size_gib": 1900, "read_io_latency_ms": {"low":0.14, "mid":0.18, "high":0.25, "confidence":0.98}}
     },
     "i3.4xlarge": {
       "name": "i3.4xlarge",
@@ -71,7 +71,7 @@
       "cpu_ghz": 2.3,
       "ram_gib": 122,
       "net_mbps": 4000,
-      "drive": {"name": "ephem", "size_gib": 3800, "read_io_latency_ms": {"low":0.2, "mid":0.3, "high":1, "confidence":0.98}}
+      "drive": {"name": "ephem", "size_gib": 3800, "read_io_latency_ms": {"low":0.14, "mid":0.18, "high":0.25, "confidence":0.98}}
     },
     "i3en.2xlarge": {
       "name": "i3en.2xlarge",
@@ -79,7 +79,7 @@
       "cpu_ghz": 3.1,
       "ram_gib": 64,
       "net_mbps": 8000,
-      "drive": {"name": "ephem", "size_gib": 5000, "read_io_latency_ms": {"low":0.1, "mid":0.2, "high":1, "confidence":0.98}}
+      "drive": {"name": "ephem", "size_gib": 5000, "read_io_latency_ms": {"low":0.08, "mid":0.12, "high":0.2, "confidence":0.98}}
     },
     "i3en.3xlarge": {
       "name": "i3en.3xlarge",
@@ -87,7 +87,7 @@
       "cpu_ghz": 3.1,
       "ram_gib": 96,
       "net_mbps": 12000,
-      "drive": {"name": "ephem", "size_gib": 7500, "read_io_latency_ms": {"low":0.1, "mid":0.2, "high":1, "confidence":0.98}}
+      "drive": {"name": "ephem", "size_gib": 7500, "read_io_latency_ms": {"low":0.08, "mid":0.12, "high":0.2, "confidence":0.98}}
     },
     "m5d.2xlarge": {
       "name": "m5d.2xlarge",
@@ -95,7 +95,7 @@
       "cpu_ghz": 3.1,
       "ram_gib": 32,
       "net_mbps": 2000,
-      "drive": {"name": "ephem", "size_gib": 300, "read_io_latency_ms": {"low":0.2, "mid":0.3, "high":1, "confidence":0.98}},
+      "drive": {"name": "ephem", "size_gib": 300, "read_io_latency_ms": {"low":0.08, "mid":0.12, "high":0.2, "confidence":0.98}},
       "annual_cost": 1488.6
     },
     "m5d.4xlarge": {
@@ -104,7 +104,7 @@
       "cpu_ghz": 3.1,
       "ram_gib": 64,
       "net_mbps": 4000,
-      "drive": {"name": "ephem", "size_gib": 600, "read_io_latency_ms": {"low":0.2, "mid":0.3, "high":1, "confidence":0.98}},
+      "drive": {"name": "ephem", "size_gib": 600, "read_io_latency_ms": {"low":0.08, "mid":0.12, "high":0.2, "confidence":0.98}},
       "annual_cost": 2977.7
     },
     "m5d.8xlarge": {
@@ -113,7 +113,7 @@
       "cpu_ghz": 3.1,
       "ram_gib": 128,
       "net_mbps": 10000,
-      "drive": {"name": "ephem", "size_gib": 1200, "read_io_latency_ms": {"low":0.2, "mid":0.3, "high":1, "confidence":0.98}},
+      "drive": {"name": "ephem", "size_gib": 1200, "read_io_latency_ms": {"low":0.08, "mid":0.12, "high":0.2, "confidence":0.98}},
       "annual_cost": 5955
     },
     "r5d.2xlarge": {
@@ -122,7 +122,7 @@
       "cpu_ghz": 3.1,
       "ram_gib": 64,
       "net_mbps": 2000,
-      "drive": {"name": "ephem", "size_gib": 300, "read_io_latency_ms": {"low":0.2, "mid":0.3, "high":1, "confidence":0.98}}
+      "drive": {"name": "ephem", "size_gib": 300, "read_io_latency_ms": {"low":0.08, "mid":0.12, "high":0.2, "confidence":0.98}}
     },
     "r5d.4xlarge": {
       "name": "r5d.4xlarge",
@@ -130,7 +130,7 @@
       "cpu_ghz": 3.1,
       "ram_gib": 128,
       "net_mbps": 4000,
-      "drive": {"name": "ephem", "size_gib": 600, "read_io_latency_ms": {"low":0.2, "mid":0.3, "high":1, "confidence":0.98}}
+      "drive": {"name": "ephem", "size_gib": 600, "read_io_latency_ms": {"low":0.08, "mid":0.12, "high":0.2, "confidence":0.98}}
     },
     "r5d.8xlarge": {
       "name": "r5d.8xlarge",
@@ -138,14 +138,14 @@
       "cpu_ghz": 3.1,
       "ram_gib": 256,
       "net_mbps": 10000,
-      "drive": {"name": "ephem", "size_gib": 1200, "read_io_latency_ms": {"low":0.2, "mid":0.3, "high":1, "confidence":0.98}}
+      "drive": {"name": "ephem", "size_gib": 1200, "read_io_latency_ms": {"low":0.08, "mid":0.12, "high":0.2, "confidence":0.98}}
     }
   },
   "drives": {
     "gp2": {
       "name": "gp2",
-      "read_io_latency_ms": {"low": 0.4, "mid": 0.6, "high": 2, "confidence": 0.98},
-      "write_io_latency_ms": {"low": 0.5, "mid": 1, "high": 5, "confidence": 0.98}
+      "read_io_latency_ms": {"low": 1, "mid": 1.1, "high": 20, "confidence": 0.90},
+      "write_io_latency_ms": {"low": 1.2, "mid": 2, "high": 30, "confidence": 0.90}
     }
   }
 }
