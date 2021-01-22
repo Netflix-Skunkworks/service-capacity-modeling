@@ -66,6 +66,7 @@ def _estimate_cassandra_requirement(
         mem_gib=certain_float(needed_memory),
         disk_gib=certain_float(needed_disk),
         network_mbps=certain_float(needed_network_mbps),
+        context={"working_set": working_set},
     )
 
 
@@ -98,15 +99,16 @@ def _estimate_cassandra_cluster_zonal(
     # Based on the disk latency and the read latency SLOs we adjust our
     # working set to keep more or less data in RAM. Faster drives need
     # less fronting RAM.
+    ws_drive = instance.drive or drive
     working_set = working_set_from_drive_and_slo(
-        drive_read_latency_dist=gamma_for_interval(drive.read_io_latency_ms),
+        drive_read_latency_dist=gamma_for_interval(ws_drive.read_io_latency_ms),
         read_slo_latency_dist=gamma_for_interval(
             desires.query_pattern.read_latency_slo_ms
         ),
         estimated_working_set=desires.data_shape.estimated_working_set_percent,
         # This is about right for a database, a cache probably wants
         # to have less of the SLO latency coming from disk
-        target_percentile=0.10,
+        target_percentile=0.20,
     ).mid
 
     requirement = _estimate_cassandra_requirement(
@@ -219,20 +221,20 @@ class NflxCassandraCapacityModel(CapacityModel):
                     estimated_mean_write_size_bytes=Interval(
                         low=64, mid=128, high=1024, confidence=0.95
                     ),
-                    # Cassandra point queries usualy take just around 1ms
-                    # of on CPU time for reads and 0.6ms for writes
+                    # Cassandra point queries usualy take just around 2ms
+                    # of on CPU time for reads and 1ms for writes
                     estimated_mean_read_latency_ms=Interval(
-                        low=0.2, mid=1, high=10, confidence=0.98
+                        low=0.4, mid=2, high=10, confidence=0.98
                     ),
                     estimated_mean_write_latency_ms=Interval(
-                        low=0.2, mid=0.6, high=2, confidence=0.98
+                        low=0.4, mid=1, high=2, confidence=0.98
                     ),
                     # "Single digit milliseconds SLO"
                     read_latency_slo_ms=FixedInterval(
-                        low=0.4, mid=4, high=10, confidence=0.98
+                        low=0.4, mid=2.5, high=10, confidence=0.98
                     ),
                     write_latency_slo_ms=FixedInterval(
-                        low=0.4, mid=4, high=10, confidence=0.98
+                        low=0.4, mid=1, high=10, confidence=0.98
                     ),
                 ),
                 # Most latency sensitive cassandra clusters are in the
@@ -262,10 +264,10 @@ class NflxCassandraCapacityModel(CapacityModel):
                     ),
                     # "Single digit milliseconds SLO"
                     read_latency_slo_ms=FixedInterval(
-                        low=0.4, mid=4, high=10, confidence=0.98
+                        low=0.4, mid=8, high=100, confidence=0.98
                     ),
                     write_latency_slo_ms=FixedInterval(
-                        low=0.4, mid=4, high=10, confidence=0.98
+                        low=0.4, mid=2, high=10, confidence=0.98
                     ),
                 ),
                 data_shape=DataShape(

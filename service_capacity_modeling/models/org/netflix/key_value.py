@@ -70,10 +70,10 @@ class NflxKeyValueCapacityModel(CapacityModel):
                     ),
                     # "Single digit milliseconds SLO"
                     read_latency_slo_ms=FixedInterval(
-                        low=0.4, mid=4, high=10, confidence=0.98
+                        low=0.4, mid=2.5, high=10, confidence=0.98
                     ),
                     write_latency_slo_ms=FixedInterval(
-                        low=0.4, mid=4, high=10, confidence=0.98
+                        low=0.4, mid=2, high=10, confidence=0.98
                     ),
                 ),
                 # Most KeyValue clusters are small

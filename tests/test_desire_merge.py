@@ -34,8 +34,8 @@ def test_cassandra_merge():
     assert merged.data_shape.estimated_state_size_gib.mid == 10
 
     # Should come from cassandra
-    assert merged.query_pattern.estimated_mean_read_latency_ms.mid == 1.0
-    assert merged.query_pattern.estimated_mean_write_latency_ms.mid == 0.6
+    assert merged.query_pattern.estimated_mean_read_latency_ms.mid == 2.0
+    assert merged.query_pattern.estimated_mean_write_latency_ms.mid == 1.0
 
     # Should come from overall defaults
     assert merged.data_shape.estimated_state_item_count is None

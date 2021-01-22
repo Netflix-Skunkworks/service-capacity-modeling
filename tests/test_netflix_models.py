@@ -17,7 +17,6 @@ small_but_high_qps = CapacityDesires(
     ),
     data_shape=DataShape(
         estimated_state_size_gib=certain_int(10),
-        estimated_working_set_percent=certain_float(0.5),
     ),
 )
 
@@ -31,7 +30,6 @@ high_writes = CapacityDesires(
     ),
     data_shape=DataShape(
         estimated_state_size_gib=certain_int(300),
-        estimated_working_set_percent=certain_float(0.1),
     ),
 )
 
@@ -45,7 +43,6 @@ large_footprint = CapacityDesires(
     ),
     data_shape=DataShape(
         estimated_state_size_gib=certain_int(4000),
-        estimated_working_set_percent=certain_float(0.05),
     ),
 )
 
@@ -78,9 +75,10 @@ def test_capacity_high_writes():
         copies_per_region=2,
     )[0]
     high_writes_result = cap_plan.candidate_clusters.zonal[0]
-    assert high_writes_result.instance.name == "m5.2xlarge"
+    assert high_writes_result.instance.name == "m5d.2xlarge"
     assert high_writes_result.count == 4
-    assert high_writes_result.attached_drives[0].size_gib >= 500
+    assert high_writes_result.instance.drive is not None
+    assert high_writes_result.instance.drive.size_gib >= 200
 
 
 uncertain_mid = CapacityDesires(
@@ -120,8 +118,8 @@ def test_uncertain_planning_ebs():
     )
     lr = mid_plan.least_regret[0]
     lr_cluster = lr.candidate_clusters.zonal[0]
-    assert 12 < lr_cluster.count * lr_cluster.instance.cpu <= 64
-    assert 5_000 < lr.candidate_clusters.total_annual_cost.mid < 50_000
+    assert 12 <= lr_cluster.count * lr_cluster.instance.cpu <= 64
+    assert 5_000 <= lr.candidate_clusters.total_annual_cost.mid < 50_000
 
     tiny_plan = planner.plan(
         model_name="org.netflix.cassandra",
@@ -171,10 +169,12 @@ def test_increasing_qps_simple():
         result.append((lr_family, lr_cpu, lr_cost))
 
     # As the QPS dominates the storage we should switch to paying for CPU
-    assert [r[0] for r in result] == ["r5", "r5", "r5d", "m5"]
+    assert all([r[0].startswith("m5") for r in result])
 
     # Should have more capacity as requirement increases
-    assert sorted([r[1] for r in result]) == [r[1] for r in result]
+    x = [r[1] for r in result]
+    assert x[0] < x[-1]
+    assert sorted(x) == x
 
 
 def test_capacity_large_footprint():

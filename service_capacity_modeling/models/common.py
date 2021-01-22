@@ -222,6 +222,7 @@ class WorkingSetEstimator:
         # what is our target percentile for hitting disk
         # Note that lower will decrease the amount we hit disk
         target_percentile: float = 0.10,
+        min_working_set: float = 0.01,
     ) -> Interval:
         # random cache eviction
         if len(self._cache) >= 100:
@@ -233,17 +234,15 @@ class WorkingSetEstimator:
             target_percentile,
         )
         # Cached because ppf in particular is _really_ slow
-        if cache_key in self._cache:
-            result = self._cache[cache_key]
-        else:
+        if cache_key not in self._cache:
             # The inverse CDF, basically what percentile do we want to target
             # to be all on disk.
             target_latency = read_slo_latency_dist.ppf(target_percentile)
 
             # What percent of disk reads will fall below this latency SLO
-            result = certain_float(drive_read_latency_dist.sf(target_latency))
-            self._cache[cache_key] = result
-        return result
+            lat = max(drive_read_latency_dist.sf(target_latency), min_working_set)
+            self._cache[cache_key] = certain_float(lat)
+        return self._cache[cache_key]
 
 
 _working_set_estimator = WorkingSetEstimator()
@@ -258,6 +257,7 @@ def working_set_from_drive_and_slo(
     # what is our target percentile slo latency that we allow to hit disk
     # Note that lower will decrease the amount we hit disk
     target_percentile: float = 0.10,
+    min_working_set: float = 0.01,
 ) -> Interval:
     if estimated_working_set is not None:
         return estimated_working_set
@@ -266,6 +266,7 @@ def working_set_from_drive_and_slo(
         drive_read_latency_dist=drive_read_latency_dist,
         read_slo_latency_dist=read_slo_latency_dist,
         target_percentile=target_percentile,
+        min_working_set=min_working_set,
     )
 
 
