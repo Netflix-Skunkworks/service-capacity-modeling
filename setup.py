@@ -7,7 +7,7 @@ setuptools.setup(
     versioning="distance",
     setup_requires="setupmeta",
     description="Contains utilities for modeling database capacity on a cloud",
-    packages=setuptools.find_packages(exclude=("tests*",)),
+    packages=setuptools.find_packages(exclude=("tests*", "notebooks*")),
     install_requires=[
         "pydantic",
         "scipy",
