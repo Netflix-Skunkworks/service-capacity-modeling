@@ -1,5 +1,7 @@
 import math
 from typing import Optional
+from typing import Sequence
+from typing import Tuple
 
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
@@ -19,7 +21,7 @@ from service_capacity_modeling.models.common import sqrt_staffed_cores
 def _estimate_java_app_requirement(
     desires: CapacityDesires,
     failover: bool = True,
-    jvm_memory_overhead: float = 2,
+    jvm_memory_overhead: float = 1.2,
 ) -> CapacityRequirement:
     needed_cores = sqrt_staffed_cores(desires)
     needed_network_mbps = simple_network_mbps(desires)
@@ -111,4 +113,20 @@ class NflxJavaAppCapacityModel(CapacityModel):
             failover=failover,
             jvm_memory_overhead=jvm_memory_overhead,
             zones_per_region=zones_per_region,
+        )
+
+    @staticmethod
+    def description():
+        return "Netflix Streaming Java App Model"
+
+    @staticmethod
+    def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
+        return (
+            ("zones_per_region", "int = 3", "How many zones exist in the region"),
+            ("failover", "bool = 1", "If this app participates in failover"),
+            (
+                "jvm_memory_overhead",
+                "float = 1.2",
+                "How much overhead does the heap have per read byte",
+            ),
         )

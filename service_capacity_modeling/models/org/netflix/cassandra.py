@@ -1,6 +1,8 @@
 import logging
 import math
 from typing import Optional
+from typing import Sequence
+from typing import Tuple
 
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
@@ -194,7 +196,19 @@ class NflxCassandraCapacityModel(CapacityModel):
         return "Netflix Streaming Cassandra Model"
 
     @staticmethod
-    def default_desires(user_desires):
+    def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
+        return (
+            ("zones_per_region", "int = 3", "How many zones exist in the region"),
+            (
+                "copies_per_region",
+                "int = 3",
+                "How many copies of the data will exist e.g. RF=3",
+            ),
+            ("allow_gp2", "bool = 0", "If gp2 drives should be permitted"),
+        )
+
+    @staticmethod
+    def default_desires(user_desires, **kwargs):
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(

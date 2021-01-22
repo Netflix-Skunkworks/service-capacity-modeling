@@ -1,4 +1,6 @@
 from typing import Optional
+from typing import Sequence
+from typing import Tuple
 
 from .cassandra import NflxCassandraCapacityModel
 from .stateless_java import NflxJavaAppCapacityModel
@@ -41,7 +43,13 @@ class NflxKeyValueCapacityModel(CapacityModel):
         return "Netflix Streaming Key-Value Model"
 
     @staticmethod
-    def default_desires(user_desires):
+    def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
+        return tuple(NflxCassandraCapacityModel.extra_model_arguments()) + tuple(
+            NflxJavaAppCapacityModel.extra_model_arguments()
+        )
+
+    @staticmethod
+    def default_desires(user_desires, **kwargs):
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(

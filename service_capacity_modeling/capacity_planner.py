@@ -211,7 +211,7 @@ class CapacityPlanner:
         num_results = num_results or self._default_num_results
         model = self._models[model_name]
 
-        desires = desires.merge_with(model.default_desires(desires))
+        desires = desires.merge_with(model.default_desires(desires, **model_kwargs))
 
         plans = []
         for instance in hardware.instances.values():
@@ -249,7 +249,9 @@ class CapacityPlanner:
 
         simulations = simulations or self._default_num_simulations
         num_results = num_results or self._default_num_results
-        desires = desires.merge_with(self._models[model_name].default_desires(desires))
+        desires = desires.merge_with(
+            self._models[model_name].default_desires(desires, **model_kwargs)
+        )
 
         requirements = {}
         # desires -> Optional[CapacityPlan]

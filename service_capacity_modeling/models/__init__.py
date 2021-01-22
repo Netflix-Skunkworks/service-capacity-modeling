@@ -1,4 +1,6 @@
 from typing import Optional
+from typing import Sequence
+from typing import Tuple
 
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
@@ -36,6 +38,15 @@ class CapacityModel:
     def capacity_plan(
         instance: Instance, drive: Drive, desires: CapacityDesires, **kwargs
     ) -> Optional[CapacityPlan]:
+        """Given a concrete hardware shape and desires, return a candidate
+
+        This is the only required method on this interface. Your model
+        must either:
+            * Return None to indicate there is no viable use of the
+              instance/drive which meets the user's desires
+            * Return a CapapacityPlan containing the model's calculation
+              of how much CPU/RAM/disk etc ... that is required and
+        """
         # quiet pylint
         (_, _, _) = (instance, drive, desires)
         return None
@@ -46,9 +57,18 @@ class CapacityModel:
         optimal_plan: CapacityPlan,
         proposed_plan: CapacityPlan,
     ) -> float:
-        # Under an assumption that cost is a reasonable single dimension
-        # to compare to clusters on, we penalize under-provisioned (cheap)
-        # clusters more than expensive ones.
+        """Optional cost model for how much we regret a choice
+
+        After the capacity planner has simulated a bunch of possible outcomes
+        We need to evaluate each cluster against the optimal choice for a
+        given requirement.
+
+        Our default model of cost is just related to money:
+
+        Under an assumption that cost is a reasonable single dimension
+        to compare to clusters on, we penalize under-provisioned (cheap)
+        clusters more than expensive ones.
+        """
         optimal_cost = optimal_plan.candidate_clusters.total_annual_cost.mid
         plan_cost = proposed_plan.candidate_clusters.total_annual_cost.mid
 
@@ -63,10 +83,34 @@ class CapacityModel:
 
     @staticmethod
     def description() -> str:
+        """ Optional description of the model """
         return "No description"
 
     @staticmethod
-    def default_desires(user_desires: CapacityDesires):
+    def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
+        """Optional list of extra keyword arguments
+
+        Some models might take additional arguments to capacity_plan.
+        They can convey that context to callers here along with a
+        description of each argument
+
+        Result is a sequence of (name, type = default, description) pairs
+        For example:
+            (
+                ("arg_name", "int = 3", "my custom arg"),
+            )
+        """
+        return tuple()
+
+    @staticmethod
+    def default_desires(user_desires: CapacityDesires, **kwargs):
+        """Optional defaults to apply given a user desires
+
+        Often users do not know what the on-cpu time of their queries
+        will be, but the models often have a good idea. For example
+        databases usually have some range of on-cpu time for point queries
+        (latency access) versus throughput.
+        """
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(
