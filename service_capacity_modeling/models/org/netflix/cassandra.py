@@ -81,11 +81,6 @@ def _estimate_cassandra_cluster_zonal(
     required_cluster_size: Optional[int] = None,
 ) -> Optional[CapacityPlan]:
 
-    if instance.drive is None:
-        # if we're not allowed to use gp2, skip EBS only types
-        if not allow_gp2:
-            return None
-
     # Cassandra only deploys on gp2 drives right now
     if drive.name != "gp2":
         return None
@@ -93,6 +88,11 @@ def _estimate_cassandra_cluster_zonal(
     # Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 8:
         return None
+
+    # if we're not allowed to use gp2, skip EBS only types
+    if instance.drive is None and not allow_gp2:
+        if not allow_gp2:
+            return None
 
     rps = desires.query_pattern.estimated_read_per_second.mid // zones_per_region
 
@@ -118,6 +118,13 @@ def _estimate_cassandra_cluster_zonal(
         copies_per_region=copies_per_region,
     )
 
+    # Cassandra clusters should aim to be at least 2 nodes per zone to start
+    # out with for tier 0 or tier 1. This gives us more room to "up-color"]
+    # clusters.
+    min_count = 0
+    if desires.service_tier <= 1:
+        min_count = 2
+
     cluster = compute_stateful_zone(
         instance=instance,
         # Only run C* on gp2
@@ -136,6 +143,7 @@ def _estimate_cassandra_cluster_zonal(
         required_disk_space=lambda x: x * 4,
         # C* clusters provision in powers of 2 because doubling
         cluster_size=next_power_of_2,
+        min_count=min_count,
         # C* heap usage takes away from OS page cache memory
         reserve_memory=lambda x: max(min(x // 2, 4), min(x // 4, 12)),
         core_reference_ghz=requirement.core_reference_ghz,

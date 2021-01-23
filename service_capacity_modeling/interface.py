@@ -118,10 +118,10 @@ class Drive(BaseModel):
     # These defaults are assuming a cloud SSD like a gp2 volume
     # If you disagree please change them in your hardware description
     read_io_latency_ms: FixedInterval = FixedInterval(
-        low=0.4, mid=0.8, high=2, confidence=0.98
+        low=0.8, mid=1, high=2, confidence=0.9
     )
     write_io_latency_ms: FixedInterval = FixedInterval(
-        low=0.5, mid=1, high=2.4, confidence=0.98
+        low=0.6, mid=2, high=3, confidence=0.9
     )
 
     @property

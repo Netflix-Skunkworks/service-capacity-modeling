@@ -133,6 +133,7 @@ def compute_stateful_zone(
     cluster_size,
     # Faster CPUs can execute operations faster
     core_reference_ghz: float,
+    min_count: int = 0,
 ) -> ZoneClusterCapacity:
 
     # Normalize the cores of this instance type to the latency reference
@@ -161,7 +162,8 @@ def compute_stateful_zone(
     if instance.drive is not None and instance.drive.size_gib > 0:
         count = max(count, needed_disk_gib // instance.drive.size_gib)
 
-    count = cluster_size(count)
+    count = max(cluster_size(count), min_count)
+
     cost = count * instance.annual_cost
 
     attached_drives = []

@@ -65,6 +65,6 @@ def test_working_set():
     )
 
     assert cache_gp2_working_set >= 0.99
-    assert 0.6 >= cache_ephem_working_set >= 0.05
+    assert 0.6 >= cache_ephem_working_set >= 0.001
     assert 0.95 >= db_gp2_working_set >= 0.2
     assert 0.3 >= db_ephem_working_set >= 0.000001

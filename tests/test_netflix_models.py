@@ -97,7 +97,7 @@ uncertain_mid = CapacityDesires(
 )
 
 uncertain_tiny = CapacityDesires(
-    service_tier=1,
+    service_tier=2,
     query_pattern=QueryPattern(
         estimated_read_per_second=Interval(low=1, mid=10, high=100, confidence=0.9),
         estimated_write_per_second=Interval(low=1, mid=10, high=100, confidence=0.9),
@@ -149,7 +149,7 @@ def test_increasing_qps_simple():
             ),
             data_shape=DataShape(
                 estimated_state_size_gib=Interval(
-                    low=10, mid=100, high=200, confidence=0.9
+                    low=20, mid=200, high=2000, confidence=0.9
                 ),
             ),
         )
@@ -166,10 +166,12 @@ def test_increasing_qps_simple():
         lr_cpu = lr.count * lr.instance.cpu
         lr_cost = cap_plan.least_regret[0].candidate_clusters.total_annual_cost
         lr_family = lr.instance.family
-        result.append((lr_family, lr_cpu, lr_cost))
+        result.append(
+            (lr_family, lr_cpu, lr_cost, cap_plan.least_regret[0].requirement)
+        )
 
-    # As the QPS dominates the storage we should switch to paying for CPU
-    assert all([r[0].startswith("m5") for r in result])
+    # We should generally want CPU
+    assert all([r[0] in ("m5d", "i3") for r in result])
 
     # Should have more capacity as requirement increases
     x = [r[1] for r in result]
