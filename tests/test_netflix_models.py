@@ -76,7 +76,7 @@ def test_capacity_high_writes():
     )[0]
     high_writes_result = cap_plan.candidate_clusters.zonal[0]
     assert high_writes_result.instance.name == "m5d.2xlarge"
-    assert high_writes_result.count == 4
+    assert high_writes_result.count == 2
     assert high_writes_result.instance.drive is not None
     assert high_writes_result.instance.drive.size_gib >= 200
 

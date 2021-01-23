@@ -21,10 +21,10 @@ def test_working_set():
     )
 
     slo_dist_cache = gamma_for_interval(
-        FixedInterval(low=0.2, mid=0.5, high=5, confidence=0.98)
+        FixedInterval(low=0.2, mid=0.6, high=1, confidence=0.98)
     )
 
-    target_percentile = 0.20
+    target_percentile = 0.9
     estimator = WorkingSetEstimator()
 
     db_gp2_working_set = estimator.working_set_percent(
@@ -64,7 +64,7 @@ def test_working_set():
         cache_ephem_working_set,
     )
 
-    assert cache_gp2_working_set >= 0.99
-    assert 0.6 >= cache_ephem_working_set >= 0.001
-    assert 0.95 >= db_gp2_working_set >= 0.2
-    assert 0.3 >= db_ephem_working_set >= 0.000001
+    assert cache_gp2_working_set >= 0.90
+    assert 0.4 >= cache_ephem_working_set >= 0.15
+    assert 0.6 >= db_gp2_working_set >= 0.3
+    assert 0.2 >= db_ephem_working_set >= 0.001
