@@ -104,6 +104,7 @@ def _estimate_cassandra_cluster_zonal(
     allow_gp2: bool = True,
     required_cluster_size: Optional[int] = None,
     max_rps_to_disk: int = 500,
+    max_regional_size: int = 96,
 ) -> Optional[CapacityPlan]:
 
     # Cassandra only deploys on gp2 drives right now
@@ -171,7 +172,7 @@ def _estimate_cassandra_cluster_zonal(
         required_disk_space=lambda x: x * 4,
         # C* clusters provision in powers of 2 because doubling
         cluster_size=next_power_of_2,
-        min_count=min_count,
+        min_count=max(min_count, required_cluster_size or 0),
         # C* heap usage takes away from OS page cache memory
         reserve_memory=lambda x: max(min(x // 2, 4), min(x // 4, 12)),
         core_reference_ghz=requirement.core_reference_ghz,
@@ -182,12 +183,18 @@ def _estimate_cassandra_cluster_zonal(
     if required_cluster_size is not None and cluster.count != required_cluster_size:
         return None
 
-    # Cassandra clusters shouldn't be more than 32 nodes per zone
-    if cluster.count <= 32:
-        cluster.cluster_type = "cassandra"
-    else:
+    # Cassandra clusters generally should try to stay under some total number
+    # of nodes. Orgs do this for all kinds of reasons such as
+    #   * Security group limits. Since you must have < 500 rules if you're
+    #       ingressing public ips)
+    #   * Maintenance. If your restart script does one node at a time you want
+    #       smaller clusters so your restarts don't take months.
+    #   * Schema propagation. Since C* must gossip out changes to schema the
+    #       duration of this can increase a lot with > 500 node clusters.
+    if cluster.count > (max_regional_size // zones_per_region):
         return None
 
+    cluster.cluster_type = "cassandra"
     clusters = Clusters(
         total_annual_cost=certain_float(zones_per_region * cluster.annual_cost),
         zonal=[cluster] * zones_per_region,
@@ -219,6 +226,7 @@ class NflxCassandraCapacityModel(CapacityModel):
         allow_gp2: bool = kwargs.pop("allow_gp2", True)
         required_cluster_size: Optional[int] = kwargs.pop("required_cluster_size", None)
         max_rps_to_disk: int = kwargs.pop("max_rps_to_disk", 500)
+        max_regional_size: int = kwargs.pop("max_regional_size", 96)
 
         return _estimate_cassandra_cluster_zonal(
             instance=instance,
@@ -229,6 +237,7 @@ class NflxCassandraCapacityModel(CapacityModel):
             allow_gp2=allow_gp2,
             required_cluster_size=required_cluster_size,
             max_rps_to_disk=max_rps_to_disk,
+            max_regional_size=max_regional_size,
         )
 
     @staticmethod
@@ -249,6 +258,11 @@ class NflxCassandraCapacityModel(CapacityModel):
                 "max_rps_to_disk",
                 "int = 500",
                 "How many disk IOs should be allowed to hit disk per instance",
+            ),
+            (
+                "max_regional_size",
+                "int = 96",
+                "What is the maximum size of a cluster in this region",
             ),
         )
 
