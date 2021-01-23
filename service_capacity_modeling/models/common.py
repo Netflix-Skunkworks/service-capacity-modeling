@@ -94,7 +94,9 @@ def compute_stateless_region(
     """
 
     # Stateless apps basically just use CPU resources and network
-    needed_cores = int(max(1, needed_cores // (instance.cpu_ghz / core_reference_ghz)))
+    needed_cores = math.ceil(
+        max(1, needed_cores // (instance.cpu_ghz / core_reference_ghz))
+    )
 
     count = max(2, math.ceil(needed_cores / instance.cpu))
 
@@ -137,7 +139,9 @@ def compute_stateful_zone(
 ) -> ZoneClusterCapacity:
 
     # Normalize the cores of this instance type to the latency reference
-    needed_cores = int(max(1, needed_cores // (instance.cpu_ghz / core_reference_ghz)))
+    needed_cores = math.ceil(
+        max(1, needed_cores // (instance.cpu_ghz / core_reference_ghz))
+    )
 
     # Datastores often require disk headroom for e.g. compaction and such
     if instance.drive is not None:
@@ -176,8 +180,8 @@ def compute_stateful_zone(
         space_gib = max(1, (needed_disk_gib * 2) // count)
         io_gib = _gp2_gib_for_io(required_disk_ios(needed_disk_gib // count))
 
-        # Provision EBS in increments of 100 GiB
-        ebs_gib = utils.next_n(max(1, max(io_gib, space_gib)), n=100)
+        # Provision EBS in increments of 200 GiB
+        ebs_gib = utils.next_n(max(1, max(io_gib, space_gib)), n=200)
         attached_drive = drive.copy()
         attached_drive.size_gib = ebs_gib
 
@@ -221,9 +225,9 @@ class WorkingSetEstimator:
         # expressed as scipy rv_continuous objects
         drive_read_latency_dist,
         read_slo_latency_dist,
-        # what is our target percentile for hitting disk
-        # Note that lower will decrease the amount we hit disk
-        target_percentile: float = 0.10,
+        # what percentile of disk latency should we target for keeping in
+        # memory. Not as this is _increased_ more memory will be reserved
+        target_percentile: float = 0.90,
         min_working_set: float = 0.01,
     ) -> Interval:
         # random cache eviction
@@ -237,13 +241,18 @@ class WorkingSetEstimator:
         )
         # Cached because ppf in particular is _really_ slow
         if cache_key not in self._cache:
-            # The inverse CDF, basically what percentile do we want to target
-            # to be all on disk.
-            target_latency = read_slo_latency_dist.ppf(target_percentile)
+            # How fast is the drive at the target percentile
+            minimum_drive_latency = drive_read_latency_dist.ppf(target_percentile)
 
-            # What percent of disk reads will fall below this latency SLO
-            lat = max(drive_read_latency_dist.sf(target_latency), min_working_set)
-            self._cache[cache_key] = certain_float(lat)
+            # How much of the read latency SLO lies below the minimum
+            # drive latency. So for example if EBS's 99% is 1.7ms and we
+            # 45% of our read SLO lies below that then we need at least 45%
+            # of our data to be stored in memory.
+            required_percent = read_slo_latency_dist.cdf(minimum_drive_latency)
+
+            self._cache[cache_key] = certain_float(
+                max(required_percent, min_working_set)
+            )
         return self._cache[cache_key]
 
 
@@ -256,9 +265,9 @@ def working_set_from_drive_and_slo(
     drive_read_latency_dist,
     read_slo_latency_dist,
     estimated_working_set: Optional[Interval] = None,
-    # what is our target percentile slo latency that we allow to hit disk
-    # Note that lower will decrease the amount we hit disk
-    target_percentile: float = 0.10,
+    # what percentile of disk latency should we target for keeping in
+    # memory. Not as this is _increased_ more memory will be reserved
+    target_percentile: float = 0.90,
     min_working_set: float = 0.01,
 ) -> Interval:
     if estimated_working_set is not None:

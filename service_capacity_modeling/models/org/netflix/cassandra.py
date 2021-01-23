@@ -30,8 +30,11 @@ logger = logging.getLogger(__name__)
 
 
 def _estimate_cassandra_requirement(
+    instance: Instance,
     desires: CapacityDesires,
     working_set: float,
+    reads_per_second: float,
+    max_rps_to_disk: int,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
 ) -> CapacityRequirement:
@@ -46,7 +49,24 @@ def _estimate_cassandra_requirement(
     needed_network_mbps = simple_network_mbps(desires) * 2
 
     needed_disk = desires.data_shape.estimated_state_size_gib.mid * copies_per_region
-    needed_memory = working_set * needed_disk
+
+    # Rough estimate of how many instances we would need just for the the CPU
+    # Note that this is a lower bound, we might end up with more.
+    needed_cores = math.ceil(
+        max(1, needed_cores // (instance.cpu_ghz / desires.core_reference_ghz))
+    )
+    rough_count = math.ceil(needed_cores / instance.cpu)
+
+    # Generally speaking we want fewer than some number of reads per second
+    # hitting disk per instance. If we don't have many reads we don't need to
+    # hold much data in memory.
+    instance_rps = max(1, reads_per_second // rough_count)
+    disk_rps = instance_rps * _cass_io_per_read(max(1, needed_disk // rough_count))
+    rps_working_set = disk_rps / max_rps_to_disk
+
+    # If disk RPS will be smaller than our target because there are no
+    # reads, we don't need to hold as much data in memory
+    needed_memory = min(working_set, rps_working_set) * needed_disk
 
     # Now convert to per zone
     needed_cores = needed_cores // zones_per_region
@@ -66,7 +86,11 @@ def _estimate_cassandra_requirement(
         mem_gib=certain_float(needed_memory),
         disk_gib=certain_float(needed_disk),
         network_mbps=certain_float(needed_network_mbps),
-        context={"working_set": working_set},
+        context={
+            "working_set": min(working_set, rps_working_set),
+            "rps_working_set": rps_working_set,
+            "disk_slo_working_set": working_set,
+        },
     )
 
 
@@ -79,6 +103,7 @@ def _estimate_cassandra_cluster_zonal(
     copies_per_region: int = 3,
     allow_gp2: bool = True,
     required_cluster_size: Optional[int] = None,
+    max_rps_to_disk: int = 500,
 ) -> Optional[CapacityPlan]:
 
     # Cassandra only deploys on gp2 drives right now
@@ -106,14 +131,17 @@ def _estimate_cassandra_cluster_zonal(
             desires.query_pattern.read_latency_slo_ms
         ),
         estimated_working_set=desires.data_shape.estimated_working_set_percent,
-        # This is about right for a database, a cache probably wants
-        # to have less of the SLO latency coming from disk
-        target_percentile=0.20,
+        # This is about right for a database, a cache probably would want
+        # to increase this even more.
+        target_percentile=0.95,
     ).mid
 
     requirement = _estimate_cassandra_requirement(
+        instance=instance,
         desires=desires,
         working_set=working_set,
+        reads_per_second=rps,
+        max_rps_to_disk=max_rps_to_disk,
         zones_per_region=zones_per_region,
         copies_per_region=copies_per_region,
     )
@@ -190,6 +218,7 @@ class NflxCassandraCapacityModel(CapacityModel):
         copies_per_region: int = kwargs.pop("copies_per_region", 3)
         allow_gp2: bool = kwargs.pop("allow_gp2", True)
         required_cluster_size: Optional[int] = kwargs.pop("required_cluster_size", None)
+        max_rps_to_disk: int = kwargs.pop("max_rps_to_disk", 500)
 
         return _estimate_cassandra_cluster_zonal(
             instance=instance,
@@ -199,6 +228,7 @@ class NflxCassandraCapacityModel(CapacityModel):
             copies_per_region=copies_per_region,
             allow_gp2=allow_gp2,
             required_cluster_size=required_cluster_size,
+            max_rps_to_disk=max_rps_to_disk,
         )
 
     @staticmethod
@@ -215,6 +245,11 @@ class NflxCassandraCapacityModel(CapacityModel):
                 "How many copies of the data will exist e.g. RF=3",
             ),
             ("allow_gp2", "bool = 0", "If gp2 drives should be permitted"),
+            (
+                "max_rps_to_disk",
+                "int = 500",
+                "How many disk IOs should be allowed to hit disk per instance",
+            ),
         )
 
     @staticmethod
