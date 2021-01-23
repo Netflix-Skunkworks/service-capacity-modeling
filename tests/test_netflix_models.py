@@ -193,6 +193,45 @@ def test_capacity_large_footprint():
     assert large_footprint_result.count == 4
 
 
+def test_worn_dataset():
+    """Assert that a write once read never (aka tracing) dataset uses
+    CPU and GP2 cloud drives to max ability. Paying for fast ephmeral storage
+    is silly when we're never reading from it.
+    """
+    worn_desire = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            # Very Very few reads.
+            estimated_read_per_second=Interval(low=1, mid=10, high=100, confidence=0.9),
+            # We think we're going to have around 1 million writes per second
+            estimated_write_per_second=Interval(
+                low=100_000, mid=1_000_000, high=2_000_000, confidence=0.9
+            ),
+        ),
+        # We think we're going to have around 200 TiB of data
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(
+                low=104800, mid=204800, high=404800, confidence=0.9
+            ),
+        ),
+    )
+    cap_plan = planner.plan(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=worn_desire,
+        max_regional_size=200,
+        copies_per_region=2,
+    )
+
+    lr = cap_plan.least_regret[0]
+    lr_cluster = lr.candidate_clusters.zonal[0]
+    assert 256 <= lr_cluster.count * lr_cluster.instance.cpu <= 1024
+    assert 100_000 <= lr.candidate_clusters.total_annual_cost.mid < 500_000
+    assert lr_cluster.instance.name.startswith("m5.")
+    assert lr_cluster.attached_drives[0].name == "gp2"
+    assert lr_cluster.attached_drives[0].size_gib * lr_cluster.count * 3 > 204800
+
+
 def test_java_app():
     java_cap_plan = planner.plan_certain(
         model_name="org.netflix.stateless-java",
