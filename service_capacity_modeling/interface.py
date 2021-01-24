@@ -182,14 +182,22 @@ class Service(BaseModel):
     )
 
 
+class RegionContext(BaseModel):
+    services: Dict[str, Service] = {}
+    zones_in_region: int = 3
+
+
 class Hardware(BaseModel):
     """Represents a hardware deployment
 
     In EC2 this maps to:
         instances: instance type -> Instance(cpu, mem, cost, etc...)
         drives: ebs type -> Drive(cost per _GiB year_, etc...)
+        services: service type -> Service(name, params, cost, etc ...)
     """
 
+    # How many zones of compute exist in this region of compute
+    zones_in_region: int = 3
     # Per instance shape information e.g. cpu, ram, cpu etc ...
     instances: Dict[str, Instance]
     # Per drive type information and cost
@@ -229,6 +237,7 @@ class HardwarePricing(BaseModel):
     instances: Dict[str, InstancePricing]
     drives: Dict[str, DrivePricing]
     services: Dict[str, ServicePricing]
+    zones_in_region: int = 3
 
 
 class Pricing(BaseModel):

@@ -56,7 +56,10 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
             ].annual_cost_per_write_io = svc_price.annual_cost_per_write_io
 
         regions[region] = Hardware(
-            instances=priced_instances, drives=priced_drives, services=priced_services
+            instances=priced_instances,
+            drives=priced_drives,
+            services=priced_services,
+            zones_in_region=region_pricing.zones_in_region,
         )
 
     return GlobalHardware(regions=regions)

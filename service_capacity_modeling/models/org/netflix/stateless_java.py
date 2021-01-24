@@ -1,6 +1,5 @@
 import math
 from decimal import Decimal
-from typing import Dict
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
@@ -14,7 +13,7 @@ from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import RegionClusterCapacity
-from service_capacity_modeling.interface import Service
+from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateless_region
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -102,13 +101,12 @@ class NflxJavaAppCapacityModel(CapacityModel):
     def capacity_plan(
         instance: Instance,
         drive: Drive,
-        services: Dict[str, Service],
+        context: RegionContext,
         desires: CapacityDesires,
         **kwargs,
     ) -> Optional[CapacityPlan]:
         failover: bool = kwargs.pop("failover", True)
         jvm_memory_overhead: float = kwargs.pop("jvm_memory_overhead", 1.2)
-        zones_per_region: int = kwargs.pop("zones_per_region", 3)
 
         return _estimate_java_app_region(
             instance=instance,
@@ -116,7 +114,7 @@ class NflxJavaAppCapacityModel(CapacityModel):
             desires=desires,
             failover=failover,
             jvm_memory_overhead=jvm_memory_overhead,
-            zones_per_region=zones_per_region,
+            zones_per_region=context.zones_in_region,
         )
 
     @staticmethod
@@ -126,7 +124,6 @@ class NflxJavaAppCapacityModel(CapacityModel):
     @staticmethod
     def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
         return (
-            ("zones_per_region", "int = 3", "How many zones exist in the region"),
             ("failover", "bool = 1", "If this app participates in failover"),
             (
                 "jvm_memory_overhead",

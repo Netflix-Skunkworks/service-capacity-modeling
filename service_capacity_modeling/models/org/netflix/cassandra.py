@@ -1,7 +1,6 @@
 import logging
 import math
 from decimal import Decimal
-from typing import Dict
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
@@ -19,7 +18,7 @@ from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
-from service_capacity_modeling.interface import Service
+from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
@@ -102,7 +101,7 @@ def _estimate_cassandra_requirement(
 def _estimate_cassandra_cluster_zonal(
     instance: Instance,
     drive: Drive,
-    services: Dict[str, Service],
+    context: RegionContext,
     desires: CapacityDesires,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
@@ -203,7 +202,7 @@ def _estimate_cassandra_cluster_zonal(
     # over the retention period.
     cap_services = []
     if desires.data_shape.durability_slo_nines.mid > 2:
-        blob = services.get("blob.standard", None)
+        blob = context.services.get("blob.standard", None)
         if blob:
             cap_services = [
                 ServiceCapacity(
@@ -243,11 +242,10 @@ class NflxCassandraCapacityModel(CapacityModel):
     def capacity_plan(
         instance: Instance,
         drive: Drive,
-        services: Dict[str, Service],
+        context: RegionContext,
         desires: CapacityDesires,
         **kwargs,
     ) -> Optional[CapacityPlan]:
-        zones_per_region: int = kwargs.pop("zones_per_region", 3)
         copies_per_region: int = kwargs.pop("copies_per_region", 3)
         allow_gp2: bool = kwargs.pop("allow_gp2", True)
         required_cluster_size: Optional[int] = kwargs.pop("required_cluster_size", None)
@@ -257,9 +255,9 @@ class NflxCassandraCapacityModel(CapacityModel):
         return _estimate_cassandra_cluster_zonal(
             instance=instance,
             drive=drive,
-            services=services,
+            context=context,
             desires=desires,
-            zones_per_region=zones_per_region,
+            zones_per_region=context.zones_in_region,
             copies_per_region=copies_per_region,
             allow_gp2=allow_gp2,
             required_cluster_size=required_cluster_size,
@@ -274,7 +272,6 @@ class NflxCassandraCapacityModel(CapacityModel):
     @staticmethod
     def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
         return (
-            ("zones_per_region", "int = 3", "How many zones exist in the region"),
             (
                 "copies_per_region",
                 "int = 3",

@@ -28,6 +28,7 @@
         "annual_cost_per_write_io": "0.000005",
         "annual_cost_per_read_io": "0.0000004"
       }
-    }
+    },
+    "zones_in_region": 3
   }
 }

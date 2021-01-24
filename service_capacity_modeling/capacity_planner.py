@@ -19,6 +19,7 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import interval
 from service_capacity_modeling.interface import interval_percentile
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import UncertainCapacityPlan
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.org import netflix
@@ -212,7 +213,10 @@ class CapacityPlanner:
         model = self._models[model_name]
 
         desires = desires.merge_with(model.default_desires(desires, **model_kwargs))
-        services = {n: s.copy(deep=True) for n, s in hardware.services.items()}
+        context = RegionContext(
+            zones_in_region=hardware.zones_in_region,
+            services={n: s.copy(deep=True) for n, s in hardware.services.items()},
+        )
 
         plans = []
         for instance in hardware.instances.values():
@@ -220,7 +224,7 @@ class CapacityPlanner:
                 plan = self._models[model_name].capacity_plan(
                     instance=instance,
                     drive=drive,
-                    services=services,
+                    context=context,
                     desires=desires,
                     **model_kwargs,
                 )
