@@ -119,7 +119,7 @@ def test_uncertain_planning_ebs():
     lr = mid_plan.least_regret[0]
     lr_cluster = lr.candidate_clusters.zonal[0]
     assert 12 <= lr_cluster.count * lr_cluster.instance.cpu <= 64
-    assert 5_000 <= lr.candidate_clusters.total_annual_cost.mid < 50_000
+    assert 5_000 <= lr.candidate_clusters.total_annual_cost < 50_000
 
     tiny_plan = planner.plan(
         model_name="org.netflix.cassandra",
@@ -130,7 +130,7 @@ def test_uncertain_planning_ebs():
     lr = tiny_plan.least_regret[0]
     lr_cluster = lr.candidate_clusters.zonal[0]
     assert 4 < lr_cluster.count * lr_cluster.instance.cpu < 16
-    assert 2_000 < lr.candidate_clusters.total_annual_cost.mid < 8_000
+    assert 2_000 < lr.candidate_clusters.total_annual_cost < 8_000
 
 
 def test_increasing_qps_simple():
@@ -226,10 +226,12 @@ def test_worn_dataset():
     lr = cap_plan.least_regret[0]
     lr_cluster = lr.candidate_clusters.zonal[0]
     assert 256 <= lr_cluster.count * lr_cluster.instance.cpu <= 1024
-    assert 100_000 <= lr.candidate_clusters.total_annual_cost.mid < 500_000
+    assert 100_000 <= lr.candidate_clusters.total_annual_cost < 500_000
     assert lr_cluster.instance.name.startswith("m5.")
     assert lr_cluster.attached_drives[0].name == "gp2"
     assert lr_cluster.attached_drives[0].size_gib * lr_cluster.count * 3 > 204800
+    # We should have S3 backup cost
+    assert lr.candidate_clusters.services[0].annual_cost > 5_000
 
 
 def test_java_app():

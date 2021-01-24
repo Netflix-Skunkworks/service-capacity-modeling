@@ -23,7 +23,7 @@
       "gp2": {"annual_cost_per_gib": 1.2}
     },
     "services": {
-      "s3.standard": {
+      "blob.standard": {
         "annual_cost_per_gib": "0.252",
         "annual_cost_per_write_io": "0.000005",
         "annual_cost_per_read_io": "0.0000004"

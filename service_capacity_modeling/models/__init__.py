@@ -75,8 +75,8 @@ class CapacityModel:
         to compare to clusters on, we penalize under-provisioned (cheap)
         clusters more than expensive ones.
         """
-        optimal_cost = optimal_plan.candidate_clusters.total_annual_cost.mid
-        plan_cost = proposed_plan.candidate_clusters.total_annual_cost.mid
+        optimal_cost = float(optimal_plan.candidate_clusters.total_annual_cost)
+        plan_cost = float(proposed_plan.candidate_clusters.total_annual_cost)
 
         if plan_cost >= optimal_cost:
             return (

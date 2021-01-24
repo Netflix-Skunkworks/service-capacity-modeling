@@ -1,3 +1,4 @@
+from decimal import Decimal
 from enum import Enum
 from typing import Dict
 from typing import Optional
@@ -287,6 +288,14 @@ class DataShape(BaseModel):
     estimated_state_item_count: Optional[Interval] = None
     estimated_working_set_percent: Optional[Interval] = None
 
+    # How durable does this dataset need to be. We want to provision
+    # sufficient replication and backups of data to achieve the target
+    # durability SLO so we don't lose our customer's data. Note that
+    # This is measured in "nines" per year
+    durability_slo_nines: FixedInterval = FixedInterval(
+        low=3, mid=4, high=5, confidence=0.98
+    )
+
 
 class CapacityDesires(BaseModel):
     # How critical is this cluster, impacts how much "extra" we provision
@@ -358,7 +367,7 @@ class RegionClusterCapacity(ClusterCapacity):
 
 
 class Clusters(BaseModel):
-    total_annual_cost: Interval
+    total_annual_cost: Decimal = Decimal(0)
     zonal: Sequence[ZoneClusterCapacity] = list()
     regional: Sequence[RegionClusterCapacity] = list()
     services: Sequence[ServiceCapacity] = list()

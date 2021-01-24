@@ -1,7 +1,8 @@
+from decimal import Decimal
+
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
-from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import RegionClusterCapacity
@@ -31,7 +32,7 @@ def test_merge_plan():
     left_plan = CapacityPlan(
         requirement=left_requirement,
         candidate_clusters=Clusters(
-            total_annual_cost=certain_int(1234),
+            total_annual_cost=Decimal(1234),
             zonal=[
                 ZoneClusterCapacity(
                     cluster_type="left",
@@ -47,7 +48,7 @@ def test_merge_plan():
     right_plan = CapacityPlan(
         requirement=right_requirement,
         candidate_clusters=Clusters(
-            total_annual_cost=certain_int(1468),
+            total_annual_cost=Decimal(1468),
             regional=[
                 RegionClusterCapacity(
                     cluster_type="right",

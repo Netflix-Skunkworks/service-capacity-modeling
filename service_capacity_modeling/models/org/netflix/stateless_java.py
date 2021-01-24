@@ -1,4 +1,5 @@
 import math
+from decimal import Decimal
 from typing import Dict
 from typing import Optional
 from typing import Sequence
@@ -88,7 +89,7 @@ def _estimate_java_app_region(
         return CapacityPlan(
             requirement=requirement,
             candidate_clusters=Clusters(
-                total_annual_cost=certain_float(cluster.annual_cost),
+                total_annual_cost=round(Decimal(cluster.annual_cost), 2),
                 regional=[cluster],
                 zonal=list(),
             ),

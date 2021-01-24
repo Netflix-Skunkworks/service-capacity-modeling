@@ -175,5 +175,18 @@ We have a demo notebook in `notebooks` you can use to experiment. Start it with
 tox -e notebook jupyter notebook notebooks/demo.ipynb
 ```
 
+## Development
+
+To contribute to this project:
+
+1. Make your change in a branch. Consider making a new model if you are making
+   significant changes and registering it as a different name.
+2. Write a unit test using `pytest` in the `tests` folder.
+3. Ensure your tests pass (or debug them) with:
+```
+tox -e py38 -- -k test_<your_functionality> --pdb --pdbcls=IPython.terminal.debugger:Pdb
+```
+
+
 ## Release
 TODO

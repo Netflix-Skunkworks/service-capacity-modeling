@@ -352,8 +352,8 @@ def merge_plan(
     right_cluster = right.candidate_clusters
 
     merged_clusters = Clusters(
-        total_annual_cost=_add_interval(
-            left_cluster.total_annual_cost, right_cluster.total_annual_cost
+        total_annual_cost=(
+            left_cluster.total_annual_cost + right_cluster.total_annual_cost
         ),
         zonal=(
             [zonal_transform(z) for z in left_cluster.zonal]

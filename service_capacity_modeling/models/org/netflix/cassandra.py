@@ -1,5 +1,6 @@
 import logging
 import math
+from decimal import Decimal
 from typing import Dict
 from typing import Optional
 from typing import Sequence
@@ -19,6 +20,7 @@ from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import Service
+from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -100,6 +102,7 @@ def _estimate_cassandra_requirement(
 def _estimate_cassandra_cluster_zonal(
     instance: Instance,
     drive: Drive,
+    services: Dict[str, Service],
     desires: CapacityDesires,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
@@ -158,7 +161,6 @@ def _estimate_cassandra_cluster_zonal(
 
     cluster = compute_stateful_zone(
         instance=instance,
-        # Only run C* on gp2
         drive=drive,
         needed_cores=int(requirement.cpu_cores.mid),
         needed_disk_gib=int(requirement.disk_gib.mid),
@@ -196,11 +198,32 @@ def _estimate_cassandra_cluster_zonal(
     if cluster.count > (max_regional_size // zones_per_region):
         return None
 
+    # Durable Cassandra clusters backup to S3
+    # TODO use the write rate and estimated write size to estimate churn
+    # over the retention period.
+    cap_services = []
+    if desires.data_shape.durability_slo_nines.mid > 2:
+        blob = services.get("blob.standard", None)
+        if blob:
+            cap_services = [
+                ServiceCapacity(
+                    service_type=f"{blob.name}",
+                    annual_cost=blob.annual_cost_per_gib * requirement.disk_gib.mid,
+                    service_params={
+                        "nines_required": desires.data_shape.durability_slo_nines.mid
+                    },
+                )
+            ]
+
+    ec2_cost = zones_per_region * cluster.annual_cost
+    backup_cost = sum([s.annual_cost for s in cap_services])
+
     cluster.cluster_type = "cassandra"
     clusters = Clusters(
-        total_annual_cost=certain_float(zones_per_region * cluster.annual_cost),
+        total_annual_cost=round(Decimal(ec2_cost + backup_cost), 2),
         zonal=[cluster] * zones_per_region,
         regional=list(),
+        services=cap_services,
     )
 
     return CapacityPlan(requirement=requirement, candidate_clusters=clusters)
@@ -234,6 +257,7 @@ class NflxCassandraCapacityModel(CapacityModel):
         return _estimate_cassandra_cluster_zonal(
             instance=instance,
             drive=drive,
+            services=services,
             desires=desires,
             zones_per_region=zones_per_region,
             copies_per_region=copies_per_region,
