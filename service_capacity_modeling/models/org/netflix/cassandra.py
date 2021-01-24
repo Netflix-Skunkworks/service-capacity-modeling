@@ -5,6 +5,7 @@ from typing import Optional
 from typing import Sequence
 from typing import Tuple
 
+from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
@@ -201,7 +202,7 @@ def _estimate_cassandra_cluster_zonal(
     # TODO use the write rate and estimated write size to estimate churn
     # over the retention period.
     cap_services = []
-    if desires.data_shape.durability_slo_nines.mid > 2:
+    if desires.data_shape.durability_slo_order.mid >= 1000:
         blob = context.services.get("blob.standard", None)
         if blob:
             cap_services = [
@@ -209,7 +210,9 @@ def _estimate_cassandra_cluster_zonal(
                     service_type=f"{blob.name}",
                     annual_cost=blob.annual_cost_per_gib * requirement.disk_gib.mid,
                     service_params={
-                        "nines_required": desires.data_shape.durability_slo_nines.mid
+                        "nines_required": (
+                            1 - 1.0 / desires.data_shape.durability_slo_order.mid
+                        )
                     },
                 )
             ]
@@ -292,10 +295,24 @@ class NflxCassandraCapacityModel(CapacityModel):
 
     @staticmethod
     def default_desires(user_desires, **kwargs):
+        acceptable_consistency = set(
+            (
+                AccessConsistency.best_effort,
+                AccessConsistency.eventual,
+                AccessConsistency.read_your_writes,
+            )
+        )
+        if user_desires.query_pattern.access_consistency not in acceptable_consistency:
+            raise ValueError(
+                f"Cassandra can only provide {acceptable_consistency} access."
+                f"User asked for {user_desires.query_pattern.acceptable_consistency}"
+            )
+
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.latency,
+                    access_consistency=AccessConsistency.read_your_writes,
                     estimated_mean_read_size_bytes=Interval(
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),
@@ -329,7 +346,8 @@ class NflxCassandraCapacityModel(CapacityModel):
         else:
             return CapacityDesires(
                 query_pattern=QueryPattern(
-                    access_pattern=AccessPattern.latency,
+                    access_pattern=AccessPattern.throughput,
+                    access_consistency=AccessConsistency.eventual,
                     estimated_mean_read_size_bytes=Interval(
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),

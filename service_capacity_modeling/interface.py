@@ -254,6 +254,17 @@ class AccessPattern(str, Enum):
     throughput = "throughput"
 
 
+class AccessConsistency(str, Enum):
+    # Single item consistency (most services)
+    best_effort = "best-effort"
+    eventual = "eventual"
+    read_your_writes = "read-your-writes"
+    linearizable = "linearizable"
+    # Multiple item consistency (often "transactional" or "acid" services)
+    serializable = "serializable"
+    snapshot = "snapshot"
+
+
 AVG_ITEM_SIZE_BYTES: int = 1024
 
 
@@ -261,6 +272,7 @@ class QueryPattern(BaseModel):
     # Will the service primarily be accessed in a latency sensitive mode
     # (aka we care about P99) or throughput (we care about averages)
     access_pattern: AccessPattern = AccessPattern.latency
+    access_consistency: AccessConsistency = AccessConsistency.read_your_writes
 
     # A main input, how many requests per second will we handle
     # We assume this is the mean of a range of possible outcomes
@@ -300,9 +312,11 @@ class DataShape(BaseModel):
     # How durable does this dataset need to be. We want to provision
     # sufficient replication and backups of data to achieve the target
     # durability SLO so we don't lose our customer's data. Note that
-    # This is measured in "nines" per year
-    durability_slo_nines: FixedInterval = FixedInterval(
-        low=3, mid=4, high=5, confidence=0.98
+    # This is measured in orders of magnitude. So
+    #   1000   = 1 - (1/1000) = 0.999
+    #   10000  = 1 - (1/10000) = 0.9999
+    durability_slo_order: FixedInterval = FixedInterval(
+        low=1000, mid=10000, high=100000, confidence=0.98
     )
 
 

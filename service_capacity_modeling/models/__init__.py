@@ -2,6 +2,7 @@ from typing import Optional
 from typing import Sequence
 from typing import Tuple
 
+from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
@@ -41,7 +42,7 @@ class CapacityModel:
         drive: Drive,
         context: RegionContext,
         desires: CapacityDesires,
-        **kwargs
+        **kwargs,
     ) -> Optional[CapacityPlan]:
         """Given a concrete hardware shape and desires, return a candidate
 
@@ -115,7 +116,20 @@ class CapacityModel:
         will be, but the models often have a good idea. For example
         databases usually have some range of on-cpu time for point queries
         (latency access) versus throughput.
+
+        This is also a good place to throw ValueError on AccessPattern
+        or AccessConsistency that cannot be met.
         """
+        unlikely_consistency_models = (
+            AccessConsistency.linearizable,
+            AccessConsistency.serializable,
+            AccessConsistency.snapshot,
+        )
+        if user_desires.query_pattern.access_consistency in unlikely_consistency_models:
+            raise ValueError(
+                f"Most services do not support {unlikely_consistency_models}"
+            )
+
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(
