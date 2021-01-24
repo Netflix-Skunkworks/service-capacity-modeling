@@ -1,4 +1,5 @@
 import math
+from typing import Dict
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
@@ -12,6 +13,7 @@ from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import RegionClusterCapacity
+from service_capacity_modeling.interface import Service
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateless_region
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -99,6 +101,7 @@ class NflxJavaAppCapacityModel(CapacityModel):
     def capacity_plan(
         instance: Instance,
         drive: Drive,
+        services: Dict[str, Service],
         desires: CapacityDesires,
         **kwargs,
     ) -> Optional[CapacityPlan]:

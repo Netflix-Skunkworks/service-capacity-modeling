@@ -1,5 +1,6 @@
 import logging
 import math
+from typing import Dict
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
@@ -17,6 +18,7 @@ from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.interface import Service
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -218,6 +220,7 @@ class NflxCassandraCapacityModel(CapacityModel):
     def capacity_plan(
         instance: Instance,
         drive: Drive,
+        services: Dict[str, Service],
         desires: CapacityDesires,
         **kwargs,
     ) -> Optional[CapacityPlan]:

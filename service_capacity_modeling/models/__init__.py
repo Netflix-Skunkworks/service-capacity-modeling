@@ -1,3 +1,4 @@
+from typing import Dict
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
@@ -12,6 +13,7 @@ from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.interface import Service
 
 
 class CapacityModel:
@@ -36,7 +38,11 @@ class CapacityModel:
 
     @staticmethod
     def capacity_plan(
-        instance: Instance, drive: Drive, desires: CapacityDesires, **kwargs
+        instance: Instance,
+        drive: Drive,
+        services: Dict[str, Service],
+        desires: CapacityDesires,
+        **kwargs
     ) -> Optional[CapacityPlan]:
         """Given a concrete hardware shape and desires, return a candidate
 
@@ -48,7 +54,7 @@ class CapacityModel:
               of how much CPU/RAM/disk etc ... that is required and
         """
         # quiet pylint
-        (_, _, _) = (instance, drive, desires)
+        (_, _, _, _) = (instance, drive, services, desires)
         return None
 
     @staticmethod

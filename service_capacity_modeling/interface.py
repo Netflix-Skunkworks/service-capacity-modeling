@@ -339,6 +339,14 @@ class ClusterCapacity(BaseModel):
     annual_cost: float
 
 
+class ServiceCapacity(BaseModel):
+    service_type: str
+    annual_cost: float
+    # Often while provisioning cloud services we need to represent
+    # parameters to the cloud APIs, use this to inject those from models
+    service_params: Dict = {}
+
+
 # For services that are provisioned by zone (e.g. Cassandra, EVCache)
 class ZoneClusterCapacity(ClusterCapacity):
     pass
@@ -353,6 +361,7 @@ class Clusters(BaseModel):
     total_annual_cost: Interval
     zonal: Sequence[ZoneClusterCapacity] = list()
     regional: Sequence[RegionClusterCapacity] = list()
+    services: Sequence[ServiceCapacity] = list()
 
 
 class CapacityPlan(BaseModel):

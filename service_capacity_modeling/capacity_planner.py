@@ -49,8 +49,8 @@ def simulate_interval(interval: Interval) -> Callable[[int], Sequence[Interval]]
 def model_desires(
     desires: CapacityDesires, num_sims: int = 1000
 ) -> Generator[CapacityDesires, None, None]:
-    query_pattern = desires.query_pattern.copy()
-    data_shape = desires.data_shape.copy()
+    query_pattern = desires.query_pattern.copy(deep=True)
+    data_shape = desires.data_shape.copy(deep=True)
 
     query_pattern_simulation = {}
     for field in sorted(query_pattern.__fields__):
@@ -79,7 +79,7 @@ def model_desires(
             **{f: data_shape_simulation[f][sim] for f in sorted(data_shape.__fields__)}
         )
 
-        d = desires.copy()
+        d = desires.copy(deep=True)
         d.query_pattern = query_pattern
         d.data_shape = data_shape
         yield d
@@ -89,8 +89,8 @@ def model_desires_percentiles(
     desires: CapacityDesires,
     percentiles: Sequence[int] = (5, 25, 50, 75, 95),
 ) -> Tuple[Sequence[CapacityDesires], CapacityDesires]:
-    query_pattern = desires.query_pattern.copy()
-    data_shape = desires.data_shape.copy()
+    query_pattern = desires.query_pattern.copy(deep=True)
+    data_shape = desires.data_shape.copy(deep=True)
 
     query_pattern_simulation = {}
     query_pattern_means = {}
@@ -131,7 +131,7 @@ def model_desires_percentiles(
         data_shape = DataShape(
             **{f: data_shape_simulation[f][i] for f in sorted(data_shape.__fields__)}
         )
-        d = desires.copy()
+        d = desires.copy(deep=True)
         d.query_pattern = query_pattern
         d.data_shape = data_shape
         results.append(d)
@@ -142,7 +142,7 @@ def model_desires_percentiles(
     mean_ds = DataShape(
         **{f: data_shape_means[f] for f in sorted(data_shape.__fields__)}
     )
-    d = desires.copy()
+    d = desires.copy(deep=True)
     d.query_pattern = mean_qp
     d.data_shape = mean_ds
 
@@ -212,12 +212,17 @@ class CapacityPlanner:
         model = self._models[model_name]
 
         desires = desires.merge_with(model.default_desires(desires, **model_kwargs))
+        services = {n: s.copy(deep=True) for n, s in hardware.services.items()}
 
         plans = []
         for instance in hardware.instances.values():
             for drive in hardware.drives.values():
                 plan = self._models[model_name].capacity_plan(
-                    instance=instance, drive=drive, desires=desires, **model_kwargs
+                    instance=instance,
+                    drive=drive,
+                    services=services,
+                    desires=desires,
+                    **model_kwargs,
                 )
                 if plan is not None:
                     plans.append(plan)
