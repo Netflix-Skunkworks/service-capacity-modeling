@@ -10,6 +10,7 @@ from service_capacity_modeling.interface import GlobalHardware
 from service_capacity_modeling.interface import Hardware
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Pricing
+from service_capacity_modeling.interface import Service
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
     for region, region_pricing in pricing.regions.items():
         priced_instances: Dict[str, Instance] = {}
         priced_drives: Dict[str, Drive] = {}
+        priced_services: Dict[str, Service] = {}
 
         for instance, iprice in region_pricing.instances.items():
             priced_instances[instance] = hardware.instances[instance].copy()
@@ -35,14 +37,26 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
 
         for drive, dprice in region_pricing.drives.items():
             priced_drives[drive] = hardware.drives[drive].copy()
-            pd = priced_drives[drive]
-            pd.annual_cost_per_gib = dprice.annual_cost_per_gib
-            pd.annual_cost_per_read_io = dprice.annual_cost_per_read_io
-            pd.annual_cost_per_write_io = dprice.annual_cost_per_write_io
+            priced_drives[drive].annual_cost_per_gib = dprice.annual_cost_per_gib
+            priced_drives[
+                drive
+            ].annual_cost_per_read_io = dprice.annual_cost_per_read_io
+            priced_drives[
+                drive
+            ].annual_cost_per_write_io = dprice.annual_cost_per_write_io
+
+        for svc, svc_price in region_pricing.services.items():
+            priced_services[svc] = hardware.services[svc].copy()
+            priced_services[svc].annual_cost_per_gib = svc_price.annual_cost_per_gib
+            priced_services[
+                svc
+            ].annual_cost_per_read_io = svc_price.annual_cost_per_read_io
+            priced_services[
+                svc
+            ].annual_cost_per_write_io = svc_price.annual_cost_per_write_io
 
         regions[region] = Hardware(
-            instances=priced_instances,
-            drives=priced_drives,
+            instances=priced_instances, drives=priced_drives, services=priced_services
         )
 
     return GlobalHardware(regions=regions)

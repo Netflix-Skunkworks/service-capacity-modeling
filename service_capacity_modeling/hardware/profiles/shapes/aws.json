@@ -147,5 +147,12 @@
       "read_io_latency_ms": {"low": 1, "mid": 1.1, "high": 20, "confidence": 0.90},
       "write_io_latency_ms": {"low": 1.2, "mid": 2, "high": 30, "confidence": 0.90}
     }
+  },
+  "services": {
+    "s3.standard": {
+      "name": "s3-standard",
+      "read_io_latency_ms": {"low": 1, "mid": 5, "high": 50, "confidence": 0.90},
+      "write_io_latency_ms": {"low": 1, "mid": 10, "high": 50, "confidence": 0.90}
+    }
   }
 }

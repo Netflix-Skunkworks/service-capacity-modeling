@@ -158,6 +158,29 @@ class Instance(BaseModel):
         return self.name.split(self.family_separator)[0]
 
 
+class Service(BaseModel):
+    """Represents a cloud service, such as a blob store (S3) or
+    managed service such as DynamoDB or RDS.
+
+    This model is generic to any cloud.
+    """
+
+    name: str
+    size_gib: int = 0
+
+    annual_cost_per_gib: float = 0
+    annual_cost_per_read_io: float = 0
+    annual_cost_per_write_io: float = 0
+
+    # These defaults assume a cloud blob storage like S3
+    read_io_latency_ms: FixedInterval = FixedInterval(
+        low=1, mid=5, high=50, confidence=0.9
+    )
+    write_io_latency_ms: FixedInterval = FixedInterval(
+        low=1, mid=10, high=50, confidence=0.9
+    )
+
+
 class Hardware(BaseModel):
     """Represents a hardware deployment
 
@@ -170,6 +193,8 @@ class Hardware(BaseModel):
     instances: Dict[str, Instance]
     # Per drive type information and cost
     drives: Dict[str, Drive]
+    # Per service information and cost
+    services: Dict[str, Service]
 
 
 class GlobalHardware(BaseModel):
@@ -193,9 +218,16 @@ class DrivePricing(BaseModel):
     annual_cost_per_write_io: float = 0
 
 
+class ServicePricing(BaseModel):
+    annual_cost_per_gib: float = 0
+    annual_cost_per_read_io: float = 0
+    annual_cost_per_write_io: float = 0
+
+
 class HardwarePricing(BaseModel):
     instances: Dict[str, InstancePricing]
     drives: Dict[str, DrivePricing]
+    services: Dict[str, ServicePricing]
 
 
 class Pricing(BaseModel):
