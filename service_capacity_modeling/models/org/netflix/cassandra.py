@@ -52,7 +52,12 @@ def _estimate_cassandra_requirement(
     # Keep half of the bandwidth available for backup
     needed_network_mbps = simple_network_mbps(desires) * 2
 
-    needed_disk = desires.data_shape.estimated_state_size_gib.mid * copies_per_region
+    needed_disk = round(
+        (1.0 / desires.data_shape.estimated_compression_ratio.mid)
+        * desires.data_shape.estimated_state_size_gib.mid
+        * copies_per_region,
+        2,
+    )
 
     # Rough estimate of how many instances we would need just for the the CPU
     # Note that this is a lower bound, we might end up with more.
@@ -95,6 +100,9 @@ def _estimate_cassandra_requirement(
             "rps_working_set": rps_working_set,
             "disk_slo_working_set": working_set,
             "replication_factor": copies_per_region,
+            "compression_ratio": round(
+                1.0 / desires.data_shape.estimated_compression_ratio.mid, 2
+            ),
         },
     )
 
@@ -380,7 +388,11 @@ class NflxCassandraCapacityModel(CapacityModel):
                 data_shape=DataShape(
                     estimated_state_size_gib=Interval(
                         low=10, mid=100, high=1000, confidence=0.98
-                    )
+                    ),
+                    # Cassandra compresses with LZ4 by default
+                    estimated_compression_ratio=Interval(
+                        low=2, mid=3, high=5, confidence=0.98
+                    ),
                 ),
             )
         else:
@@ -414,6 +426,10 @@ class NflxCassandraCapacityModel(CapacityModel):
                 data_shape=DataShape(
                     estimated_state_size_gib=Interval(
                         low=100, mid=1000, high=4000, confidence=0.98
-                    )
+                    ),
+                    # Cassandra compresses with LZ4 by default
+                    estimated_compression_ratio=Interval(
+                        low=2, mid=3, high=5, confidence=0.98
+                    ),
                 ),
             )

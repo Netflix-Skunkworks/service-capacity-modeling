@@ -95,7 +95,7 @@ def test_increasing_qps_simple():
         )
 
     # We should generally want CPU
-    assert all([r[0] in ("m5d", "i3") for r in result])
+    assert all([r[0] in ("m5d", "m5") for r in result])
 
     # Should have more capacity as requirement increases
     x = [r[1] for r in result]
@@ -137,7 +137,9 @@ def test_worn_dataset():
     lr_cluster = lr.candidate_clusters.zonal[0]
     assert 256 <= lr_cluster.count * lr_cluster.instance.cpu <= 1024
     assert 100_000 <= lr.candidate_clusters.total_annual_cost < 500_000
-    assert lr_cluster.instance.name.startswith("m5.")
+    assert lr_cluster.instance.name.startswith(
+        "m5."
+    ) or lr_cluster.instance.name.startswith("r5.")
     assert lr_cluster.attached_drives[0].name == "gp2"
     assert lr_cluster.attached_drives[0].size_gib * lr_cluster.count * 3 > 204800
     # We should have S3 backup cost

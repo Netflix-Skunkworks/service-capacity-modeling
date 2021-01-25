@@ -309,6 +309,13 @@ class DataShape(BaseModel):
     estimated_state_item_count: Optional[Interval] = None
     estimated_working_set_percent: Optional[Interval] = None
 
+    # How compressible is this dataset. Note that databases might offer
+    # better or worse compression strategies that will impact this
+    #   Note that the ratio here is the forward ratio, e.g.
+    #   A ratio of 2 means 2:1 compression (0.5 on disk size)
+    #   A ratio of 5 means 5:1 compression (0.2 on disk size)
+    estimated_compression_ratio: Interval = certain_float(1)
+
     # How durable does this dataset need to be. We want to provision
     # sufficient replication and backups of data to achieve the target
     # durability SLO so we don't lose our customer's data. Note that
