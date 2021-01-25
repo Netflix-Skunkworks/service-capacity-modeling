@@ -369,6 +369,10 @@ class ClusterCapacity(BaseModel):
     instance: Instance
     attached_drives: Sequence[Drive] = ()
     annual_cost: float
+    # When provisioning services we might need to signal they
+    # should have certain configuration, for example flags that
+    # affect durability shut off
+    cluster_params: Dict = {}
 
 
 class ServiceCapacity(BaseModel):

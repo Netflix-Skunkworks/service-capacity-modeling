@@ -94,8 +94,16 @@ def _estimate_cassandra_requirement(
             "working_set": min(working_set, rps_working_set),
             "rps_working_set": rps_working_set,
             "disk_slo_working_set": working_set,
+            "replication_factor": copies_per_region,
         },
     )
+
+
+def _upsert_params(cluster, params):
+    if cluster.cluster_params:
+        cluster.cluster_params.update(params)
+    else:
+        cluster.cluster_params = params
 
 
 # pylint: disable=too-many-locals
@@ -182,6 +190,11 @@ def _estimate_cassandra_cluster_zonal(
         core_reference_ghz=requirement.core_reference_ghz,
     )
 
+    # Communicate to the actual provision that we're running in reduced
+    # RF mode.
+    params = {"cassandra.keyspace.rf": copies_per_region}
+    _upsert_params(cluster, params)
+
     # Sometimes we don't want modify cluster topology, so only allow
     # topologies that match the desired zone size
     if required_cluster_size is not None and cluster.count != required_cluster_size:
@@ -240,6 +253,22 @@ def _cass_io_per_read(node_size_gib, sstable_size_mb=160):
     return levels
 
 
+def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
+    if user_copies is not None:
+        assert user_copies > 1
+        return user_copies
+
+    # Due to the relaxed durability and consistency requirements we can
+    # run with RF=2
+    if (
+        desires.data_shape.durability_slo_order.mid < 1000
+        and desires.query_pattern.access_consistency
+        != AccessConsistency.read_your_writes
+    ):
+        return 2
+    return 3
+
+
 class NflxCassandraCapacityModel(CapacityModel):
     @staticmethod
     def capacity_plan(
@@ -249,7 +278,9 @@ class NflxCassandraCapacityModel(CapacityModel):
         desires: CapacityDesires,
         **kwargs,
     ) -> Optional[CapacityPlan]:
-        copies_per_region: int = kwargs.pop("copies_per_region", 3)
+        # Use durabiliy and consistency to compute RF.
+        copies_per_region = _target_rf(desires, kwargs.pop("copies_per_region", None))
+
         allow_gp2: bool = kwargs.pop("allow_gp2", True)
         required_cluster_size: Optional[int] = kwargs.pop("required_cluster_size", None)
         max_rps_to_disk: int = kwargs.pop("max_rps_to_disk", 500)
@@ -278,7 +309,8 @@ class NflxCassandraCapacityModel(CapacityModel):
             (
                 "copies_per_region",
                 "int = 3",
-                "How many copies of the data will exist e.g. RF=3",
+                "How many copies of the data will exist e.g. RF=3. If unsupplied"
+                " this will be deduced from durability and consistency desires",
             ),
             ("allow_gp2", "bool = 0", "If gp2 drives should be permitted"),
             (
@@ -308,6 +340,13 @@ class NflxCassandraCapacityModel(CapacityModel):
                 f"User asked for {user_desires.query_pattern.acceptable_consistency}"
             )
 
+        # Lower RF = less write compute
+        rf = _target_rf(user_desires, kwargs.pop("copies_per_region", None))
+        if rf < 3:
+            rf_write_latency = Interval(low=0.2, mid=0.6, high=2, confidence=0.98)
+        else:
+            rf_write_latency = Interval(low=0.4, mid=1, high=2, confidence=0.98)
+
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(
@@ -324,9 +363,7 @@ class NflxCassandraCapacityModel(CapacityModel):
                     estimated_mean_read_latency_ms=Interval(
                         low=0.4, mid=2, high=10, confidence=0.98
                     ),
-                    estimated_mean_write_latency_ms=Interval(
-                        low=0.4, mid=1, high=2, confidence=0.98
-                    ),
+                    estimated_mean_write_latency_ms=rf_write_latency,
                     # "Single digit milliseconds SLO"
                     read_latency_slo_ms=FixedInterval(
                         low=0.4, mid=2.5, high=10, confidence=0.98
@@ -358,6 +395,8 @@ class NflxCassandraCapacityModel(CapacityModel):
                     estimated_mean_read_latency_ms=Interval(
                         low=0.2, mid=5, high=20, confidence=0.98
                     ),
+                    # Usually throughput clusters are running RF=2
+                    # Maybe revise this?
                     estimated_mean_write_latency_ms=Interval(
                         low=0.2, mid=0.6, high=2, confidence=0.98
                     ),
