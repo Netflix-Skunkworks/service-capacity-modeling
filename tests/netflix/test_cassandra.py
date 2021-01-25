@@ -87,12 +87,12 @@ def test_capacity_large_footprint():
         region="us-east-1",
         desires=large_footprint,
         allow_gp2=False,
-        required_cluster_size=4,
+        required_cluster_size=16,
     )[0]
 
     large_footprint_result = cap_plan.candidate_clusters.zonal[0]
-    assert large_footprint_result.instance.name == "i3en.3xlarge"
-    assert large_footprint_result.count == 4
+    assert large_footprint_result.instance.name.startswith("i3")
+    assert large_footprint_result.count == 16
 
 
 def test_reduced_durability():

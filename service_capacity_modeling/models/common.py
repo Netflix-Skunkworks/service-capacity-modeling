@@ -129,6 +129,7 @@ def compute_stateful_zone(
     # or less IOs for a given data size as well as space
     required_disk_ios,
     required_disk_space,
+    max_local_disk_gib,
     # Some stateful clusters have sidecars that take memory
     reserve_memory,
     # Some stateful clusters have preferences on per zone sizing
@@ -164,7 +165,8 @@ def compute_stateful_zone(
 
     # How many instances do we need for the disk
     if instance.drive is not None and instance.drive.size_gib > 0:
-        count = max(count, needed_disk_gib // instance.drive.size_gib)
+        disk_per_node = min(max_local_disk_gib, instance.drive.size_gib)
+        count = max(count, needed_disk_gib // disk_per_node)
 
     count = max(cluster_size(count), min_count)
 

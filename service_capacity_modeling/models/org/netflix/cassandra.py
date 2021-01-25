@@ -182,16 +182,19 @@ def _estimate_cassandra_cluster_zonal(
         # C* requires ephemeral disks to be 25% full because compaction
         # and replacement time if we're underscaled.
         required_disk_space=lambda x: x * 4,
+        # C* clusters cannot recover data from neighbors quickly so we
+        # want to avoid clusters with more than 1 TiB of local state
+        max_local_disk_gib=1024,
         # C* clusters provision in powers of 2 because doubling
         cluster_size=next_power_of_2,
         min_count=max(min_count, required_cluster_size or 0),
         # C* heap usage takes away from OS page cache memory
+        # TODO: what about sidecars?
         reserve_memory=lambda x: max(min(x // 2, 4), min(x // 4, 12)),
         core_reference_ghz=requirement.core_reference_ghz,
     )
 
-    # Communicate to the actual provision that we're running in reduced
-    # RF mode.
+    # Communicate to the actual provision that if we want reduced RF
     params = {"cassandra.keyspace.rf": copies_per_region}
     _upsert_params(cluster, params)
 
