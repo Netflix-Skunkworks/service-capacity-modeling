@@ -6,6 +6,7 @@ from typing import Sequence
 
 import numpy as np
 from pydantic import BaseModel
+from pydantic import Field
 
 ###############################################################################
 #              Models (structs) for how we describe intervals                 #
@@ -255,14 +256,40 @@ class AccessPattern(str, Enum):
 
 
 class AccessConsistency(str, Enum):
+    """See https://jepsen.io/consistency
+
+    Generally speaking consistency is expensive, so models need to know what
+    kind of consistency will be required in order to estimate CPU usage
+    within a factor of 4-5x correctly.
+    """
+
+    #
     # Single item consistency (most services)
+    #
+
+    # Best Effort: we might lose writes or reads might be stale or missing.
+    #              Most caches offer this level of consistency.
+    # Eventual: We will eventually reflect the latest successful write but
+    #           there is some (often large) time bound on that eventuality.
+    # Read-Your-Writes: The first "consistent" offering.
     best_effort = "best-effort"
     eventual = "eventual"
     read_your_writes = "read-your-writes"
+    # Fully lineralizable, writes and reads
     linearizable = "linearizable"
+    # Writes are linerizable but stale reads are possible (e.g. ZK)
+    linearizable_stale = "linearizable-stale"
+
+    #
     # Multiple item consistency (often "transactional" or "acid" services)
+    #
+
+    # All operations are serializable.
+    # (e.g. CRDB in default settings)
     serializable = "serializable"
-    snapshot = "snapshot"
+    # Writes are serializable but stale reads are possible
+    # (e.g. CRDB with stale reads enabled, MySQL with read replicas, etc ...)
+    serializable_stale = "serializable-stale"
 
 
 AVG_ITEM_SIZE_BYTES: int = 1024
@@ -272,7 +299,25 @@ class QueryPattern(BaseModel):
     # Will the service primarily be accessed in a latency sensitive mode
     # (aka we care about P99) or throughput (we care about averages)
     access_pattern: AccessPattern = AccessPattern.latency
-    access_consistency: AccessConsistency = AccessConsistency.read_your_writes
+    access_consistency: AccessConsistency = Field(
+        AccessConsistency.read_your_writes,
+        title="Consistency requirement on access",
+        description=(
+            "Stronger consistency access is generally more expensive."
+            " The words used here to describe consistency attempt to "
+            " align with the Jepsen tree of multi/single object "
+            " consistency models: https://jepsen.io/consistency"
+        ),
+    )
+    access_staleness_slo_sec: FixedInterval = Field(
+        FixedInterval(low=10, mid=60, high=600, confidence=0.98),
+        title="When stale reads are permitted what is the staleness requirement",
+        description=(
+            "Eventual consistency (aka stale reads) is usually bounded by some"
+            " amount of time. Applications can use this to try to enforce when "
+            " a write is globally available for reads"
+        ),
+    )
 
     # A main input, how many requests per second will we handle
     # We assume this is the mean of a range of possible outcomes
@@ -307,7 +352,16 @@ class QueryPattern(BaseModel):
 class DataShape(BaseModel):
     estimated_state_size_gib: Interval = certain_int(0)
     estimated_state_item_count: Optional[Interval] = None
-    estimated_working_set_percent: Optional[Interval] = None
+    estimated_working_set_percent: Optional[Interval] = Field(
+        None,
+        title="Estimated working set percentage",
+        description=(
+            "The estimated percentage of data that will be accessed frequently"
+            " and therefore must be kept hot in memory (e.g. 0.10). Note that "
+            " models will generally estimate this from the latency SLO and "
+            "latency model of the drives being attached"
+        ),
+    )
 
     # How compressible is this dataset. Note that databases might offer
     # better or worse compression strategies that will impact this
