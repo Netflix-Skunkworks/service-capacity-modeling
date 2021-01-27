@@ -422,3 +422,5 @@ class UncertainCapacityPlan(BaseModel):
 class CapacityRegretParameters(BaseModel):
     over_provision_cost: float = 1
     under_provision_cost: float = 1.25
+    cost_exponent = 1.2
+    disk_exponent = 1.1

@@ -163,10 +163,13 @@ def _least_regret(
             if j == i:
                 continue
 
-            regret += model.regret(
-                regret_params=regret_params,
-                optimal_plan=optimal_plan,
-                proposed_plan=proposed_plan,
+            regret += sum(
+                v
+                for k, v in model.regret(
+                    regret_params=regret_params,
+                    optimal_plan=optimal_plan,
+                    proposed_plan=proposed_plan,
+                ).items()
             )
 
         plans_by_regret.append((proposed_plan, regret))

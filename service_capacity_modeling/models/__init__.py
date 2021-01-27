@@ -1,3 +1,4 @@
+from typing import Dict
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
@@ -62,30 +63,51 @@ class CapacityModel:
         regret_params: CapacityRegretParameters,
         optimal_plan: CapacityPlan,
         proposed_plan: CapacityPlan,
-    ) -> float:
+    ) -> Dict[str, float]:
         """Optional cost model for how much we regret a choice
 
         After the capacity planner has simulated a bunch of possible outcomes
         We need to evaluate each cluster against the optimal choice for a
         given requirement.
 
-        Our default model of cost is just related to money:
+        Our default model of cost is just related to money and disk footprint:
 
         Under an assumption that cost is a reasonable single dimension
         to compare to clusters on, we penalize under-provisioned (cheap)
         clusters more than expensive ones.
+
+        :return: A componentized regret function where the total regret is
+        the sum of all componenets. This is not just a single number so as you
+        develop more complex regret functions you can debug why clusters are
+        or are not being chosen
         """
         optimal_cost = float(optimal_plan.candidate_clusters.total_annual_cost)
         plan_cost = float(proposed_plan.candidate_clusters.total_annual_cost)
 
         if plan_cost >= optimal_cost:
-            return (
+            cost_regret = (
                 (plan_cost - optimal_cost) * regret_params.over_provision_cost
-            ) ** 1.25
+            ) ** regret_params.cost_exponent
         else:
-            return (
+            cost_regret = (
                 (optimal_cost - plan_cost) * regret_params.under_provision_cost
-            ) ** 1.25
+            ) ** regret_params.cost_exponent
+
+        optimal_disk = optimal_plan.requirement.disk_gib.mid
+        plan_disk = proposed_plan.requirement.disk_gib.mid
+
+        # We regret not having the disk space for a dataset
+        if optimal_disk > plan_disk:
+            disk_regret = (
+                (optimal_disk - plan_disk) * regret_params.under_provision_cost
+            ) ** regret_params.disk_exponent
+        else:
+            disk_regret = 0
+
+        return {
+            "cost": round(cost_regret, 4),
+            "disk_space": round(disk_regret, 4),
+        }
 
     @staticmethod
     def description() -> str:

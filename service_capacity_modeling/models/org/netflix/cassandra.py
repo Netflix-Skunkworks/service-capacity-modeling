@@ -391,7 +391,7 @@ class NflxCassandraCapacityModel(CapacityModel):
                     ),
                     # Cassandra compresses with LZ4 by default
                     estimated_compression_ratio=Interval(
-                        low=2, mid=3, high=5, confidence=0.98
+                        minimum_value=1.1, low=2, mid=3, high=5, confidence=0.98
                     ),
                 ),
             )
