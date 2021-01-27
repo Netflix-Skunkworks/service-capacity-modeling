@@ -145,7 +145,6 @@ class CapacityModel:
         unlikely_consistency_models = (
             AccessConsistency.linearizable,
             AccessConsistency.serializable,
-            AccessConsistency.snapshot,
         )
         if user_desires.query_pattern.access_consistency in unlikely_consistency_models:
             raise ValueError(
