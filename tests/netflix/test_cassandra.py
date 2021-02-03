@@ -137,8 +137,8 @@ def test_reduced_durability():
     )
     # The reduced durability and consistency requirement let's us
     # use less compute
-    assert expensive_plan.requirement.context["replication_factor"] == 3
-    assert cheap_plan.requirement.context["replication_factor"] == 2
+    assert expensive_plan.requirements.zonal[0].context["replication_factor"] == 3
+    assert cheap_plan.requirements.zonal[0].context["replication_factor"] == 2
 
     assert (
         cheap_plan.candidate_clusters.zonal[0].cluster_params["cassandra.keyspace.rf"]

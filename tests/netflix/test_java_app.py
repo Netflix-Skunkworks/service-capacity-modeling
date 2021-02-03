@@ -3,6 +3,7 @@ from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 
 
@@ -53,3 +54,48 @@ def test_java_app():
     cores = java_result.count * java_result.instance.cpu
     assert java_result.instance.name.startswith("m5.")
     assert 100 <= cores <= 300
+
+
+def test_uncertain_java_app():
+    uncertain = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=Interval(
+                low=2_000, mid=30_000, high=60_000, confidence=0.9
+            ),
+            estimated_write_per_second=Interval(
+                low=2_000, mid=30_000, high=60_000, confidence=0.9
+            ),
+        ),
+        # Should be ignored
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(low=50, mid=500, high=1000)
+        ),
+    )
+
+    java_cap_plan = planner.plan(
+        model_name="org.netflix.stateless-java",
+        region="us-east-1",
+        desires=uncertain,
+    )
+    java_least_regret = java_cap_plan.least_regret[0]
+    java_result = java_least_regret.candidate_clusters.regional[0]
+
+    cores = java_result.count * java_result.instance.cpu
+    assert java_result.instance.name.startswith("m5.")
+    assert 100 <= cores <= 300
+
+    # KeyValue regional clusters should match
+    kv_cap_plan = planner.plan(
+        model_name="org.netflix.key-value",
+        region="us-east-1",
+        desires=uncertain,
+    )
+    kv_least_regret = kv_cap_plan.least_regret[0]
+    kv_result = kv_least_regret.candidate_clusters.regional[0]
+
+    kv_cores = kv_result.count * kv_result.instance.cpu
+    assert kv_result.instance.name.startswith("m5.")
+    assert kv_cores == cores
+
+    assert kv_least_regret.candidate_clusters.zonal[0].count > 0

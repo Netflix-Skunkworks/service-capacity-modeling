@@ -91,7 +91,7 @@ def test_increasing_qps_simple():
         lr_cost = cap_plan.least_regret[0].candidate_clusters.total_annual_cost
         lr_family = lr.instance.family
         result.append(
-            (lr_family, lr_cpu, lr_cost, cap_plan.least_regret[0].requirement)
+            (lr_family, lr_cpu, lr_cost, cap_plan.least_regret[0].requirements.zonal[0])
         )
 
     # We should generally want CPU

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import functools
 import logging
 from typing import Callable
 from typing import Dict
@@ -20,8 +21,10 @@ from service_capacity_modeling.interface import interval
 from service_capacity_modeling.interface import interval_percentile
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
+from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import UncertainCapacityPlan
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.org import netflix
 from service_capacity_modeling.models.utils import reduce_by_family
 from service_capacity_modeling.stats import gamma_for_interval
@@ -179,6 +182,21 @@ def _least_regret(
     return reduce_by_family(plans)[:num_results]
 
 
+def _add_requirement(requirement, accum):
+    if requirement.requirement_type not in accum:
+        accum[requirement.requirement_type] = {}
+
+    requirements = accum[requirement.requirement_type]
+
+    for field in sorted(requirement.__fields__):
+        d = getattr(requirement, field)
+        if isinstance(d, Interval):
+            if field not in requirements:
+                requirements[field] = [d]
+            else:
+                requirements[field].append(d)
+
+
 class CapacityPlanner:
     def __init__(self):
         self._shapes: HardwareShapes = shapes
@@ -211,11 +229,43 @@ class CapacityPlanner:
         num_results: Optional[int] = None,
         **model_kwargs,
     ) -> Sequence[CapacityPlan]:
+        if model_name not in self._models:
+            raise ValueError(
+                f"model_name={model_name} does not exist. "
+                f"Try {sorted(list(self._models.keys()))}"
+            )
+
+        results = []
+        composable_models = tuple(
+            self._models[model_name].compose_with(desires, **model_kwargs)
+        )
+        models = (model_name,) + composable_models
+
+        for model in models:
+            results.append(
+                self._plan_certain(
+                    model_name=model,
+                    region=region,
+                    desires=desires,
+                    num_results=num_results,
+                    **model_kwargs,
+                )
+            )
+
+        return [functools.reduce(merge_plan, composed) for composed in zip(*results)]
+
+    def _plan_certain(
+        self,
+        model_name: str,
+        region: str,
+        desires: CapacityDesires,
+        num_results: Optional[int] = None,
+        **model_kwargs,
+    ) -> Sequence[CapacityPlan]:
+
         hardware = self._shapes.region(region)
         num_results = num_results or self._default_num_results
-        model = self._models[model_name]
 
-        desires = desires.merge_with(model.default_desires(desires, **model_kwargs))
         context = RegionContext(
             zones_in_region=hardware.zones_in_region,
             services={n: s.copy(deep=True) for n, s in hardware.services.items()},
@@ -261,11 +311,10 @@ class CapacityPlanner:
 
         simulations = simulations or self._default_num_simulations
         num_results = num_results or self._default_num_results
-        desires = desires.merge_with(
-            self._models[model_name].default_desires(desires, **model_kwargs)
-        )
 
-        requirements = {}
+        # requirement types -> values
+        zonal_requirements: Dict[str, Dict] = {}
+        regional_requirements: Dict[str, Dict] = {}
         # desires -> Optional[CapacityPlan]
         capacity_plans = []
 
@@ -274,32 +323,45 @@ class CapacityPlanner:
                 model_name=model_name,
                 region=region,
                 desires=sim_desires,
+                num_results=1,
                 **model_kwargs,
             )
             if len(plans) == 0:
                 continue
 
             capacity_plans.append(plans[0])
-            requirement = plans[0].requirement
-
-            for field in sorted(requirement.__fields__):
-                d = getattr(requirement, field)
-                if isinstance(d, Interval):
-                    if field not in requirements:
-                        requirements[field] = [d]
-                    else:
-                        requirements[field].append(d)
+            plan_requirements = plans[0].requirements
+            for req in plan_requirements.zonal:
+                _add_requirement(req, zonal_requirements)
+            for req in plan_requirements.regional:
+                _add_requirement(req, regional_requirements)
 
         low_p, high_p = sorted(percentiles)[0], sorted(percentiles)[-1]
 
-        caps = {
-            k: interval(samples=[i.mid for i in v], low_p=low_p, high_p=high_p)
-            for k, v in requirements.items()
-        }
+        final_zonal = []
+        final_regional = []
+        for req_type, samples in zonal_requirements.items():
+            req = CapacityRequirement(
+                core_reference_ghz=desires.core_reference_ghz,
+                requirement_type=req_type,
+                **{
+                    k: interval(samples=[i.mid for i in v], low_p=low_p, high_p=high_p)
+                    for k, v in samples.items()
+                },
+            )
+            final_zonal.append(req)
+        for req_type, samples in regional_requirements.items():
+            req = CapacityRequirement(
+                requirement_type=req_type,
+                core_reference_ghz=desires.core_reference_ghz,
+                **{
+                    k: interval(samples=[i.mid for i in v], low_p=low_p, high_p=high_p)
+                    for k, v in samples.items()
+                },
+            )
+            final_regional.append(req)
 
-        final_requirement = CapacityRequirement(
-            core_reference_ghz=desires.core_reference_ghz, **caps
-        )
+        final_requirement = Requirements(zonal=final_zonal, regional=final_regional)
 
         percentile_inputs, mean_desires = model_desires_percentiles(
             desires=desires, percentiles=sorted(percentiles)
@@ -314,7 +376,7 @@ class CapacityPlanner:
             )
 
         result = UncertainCapacityPlan(
-            requirement=final_requirement,
+            requirements=final_requirement,
             least_regret=_least_regret(
                 capacity_plans,
                 self._regret_params,

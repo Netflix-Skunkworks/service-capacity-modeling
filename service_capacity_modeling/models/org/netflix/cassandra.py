@@ -20,6 +20,7 @@ from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
+from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
@@ -71,7 +72,7 @@ def _estimate_cassandra_requirement(
     # hold much data in memory.
     instance_rps = max(1, reads_per_second // rough_count)
     disk_rps = instance_rps * _cass_io_per_read(max(1, needed_disk // rough_count))
-    rps_working_set = disk_rps / max_rps_to_disk
+    rps_working_set = min(1.0, disk_rps / max_rps_to_disk)
 
     # If disk RPS will be smaller than our target because there are no
     # reads, we don't need to hold as much data in memory
@@ -90,6 +91,7 @@ def _estimate_cassandra_requirement(
     )
 
     return CapacityRequirement(
+        requirement_type="cassandra-zonal",
         core_reference_ghz=desires.core_reference_ghz,
         cpu_cores=certain_int(needed_cores),
         mem_gib=certain_float(needed_memory),
@@ -103,6 +105,7 @@ def _estimate_cassandra_requirement(
             "compression_ratio": round(
                 1.0 / desires.data_shape.estimated_compression_ratio.mid, 2
             ),
+            "read_per_second": reads_per_second,
         },
     )
 
@@ -252,7 +255,10 @@ def _estimate_cassandra_cluster_zonal(
         services=cap_services,
     )
 
-    return CapacityPlan(requirement=requirement, candidate_clusters=clusters)
+    return CapacityPlan(
+        requirements=Requirements(zonal=[requirement] * zones_per_region),
+        candidate_clusters=clusters,
+    )
 
 
 # C* LCS has 160 MiB sstables by default and 10 sstables per level
@@ -289,6 +295,10 @@ class NflxCassandraCapacityModel(CapacityModel):
         desires: CapacityDesires,
         **kwargs,
     ) -> Optional[CapacityPlan]:
+        desires = desires.merge_with(
+            nflx_cassandra_capacity_model.default_desires(desires, **kwargs)
+        )
+
         # Use durabiliy and consistency to compute RF.
         copies_per_region = _target_rf(desires, kwargs.pop("copies_per_region", None))
 
@@ -433,3 +443,6 @@ class NflxCassandraCapacityModel(CapacityModel):
                     ),
                 ),
             )
+
+
+nflx_cassandra_capacity_model = NflxCassandraCapacityModel()

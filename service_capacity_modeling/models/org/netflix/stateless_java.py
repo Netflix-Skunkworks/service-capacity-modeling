@@ -1,11 +1,13 @@
 import math
 from decimal import Decimal
+from typing import Dict
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
 
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
@@ -14,6 +16,7 @@ from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
+from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateless_region
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -44,6 +47,7 @@ def _estimate_java_app_requirement(
     needed_memory_gib = heap_allocation_gibps * 2
 
     return CapacityRequirement(
+        requirement_type="java-app",
         core_reference_ghz=desires.core_reference_ghz,
         cpu_cores=certain_int(needed_cores),
         mem_gib=certain_float(needed_memory_gib),
@@ -55,6 +59,7 @@ def _estimate_java_app_region(
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,
+    root_disk_gib: int = 10,
     failover: bool = True,
     jvm_memory_overhead: float = 2,
     zones_per_region: int = 3,
@@ -66,7 +71,7 @@ def _estimate_java_app_region(
     requirement = _estimate_java_app_requirement(desires, failover, jvm_memory_overhead)
 
     drive = drive.copy()
-    drive.size_gib = 20
+    drive.size_gib = root_disk_gib
     attached_drives = (drive,)
 
     cluster: RegionClusterCapacity = compute_stateless_region(
@@ -86,7 +91,7 @@ def _estimate_java_app_region(
 
     if cluster.count <= 256:
         return CapacityPlan(
-            requirement=requirement,
+            requirements=Requirements(regional=[requirement]),
             candidate_clusters=Clusters(
                 total_annual_cost=round(Decimal(cluster.annual_cost), 2),
                 regional=[cluster],
@@ -105,14 +110,20 @@ class NflxJavaAppCapacityModel(CapacityModel):
         desires: CapacityDesires,
         **kwargs,
     ) -> Optional[CapacityPlan]:
+        desires = desires.merge_with(
+            nflx_java_app_capacity_model.default_desires(desires, **kwargs)
+        )
+
         failover: bool = kwargs.pop("failover", True)
         jvm_memory_overhead: float = kwargs.pop("jvm_memory_overhead", 1.2)
+        root_disk_gib: int = kwargs.pop("root_disk_gib", 10)
 
         return _estimate_java_app_region(
             instance=instance,
             drive=drive,
             desires=desires,
             failover=failover,
+            root_disk_gib=root_disk_gib,
             jvm_memory_overhead=jvm_memory_overhead,
             zones_per_region=context.zones_in_region,
         )
@@ -130,4 +141,20 @@ class NflxJavaAppCapacityModel(CapacityModel):
                 "float = 1.2",
                 "How much overhead does the heap have per read byte",
             ),
+            ("root_disk_gib", "int = 10", "How many GiB of root volume to attach"),
         )
+
+    @staticmethod
+    def regret(
+        regret_params: CapacityRegretParameters,
+        optimal_plan: CapacityPlan,
+        proposed_plan: CapacityPlan,
+    ) -> Dict[str, float]:
+        regret = super(NflxJavaAppCapacityModel, NflxJavaAppCapacityModel).regret(
+            regret_params, optimal_plan, proposed_plan
+        )
+        regret["disk_space"] = 0
+        return regret
+
+
+nflx_java_app_capacity_model = NflxJavaAppCapacityModel()

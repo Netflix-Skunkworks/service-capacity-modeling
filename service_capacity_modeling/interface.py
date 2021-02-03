@@ -414,8 +414,9 @@ class CapacityDesires(BaseModel):
 
 
 class CapacityRequirement(BaseModel):
+    requirement_type: str
+
     core_reference_ghz: float
-    # Ranges of capacity requirements, typically [10%, mean, 90%]
     cpu_cores: Interval
     mem_gib: Interval = certain_int(0)
     network_mbps: Interval = certain_int(0)
@@ -454,6 +455,11 @@ class RegionClusterCapacity(ClusterCapacity):
     pass
 
 
+class Requirements(BaseModel):
+    zonal: Sequence[CapacityRequirement] = list()
+    regional: Sequence[CapacityRequirement] = list()
+
+
 class Clusters(BaseModel):
     total_annual_cost: Decimal = Decimal(0)
     zonal: Sequence[ZoneClusterCapacity] = list()
@@ -462,12 +468,12 @@ class Clusters(BaseModel):
 
 
 class CapacityPlan(BaseModel):
-    requirement: CapacityRequirement
+    requirements: Requirements
     candidate_clusters: Clusters
 
 
 class UncertainCapacityPlan(BaseModel):
-    requirement: CapacityRequirement
+    requirements: Requirements
     least_regret: Sequence[CapacityPlan]
     mean: Sequence[CapacityPlan]
     percentiles: Dict[int, Sequence[CapacityPlan]]

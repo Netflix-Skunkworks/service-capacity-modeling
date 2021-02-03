@@ -7,7 +7,6 @@ from typing import Optional
 from service_capacity_modeling.interface import AVG_ITEM_SIZE_BYTES
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
-from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
@@ -15,6 +14,7 @@ from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import RegionClusterCapacity
+from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import utils
 
@@ -327,6 +327,20 @@ def _noop_region(x: RegionClusterCapacity) -> RegionClusterCapacity:
     return x
 
 
+def merge_requirements(
+    left_req: Requirements,
+    right_req: Requirements,
+) -> Requirements:
+
+    merged_zonal, merged_regional = [], []
+    for req in list(left_req.zonal) + list(right_req.zonal):
+        merged_zonal.append(req)
+    for req in list(left_req.regional) + list(right_req.regional):
+        merged_regional.append(req)
+
+    return Requirements(zonal=merged_zonal, regional=merged_regional)
+
+
 def merge_plan(
     left: Optional[CapacityPlan],
     right: Optional[CapacityPlan],
@@ -338,18 +352,8 @@ def merge_plan(
     if left is None or right is None:
         return None
 
-    left_req = left.requirement
-    right_req = right.requirement
+    merged_requirements = merge_requirements(left.requirements, right.requirements)
 
-    merged_requirement = CapacityRequirement(
-        core_reference_ghz=min(
-            left_req.core_reference_ghz, right_req.core_reference_ghz
-        ),
-        cpu_cores=_add_interval(left_req.cpu_cores, right_req.cpu_cores),
-        mem_gib=_add_interval(left_req.mem_gib, right_req.mem_gib),
-        network_mbps=_add_interval(left_req.network_mbps, right_req.network_mbps),
-        disk_gib=_add_interval(left_req.disk_gib, right_req.disk_gib),
-    )
     left_cluster = left.candidate_clusters
     right_cluster = right.candidate_clusters
 
@@ -367,5 +371,5 @@ def merge_plan(
         ),
     )
     return CapacityPlan(
-        requirement=merged_requirement, candidate_clusters=merged_clusters
+        requirements=merged_requirements, candidate_clusters=merged_clusters
     )

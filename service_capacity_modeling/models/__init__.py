@@ -93,8 +93,15 @@ class CapacityModel:
                 (optimal_cost - plan_cost) * regret_params.under_provision_cost
             ) ** regret_params.cost_exponent
 
-        optimal_disk = optimal_plan.requirement.disk_gib.mid
-        plan_disk = proposed_plan.requirement.disk_gib.mid
+        optimal_disk = sum(req.disk_gib.mid for req in optimal_plan.requirements.zonal)
+        optimal_disk += sum(
+            req.disk_gib.mid for req in optimal_plan.requirements.regional
+        )
+
+        plan_disk = sum(req.disk_gib.mid for req in proposed_plan.requirements.zonal)
+        plan_disk += sum(
+            req.disk_gib.mid for req in proposed_plan.requirements.regional
+        )
 
         # We regret not having the disk space for a dataset
         if optimal_disk > plan_disk:
@@ -128,6 +135,16 @@ class CapacityModel:
                 ("arg_name", "int = 3", "my custom arg"),
             )
         """
+        return tuple()
+
+    @staticmethod
+    def compose_with(user_desires: CapacityDesires, **kwargs) -> Tuple[str, ...]:
+        """Return additional model names to compose with this one
+
+        Often used for dependencies.
+        """
+        # quiet pylint
+        _ = user_desires
         return tuple()
 
     @staticmethod

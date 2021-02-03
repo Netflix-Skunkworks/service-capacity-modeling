@@ -2,8 +2,7 @@ from typing import Optional
 from typing import Sequence
 from typing import Tuple
 
-from .cassandra import NflxCassandraCapacityModel
-from .stateless_java import NflxJavaAppCapacityModel
+from .stateless_java import nflx_java_app_capacity_model
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
@@ -15,7 +14,6 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models import CapacityModel
-from service_capacity_modeling.models.common import merge_plan
 
 
 class NflxKeyValueCapacityModel(CapacityModel):
@@ -27,18 +25,26 @@ class NflxKeyValueCapacityModel(CapacityModel):
         desires: CapacityDesires,
         **kwargs,
     ) -> Optional[CapacityPlan]:
-        cass_cluster = NflxCassandraCapacityModel().capacity_plan(
-            instance=instance, drive=drive, context=context, desires=desires, **kwargs
+        # KeyValue wants 20GiB root volumes
+        java_root_size = kwargs.pop("root_disk_gib", 20)
+        desires = desires.merge_with(
+            nflx_key_value_capacity_model.default_desires(desires, **kwargs)
         )
-        kv_app = NflxJavaAppCapacityModel().capacity_plan(
-            instance=instance, drive=drive, context=context, desires=desires, **kwargs
+
+        kv_app = nflx_java_app_capacity_model.capacity_plan(
+            instance=instance,
+            drive=drive,
+            context=context,
+            desires=desires,
+            root_disk_gib=java_root_size,
+            **kwargs,
         )
-        if cass_cluster is None or kv_app is None:
+        if kv_app is None:
             return None
 
         for cluster in kv_app.candidate_clusters.regional:
             cluster.cluster_type = "dgwkv"
-        return merge_plan(cass_cluster, kv_app)
+        return kv_app
 
     @staticmethod
     def description():
@@ -46,9 +52,13 @@ class NflxKeyValueCapacityModel(CapacityModel):
 
     @staticmethod
     def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
-        return tuple(NflxCassandraCapacityModel.extra_model_arguments()) + tuple(
-            NflxJavaAppCapacityModel.extra_model_arguments()
-        )
+        return nflx_java_app_capacity_model.extra_model_arguments()
+
+    @staticmethod
+    def compose_with(user_desires: CapacityDesires, **kwargs) -> Tuple[str, ...]:
+        # In the future depending on the user desire we might need EVCache
+        # as well, e.g. if the latency SLO is reduced
+        return ("org.netflix.cassandra",)
 
     @staticmethod
     def default_desires(user_desires, **kwargs):
@@ -62,8 +72,6 @@ class NflxKeyValueCapacityModel(CapacityModel):
                     estimated_mean_write_size_bytes=Interval(
                         low=64, mid=128, high=1024, confidence=0.95
                     ),
-                    # Cassandra point queries usualy take just around 1ms
-                    # of on CPU time for reads and 0.6ms for writes
                     estimated_mean_read_latency_ms=Interval(
                         low=0.2, mid=1, high=10, confidence=0.98
                     ),
@@ -117,3 +125,6 @@ class NflxKeyValueCapacityModel(CapacityModel):
                     )
                 ),
             )
+
+
+nflx_key_value_capacity_model = NflxKeyValueCapacityModel()

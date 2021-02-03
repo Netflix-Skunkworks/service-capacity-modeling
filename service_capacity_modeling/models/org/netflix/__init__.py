@@ -1,11 +1,11 @@
-from .cassandra import NflxCassandraCapacityModel
-from .key_value import NflxKeyValueCapacityModel
-from .stateless_java import NflxJavaAppCapacityModel
+from .cassandra import nflx_cassandra_capacity_model
+from .key_value import nflx_key_value_capacity_model
+from .stateless_java import nflx_java_app_capacity_model
 
 
 def models():
     return {
-        "org.netflix.cassandra": NflxCassandraCapacityModel(),
-        "org.netflix.stateless-java": NflxJavaAppCapacityModel(),
-        "org.netflix.key-value": NflxKeyValueCapacityModel(),
+        "org.netflix.cassandra": nflx_cassandra_capacity_model,
+        "org.netflix.stateless-java": nflx_java_app_capacity_model,
+        "org.netflix.key-value": nflx_key_value_capacity_model,
     }
