@@ -38,7 +38,6 @@ def test_uncertain_planning_ebs():
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=uncertain_mid,
-        allow_gp2=True,
     )
     lr = mid_plan.least_regret[0]
     lr_cluster = lr.candidate_clusters.zonal[0]
@@ -49,7 +48,6 @@ def test_uncertain_planning_ebs():
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=uncertain_tiny,
-        allow_gp2=True,
     )
     lr = tiny_plan.least_regret[0]
     lr_cluster = lr.candidate_clusters.zonal[0]
@@ -82,7 +80,6 @@ def test_increasing_qps_simple():
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=simple,
-            allow_gp2=True,
         )
         # pr.print_stats()
 

@@ -47,12 +47,12 @@ large_footprint = CapacityDesires(
 
 
 def test_capacity_small_fast():
-    for allow_ebs in (True, False):
+    for require_local_disks in (True, False):
         cap_plan = planner.plan_certain(
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=small_but_high_qps,
-            allow_gp2=allow_ebs,
+            require_local_disks=require_local_disks,
         )[0]
         small_result = cap_plan.candidate_clusters.zonal[0]
         # We really should just pay for CPU here
@@ -86,7 +86,7 @@ def test_capacity_large_footprint():
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=large_footprint,
-        allow_gp2=False,
+        require_local_disks=True,
         required_cluster_size=16,
     )[0]
 

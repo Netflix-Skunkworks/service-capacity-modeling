@@ -125,24 +125,24 @@ def _estimate_cassandra_cluster_zonal(
     desires: CapacityDesires,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
-    allow_gp2: bool = True,
+    require_local_disks: bool = False,
     required_cluster_size: Optional[int] = None,
     max_rps_to_disk: int = 500,
+    max_local_disk_gib: int = 2048,
     max_regional_size: int = 96,
 ) -> Optional[CapacityPlan]:
-
-    # Cassandra only deploys on gp2 drives right now
-    if drive.name != "gp2":
-        return None
 
     # Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 8:
         return None
 
     # if we're not allowed to use gp2, skip EBS only types
-    if instance.drive is None and not allow_gp2:
-        if not allow_gp2:
-            return None
+    if instance.drive is None and require_local_disks:
+        return None
+
+    # Cassandra only deploys on gp2 drives right now
+    if drive.name != "gp2":
+        return None
 
     rps = desires.query_pattern.estimated_read_per_second.mid // zones_per_region
 
@@ -195,7 +195,7 @@ def _estimate_cassandra_cluster_zonal(
         required_disk_space=lambda x: x * 4,
         # C* clusters cannot recover data from neighbors quickly so we
         # want to avoid clusters with more than 1 TiB of local state
-        max_local_disk_gib=1024,
+        max_local_disk_gib=max_local_disk_gib,
         # C* clusters provision in powers of 2 because doubling
         cluster_size=next_power_of_2,
         min_count=max(min_count, required_cluster_size or 0),
@@ -302,10 +302,11 @@ class NflxCassandraCapacityModel(CapacityModel):
         # Use durabiliy and consistency to compute RF.
         copies_per_region = _target_rf(desires, kwargs.pop("copies_per_region", None))
 
-        allow_gp2: bool = kwargs.pop("allow_gp2", True)
+        require_local_disks: bool = kwargs.pop("require_local_disks", False)
         required_cluster_size: Optional[int] = kwargs.pop("required_cluster_size", None)
         max_rps_to_disk: int = kwargs.pop("max_rps_to_disk", 500)
         max_regional_size: int = kwargs.pop("max_regional_size", 96)
+        max_local_disk_gib: int = kwargs.pop("max_local_disk_gib", 2048)
 
         return _estimate_cassandra_cluster_zonal(
             instance=instance,
@@ -314,10 +315,11 @@ class NflxCassandraCapacityModel(CapacityModel):
             desires=desires,
             zones_per_region=context.zones_in_region,
             copies_per_region=copies_per_region,
-            allow_gp2=allow_gp2,
+            require_local_disks=require_local_disks,
             required_cluster_size=required_cluster_size,
             max_rps_to_disk=max_rps_to_disk,
             max_regional_size=max_regional_size,
+            max_local_disk_gib=max_local_disk_gib,
         )
 
     @staticmethod
@@ -333,7 +335,11 @@ class NflxCassandraCapacityModel(CapacityModel):
                 "How many copies of the data will exist e.g. RF=3. If unsupplied"
                 " this will be deduced from durability and consistency desires",
             ),
-            ("allow_gp2", "bool = 0", "If gp2 drives should be permitted"),
+            (
+                "require_local_disks",
+                "bool = 0",
+                "If local (ephemeral) drives are required",
+            ),
             (
                 "max_rps_to_disk",
                 "int = 500",
@@ -343,6 +349,11 @@ class NflxCassandraCapacityModel(CapacityModel):
                 "max_regional_size",
                 "int = 96",
                 "What is the maximum size of a cluster in this region",
+            ),
+            (
+                "max_local_disk_gib",
+                "int = 2048",
+                "The maximum amount of data we store per machine",
             ),
         )
 
