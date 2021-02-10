@@ -11,6 +11,7 @@ setuptools.setup(
     install_requires=[
         "pydantic",
         "scipy",
+        "numpy",
         'importlib_resources; python_version < "3.7"',
     ],
     extras_require={

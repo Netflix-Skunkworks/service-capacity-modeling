@@ -277,10 +277,11 @@ def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
 
     # Due to the relaxed durability and consistency requirements we can
     # run with RF=2
+    consistency = desires.query_pattern.access_consistency.same_region
     if (
         desires.data_shape.durability_slo_order.mid < 1000
-        and desires.query_pattern.access_consistency
-        != AccessConsistency.read_your_writes
+        and consistency is not None
+        and consistency.target_consistency != AccessConsistency.read_your_writes
     ):
         return 2
     return 3
@@ -366,11 +367,12 @@ class NflxCassandraCapacityModel(CapacityModel):
                 AccessConsistency.read_your_writes,
             )
         )
-        if user_desires.query_pattern.access_consistency not in acceptable_consistency:
-            raise ValueError(
-                f"Cassandra can only provide {acceptable_consistency} access."
-                f"User asked for {user_desires.query_pattern.acceptable_consistency}"
-            )
+        for key, value in user_desires.query_pattern.access_consistency:
+            if value.target_consistency not in acceptable_consistency:
+                raise ValueError(
+                    f"Cassandra can only provide {acceptable_consistency} access."
+                    f"User asked for {key}={value}"
+                )
 
         # Lower RF = less write compute
         rf = _target_rf(user_desires, kwargs.pop("copies_per_region", None))
@@ -383,7 +385,6 @@ class NflxCassandraCapacityModel(CapacityModel):
             return CapacityDesires(
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.latency,
-                    access_consistency=AccessConsistency.read_your_writes,
                     estimated_mean_read_size_bytes=Interval(
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),
@@ -420,7 +421,6 @@ class NflxCassandraCapacityModel(CapacityModel):
             return CapacityDesires(
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.throughput,
-                    access_consistency=AccessConsistency.eventual,
                     estimated_mean_read_size_bytes=Interval(
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),

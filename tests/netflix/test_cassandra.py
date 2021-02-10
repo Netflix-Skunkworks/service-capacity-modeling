@@ -3,8 +3,10 @@ from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import FixedInterval
+from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import QueryPattern
 
 
@@ -112,7 +114,9 @@ def test_reduced_durability():
         query_pattern=QueryPattern(
             estimated_read_per_second=certain_int(1000),
             estimated_write_per_second=certain_int(1_000_000),
-            access_consistency=AccessConsistency.eventual,
+            access_consistency=GlobalConsistency(
+                same_region=Consistency(target_consistency=AccessConsistency.eventual)
+            ),
         ),
         data_shape=DataShape(
             estimated_state_size_gib=certain_int(100_000),

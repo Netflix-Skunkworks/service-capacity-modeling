@@ -295,11 +295,8 @@ class AccessConsistency(str, Enum):
 AVG_ITEM_SIZE_BYTES: int = 1024
 
 
-class QueryPattern(BaseModel):
-    # Will the service primarily be accessed in a latency sensitive mode
-    # (aka we care about P99) or throughput (we care about averages)
-    access_pattern: AccessPattern = AccessPattern.latency
-    access_consistency: AccessConsistency = Field(
+class Consistency(BaseModel):
+    target_consistency: AccessConsistency = Field(
         AccessConsistency.read_your_writes,
         title="Consistency requirement on access",
         description=(
@@ -309,7 +306,7 @@ class QueryPattern(BaseModel):
             " consistency models: https://jepsen.io/consistency"
         ),
     )
-    access_staleness_slo_sec: FixedInterval = Field(
+    staleness_slo_sec: FixedInterval = Field(
         FixedInterval(low=10, mid=60, high=600, confidence=0.98),
         title="When stale reads are permitted what is the staleness requirement",
         description=(
@@ -318,6 +315,24 @@ class QueryPattern(BaseModel):
             " a write is globally available for reads"
         ),
     )
+
+
+class GlobalConsistency(BaseModel):
+    same_region: Consistency = Consistency(
+        target_consistency=AccessConsistency.read_your_writes,
+        staleness_slo_sec=FixedInterval(low=0, mid=0.1, high=1, confidence=0.99),
+    )
+    cross_region: Consistency = Consistency(
+        target_consistency=AccessConsistency.eventual,
+        staleness_slo_sec=FixedInterval(low=10, mid=60, high=600, confidence=0.99),
+    )
+
+
+class QueryPattern(BaseModel):
+    # Will the service primarily be accessed in a latency sensitive mode
+    # (aka we care about P99) or throughput (we care about averages)
+    access_pattern: AccessPattern = AccessPattern.latency
+    access_consistency: GlobalConsistency = GlobalConsistency()
 
     # A main input, how many requests per second will we handle
     # We assume this is the mean of a range of possible outcomes
