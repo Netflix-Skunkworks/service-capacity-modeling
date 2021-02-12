@@ -385,6 +385,14 @@ class DataShape(BaseModel):
     #   A ratio of 5 means 5:1 compression (0.2 on disk size)
     estimated_compression_ratio: Interval = certain_float(1)
 
+    # How much fixed memory must be provisioned per instance for the
+    # application (e.g. for process heap memory)
+    reserved_instance_app_mem_gib: int = 2
+
+    # How much fixed memory must be provisioned per instance for the
+    # system (e.g. for kernel and other system processes)
+    reserved_instance_system_mem_gib: int = 1
+
     # How durable does this dataset need to be. We want to provision
     # sufficient replication and backups of data to achieve the target
     # durability SLO so we don't lose our customer's data. Note that

@@ -178,6 +178,10 @@ def _estimate_cassandra_cluster_zonal(
     if desires.service_tier <= 1:
         min_count = 2
 
+    base_mem = (
+        desires.data_shape.reserved_instance_app_mem_gib
+        + desires.data_shape.reserved_instance_system_mem_gib
+    )
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
@@ -200,8 +204,7 @@ def _estimate_cassandra_cluster_zonal(
         cluster_size=next_power_of_2,
         min_count=max(min_count, required_cluster_size or 0),
         # C* heap usage takes away from OS page cache memory
-        # TODO: what about sidecars?
-        reserve_memory=lambda x: max(min(x // 2, 4), min(x // 4, 12)),
+        reserve_memory=lambda x: base_mem + max(min(x // 2, 4), min(x // 4, 12)),
         core_reference_ghz=requirement.core_reference_ghz,
     )
 
@@ -415,6 +418,9 @@ class NflxCassandraCapacityModel(CapacityModel):
                     estimated_compression_ratio=Interval(
                         minimum_value=1.1, low=2, mid=3, high=5, confidence=0.98
                     ),
+                    # We dynamically allocate the C* JVM memory in the plan
+                    # but account for the Priam sidecar here
+                    reserved_instance_app_mem_gib=4,
                 ),
             )
         else:
@@ -452,6 +458,9 @@ class NflxCassandraCapacityModel(CapacityModel):
                     estimated_compression_ratio=Interval(
                         low=2, mid=3, high=5, confidence=0.98
                     ),
+                    # We dynamically allocate the C* JVM memory in the plan
+                    # but account for the Priam sidecar here
+                    reserved_instance_app_mem_gib=4,
                 ),
             )
 

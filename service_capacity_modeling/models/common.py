@@ -152,7 +152,7 @@ def compute_stateful_zone(
     count = math.ceil(needed_cores / instance.cpu)
 
     # How many instances do we need for the ram, taking into account
-    # reserved memory for sidecars
+    # reserved memory for the application and system
     count = max(
         count,
         math.ceil(
