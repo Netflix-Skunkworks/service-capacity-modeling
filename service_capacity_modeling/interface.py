@@ -297,7 +297,7 @@ AVG_ITEM_SIZE_BYTES: int = 1024
 
 class Consistency(BaseModel):
     target_consistency: AccessConsistency = Field(
-        AccessConsistency.read_your_writes,
+        ...,
         title="Consistency requirement on access",
         description=(
             "Stronger consistency access is generally more expensive."
@@ -307,12 +307,12 @@ class Consistency(BaseModel):
         ),
     )
     staleness_slo_sec: FixedInterval = Field(
-        FixedInterval(low=10, mid=60, high=600, confidence=0.98),
+        FixedInterval(low=0, mid=10, high=60),
         title="When stale reads are permitted what is the staleness requirement",
         description=(
             "Eventual consistency (aka stale reads) is usually bounded by some"
             " amount of time. Applications can use this to try to enforce when "
-            " a write is globally available for reads"
+            " a write is available for reads"
         ),
     )
 
@@ -320,11 +320,11 @@ class Consistency(BaseModel):
 class GlobalConsistency(BaseModel):
     same_region: Consistency = Consistency(
         target_consistency=AccessConsistency.read_your_writes,
-        staleness_slo_sec=FixedInterval(low=0, mid=0.1, high=1, confidence=0.99),
+        staleness_slo_sec=FixedInterval(low=0, mid=0.1, high=1),
     )
     cross_region: Consistency = Consistency(
         target_consistency=AccessConsistency.eventual,
-        staleness_slo_sec=FixedInterval(low=10, mid=60, high=600, confidence=0.99),
+        staleness_slo_sec=FixedInterval(low=10, mid=60, high=600),
     )
 
 
