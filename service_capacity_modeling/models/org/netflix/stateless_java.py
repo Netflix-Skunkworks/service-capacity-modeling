@@ -110,10 +110,6 @@ class NflxJavaAppCapacityModel(CapacityModel):
         desires: CapacityDesires,
         **kwargs,
     ) -> Optional[CapacityPlan]:
-        desires = desires.merge_with(
-            nflx_java_app_capacity_model.default_desires(desires, **kwargs)
-        )
-
         failover: bool = kwargs.pop("failover", True)
         jvm_memory_overhead: float = kwargs.pop("jvm_memory_overhead", 1.2)
         root_disk_gib: int = kwargs.pop("root_disk_gib", 10)

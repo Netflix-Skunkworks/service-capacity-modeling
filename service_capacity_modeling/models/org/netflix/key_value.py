@@ -27,9 +27,6 @@ class NflxKeyValueCapacityModel(CapacityModel):
     ) -> Optional[CapacityPlan]:
         # KeyValue wants 20GiB root volumes
         java_root_size = kwargs.pop("root_disk_gib", 20)
-        desires = desires.merge_with(
-            nflx_key_value_capacity_model.default_desires(desires, **kwargs)
-        )
 
         kv_app = nflx_java_app_capacity_model.capacity_plan(
             instance=instance,

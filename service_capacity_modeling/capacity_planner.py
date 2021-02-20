@@ -262,6 +262,9 @@ class CapacityPlanner:
         num_results: Optional[int] = None,
         **model_kwargs,
     ) -> Sequence[CapacityPlan]:
+        desires = desires.merge_with(
+            self._models[model_name].default_desires(desires, **model_kwargs)
+        )
 
         hardware = self._shapes.region(region)
         num_results = num_results or self._default_num_results

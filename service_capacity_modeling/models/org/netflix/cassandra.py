@@ -299,10 +299,6 @@ class NflxCassandraCapacityModel(CapacityModel):
         desires: CapacityDesires,
         **kwargs,
     ) -> Optional[CapacityPlan]:
-        desires = desires.merge_with(
-            nflx_cassandra_capacity_model.default_desires(desires, **kwargs)
-        )
-
         # Use durabiliy and consistency to compute RF.
         copies_per_region = _target_rf(desires, kwargs.pop("copies_per_region", None))
 
