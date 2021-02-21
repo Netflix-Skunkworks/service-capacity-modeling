@@ -1,5 +1,6 @@
 from decimal import Decimal
 from enum import Enum
+from functools import lru_cache
 from typing import Dict
 from typing import Optional
 from typing import Sequence
@@ -38,6 +39,9 @@ class Interval(BaseModel):
     minimum_value: Optional[float] = None
     maximum_value: Optional[float] = None
 
+    class Config:
+        allow_mutation = False
+
     @property
     def can_simulate(self):
         return self.confidence <= 0.99 and self.allow_simulate
@@ -66,10 +70,12 @@ class FixedInterval(Interval):
     allow_simulate: bool = False
 
 
+@lru_cache(2048)
 def certain_int(x: int) -> Interval:
     return Interval(low=x, mid=x, high=x, confidence=1.0)
 
 
+@lru_cache(2048)
 def certain_float(x: float) -> Interval:
     return Interval(low=x, mid=x, high=x, confidence=1.0)
 

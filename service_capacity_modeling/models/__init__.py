@@ -111,10 +111,7 @@ class CapacityModel:
         else:
             disk_regret = 0
 
-        return {
-            "cost": round(cost_regret, 4),
-            "disk_space": round(disk_regret, 4),
-        }
+        return {"cost": cost_regret, "disk_space": disk_regret}
 
     @staticmethod
     def description() -> str:

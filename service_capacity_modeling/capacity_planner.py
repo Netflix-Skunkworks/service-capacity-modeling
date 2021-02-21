@@ -83,7 +83,7 @@ def model_desires(
             **{f: data_shape_simulation[f][sim] for f in sorted(data_shape.__fields__)}
         )
 
-        d = desires.copy(deep=True)
+        d = desires.copy(exclude={"query_pattern", "data_shape"})
         d.query_pattern = query_pattern
         d.data_shape = data_shape
         yield d
@@ -160,6 +160,8 @@ def _least_regret(
     num_results: int,
 ) -> Sequence[CapacityPlan]:
     plans_by_regret = []
+
+    # Unfortunately has to be O(n*2) since this isn't symmetric ...
     for i, proposed_plan in enumerate(capacity_plans):
         regret = 0.0
         for j, optimal_plan in enumerate(capacity_plans):
@@ -198,13 +200,13 @@ def _add_requirement(requirement, accum):
 
 
 class CapacityPlanner:
-    def __init__(self):
+    def __init__(self, default_num_simulations=100, default_num_results=2):
         self._shapes: HardwareShapes = shapes
         self._models: Dict[str, CapacityModel] = dict()
 
-        self._default_num_simulations = 200
-        self._default_num_results = 3
-        self._regret_params = CapacityRegretParameters()
+        self._default_num_simulations = default_num_simulations
+        self._default_num_results = default_num_results
+        self._default_regret_params = CapacityRegretParameters()
 
     def register_group(self, group: Callable[[], Dict[str, CapacityModel]]):
         for name, model in group().items():
@@ -298,9 +300,10 @@ class CapacityPlanner:
         model_name: str,
         region: str,
         desires: CapacityDesires,
-        percentiles: Tuple[int, ...] = (5, 25, 50, 75, 95),
+        percentiles: Tuple[int, ...] = (5, 50, 95),
         simulations: Optional[int] = None,
         num_results: Optional[int] = None,
+        regret_params: Optional[CapacityRegretParameters] = None,
         **model_kwargs,
     ) -> UncertainCapacityPlan:
 
@@ -312,6 +315,7 @@ class CapacityPlanner:
                 f"Try {sorted(list(self._models.keys()))}"
             )
 
+        regret_params = regret_params or self._default_regret_params
         simulations = simulations or self._default_num_simulations
         num_results = num_results or self._default_num_results
 
@@ -382,7 +386,7 @@ class CapacityPlanner:
             requirements=final_requirement,
             least_regret=_least_regret(
                 capacity_plans,
-                self._regret_params,
+                regret_params,
                 self._models[model_name],
                 num_results,
             ),

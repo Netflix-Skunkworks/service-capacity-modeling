@@ -250,7 +250,7 @@ class WorkingSetEstimator:
             # drive latency. So for example if EBS's 99% is 1.7ms and we
             # 45% of our read SLO lies below that then we need at least 45%
             # of our data to be stored in memory.
-            required_percent = read_slo_latency_dist.cdf(minimum_drive_latency)
+            required_percent = float(read_slo_latency_dist.cdf(minimum_drive_latency))
 
             self._cache[cache_key] = certain_float(
                 max(required_percent, min_working_set)
