@@ -1,13 +1,13 @@
 import math
+from typing import Iterable
 from typing import List
-from typing import Sequence
 from typing import Set
 from typing import Tuple
 
 from service_capacity_modeling.models import CapacityPlan
 
 
-def reduce_by_family(plans: Sequence[CapacityPlan]) -> List[CapacityPlan]:
+def reduce_by_family(plans: Iterable[CapacityPlan]) -> List[CapacityPlan]:
     """Groups a potential set of clusters by hardware family sorted by cost.
 
     Useful for showing different family options.

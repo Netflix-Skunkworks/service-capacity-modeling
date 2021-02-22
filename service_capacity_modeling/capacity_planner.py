@@ -8,6 +8,8 @@ from typing import Optional
 from typing import Sequence
 from typing import Tuple
 
+import numpy as np
+
 from service_capacity_modeling.hardware import HardwareShapes
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import CapacityDesires
@@ -161,27 +163,27 @@ def _least_regret(
 ) -> Sequence[CapacityPlan]:
     plans_by_regret = []
 
-    # Unfortunately has to be O(n*2) since this isn't symmetric ...
+    # Unfortunately has to be O(N^2) since regret isn't symmetric.
+    # We could create the entire NxN regret matrix and use
+    # einsum('ij->i') to quickly do a row wise sum, but that would
+    # require a _lot_ more memory than this ...
+    regret = np.zeros(len(capacity_plans), dtype=np.float64)
     for i, proposed_plan in enumerate(capacity_plans):
-        regret = 0.0
         for j, optimal_plan in enumerate(capacity_plans):
             if j == i:
-                continue
+                regret[j] = 0
 
-            regret += sum(
-                v
-                for k, v in model.regret(
+            regret[j] = sum(
+                model.regret(
                     regret_params=regret_params,
                     optimal_plan=optimal_plan,
                     proposed_plan=proposed_plan,
-                ).items()
+                ).values()
             )
-
-        plans_by_regret.append((proposed_plan, regret))
+        plans_by_regret.append((proposed_plan, np.einsum("i->", regret)))
 
     plans_by_regret.sort(key=lambda d: d[1])
-    plans = [p[0] for p in plans_by_regret]
-    return reduce_by_family(plans)[:num_results]
+    return reduce_by_family(p[0] for p in plans_by_regret)[:num_results]
 
 
 def _add_requirement(requirement, accum):
@@ -200,7 +202,7 @@ def _add_requirement(requirement, accum):
 
 
 class CapacityPlanner:
-    def __init__(self, default_num_simulations=100, default_num_results=2):
+    def __init__(self, default_num_simulations=128, default_num_results=2):
         self._shapes: HardwareShapes = shapes
         self._models: Dict[str, CapacityModel] = dict()
 
