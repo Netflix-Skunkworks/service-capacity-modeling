@@ -5,6 +5,7 @@ from typing import Optional
 from typing import Sequence
 from typing import Tuple
 
+from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRegretParameters
@@ -12,8 +13,12 @@ from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
+from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import Instance
+from service_capacity_modeling.interface import Interval
+from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
@@ -37,14 +42,22 @@ def _estimate_java_app_requirement(
         needed_network_mbps = int(math.ceil(needed_network_mbps * (1 / 0.4)))
 
     # Assume a Java application that can allocate about 1 GiB/s to heap
-    # per 2 GiB of memory and assume that we have a ~2x memory overhead
-    # due to the JVM overhead.
+    # per 2 GiB of heap with some amount of overhead on the network traffic.
+    # So for example if we have 512 MiB of network traffic there is some
+    # overhead associated with that...
+
     # TODO: we should probably have the memory bandwidth attached to
     # the instance type, e.g. Intel CPUs and AMD CPUs have different
     # per core memory bandwidth.
     mem_allocation_mbps = needed_network_mbps * jvm_memory_overhead
-    heap_allocation_gibps = mem_allocation_mbps / 8
-    needed_memory_gib = heap_allocation_gibps * 2
+    heap_allocation_gibps = (mem_allocation_mbps / 8) / 1024
+    network_heap = heap_allocation_gibps * 2
+
+    needed_memory_gib = (
+        network_heap
+        + desires.data_shape.reserved_instance_app_mem_gib
+        + desires.data_shape.reserved_instance_system_mem_gib
+    )
 
     return CapacityRequirement(
         requirement_type="java-app",
@@ -52,6 +65,10 @@ def _estimate_java_app_requirement(
         cpu_cores=certain_int(needed_cores),
         mem_gib=certain_float(needed_memory_gib),
         network_mbps=certain_float(needed_network_mbps),
+        context={
+            "network_heap_gib": network_heap,
+            "reserved_mem": desires.data_shape.reserved_instance_app_mem_gib,
+        },
     )
 
 
@@ -151,6 +168,68 @@ class NflxJavaAppCapacityModel(CapacityModel):
         )
         regret["disk_space"] = 0
         return regret
+
+    @staticmethod
+    def default_desires(user_desires, **kwargs):
+        if user_desires.query_pattern.access_pattern == AccessPattern.latency:
+            return CapacityDesires(
+                query_pattern=QueryPattern(
+                    access_pattern=AccessPattern.latency,
+                    estimated_mean_read_size_bytes=Interval(
+                        low=128, mid=1024, high=65536, confidence=0.95
+                    ),
+                    estimated_mean_write_size_bytes=Interval(
+                        low=64, mid=128, high=1024, confidence=0.95
+                    ),
+                    estimated_mean_read_latency_ms=Interval(
+                        low=0.2, mid=1, high=10, confidence=0.98
+                    ),
+                    estimated_mean_write_latency_ms=Interval(
+                        low=0.2, mid=0.6, high=2, confidence=0.98
+                    ),
+                    # "Single digit milliseconds SLO"
+                    read_latency_slo_ms=FixedInterval(
+                        low=0.4, mid=2.5, high=10, confidence=0.98
+                    ),
+                    write_latency_slo_ms=FixedInterval(
+                        low=0.4, mid=2, high=10, confidence=0.98
+                    ),
+                ),
+                data_shape=DataShape(
+                    # Assume 4 GiB heaps
+                    reserved_instance_app_mem_gib=4
+                ),
+            )
+        else:
+            return CapacityDesires(
+                query_pattern=QueryPattern(
+                    access_pattern=AccessPattern.latency,
+                    estimated_mean_read_size_bytes=Interval(
+                        low=128, mid=1024, high=65536, confidence=0.95
+                    ),
+                    estimated_mean_write_size_bytes=Interval(
+                        low=64, mid=128, high=1024, confidence=0.95
+                    ),
+                    # KV scan queries can be slower
+                    estimated_mean_read_latency_ms=Interval(
+                        low=0.2, mid=4, high=20, confidence=0.98
+                    ),
+                    estimated_mean_write_latency_ms=Interval(
+                        low=0.2, mid=0.6, high=2, confidence=0.98
+                    ),
+                    # "Single digit milliseconds SLO"
+                    read_latency_slo_ms=FixedInterval(
+                        low=0.4, mid=4, high=10, confidence=0.98
+                    ),
+                    write_latency_slo_ms=FixedInterval(
+                        low=0.4, mid=4, high=10, confidence=0.98
+                    ),
+                ),
+                data_shape=DataShape(
+                    # Assume 4 GiB heaps
+                    reserved_instance_app_mem_gib=4
+                ),
+            )
 
 
 nflx_java_app_capacity_model = NflxJavaAppCapacityModel()

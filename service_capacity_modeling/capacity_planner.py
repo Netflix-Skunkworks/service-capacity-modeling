@@ -4,6 +4,7 @@ import logging
 from typing import Callable
 from typing import Dict
 from typing import Generator
+from typing import List
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
@@ -182,7 +183,7 @@ def _least_regret(
             )
         plans_by_regret.append((proposed_plan, np.einsum("i->", regret)))
 
-    plans_by_regret.sort(key=lambda d: d[1])
+    plans_by_regret.sort(key=lambda p: p[1])
     return reduce_by_family(p[0] for p in plans_by_regret)[:num_results]
 
 
@@ -199,6 +200,24 @@ def _add_requirement(requirement, accum):
                 requirements[field] = [d]
             else:
                 requirements[field].append(d)
+
+
+def _merge_models(raw_capacity_plans, zonal_requirements, regional_requirements):
+    capacity_plans = []
+    for components in raw_capacity_plans:
+        merged_plans = [
+            functools.reduce(merge_plan, composed) for composed in zip(*components)
+        ]
+        if len(merged_plans) == 0:
+            continue
+
+        capacity_plans.append(merged_plans[0])
+        plan_requirements = merged_plans[0].requirements
+        for req in plan_requirements.zonal:
+            _add_requirement(req, zonal_requirements)
+        for req in plan_requirements.regional:
+            _add_requirement(req, regional_requirements)
+    return capacity_plans
 
 
 class CapacityPlanner:
@@ -246,6 +265,9 @@ class CapacityPlanner:
         models = (model_name,) + composable_models
 
         for model in models:
+            desires = desires.merge_with(
+                self._models[model_name].default_desires(desires, **model_kwargs)
+            )
             results.append(
                 self._plan_certain(
                     model_name=model,
@@ -266,9 +288,6 @@ class CapacityPlanner:
         num_results: Optional[int] = None,
         **model_kwargs,
     ) -> Sequence[CapacityPlan]:
-        desires = desires.merge_with(
-            self._models[model_name].default_desires(desires, **model_kwargs)
-        )
 
         hardware = self._shapes.region(region)
         num_results = num_results or self._default_num_results
@@ -324,26 +343,35 @@ class CapacityPlanner:
         # requirement types -> values
         zonal_requirements: Dict[str, Dict] = {}
         regional_requirements: Dict[str, Dict] = {}
-        # desires -> Optional[CapacityPlan]
-        capacity_plans = []
 
-        for sim_desires in model_desires(desires, simulations):
-            plans = self.plan_certain(
-                model_name=model_name,
-                region=region,
-                desires=sim_desires,
-                num_results=1,
-                **model_kwargs,
+        # We might have to compose this model with others depending on
+        # the user requirement
+        composable_models = tuple(
+            self._models[model_name].compose_with(desires, **model_kwargs)
+        )
+        models = (model_name,) + composable_models
+        raw_capacity_plans: List[List[Sequence[CapacityPlan]]] = []
+        for i in range(simulations):
+            raw_capacity_plans.append([list(tuple()) for i in range(len(models))])
+
+        for i, model in enumerate(models):
+            merged_desires = desires.merge_with(
+                self._models[model].default_desires(desires, **model_kwargs)
             )
-            if len(plans) == 0:
-                continue
 
-            capacity_plans.append(plans[0])
-            plan_requirements = plans[0].requirements
-            for req in plan_requirements.zonal:
-                _add_requirement(req, zonal_requirements)
-            for req in plan_requirements.regional:
-                _add_requirement(req, regional_requirements)
+            for j, sim_desires in enumerate(model_desires(merged_desires, simulations)):
+                raw_capacity_plans[j][i] = self._plan_certain(
+                    model_name=model,
+                    region=region,
+                    desires=sim_desires,
+                    num_results=1,
+                    **model_kwargs,
+                )
+
+        # Now accumulate across the composed models
+        capacity_plans = _merge_models(
+            raw_capacity_plans, zonal_requirements, regional_requirements
+        )
 
         low_p, high_p = sorted(percentiles)[0], sorted(percentiles)[-1]
 

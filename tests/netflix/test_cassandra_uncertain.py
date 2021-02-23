@@ -32,8 +32,7 @@ uncertain_tiny = CapacityDesires(
 )
 
 
-def test_uncertain_planning_ebs():
-    # with cProfile.Profile() as pr:
+def test_uncertain_planning():
     mid_plan = planner.plan(
         model_name="org.netflix.cassandra",
         region="us-east-1",
@@ -42,7 +41,12 @@ def test_uncertain_planning_ebs():
     lr = mid_plan.least_regret[0]
     lr_cluster = lr.candidate_clusters.zonal[0]
     assert 12 <= lr_cluster.count * lr_cluster.instance.cpu <= 64
-    assert 5_000 <= lr.candidate_clusters.total_annual_cost < 50_000
+    assert 5_000 <= lr.candidate_clusters.total_annual_cost < 40_000
+
+    sr = mid_plan.least_regret[1]
+    sr_cluster = sr.candidate_clusters.zonal[0]
+    assert 12 <= sr_cluster.count * sr_cluster.instance.cpu <= 64
+    assert 5_000 <= sr.candidate_clusters.total_annual_cost < 40_000
 
     tiny_plan = planner.plan(
         model_name="org.netflix.cassandra",
@@ -91,8 +95,8 @@ def test_increasing_qps_simple():
             (lr_family, lr_cpu, lr_cost, cap_plan.least_regret[0].requirements.zonal[0])
         )
 
-    # We should generally want CPU
-    assert all([r[0] in ("m5d", "m5") for r in result])
+    # We should generally want cheap CPUs
+    assert all([r[0] in ("m5d", "m5", "i3") for r in result])
 
     # Should have more capacity as requirement increases
     x = [r[1] for r in result]

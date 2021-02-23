@@ -106,7 +106,7 @@ class CapacityModel:
         # We regret not having the disk space for a dataset
         if optimal_disk > plan_disk:
             disk_regret = (
-                (optimal_disk - plan_disk) * regret_params.under_provision_cost
+                (optimal_disk - plan_disk) * regret_params.under_provision_disk_cost
             ) ** regret_params.disk_exponent
         else:
             disk_regret = 0
@@ -185,8 +185,8 @@ class CapacityModel:
             return CapacityDesires(
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.throughput,
-                    estimated_mean_read_latency_ms=certain_float(10),
-                    estimated_mean_write_latency_ms=certain_float(20),
+                    estimated_mean_read_latency_ms=certain_float(2),
+                    estimated_mean_write_latency_ms=certain_float(4),
                     # "Tens of milliseconds"
                     read_latency_slo_ms=FixedInterval(
                         low=10, mid=50, high=100, confidence=0.98
@@ -194,5 +194,6 @@ class CapacityModel:
                     write_latency_slo_ms=FixedInterval(
                         low=10, mid=50, high=100, confidence=0.98
                     ),
-                )
+                ),
+                data_shape=DataShape(),
             )

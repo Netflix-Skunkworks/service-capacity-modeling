@@ -87,7 +87,8 @@ class NflxKeyValueCapacityModel(CapacityModel):
                 data_shape=DataShape(
                     estimated_state_size_gib=Interval(
                         low=10, mid=50, high=200, confidence=0.98
-                    )
+                    ),
+                    reserved_instance_app_mem_gib=8,
                 ),
             )
         else:
@@ -119,7 +120,8 @@ class NflxKeyValueCapacityModel(CapacityModel):
                 data_shape=DataShape(
                     estimated_state_size_gib=Interval(
                         low=100, mid=1000, high=4000, confidence=0.98
-                    )
+                    ),
+                    reserved_instance_app_mem_gib=8,
                 ),
             )
 

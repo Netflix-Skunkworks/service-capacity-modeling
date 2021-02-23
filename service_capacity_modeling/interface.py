@@ -511,5 +511,8 @@ class UncertainCapacityPlan(BaseModel):
 class CapacityRegretParameters(BaseModel):
     over_provision_cost: float = 1
     under_provision_cost: float = 1.25
-    cost_exponent = 1.2
-    disk_exponent = 1.1
+    cost_exponent: float = 1.2
+
+    # For every GiB we are underprovisioned by default cost $1 / year
+    under_provision_disk_cost: float = 1.1
+    disk_exponent = 1.05

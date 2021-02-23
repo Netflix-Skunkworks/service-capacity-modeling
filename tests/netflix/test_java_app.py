@@ -69,7 +69,8 @@ def test_uncertain_java_app():
         ),
         # Should be ignored
         data_shape=DataShape(
-            estimated_state_size_gib=Interval(low=50, mid=500, high=1000)
+            estimated_state_size_gib=Interval(low=50, mid=500, high=1000),
+            reserved_instance_app_mem_gib=4,
         ),
     )
 
@@ -96,6 +97,6 @@ def test_uncertain_java_app():
 
     kv_cores = kv_result.count * kv_result.instance.cpu
     assert kv_result.instance.name.startswith("m5.")
-    assert kv_cores == cores
+    assert 0.75 <= float(kv_cores) / cores <= 1.25
 
     assert kv_least_regret.candidate_clusters.zonal[0].count > 0
