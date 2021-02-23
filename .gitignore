@@ -35,3 +35,6 @@ debian/*.debhelper
 
 # Notebooks
 notebooks/.ipynb_checkpoints/
+
+# Profiling
+prof
