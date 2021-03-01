@@ -41,6 +41,7 @@ class Interval(BaseModel):
 
     class Config:
         allow_mutation = False
+        frozen = True
 
     @property
     def can_simulate(self):
