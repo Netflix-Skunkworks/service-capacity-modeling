@@ -12,12 +12,15 @@ def test_working_set():
     ephem_drive = shapes.region("us-east-1").instances["m5d.2xlarge"].drive
     if ephem_drive is None:
         assert False
+
     ephem_interval = ephem_drive.read_io_latency_ms
     drive_ephem = dist_for_interval(ephem_interval)
     print(ephem_interval)
 
     slo_dist_db = dist_for_interval(
-        FixedInterval(low=0.4, mid=2.5, high=10, confidence=0.98)
+        FixedInterval(
+            minimum_value=0.1, low=0.4, mid=2, high=5, maximum_value=10, confidence=0.98
+        )
     )
 
     slo_dist_cache = dist_for_interval(
@@ -65,6 +68,6 @@ def test_working_set():
     )
 
     assert cache_gp2_working_set >= 0.90
-    assert 0.4 >= cache_ephem_working_set >= 0.15
-    assert 0.4 >= db_gp2_working_set >= 0.25
-    assert 0.2 >= db_ephem_working_set >= 0.001
+    assert 0.4 >= cache_ephem_working_set >= 0.1
+    assert 0.5 >= db_gp2_working_set >= 0.25
+    assert 0.2 >= db_ephem_working_set >= 0.01

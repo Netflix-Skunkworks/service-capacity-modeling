@@ -28,3 +28,5 @@ repos:
       language: system
       types: [python]
       verbose: true
+
+fail_fast: true
