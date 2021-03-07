@@ -28,7 +28,7 @@ from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
 from service_capacity_modeling.models.utils import next_power_of_2
-from service_capacity_modeling.stats import gamma_for_interval
+from service_capacity_modeling.stats import dist_for_interval
 
 
 logger = logging.getLogger(__name__)
@@ -151,8 +151,8 @@ def _estimate_cassandra_cluster_zonal(
     # less fronting RAM.
     ws_drive = instance.drive or drive
     working_set = working_set_from_drive_and_slo(
-        drive_read_latency_dist=gamma_for_interval(ws_drive.read_io_latency_ms),
-        read_slo_latency_dist=gamma_for_interval(
+        drive_read_latency_dist=dist_for_interval(ws_drive.read_io_latency_ms),
+        read_slo_latency_dist=dist_for_interval(
             desires.query_pattern.read_latency_slo_ms
         ),
         estimated_working_set=desires.data_shape.estimated_working_set_percent,

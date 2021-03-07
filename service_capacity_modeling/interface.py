@@ -22,6 +22,7 @@ class IntervalModel(str, Enum):
         return f"D({self.value})"
 
     gamma = "gamma"
+    beta = "beta"
 
 
 class Interval(BaseModel):
@@ -30,8 +31,8 @@ class Interval(BaseModel):
     high: float
     # How confident are we of this interval
     confidence: float = 1.0
-    # How to approximate this interval (e.g. with a gamma distribution)
-    model_with: IntervalModel = IntervalModel.gamma
+    # How to approximate this interval (e.g. with a beta distribution)
+    model_with: IntervalModel = IntervalModel.beta
     # If we should allow simulation of this interval, some models might not
     # be able to simulate or some properties might not want to
     allow_simulate: bool = True

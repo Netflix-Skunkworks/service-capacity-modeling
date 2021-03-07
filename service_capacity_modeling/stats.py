@@ -3,11 +3,15 @@ from typing import Tuple
 
 import numpy as np
 from scipy.optimize import fsolve
+from scipy.optimize import root
+from scipy.special import betainc as betaf
 from scipy.special import gammainc as gammaf
+from scipy.stats import beta as beta_dist
 from scipy.stats import gamma as gamma_dist
 from scipy.stats import rv_continuous
 
 from service_capacity_modeling.interface import Interval
+from service_capacity_modeling.interface import IntervalModel
 
 
 def _gamma_fn_from_params(low, mid, high, confidence):
@@ -34,6 +38,22 @@ def _gamma_fn_from_params(low, mid, high, confidence):
     return f
 
 
+def _beta_fn_from_params(low, mid, high, confidence):
+    assert low <= mid <= high < 1.0
+
+    confidence = min(confidence, 0.95)
+    confidence = max(confidence, 0.01)
+
+    low_p = 0.0 + (1 - confidence) / 2.0
+    high_p = 1.0 - (1 - confidence) / 2.0
+
+    def f(a):
+        zero = high / low
+        return betaf(a, a / mid - a, high_p) / betaf(a, a / mid - a, low_p) - zero
+
+    return f
+
+
 def _gamma_dist_from_interval(
     interval: Interval, seed: float = 0xCAFE
 ) -> Tuple[float, rv_continuous]:
@@ -52,8 +72,30 @@ def _gamma_dist_from_interval(
     shape = fsolve(f, 2)
 
     dist = gamma_dist(shape, loc=minimum, scale=(mean / shape))
-    dist.random_state = np.random.RandomState(seed=seed)
+    dist.random_state = np.random.default_rng(seed=seed)
     return (shape, dist)
+
+
+def _beta_dist_from_interval(
+    interval: Interval, seed: float = 0xCAFE
+) -> Tuple[float, rv_continuous]:
+    # If we know cdf(high), cdf(low) and mean (mid) we can use an iterative
+    # solver to find a possible beta fit
+
+    minimum = interval.minimum
+    maximum = interval.maximum
+    scale = maximum - minimum
+
+    lower = (interval.low - minimum) / scale
+    mean = (interval.mid - minimum) / scale
+    upper = (interval.high - minimum) / scale
+
+    f = _beta_fn_from_params(lower, mean, upper, interval.confidence)
+    alpha = root(f, 2).x[0]
+
+    dist = beta_dist(alpha, alpha / mean - alpha, loc=minimum, scale=scale)
+    dist.random_state = np.random.default_rng(seed=seed)
+    return (alpha, dist)
 
 
 # This can be expensive, so cache it
@@ -62,9 +104,31 @@ def _gamma_for_interval(interval: Interval, seed: float = 0xCAFE) -> rv_continuo
     return _gamma_dist_from_interval(interval, seed=seed)[1]
 
 
-# This can be expensive, so cache it
 def gamma_for_interval(interval: Interval, seed: float = 0xCAFE) -> rv_continuous:
     result = _gamma_for_interval(interval, seed)
     # Use the new Generator API instead of RandomState for ~20% speedup
     result.random_state = np.random.default_rng(seed=seed)
+    return result
+
+
+# This can be expensive, so cache it
+@lru_cache(maxsize=128)
+def _beta_for_interval(interval: Interval, seed: float = 0xCAFE) -> rv_continuous:
+    return _beta_dist_from_interval(interval, seed=seed)[1]
+
+
+def beta_for_interval(interval: Interval, seed: float = 0xCAFE) -> rv_continuous:
+    result = _beta_for_interval(interval, seed)
+    # Use the new Generator API instead of RandomState for ~20% speedup
+    result.random_state = np.random.default_rng(seed=seed)
+    return result
+
+
+def dist_for_interval(interval: Interval, seed: float = 0xCAFE) -> rv_continuous:
+    if interval.model_with == IntervalModel.beta:
+        result = beta_for_interval(interval=interval, seed=seed)
+    elif interval.model_with == IntervalModel.gamma:
+        result = gamma_for_interval(interval=interval, seed=seed)
+    else:
+        result = beta_for_interval(interval=interval, seed=seed)
     return result

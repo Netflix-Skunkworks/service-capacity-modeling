@@ -97,6 +97,6 @@ def test_uncertain_java_app():
 
     kv_cores = kv_result.count * kv_result.instance.cpu
     assert kv_result.instance.name.startswith("m5.")
-    assert 0.75 <= float(kv_cores) / cores <= 1.25
+    assert 0.5 <= float(kv_cores) / cores <= 1.5
 
     assert kv_least_regret.candidate_clusters.zonal[0].count > 0

@@ -30,7 +30,7 @@ from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.org import netflix
 from service_capacity_modeling.models.utils import reduce_by_family
-from service_capacity_modeling.stats import gamma_for_interval
+from service_capacity_modeling.stats import dist_for_interval
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def simulate_interval(interval: Interval) -> Callable[[int], Sequence[Interval]]
     if interval.can_simulate:
 
         def sim_uncertan(count: int) -> Sequence[Interval]:
-            sims = gamma_for_interval(interval).rvs(count)
+            sims = dist_for_interval(interval).rvs(count)
             return [certain_float(s) for s in sims]
 
         return sim_uncertan
@@ -106,7 +106,7 @@ def model_desires_percentiles(
         if isinstance(d, Interval):
             query_pattern_means[field] = certain_float(d.mid)
             if d.confidence <= 0.99:
-                samples = gamma_for_interval(d).rvs(1028)
+                samples = dist_for_interval(d).rvs(1028)
                 query_pattern_simulation[field] = interval_percentile(
                     samples, percentiles
                 )
@@ -121,7 +121,7 @@ def model_desires_percentiles(
         if isinstance(d, Interval):
             data_shape_means[field] = certain_float(d.mid)
             if d.confidence <= 0.99:
-                samples = gamma_for_interval(d).rvs(1028)
+                samples = dist_for_interval(d).rvs(1028)
                 data_shape_simulation[field] = interval_percentile(samples, percentiles)
                 continue
         data_shape_simulation[field] = [d] * len(percentiles)
@@ -328,7 +328,7 @@ class CapacityPlanner:
         **model_kwargs,
     ) -> UncertainCapacityPlan:
 
-        if not all([0 <= p <= 100 for p in percentiles]):
+        if not all(0 <= p <= 100 for p in percentiles):
             raise ValueError("percentiles must be an integer in the range [0, 100]")
         if model_name not in self._models:
             raise ValueError(
