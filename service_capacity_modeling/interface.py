@@ -51,6 +51,8 @@ class Interval(BaseModel):
     @property
     def minimum(self):
         if self.minimum_value is None:
+            if self.confidence == 1.0:
+                return self.low * 0.999
             return self.low / 2
 
         return self.minimum_value
@@ -58,6 +60,8 @@ class Interval(BaseModel):
     @property
     def maximum(self):
         if self.maximum_value is None:
+            if self.confidence == 1.0:
+                return self.high * 1.001
             return self.high * 2
         return self.maximum_value
 

@@ -9,25 +9,25 @@ uncertain_mid = CapacityDesires(
     service_tier=1,
     query_pattern=QueryPattern(
         estimated_read_per_second=Interval(
-            low=1000, mid=10000, high=100000, confidence=0.9
+            low=1000, mid=10000, high=100000, confidence=0.98
         ),
         estimated_write_per_second=Interval(
-            low=1000, mid=10000, high=100000, confidence=0.9
+            low=1000, mid=10000, high=100000, confidence=0.98
         ),
     ),
     data_shape=DataShape(
-        estimated_state_size_gib=Interval(low=100, mid=500, high=1000, confidence=0.9),
+        estimated_state_size_gib=Interval(low=100, mid=500, high=1000, confidence=0.98),
     ),
 )
 
 uncertain_tiny = CapacityDesires(
     service_tier=2,
     query_pattern=QueryPattern(
-        estimated_read_per_second=Interval(low=1, mid=10, high=100, confidence=0.9),
-        estimated_write_per_second=Interval(low=1, mid=10, high=100, confidence=0.9),
+        estimated_read_per_second=Interval(low=1, mid=10, high=100, confidence=0.98),
+        estimated_write_per_second=Interval(low=1, mid=10, high=100, confidence=0.98),
     ),
     data_shape=DataShape(
-        estimated_state_size_gib=Interval(low=1, mid=10, high=30, confidence=0.9),
+        estimated_state_size_gib=Interval(low=1, mid=10, high=30, confidence=0.98),
     ),
 )
 
@@ -67,15 +67,15 @@ def test_increasing_qps_simple():
             service_tier=1,
             query_pattern=QueryPattern(
                 estimated_read_per_second=Interval(
-                    low=qps // 10, mid=qps, high=qps * 10, confidence=0.9
+                    low=qps // 10, mid=qps, high=qps * 10, confidence=0.98
                 ),
                 estimated_write_per_second=Interval(
-                    low=qps // 10, mid=qps, high=qps * 10, confidence=0.9
+                    low=qps // 10, mid=qps, high=qps * 10, confidence=0.98
                 ),
             ),
             data_shape=DataShape(
                 estimated_state_size_gib=Interval(
-                    low=20, mid=200, high=2000, confidence=0.9
+                    low=20, mid=200, high=2000, confidence=0.98
                 ),
             ),
         )
@@ -96,7 +96,7 @@ def test_increasing_qps_simple():
         )
 
     # We should generally want cheap CPUs
-    assert all([r[0] in ("m5d", "m5", "i3") for r in result])
+    assert all(r[0] in ("m5d", "m5", "i3") for r in result)
 
     # Should have more capacity as requirement increases
     x = [r[1] for r in result]
@@ -113,16 +113,18 @@ def test_worn_dataset():
         service_tier=1,
         query_pattern=QueryPattern(
             # Very Very few reads.
-            estimated_read_per_second=Interval(low=1, mid=10, high=100, confidence=0.9),
+            estimated_read_per_second=Interval(
+                low=1, mid=10, high=100, confidence=0.98
+            ),
             # We think we're going to have around 1 million writes per second
             estimated_write_per_second=Interval(
-                low=100_000, mid=1_000_000, high=2_000_000, confidence=0.9
+                low=100_000, mid=1_000_000, high=2_000_000, confidence=0.98
             ),
         ),
         # We think we're going to have around 200 TiB of data
         data_shape=DataShape(
             estimated_state_size_gib=Interval(
-                low=104800, mid=204800, high=404800, confidence=0.9
+                low=104800, mid=204800, high=404800, confidence=0.98
             ),
         ),
     )

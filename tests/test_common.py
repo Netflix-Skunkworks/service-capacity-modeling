@@ -15,18 +15,18 @@ def test_merge_plan():
     left_requirement = CapacityRequirement(
         requirement_type="test",
         core_reference_ghz=2.3,
-        cpu_cores=Interval(low=10, mid=20, high=30, confidence=0.9),
-        mem_gib=Interval(low=20, mid=100, high=200, confidence=0.9),
-        network_mbps=Interval(low=1000, mid=2000, high=3000, confidence=0.9),
-        disk_gib=Interval(low=40, mid=200, high=500, confidence=0.9),
+        cpu_cores=Interval(low=10, mid=20, high=30, confidence=0.98),
+        mem_gib=Interval(low=20, mid=100, high=200, confidence=0.98),
+        network_mbps=Interval(low=1000, mid=2000, high=3000, confidence=0.98),
+        disk_gib=Interval(low=40, mid=200, high=500, confidence=0.98),
     )
     right_requirement = CapacityRequirement(
         requirement_type="test",
         core_reference_ghz=2.3,
-        cpu_cores=Interval(low=10, mid=20, high=30, confidence=0.9),
-        mem_gib=Interval(low=20, mid=100, high=200, confidence=0.9),
-        network_mbps=Interval(low=1000, mid=2000, high=3000, confidence=0.9),
-        disk_gib=Interval(low=40, mid=200, high=500, confidence=0.9),
+        cpu_cores=Interval(low=10, mid=20, high=30, confidence=0.98),
+        mem_gib=Interval(low=20, mid=100, high=200, confidence=0.98),
+        network_mbps=Interval(low=1000, mid=2000, high=3000, confidence=0.98),
+        disk_gib=Interval(low=40, mid=200, high=500, confidence=0.98),
     )
 
     left_instance = shapes.region("us-east-1").instances["r5d.2xlarge"]

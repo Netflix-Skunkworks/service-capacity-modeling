@@ -61,10 +61,10 @@ def test_uncertain_java_app():
         service_tier=1,
         query_pattern=QueryPattern(
             estimated_read_per_second=Interval(
-                low=2_000, mid=30_000, high=60_000, confidence=0.9
+                low=2_000, mid=30_000, high=60_000, confidence=0.98
             ),
             estimated_write_per_second=Interval(
-                low=2_000, mid=30_000, high=60_000, confidence=0.9
+                low=2_000, mid=30_000, high=60_000, confidence=0.98
             ),
         ),
         # Should be ignored

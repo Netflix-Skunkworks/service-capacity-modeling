@@ -2,9 +2,9 @@ from functools import lru_cache
 from typing import Tuple
 
 import numpy as np
-from scipy.optimize import fsolve
+from scipy.optimize import minimize
+from scipy.optimize import OptimizeResult
 from scipy.optimize import root
-from scipy.special import betainc as betaf
 from scipy.special import gammainc as gammaf
 from scipy.stats import beta as beta_dist
 from scipy.stats import gamma as gamma_dist
@@ -13,11 +13,18 @@ from scipy.stats import rv_continuous
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import IntervalModel
 
+# Parameter estimation of various scipy distributions using
+# See https://www.johndcook.com/quantiles_parameters.pdf for
+# background
+
+EPSILON = 0.001
+
+# Gamma distribution G(alpha, beta) with mean alpha * beta
+
 
 def _gamma_fn_from_params(low, mid, high, confidence):
-    assert low <= mid <= high
-
-    confidence = min(confidence, 0.95)
+    assert 0 < low <= mid <= high
+    confidence = min(confidence, 0.99)
     confidence = max(confidence, 0.01)
 
     low_p = 0 + (1 - confidence) / 2.0
@@ -38,22 +45,6 @@ def _gamma_fn_from_params(low, mid, high, confidence):
     return f
 
 
-def _beta_fn_from_params(low, mid, high, confidence):
-    assert low <= mid <= high < 1.0
-
-    confidence = min(confidence, 0.95)
-    confidence = max(confidence, 0.01)
-
-    low_p = 0.0 + (1 - confidence) / 2.0
-    high_p = 1.0 - (1 - confidence) / 2.0
-
-    def f(a):
-        zero = high / low
-        return betaf(a, a / mid - a, high_p) / betaf(a, a / mid - a, low_p) - zero
-
-    return f
-
-
 def _gamma_dist_from_interval(
     interval: Interval, seed: float = 0xCAFE
 ) -> Tuple[float, rv_continuous]:
@@ -68,34 +59,16 @@ def _gamma_dist_from_interval(
     lower = interval.low - minimum
     mean = interval.mid - minimum
 
+    if lower == 0:
+        lower = EPSILON
+
     f = _gamma_fn_from_params(lower, mean, interval.high, interval.confidence)
-    shape = fsolve(f, 2)
+    result = root(f, 2)
+    shape = result.x[0]
 
     dist = gamma_dist(shape, loc=minimum, scale=(mean / shape))
     dist.random_state = np.random.default_rng(seed=seed)
     return (shape, dist)
-
-
-def _beta_dist_from_interval(
-    interval: Interval, seed: float = 0xCAFE
-) -> Tuple[float, rv_continuous]:
-    # If we know cdf(high), cdf(low) and mean (mid) we can use an iterative
-    # solver to find a possible beta fit
-
-    minimum = interval.minimum
-    maximum = interval.maximum
-    scale = maximum - minimum
-
-    lower = (interval.low - minimum) / scale
-    mean = (interval.mid - minimum) / scale
-    upper = (interval.high - minimum) / scale
-
-    f = _beta_fn_from_params(lower, mean, upper, interval.confidence)
-    alpha = root(f, 2).x[0]
-
-    dist = beta_dist(alpha, alpha / mean - alpha, loc=minimum, scale=scale)
-    dist.random_state = np.random.default_rng(seed=seed)
-    return (alpha, dist)
 
 
 # This can be expensive, so cache it
@@ -109,6 +82,60 @@ def gamma_for_interval(interval: Interval, seed: float = 0xCAFE) -> rv_continuou
     # Use the new Generator API instead of RandomState for ~20% speedup
     result.random_state = np.random.default_rng(seed=seed)
     return result
+
+
+# Beta distribution B(alpha, beta) with mean alpha / (alpha + beta)
+
+
+def _beta_cost_fn_from_params(low, mid, high, confidence):
+    assert low <= mid <= high < 1.0
+    assert mid > 0
+
+    # Assume symmetric percentiles were provided
+    confidence = min(confidence, 0.99)
+    confidence = max(confidence, 0.01)
+
+    low_p = 0.0 + (1 - confidence) / 2.0
+    high_p = 1.0 - (1 - confidence) / 2.0
+
+    def cost(alpha):
+        beta = alpha / mid - alpha
+        if alpha == 0 or beta == 0:
+            return float("inf")
+
+        cost = (beta_dist.cdf(low, alpha, beta) - low_p) ** 2
+        cost += (beta_dist.cdf(high, alpha, beta) - high_p) ** 2
+        return cost
+
+    return cost
+
+
+def _beta_dist_from_interval(
+    interval: Interval, seed: float = 0xCAFE
+) -> Tuple[Tuple[float, float, OptimizeResult], rv_continuous]:
+    # If we know cdf(high), cdf(low) and mean (mid) we can use an iterative
+    # solver to find a possible beta fit
+
+    if interval.minimum == interval.maximum:
+        minimum = interval.low - EPSILON
+        maximum = interval.high + EPSILON
+        scale = maximum - minimum
+    else:
+        minimum = interval.minimum
+        maximum = interval.maximum
+        scale = maximum - minimum
+
+    lower = (interval.low - minimum) / scale
+    mean = (interval.mid - minimum) / scale
+    upper = (interval.high - minimum) / scale
+
+    f = _beta_cost_fn_from_params(lower, mean, upper, interval.confidence)
+    result = minimize(f, x0=2, bounds=[(0.1, 40)])
+    alpha = result.x[0]
+
+    dist = beta_dist(alpha, alpha / mean - alpha, loc=minimum, scale=scale)
+    dist.random_state = np.random.default_rng(seed=seed)
+    return (alpha, alpha / mean - alpha, result), dist
 
 
 # This can be expensive, so cache it
