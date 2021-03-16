@@ -1,6 +1,8 @@
 import logging
 import math
 from decimal import Decimal
+from typing import Any
+from typing import Dict
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
@@ -297,16 +299,21 @@ class NflxCassandraCapacityModel(CapacityModel):
         drive: Drive,
         context: RegionContext,
         desires: CapacityDesires,
-        **kwargs,
+        extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
         # Use durabiliy and consistency to compute RF.
-        copies_per_region = _target_rf(desires, kwargs.pop("copies_per_region", None))
-
-        require_local_disks: bool = kwargs.pop("require_local_disks", False)
-        required_cluster_size: Optional[int] = kwargs.pop("required_cluster_size", None)
-        max_rps_to_disk: int = kwargs.pop("max_rps_to_disk", 500)
-        max_regional_size: int = kwargs.pop("max_regional_size", 96)
-        max_local_disk_gib: int = kwargs.pop("max_local_disk_gib", 2048)
+        copies_per_region = _target_rf(
+            desires, extra_model_arguments.get("copies_per_region", None)
+        )
+        require_local_disks: bool = extra_model_arguments.get(
+            "require_local_disks", False
+        )
+        required_cluster_size: Optional[int] = extra_model_arguments.get(
+            "required_cluster_size", None
+        )
+        max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 500)
+        max_regional_size: int = extra_model_arguments.get("max_regional_size", 96)
+        max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 2048)
 
         return _estimate_cassandra_cluster_zonal(
             instance=instance,
@@ -358,7 +365,7 @@ class NflxCassandraCapacityModel(CapacityModel):
         )
 
     @staticmethod
-    def default_desires(user_desires, **kwargs):
+    def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
         acceptable_consistency = set(
             (
                 AccessConsistency.best_effort,
@@ -374,7 +381,9 @@ class NflxCassandraCapacityModel(CapacityModel):
                 )
 
         # Lower RF = less write compute
-        rf = _target_rf(user_desires, kwargs.pop("copies_per_region", None))
+        rf = _target_rf(
+            user_desires, extra_model_arguments.get("copies_per_region", None)
+        )
         if rf < 3:
             rf_write_latency = Interval(low=0.2, mid=0.6, high=2, confidence=0.98)
         else:

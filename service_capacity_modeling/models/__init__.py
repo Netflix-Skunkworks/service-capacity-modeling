@@ -1,3 +1,4 @@
+from typing import Any
 from typing import Dict
 from typing import Optional
 from typing import Sequence
@@ -43,7 +44,7 @@ class CapacityModel:
         drive: Drive,
         context: RegionContext,
         desires: CapacityDesires,
-        **kwargs,
+        extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
         """Given a concrete hardware shape and desires, return a candidate
 
@@ -55,7 +56,7 @@ class CapacityModel:
               of how much CPU/RAM/disk etc ... that is required and
         """
         # quiet pylint
-        (_, _, _, _) = (instance, drive, context, desires)
+        (_, _, _, _, _) = (instance, drive, context, desires, extra_model_arguments)
         return None
 
     @staticmethod
@@ -135,17 +136,22 @@ class CapacityModel:
         return tuple()
 
     @staticmethod
-    def compose_with(user_desires: CapacityDesires, **kwargs) -> Tuple[str, ...]:
+    def compose_with(
+        user_desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
+    ) -> Tuple[str, ...]:
         """Return additional model names to compose with this one
 
         Often used for dependencies.
         """
         # quiet pylint
-        _ = user_desires
+        (_, _) = user_desires, extra_model_arguments
         return tuple()
 
     @staticmethod
-    def default_desires(user_desires: CapacityDesires, **kwargs):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ):
         """Optional defaults to apply given a user desires
 
         Often users do not know what the on-cpu time of their queries
@@ -156,6 +162,8 @@ class CapacityModel:
         This is also a good place to throw ValueError on AccessPattern
         or AccessConsistency that cannot be met.
         """
+        _ = extra_model_arguments
+
         unlikely_consistency_models = (
             AccessConsistency.linearizable,
             AccessConsistency.serializable,

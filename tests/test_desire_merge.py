@@ -23,7 +23,7 @@ user_desires = CapacityDesires(
 
 def test_cassandra_merge():
     cass_defaults = planner.models["org.netflix.cassandra"].default_desires(
-        user_desires
+        user_desires, {}
     )
     merged = user_desires.merge_with(cass_defaults)
 

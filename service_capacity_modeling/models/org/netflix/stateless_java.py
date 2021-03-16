@@ -1,5 +1,6 @@
 import math
 from decimal import Decimal
+from typing import Any
 from typing import Dict
 from typing import Optional
 from typing import Sequence
@@ -125,11 +126,13 @@ class NflxJavaAppCapacityModel(CapacityModel):
         drive: Drive,
         context: RegionContext,
         desires: CapacityDesires,
-        **kwargs,
+        extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
-        failover: bool = kwargs.pop("failover", True)
-        jvm_memory_overhead: float = kwargs.pop("jvm_memory_overhead", 1.2)
-        root_disk_gib: int = kwargs.pop("root_disk_gib", 10)
+        failover: bool = extra_model_arguments.get("failover", True)
+        jvm_memory_overhead: float = extra_model_arguments.get(
+            "jvm_memory_overhead", 1.2
+        )
+        root_disk_gib: int = extra_model_arguments.get("root_disk_gib", 10)
 
         return _estimate_java_app_region(
             instance=instance,
@@ -170,7 +173,7 @@ class NflxJavaAppCapacityModel(CapacityModel):
         return regret
 
     @staticmethod
-    def default_desires(user_desires, **kwargs):
+    def default_desires(user_desires, extra_model_arguments):
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(

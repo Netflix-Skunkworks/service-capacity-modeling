@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import functools
 import logging
+from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import Generator
@@ -250,7 +251,7 @@ class CapacityPlanner:
         region: str,
         desires: CapacityDesires,
         num_results: Optional[int] = None,
-        **model_kwargs,
+        extra_model_arguments: Optional[Dict[str, Any]] = None,
     ) -> Sequence[CapacityPlan]:
         if model_name not in self._models:
             raise ValueError(
@@ -258,15 +259,19 @@ class CapacityPlanner:
                 f"Try {sorted(list(self._models.keys()))}"
             )
 
+        extra_model_arguments = extra_model_arguments or {}
+
         results = []
         composable_models = tuple(
-            self._models[model_name].compose_with(desires, **model_kwargs)
+            self._models[model_name].compose_with(
+                desires, extra_model_arguments=extra_model_arguments
+            )
         )
         models = (model_name,) + composable_models
 
         for model in models:
             desires = desires.merge_with(
-                self._models[model_name].default_desires(desires, **model_kwargs)
+                self._models[model_name].default_desires(desires, extra_model_arguments)
             )
             results.append(
                 self._plan_certain(
@@ -274,7 +279,7 @@ class CapacityPlanner:
                     region=region,
                     desires=desires,
                     num_results=num_results,
-                    **model_kwargs,
+                    extra_model_arguments=extra_model_arguments,
                 )
             )
 
@@ -286,8 +291,9 @@ class CapacityPlanner:
         region: str,
         desires: CapacityDesires,
         num_results: Optional[int] = None,
-        **model_kwargs,
+        extra_model_arguments: Optional[Dict[str, Any]] = None,
     ) -> Sequence[CapacityPlan]:
+        extra_model_arguments = extra_model_arguments or {}
 
         hardware = self._shapes.region(region)
         num_results = num_results or self._default_num_results
@@ -305,7 +311,7 @@ class CapacityPlanner:
                     drive=drive,
                     context=context,
                     desires=desires,
-                    **model_kwargs,
+                    extra_model_arguments=extra_model_arguments,
                 )
                 if plan is not None:
                     plans.append(plan)
@@ -325,8 +331,9 @@ class CapacityPlanner:
         simulations: Optional[int] = None,
         num_results: Optional[int] = None,
         regret_params: Optional[CapacityRegretParameters] = None,
-        **model_kwargs,
+        extra_model_arguments: Optional[Dict[str, Any]] = None,
     ) -> UncertainCapacityPlan:
+        extra_model_arguments = extra_model_arguments or {}
 
         if not all(0 <= p <= 100 for p in percentiles):
             raise ValueError("percentiles must be an integer in the range [0, 100]")
@@ -347,7 +354,9 @@ class CapacityPlanner:
         # We might have to compose this model with others depending on
         # the user requirement
         composable_models = tuple(
-            self._models[model_name].compose_with(desires, **model_kwargs)
+            self._models[model_name].compose_with(
+                desires, extra_model_arguments=extra_model_arguments
+            )
         )
         models = (model_name,) + composable_models
         raw_capacity_plans: List[List[Sequence[CapacityPlan]]] = []
@@ -356,7 +365,9 @@ class CapacityPlanner:
 
         for i, model in enumerate(models):
             merged_desires = desires.merge_with(
-                self._models[model].default_desires(desires, **model_kwargs)
+                self._models[model].default_desires(
+                    desires, extra_model_arguments=extra_model_arguments
+                )
             )
 
             for j, sim_desires in enumerate(model_desires(merged_desires, simulations)):
@@ -365,7 +376,7 @@ class CapacityPlanner:
                     region=region,
                     desires=sim_desires,
                     num_results=1,
-                    **model_kwargs,
+                    extra_model_arguments=extra_model_arguments,
                 )
 
         # Now accumulate across the composed models
@@ -409,7 +420,7 @@ class CapacityPlanner:
                 model_name=model_name,
                 region=region,
                 desires=percentile_inputs[index],
-                **model_kwargs,
+                extra_model_arguments=extra_model_arguments,
             )
 
         result = UncertainCapacityPlan(
@@ -424,7 +435,7 @@ class CapacityPlanner:
                 model_name=model_name,
                 region=region,
                 desires=mean_desires,
-                **model_kwargs,
+                extra_model_arguments=extra_model_arguments,
             ),
             percentiles=percentile_plans,
         )

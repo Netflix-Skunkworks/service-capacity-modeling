@@ -54,7 +54,7 @@ def test_capacity_small_fast():
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=small_but_high_qps,
-            require_local_disks=require_local_disks,
+            extra_model_arguments=dict(require_local_disks=require_local_disks),
         )[0]
         small_result = cap_plan.candidate_clusters.zonal[0]
         # We really should just pay for CPU here
@@ -73,7 +73,7 @@ def test_capacity_high_writes():
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=high_writes,
-        copies_per_region=2,
+        extra_model_arguments={"copies_per_region": 2},
     )[0]
     high_writes_result = cap_plan.candidate_clusters.zonal[0]
     assert high_writes_result.instance.name == "m5.2xlarge"
@@ -88,8 +88,7 @@ def test_capacity_large_footprint():
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=large_footprint,
-        require_local_disks=True,
-        required_cluster_size=16,
+        extra_model_arguments=dict(require_local_disks=True, required_cluster_size=16),
     )[0]
 
     large_footprint_result = cap_plan.candidate_clusters.zonal[0]

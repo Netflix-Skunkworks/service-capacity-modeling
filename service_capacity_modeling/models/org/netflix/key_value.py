@@ -1,3 +1,5 @@
+from typing import Any
+from typing import Dict
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
@@ -23,18 +25,17 @@ class NflxKeyValueCapacityModel(CapacityModel):
         drive: Drive,
         context: RegionContext,
         desires: CapacityDesires,
-        **kwargs,
+        extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
         # KeyValue wants 20GiB root volumes
-        java_root_size = kwargs.pop("root_disk_gib", 20)
+        extra_model_arguments.setdefault("root_disk_gib", 20)
 
         kv_app = nflx_java_app_capacity_model.capacity_plan(
             instance=instance,
             drive=drive,
             context=context,
             desires=desires,
-            root_disk_gib=java_root_size,
-            **kwargs,
+            extra_model_arguments=extra_model_arguments,
         )
         if kv_app is None:
             return None
@@ -52,13 +53,15 @@ class NflxKeyValueCapacityModel(CapacityModel):
         return nflx_java_app_capacity_model.extra_model_arguments()
 
     @staticmethod
-    def compose_with(user_desires: CapacityDesires, **kwargs) -> Tuple[str, ...]:
+    def compose_with(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> Tuple[str, ...]:
         # In the future depending on the user desire we might need EVCache
         # as well, e.g. if the latency SLO is reduced
         return ("org.netflix.cassandra",)
 
     @staticmethod
-    def default_desires(user_desires, **kwargs):
+    def default_desires(user_desires, extra_model_arguments):
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(

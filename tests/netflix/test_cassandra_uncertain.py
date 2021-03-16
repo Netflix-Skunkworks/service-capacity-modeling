@@ -132,8 +132,10 @@ def test_worn_dataset():
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=worn_desire,
-        max_regional_size=200,
-        copies_per_region=2,
+        extra_model_arguments=dict(
+            max_regional_size=200,
+            copies_per_region=2,
+        ),
     )
 
     lr = cap_plan.least_regret[0]
