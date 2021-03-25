@@ -200,7 +200,6 @@
       "ram_gib": 15.57,
       "net_mbps": 1000,
       "drive": {"name": "ephem", "size_gib": 140, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
-      "annual_cost": 1488.6
     },
     "m5d.2xlarge": {
       "name": "m5d.2xlarge",
@@ -209,7 +208,6 @@
       "ram_gib": 31.36,
       "net_mbps": 2000,
       "drive": {"name": "ephem", "size_gib": 280, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
-      "annual_cost": 1488.6
     },
     "m5d.4xlarge": {
       "name": "m5d.4xlarge",
@@ -218,7 +216,6 @@
       "ram_gib": 62.95,
       "net_mbps": 4000,
       "drive": {"name": "ephem", "size_gib": 559, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
-      "annual_cost": 2977.7
     },
     "m5d.8xlarge": {
       "name": "m5d.8xlarge",
@@ -227,7 +224,6 @@
       "ram_gib": 128,
       "net_mbps": 10000,
       "drive": {"name": "ephem", "size_gib": 1120, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
-      "annual_cost": 5955
     },
     "m5dn.xlarge": {
       "name": "m5dn.xlarge",
@@ -236,7 +232,6 @@
       "ram_gib": 15.57,
       "net_mbps": 3125,
       "drive": {"name": "ephem", "size_gib": 140, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
-      "annual_cost": 1488.6
     },
     "m5dn.2xlarge": {
       "name": "m5dn.2xlarge",
@@ -245,7 +240,6 @@
       "ram_gib": 31.36,
       "net_mbps": 6250,
       "drive": {"name": "ephem", "size_gib": 280, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
-      "annual_cost": 1488.6
     },
     "m5dn.4xlarge": {
       "name": "m5dn.4xlarge",
@@ -254,7 +248,6 @@
       "ram_gib": 62.95,
       "net_mbps": 12500,
       "drive": {"name": "ephem", "size_gib": 559, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
-      "annual_cost": 2977.7
     },
     "m5dn.8xlarge": {
       "name": "m5dn.8xlarge",
@@ -263,7 +256,6 @@
       "ram_gib": 128,
       "net_mbps": 25000,
       "drive": {"name": "ephem", "size_gib": 1120, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
-      "annual_cost": 5955
     },
     "r5d.large": {
       "name": "r5d.large",
