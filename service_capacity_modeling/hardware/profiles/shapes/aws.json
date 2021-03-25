@@ -42,7 +42,7 @@
       "drive": null
     },
     "r5.xlarge": {
-      "name": "r5.2xlarge",
+      "name": "r5.xlarge",
       "cpu": 4,
       "cpu_ghz": 3.1,
       "ram_gib": 31.65,
@@ -71,6 +71,46 @@
       "cpu_ghz": 3.1,
       "ram_gib": 256,
       "net_mbps": 10000,
+      "drive": null
+    },
+    "r5n.large": {
+      "name": "r5n.large",
+      "cpu": 2,
+      "cpu_ghz": 3.1,
+      "ram_gib": 15.71,
+      "net_mbps": 1562,
+      "drive": null
+    },
+    "r5n.xlarge": {
+      "name": "r5n.xlarge",
+      "cpu": 4,
+      "cpu_ghz": 3.1,
+      "ram_gib": 31.65,
+      "net_mbps": 3125,
+      "drive": null
+    },
+    "r5n.2xlarge": {
+      "name": "r5n.2xlarge",
+      "cpu": 8,
+      "cpu_ghz": 3.1,
+      "ram_gib": 63.62,
+      "net_mbps": 6250,
+      "drive": null
+    },
+    "r5n.4xlarge": {
+      "name": "r5n.4xlarge",
+      "cpu": 16,
+      "cpu_ghz": 3.1,
+      "ram_gib": 128,
+      "net_mbps": 12500,
+      "drive": null
+    },
+    "r5n.8xlarge": {
+      "name": "r5n.8xlarge",
+      "cpu": 32,
+      "cpu_ghz": 3.1,
+      "ram_gib": 256,
+      "net_mbps": 25000,
       "drive": null
     },
     "i3.xlarge": {
