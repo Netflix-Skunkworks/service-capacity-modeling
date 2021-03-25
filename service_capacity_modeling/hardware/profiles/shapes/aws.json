@@ -33,6 +33,38 @@
       "net_mbps": 10000,
       "drive": null
     },
+    "m5n.xlarge": {
+      "name": "m5n.xlarge",
+      "cpu": 4,
+      "cpu_ghz": 3.1,
+      "ram_gib": 15.57,
+      "net_mbps": 3125,
+      "drive": null
+    },
+    "m5n.2xlarge": {
+      "name": "m5n.2xlarge",
+      "cpu": 8,
+      "cpu_ghz": 3.1,
+      "ram_gib": 31.36,
+      "net_mbps": 6250,
+      "drive": null
+    },
+    "m5n.4xlarge": {
+      "name": "m5n.4xlarge",
+      "cpu": 16,
+      "cpu_ghz": 3.1,
+      "ram_gib": 62.95,
+      "net_mbps": 12500,
+      "drive": null
+    },
+    "m5n.8xlarge": {
+      "name": "m5n.8xlarge",
+      "cpu": 32,
+      "cpu_ghz": 3.1,
+      "ram_gib": 128,
+      "net_mbps": 25000,
+      "drive": null
+    },
     "r5.large": {
       "name": "r5.large",
       "cpu": 2,
