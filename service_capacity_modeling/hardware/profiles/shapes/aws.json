@@ -157,13 +157,29 @@
       "drive": {"name": "ephem", "size_gib": 1120, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
       "annual_cost": 5955
     },
+    "r5d.large": {
+      "name": "r5d.large",
+      "cpu": 2,
+      "cpu_ghz": 3.1,
+      "ram_gib": 15.74,
+      "net_mbps": 500,
+      "drive": {"name": "ephem", "size_gib": 70, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+    },
+    "r5d.xlarge": {
+      "name": "r5d.xlarge",
+      "cpu": 4,
+      "cpu_ghz": 3.1,
+      "ram_gib": 31.7,
+      "net_mbps": 1000,
+      "drive": {"name": "ephem", "size_gib": 140, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+    },
     "r5d.2xlarge": {
       "name": "r5d.2xlarge",
       "cpu": 8,
       "cpu_ghz": 3.1,
       "ram_gib": 63.62,
       "net_mbps": 2000,
-      "drive": {"name": "ephem", "size_gib": 280, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.16, "maximum_value":2, "confidence":0.9}}
+      "drive": {"name": "ephem", "size_gib": 280, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
     },
     "r5d.4xlarge": {
       "name": "r5d.4xlarge",
@@ -171,7 +187,7 @@
       "cpu_ghz": 3.1,
       "ram_gib": 128,
       "net_mbps": 4000,
-      "drive": {"name": "ephem", "size_gib": 559, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.16, "maximum_value":2, "confidence":0.9}}
+      "drive": {"name": "ephem", "size_gib": 559, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
     },
     "r5d.8xlarge": {
       "name": "r5d.8xlarge",
@@ -179,7 +195,7 @@
       "cpu_ghz": 3.1,
       "ram_gib": 256,
       "net_mbps": 10000,
-      "drive": {"name": "ephem", "size_gib": 1120, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.16, "maximum_value":2, "confidence":0.9}}
+      "drive": {"name": "ephem", "size_gib": 1120, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
     }
   },
   "drives": {
