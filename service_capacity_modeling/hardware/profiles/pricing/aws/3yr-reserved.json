@@ -29,11 +29,20 @@
       "m5d.2xlarge":  {"annual_cost": 1488.6},
       "m5d.4xlarge":  {"annual_cost": 2977.7},
       "m5d.8xlarge":  {"annual_cost": 5955},
+      "m5dn.xlarge":  {"annual_cost": 806.3},
+      "m5dn.2xlarge": {"annual_cost": 1612.6},
+      "m5dn.4xlarge": {"annual_cost": 3225.3},
+      "m5dn.8xlarge": {"annual_cost": 6450.3},
       "r5d.large":    {"annual_cost": 474},
       "r5d.xlarge":   {"annual_cost": 948},
       "r5d.2xlarge":  {"annual_cost": 1897},
       "r5d.4xlarge":  {"annual_cost": 3794},
-      "r5d.8xlarge":  {"annual_cost": 7588}
+      "r5d.8xlarge":  {"annual_cost": 7588},
+      "r5dn.large":    {"annual_cost": 518.3},
+      "r5dn.xlarge":   {"annual_cost": 1037},
+      "r5dn.2xlarge":  {"annual_cost": 2073.6},
+      "r5dn.4xlarge":  {"annual_cost": 4147.3},
+      "r5dn.8xlarge":  {"annual_cost": 8295}
     },
     "drives": {
       "gp2": {"annual_cost_per_gib": 1.2}
