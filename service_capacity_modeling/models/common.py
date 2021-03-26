@@ -173,7 +173,7 @@ def compute_stateful_zone(
     cost = count * instance.annual_cost
 
     attached_drives = []
-    if instance.drive is None:
+    if instance.drive is None and required_disk_space(needed_disk_gib) > 0:
         # If we don't have disks attach GP2 in at 50% space overprovision
         # because we can only (as of 2020-10-31) scale EBS once per 6 hours
 
