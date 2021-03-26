@@ -1,5 +1,7 @@
 # Service Capacity Modeling
 
+[![Build Status](https://travis-ci.org/Netflix-Skunkworks/service-capacity-modeling.svg?branch=main)](https://travis-ci.org/Netflix-Skunkworks/service-capacity-modeling)
+
 A generic toolkit for modeling capacity requirements in the cloud. Pricing
 information included in this repository are public prices.
 
