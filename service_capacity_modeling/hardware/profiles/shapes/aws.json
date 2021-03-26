@@ -151,7 +151,10 @@
       "cpu_ghz": 2.3,
       "ram_gib": 30.65,
       "net_mbps": 1000,
-      "drive": {"name": "ephem", "size_gib": 885, "read_io_latency_ms": {"minimum_value":0.09, "low":0.10, "mid":0.16, "high":0.20, "maximum_value":3, "confidence":0.9, "single_tenant": false}}}
+      "drive": {
+        "name": "ephem", "size_gib": 885,
+        "read_io_latency_ms": {"minimum_value":0.09, "low":0.10, "mid":0.16, "high":0.20, "maximum_value":3, "confidence":0.9, "single_tenant": false}
+      }
     },
     "i3.2xlarge": {
       "name": "i3.2xlarge",
@@ -159,7 +162,10 @@
       "cpu_ghz": 2.3,
       "ram_gib": 61.39,
       "net_mbps": 2000,
-      "drive": {"name": "ephem", "size_gib": 1900, "read_io_latency_ms": {"minimum_value":0.09, "low":0.10, "mid":0.16, "high":0.20, "maximum_value":3, "confidence":0.9}}
+      "drive": {
+        "name": "ephem", "size_gib": 1900,
+        "read_io_latency_ms": {"minimum_value":0.09, "low":0.10, "mid":0.16, "high":0.20, "maximum_value":3, "confidence":0.9}
+      }
     },
     "i3.4xlarge": {
       "name": "i3.4xlarge",
@@ -167,7 +173,10 @@
       "cpu_ghz": 2.3,
       "ram_gib": 122.86,
       "net_mbps": 4000,
-      "drive": {"name": "ephem", "size_gib": 3800, "read_io_latency_ms": {"minimum_value":0.09, "low":0.10, "mid":0.16, "high":0.20, "maximum_value":3, "confidence":0.9}}
+      "drive": {
+        "name": "ephem", "size_gib": 3800,
+        "read_io_latency_ms": {"minimum_value":0.09, "low":0.10, "mid":0.16, "high":0.20, "maximum_value":3, "confidence":0.9}
+      }
     },
     "i3en.xlarge": {
       "name": "i3en.xlarge",
@@ -175,7 +184,9 @@
       "cpu_ghz": 3.1,
       "ram_gib": 31.7,
       "net_mbps": 4000,
-      "drive": {"name": "ephem", "size_gib": 2300, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+      "drive": {
+        "name": "ephem", "size_gib": 2300,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
     },
     "i3en.2xlarge": {
       "name": "i3en.2xlarge",
@@ -183,7 +194,9 @@
       "cpu_ghz": 3.1,
       "ram_gib": 63.62,
       "net_mbps": 8000,
-      "drive": {"name": "ephem", "size_gib": 4600, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+      "drive": {
+        "name": "ephem", "size_gib": 4600,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
     },
     "i3en.3xlarge": {
       "name": "i3en.3xlarge",
@@ -199,7 +212,12 @@
       "cpu_ghz": 3.1,
       "ram_gib": 15.57,
       "net_mbps": 1000,
-      "drive": {"name": "ephem", "size_gib": 140, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
+      "drive": {
+        "name": "ephem", "size_gib": 140,
+        "read_io_latency_ms": {
+          "minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false
+        }
+      }
     },
     "m5d.2xlarge": {
       "name": "m5d.2xlarge",
@@ -207,7 +225,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 31.36,
       "net_mbps": 2000,
-      "drive": {"name": "ephem", "size_gib": 280, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
+      "drive": {
+        "name": "ephem", "size_gib": 280,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+      }
     },
     "m5d.4xlarge": {
       "name": "m5d.4xlarge",
@@ -215,7 +236,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 62.95,
       "net_mbps": 4000,
-      "drive": {"name": "ephem", "size_gib": 559, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
+      "drive": {
+        "name": "ephem", "size_gib": 559,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+      }
     },
     "m5d.8xlarge": {
       "name": "m5d.8xlarge",
@@ -223,7 +247,9 @@
       "cpu_ghz": 3.1,
       "ram_gib": 128,
       "net_mbps": 10000,
-      "drive": {"name": "ephem", "size_gib": 1120, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
+      "drive": {
+        "name": "ephem", "size_gib": 1120,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
     },
     "m5dn.xlarge": {
       "name": "m5dn.xlarge",
@@ -231,7 +257,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 15.57,
       "net_mbps": 3125,
-      "drive": {"name": "ephem", "size_gib": 140, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
+      "drive": {
+        "name": "ephem", "size_gib": 140,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+      }
     },
     "m5dn.2xlarge": {
       "name": "m5dn.2xlarge",
@@ -239,7 +268,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 31.36,
       "net_mbps": 6250,
-      "drive": {"name": "ephem", "size_gib": 280, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
+      "drive": {
+        "name": "ephem", "size_gib": 280,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+      }
     },
     "m5dn.4xlarge": {
       "name": "m5dn.4xlarge",
@@ -247,7 +279,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 62.95,
       "net_mbps": 12500,
-      "drive": {"name": "ephem", "size_gib": 559, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
+      "drive": {
+        "name": "ephem", "size_gib": 559,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+      }
     },
     "m5dn.8xlarge": {
       "name": "m5dn.8xlarge",
@@ -255,7 +290,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 128,
       "net_mbps": 25000,
-      "drive": {"name": "ephem", "size_gib": 1120, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}},
+      "drive": {
+        "name": "ephem", "size_gib": 1120,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+      }
     },
     "r5d.large": {
       "name": "r5d.large",
@@ -263,7 +301,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 15.74,
       "net_mbps": 500,
-      "drive": {"name": "ephem", "size_gib": 70, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+      "drive": {
+        "name": "ephem", "size_gib": 70,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+      }
     },
     "r5d.xlarge": {
       "name": "r5d.xlarge",
@@ -271,7 +312,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 31.7,
       "net_mbps": 1000,
-      "drive": {"name": "ephem", "size_gib": 140, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+      "drive": {
+        "name": "ephem", "size_gib": 140,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+      }
     },
     "r5d.2xlarge": {
       "name": "r5d.2xlarge",
@@ -279,7 +323,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 63.62,
       "net_mbps": 2000,
-      "drive": {"name": "ephem", "size_gib": 280, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+      "drive": {
+        "name": "ephem", "size_gib": 280,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+      }
     },
     "r5d.4xlarge": {
       "name": "r5d.4xlarge",
@@ -287,7 +334,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 128,
       "net_mbps": 4000,
-      "drive": {"name": "ephem", "size_gib": 559, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+      "drive": {
+        "name": "ephem", "size_gib": 559,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+      }
     },
     "r5d.8xlarge": {
       "name": "r5d.8xlarge",
@@ -295,7 +345,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 256,
       "net_mbps": 10000,
-      "drive": {"name": "ephem", "size_gib": 1120, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+      "drive": {
+        "name": "ephem", "size_gib": 1120,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+      }
     },
     "r5dn.large": {
       "name": "r5dn.large",
@@ -303,7 +356,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 15.74,
       "net_mbps": 1562,
-      "drive": {"name": "ephem", "size_gib": 70, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+      "drive": {
+        "name": "ephem", "size_gib": 70,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+      }
     },
     "r5dn.xlarge": {
       "name": "r5dn.xlarge",
@@ -311,7 +367,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 31.7,
       "net_mbps": 3125,
-      "drive": {"name": "ephem", "size_gib": 140, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+      "drive": {
+        "name": "ephem", "size_gib": 140,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+      }
     },
     "r5dn.2xlarge": {
       "name": "r5dn.2xlarge",
@@ -319,7 +378,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 63.62,
       "net_mbps": 6250,
-      "drive": {"name": "ephem", "size_gib": 280, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+      "drive": {
+        "name": "ephem", "size_gib": 280,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+      }
     },
     "r5dn.4xlarge": {
       "name": "r5dn.4xlarge",
@@ -327,7 +389,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 128,
       "net_mbps": 12500,
-      "drive": {"name": "ephem", "size_gib": 559, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+      "drive": {
+        "name": "ephem", "size_gib": 559,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+      }
     },
     "r5dn.8xlarge": {
       "name": "r5dn.8xlarge",
@@ -335,7 +400,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 256,
       "net_mbps": 25000,
-      "drive": {"name": "ephem", "size_gib": 1120, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+      "drive": {
+        "name": "ephem", "size_gib": 1120,
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+      }
     }
   },
   "drives": {
