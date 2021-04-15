@@ -206,6 +206,19 @@
       "net_mbps": 12000,
       "drive": {"name": "ephem", "size_gib": 6819, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.16, "maximum_value":2, "confidence":0.9}}
     },
+    "m5d.large": {
+      "name": "m5d.large",
+      "cpu": 2,
+      "cpu_ghz": 3.1,
+      "ram_gib": 8,
+      "net_mbps": 500,
+      "drive": {
+        "name": "ephem", "size_gib": 75,
+        "read_io_latency_ms": {
+          "minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false
+        }
+      }
+    },
     "m5d.xlarge": {
       "name": "m5d.xlarge",
       "cpu": 4,
