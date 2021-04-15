@@ -7,6 +7,7 @@ from typing import Tuple
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
@@ -25,6 +26,51 @@ from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 
 
+def _zk_requirement(
+    instance: Instance,
+    desires: CapacityDesires,
+    heap_overhead: float,
+    disk_overhead: float,
+) -> Optional[CapacityRequirement]:
+
+    # We only deploy Zookeeper to fast ephemeral storage
+    # Due to fsync latency to the disk.
+    if instance.drive is None:
+        return None
+
+    # Zookeeper can only really scale vertically, so let's determine if
+    # this instance type meets our memory and CPU requirements and if
+    # it does we make either a 3 node or 5 node cluster based on tier
+
+    needed_cores = sqrt_staffed_cores(desires)
+    needed_network_mbps = simple_network_mbps(desires) * 2
+    # ZK stores all data on heap, say with ~25% overhead
+    needed_memory = (
+        desires.data_shape.estimated_state_size_gib.mid * heap_overhead
+        + desires.data_shape.reserved_instance_app_mem_gib
+        + desires.data_shape.reserved_instance_system_mem_gib
+    )
+    # To take into account snapshots, we might want to make this larger
+    needed_disk = needed_memory * disk_overhead
+
+    if (
+        instance.cpu < needed_cores
+        or instance.ram_gib < needed_memory
+        or instance.drive.size_gib < needed_disk
+        or instance.net_mbps < needed_network_mbps
+    ):
+        return None
+
+    return CapacityRequirement(
+        requirement_type="zk-zonal",
+        core_reference_ghz=desires.core_reference_ghz,
+        cpu_cores=certain_int(needed_cores),
+        mem_gib=certain_float(needed_memory),
+        disk_gib=certain_float(needed_disk),
+        network_mbps=certain_float(needed_network_mbps),
+    )
+
+
 class NflxZookeeperCapacityModel(CapacityModel):
     @staticmethod
     def capacity_plan(
@@ -34,11 +80,6 @@ class NflxZookeeperCapacityModel(CapacityModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
-
-        # We only deploy Zookeeper to fast ephemeral storage
-        # Due to fsync latency to the disk.
-        if instance.drive is None:
-            return None
 
         # We only deploy Zookeeper to 3 zone regions at this time
         if context.zones_in_region != 3:
@@ -50,42 +91,22 @@ class NflxZookeeperCapacityModel(CapacityModel):
         if desires.service_tier == 0 and approving_zk_member is None:
             return None
 
-        # Zookeeper can only really scale vertically, so let's determine if
-        # this instance type meets our memory and CPU requirements and if
-        # it does we make either a 3 node or 5 node cluster based on tier
+        heap_overhead = extra_model_arguments.get("heap_overhead", 1.25)
+        disk_overhead = extra_model_arguments.get("snapshot_overhead", 4)
+        req = _zk_requirement(instance, desires, heap_overhead, disk_overhead)
 
-        needed_cores = sqrt_staffed_cores(desires)
-        needed_network_mbps = simple_network_mbps(desires) * 2
-        # ZK stores all data on heap, say with ~25% overhead
-        needed_memory = desires.data_shape.estimated_state_size_gib.mid * 1.25
-        # To take into account snapshots, we might want to make this larger
-        needed_disk = needed_memory * 2
-
-        if (
-            instance.cpu < needed_cores
-            or instance.ram_gib < needed_memory
-            or instance.drive.size_gib < needed_disk
-        ):
+        # This instance doesn't meet the requirement
+        if req is None:
             return None
 
         # We have a viable instance, now either make 3 or 5 depending on tier
-
         def soln(n) -> ZoneClusterCapacity:
             return ZoneClusterCapacity(
-                cluster_type="stateful-cluster",
+                cluster_type="zk-zonal",
                 count=n,
                 instance=instance,
                 annual_cost=(n * instance.annual_cost),
             )
-
-        req = CapacityRequirement(
-            requirement_type="zk-zonal",
-            core_reference_ghz=desires.core_reference_ghz,
-            cpu_cores=certain_int(needed_cores),
-            mem_gib=certain_float(needed_memory),
-            disk_gib=certain_float(needed_disk),
-            network_mbps=certain_float(needed_network_mbps),
-        )
 
         if desires.service_tier == 0:
             requirements = [req] * context.zones_in_region
@@ -107,11 +128,54 @@ class NflxZookeeperCapacityModel(CapacityModel):
 
     @staticmethod
     def description():
-        return "Netflix Zookeeper Coordination App Model"
+        return "Netflix Zookeeper Coordination Cluster Model"
+
+    @staticmethod
+    def regret(
+        regret_params: CapacityRegretParameters,
+        optimal_plan: CapacityPlan,
+        proposed_plan: CapacityPlan,
+    ) -> Dict[str, float]:
+        regret = super(NflxZookeeperCapacityModel, NflxZookeeperCapacityModel).regret(
+            regret_params, optimal_plan, proposed_plan
+        )
+
+        # Zookeeper regrets not having enough memory for a dataset. If the
+        # requirements _might_ require_ more memory and we don't have it
+        # that is regretful to us
+        optimal_mem = sum(req.mem_gib.mid for req in optimal_plan.requirements.zonal)
+        optimal_mem += sum(
+            req.mem_gib.mid for req in optimal_plan.requirements.regional
+        )
+
+        plan_mem = sum(req.mem_gib.mid for req in proposed_plan.requirements.zonal)
+        plan_mem += sum(req.mem_gib.mid for req in proposed_plan.requirements.regional)
+
+        # Running out of memory is particularly costly because it would
+        # cause an outage that is hard to get out of
+        if optimal_mem > plan_mem:
+            mem_regret = (
+                (optimal_mem - plan_mem) * regret_params.under_provision_mem_cost
+            ) ** regret_params.mem_exponent
+        else:
+            mem_regret = 0
+
+        regret["mem_regret"] = mem_regret
+        return regret
 
     @staticmethod
     def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
         return (
+            (
+                "heap_overhead",
+                "float = 1.25",
+                "Amount of heap overhead per byte stored",
+            ),
+            (
+                "snapshot_overhead",
+                "float = 4",
+                "Amount of disk overhead to keep for snapshots",
+            ),
             (
                 "zk_approver",
                 "str = None",
@@ -150,8 +214,13 @@ class NflxZookeeperCapacityModel(CapacityModel):
                 ),
             ),
             data_shape=DataShape(
-                # Assume 4 GiB heaps
-                reserved_instance_app_mem_gib=4
+                # We autosize our heap to the dataset, so don't account for
+                # that here.
+                reserved_instance_app_mem_gib=0,
+                # Technically the number of connections to ZK matters for
+                # this, but let's just say it's 1 GiB and be ok with that
+                # (kernel, pipes, bolt, etc ...)
+                reserved_instance_system_mem_gib=1,
             ),
         )
 

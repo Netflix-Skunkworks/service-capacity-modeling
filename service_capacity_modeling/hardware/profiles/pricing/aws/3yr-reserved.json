@@ -25,6 +25,7 @@
       "i3en.xlarge":  {"annual_cost": 1499.6},
       "i3en.2xlarge": {"annual_cost": 2999},
       "i3en.3xlarge": {"annual_cost": 4498},
+      "m5d.large":    {"annual_cost": 372.2},
       "m5d.xlarge":   {"annual_cost": 744.3},
       "m5d.2xlarge":  {"annual_cost": 1488.6},
       "m5d.4xlarge":  {"annual_cost": 2977.7},
