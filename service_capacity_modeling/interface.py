@@ -171,6 +171,10 @@ class Instance(BaseModel):
     def family(self):
         return self.name.split(self.family_separator)[0]
 
+    @property
+    def size(self):
+        return self.name.split(self.family_separator)[1]
+
 
 class Service(BaseModel):
     """Represents a cloud service, such as a blob store (S3) or
