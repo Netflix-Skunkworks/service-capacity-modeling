@@ -75,6 +75,7 @@ def test_zk_tier_1():
         "r5d.large",
     )
 
+
 def test_zk_tier_1_10gb_state():
     tier_1 = CapacityDesires(
         service_tier=1,

@@ -523,6 +523,12 @@ class CapacityRegretParameters(BaseModel):
     under_provision_cost: float = 1.25
     cost_exponent: float = 1.2
 
-    # For every GiB we are underprovisioned by default cost $1 / year
+    # For every GiB we are underprovisioned by default cost $1 / year / GiB
     under_provision_disk_cost: float = 1.1
     disk_exponent = 1.05
+
+    # For every GiB we are underprovisioned on memory (for datastores
+    # storing data in RAM), regret under_provisioning slightly more than disk
+    # *NOTE*: the default model does not take this into account
+    under_provision_mem_cost: float = 1.5
+    mem_exponent = 1.1

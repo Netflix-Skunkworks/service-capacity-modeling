@@ -210,10 +210,10 @@
       "name": "m5d.large",
       "cpu": 2,
       "cpu_ghz": 3.1,
-      "ram_gib": 8,
+      "ram_gib": 7.48,
       "net_mbps": 500,
       "drive": {
-        "name": "ephem", "size_gib": 75,
+        "name": "ephem", "size_gib": 70,
         "read_io_latency_ms": {
           "minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false
         }
