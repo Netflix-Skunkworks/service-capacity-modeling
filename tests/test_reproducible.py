@@ -35,3 +35,32 @@ def test_repeated_plans():
     a = [hash(x) for x in results]
     # We should end up with consistent results
     assert all(i == a[0] for i in a)
+
+
+def test_multiple_options():
+    result = planner.plan(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=uncertain_mid,
+        num_results=4,
+        simulations=128,
+    )
+    least_regret = result.least_regret
+    # With only 128 simulations we only have 3 instance families
+    assert len(least_regret) == 3
+    families = [lr.candidate_clusters.zonal[0].instance.family for lr in least_regret]
+    assert set(families) == set(("r5", "m5d", "m5"))
+
+    # With 1024 simulations we get a 4th instance family (i3)
+    result = planner.plan(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=uncertain_mid,
+        num_results=4,
+        simulations=1024,
+    )
+    least_regret = result.least_regret
+    assert len(least_regret) == 4
+
+    families = [lr.candidate_clusters.zonal[0].instance.family for lr in least_regret]
+    assert set(families) == set(("r5", "i3", "m5d", "m5"))
