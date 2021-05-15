@@ -38,8 +38,8 @@ def _estimate_evcache_requirement(
     instance: Instance,
     desires: CapacityDesires,
     working_set: float,
+    copies_per_region: int,
     zones_per_region: int = 3,
-    copies_per_region: int = 2,
 ) -> CapacityRequirement:
     """Estimate the capacity required for one zone given a regional desire
 
@@ -49,16 +49,16 @@ def _estimate_evcache_requirement(
     # EVCache can run at full CPU utilization
     needed_cores = sqrt_staffed_cores(desires)
 
-    # (FIXME): Need to figure out the right network approach here ...
-    # Keep half of the bandwidth available for cache warmer
-    needed_network_mbps = simple_network_mbps(desires) * 2
+    # (Arun): Keep 20% of available bandwidth for cache warmer
+    needed_network_mbps = simple_network_mbps(desires) * 1.25
 
     needed_disk = round(
         desires.data_shape.estimated_state_size_gib.mid * copies_per_region,
         2,
     )
 
-    # (FIXME): Is this the right statement?
+    # (Arun): As of 2021 we are using ephemerals exclusively and do not
+    # use cloud drives
     if instance.drive is None:
         # We can't currently store data on cloud drives, but we can put the
         # dataset into memory!
@@ -110,11 +110,16 @@ def _estimate_evcache_cluster_zonal(
     zones_per_region: int = 3,
     copies_per_region: int = 3,
     max_local_disk_gib: int = 2048,
-    max_regional_size: int = 288,
+    max_regional_size: int = 999,
+    min_instance_memory_gib: int = 12,
 ) -> Optional[CapacityPlan]:
 
-    # evcache doesn't like to deploy on single cpu instances
+    # EVCache doesn't like to deploy on single CPU instances
     if instance.cpu < 2:
+        return None
+
+    # EVCache doesn't like to deploy to instances with < 7 GiB of ram
+    if instance.ram_gib < min_instance_memory_gib:
         return None
 
     # Based on the disk latency and the read latency SLOs we adjust our
@@ -140,17 +145,29 @@ def _estimate_evcache_cluster_zonal(
         copies_per_region=copies_per_region,
     )
 
-    # evcache clusters should aim to be at least 2 nodes per zone to start
-    # out with for tier 0 or tier 1. This gives us more room to "up-color"]
-    # clusters.
-    min_count = 0
-    if desires.service_tier <= 1:
-        min_count = 2
-
+    # Account for sidecars and base system memory
     base_mem = (
         desires.data_shape.reserved_instance_app_mem_gib
         + desires.data_shape.reserved_instance_system_mem_gib
     )
+
+    # (Arun) We currently reserve extra memory for the OS as instances get
+    # larger to account for additional overhead. Note that the
+    # reserved_instance_system_mem_gib has a base of 1 GiB OSMEM so this
+    # just represents the variable component
+    def reserve_memory(instance_mem_gib):
+        # (Joey) From the chart it appears to be about a 3% overhead for
+        # OS memory.
+        variable_os = int(instance_mem_gib * 0.03)
+        return base_mem + variable_os
+
+    requirement.context["osmem"] = reserve_memory(instance.ram_gib)
+
+    # EVCache clusters aim to be at least 2 nodes per zone to start
+    # out with for tier 0
+    min_count = 0
+    if desires.service_tier < 1:
+        min_count = 2
 
     cluster = compute_stateful_zone(
         instance=instance,
@@ -167,7 +184,7 @@ def _estimate_evcache_cluster_zonal(
         # EVCache clusters should be balanced per zone
         cluster_size=lambda x: next_n(x, zones_per_region),
         min_count=max(min_count, 0),
-        # EVCache takes away memory from evcache
+        # Sidecars and Variable OS Memory
         reserve_memory=lambda x: base_mem,
         core_reference_ghz=requirement.core_reference_ghz,
     )
@@ -211,11 +228,23 @@ class NflxEVCacheCapacityModel(CapacityModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
-        # TODO: Use read requirements to compute RF.
-        copies_per_region: int = extra_model_arguments.get("copies_per_region", 2)
-        max_regional_size: int = extra_model_arguments.get("max_regional_size", 288)
+        # (Arun) EVCache defaults to RF=3 for tier 0 and tier 1
+        default_copies = 3
+        if desires.tier > 1:
+            default_copies = 2
+        copies_per_region: int = extra_model_arguments.get(
+            "copies_per_region", default_copies
+        )
+        max_regional_size: int = extra_model_arguments.get("max_regional_size", 999)
         # Very large nodes are hard to cache warm
-        max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 2048)
+        max_local_disk_gib: int = extra_model_arguments.get(
+            "max_local_disk_gib", 1024 * 6
+        )
+        # Very small nodes are hard to run memcache on
+        # (Arun) We do not deploy to less than 12 GiB
+        min_instance_memory_gib: int = extra_model_arguments.get(
+            "min_instance_memory_gib", 12
+        )
 
         return _estimate_evcache_cluster_zonal(
             instance=instance,
@@ -225,6 +254,7 @@ class NflxEVCacheCapacityModel(CapacityModel):
             copies_per_region=copies_per_region,
             max_regional_size=max_regional_size,
             max_local_disk_gib=max_local_disk_gib,
+            min_instance_memory_gib=min_instance_memory_gib,
         )
 
     @staticmethod
@@ -236,19 +266,24 @@ class NflxEVCacheCapacityModel(CapacityModel):
         return (
             (
                 "copies_per_region",
-                "int = 2",
-                "How many copies of the data will exist e.g. RF=2. If unsupplied"
-                " this will be deduced from durability and consistency desires",
+                "int = 3",
+                "How many copies of the data will exist e.g. RF=3. If unsupplied"
+                " this will be deduced from tier",
             ),
             (
                 "max_regional_size",
-                "int = 288",
+                "int = 999",
                 "What is the maximum size of a cluster in this region",
             ),
             (
                 "max_local_disk_gib",
-                "int = 2048",
+                "int = 6144",
                 "The maximum amount of data we store per machine",
+            ),
+            (
+                "min_instance_memory_gib",
+                "int = 12",
+                "The minimum amount of instance memory to allow",
             ),
         )
 
@@ -299,14 +334,17 @@ class NflxEVCacheCapacityModel(CapacityModel):
                         confidence=0.98,
                     ),
                 ),
-                # Most latency sensitive evcache clusters are in the
-                # < 100GiB range
                 data_shape=DataShape(
+                    # (Arun): Most latency sensitive < 600GiB
                     estimated_state_size_gib=Interval(
-                        low=10, mid=20, high=100, confidence=0.98
+                        low=10, mid=100, high=600, confidence=0.98
                     ),
-                    # account for the evcar sidecar here
+                    # (Arun): The management sidecar takes 512 MiB
                     reserved_instance_app_mem_gib=0.5,
+                    # account for the memcached connection memory
+                    # and system requirements.
+                    # (Arun) We currently use 1 GiB for connection memory
+                    reserved_instance_system_mem_gib=(1 + 2),
                 ),
             )
         else:
@@ -348,12 +386,15 @@ class NflxEVCacheCapacityModel(CapacityModel):
                     ),
                 ),
                 data_shape=DataShape(
-                    # Typical ML models
+                    # Typical ML models go up to TiB
                     estimated_state_size_gib=Interval(
                         low=10, mid=100, high=1000, confidence=0.98
                     ),
-                    # We dynamically allocate the memcache JVM memory in the
-                    # plan but account for the Priam sidecar here
+                    # (Arun): The management sidecar takes 512 MiB
                     reserved_instance_app_mem_gib=0.5,
+                    # account for the memcached connection memory
+                    # and system requirements.
+                    # (Arun) We currently use 1 GiB base for connection memory
+                    reserved_instance_system_mem_gib=(1 + 2),
                 ),
             )
