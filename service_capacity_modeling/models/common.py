@@ -338,7 +338,11 @@ def merge_requirements(
     for req in list(left_req.regional) + list(right_req.regional):
         merged_regional.append(req)
 
-    return Requirements(zonal=merged_zonal, regional=merged_regional)
+    merged_regrets = set(left_req.regrets) | set(right_req.regrets)
+
+    return Requirements(
+        zonal=merged_zonal, regional=merged_regional, regrets=tuple(merged_regrets)
+    )
 
 
 def merge_plan(

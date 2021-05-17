@@ -14,9 +14,11 @@ from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
+from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import FixedInterval
+from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
@@ -40,7 +42,7 @@ def _estimate_evcache_requirement(
     working_set: float,
     copies_per_region: int,
     zones_per_region: int = 3,
-) -> CapacityRequirement:
+) -> Tuple[CapacityRequirement, Tuple[str, ...]]:
     """Estimate the capacity required for one zone given a regional desire
 
     The input desires should be the **regional** desire, and this function will
@@ -57,6 +59,7 @@ def _estimate_evcache_requirement(
         2,
     )
 
+    regrets: Tuple[str, ...] = ("spend", "mem")
     # (Arun): As of 2021 we are using ephemerals exclusively and do not
     # use cloud drives
     if instance.drive is None:
@@ -68,6 +71,7 @@ def _estimate_evcache_requirement(
         # We can store data on fast ephems (reducing the working set that must
         # be kept in RAM)
         needed_memory = working_set * needed_disk
+        regrets = ("spend", "disk", "mem")
 
     # Now convert to per zone
     needed_cores = needed_cores // zones_per_region
@@ -81,17 +85,20 @@ def _estimate_evcache_requirement(
         working_set,
     )
 
-    return CapacityRequirement(
-        requirement_type="evcache-zonal",
-        core_reference_ghz=desires.core_reference_ghz,
-        cpu_cores=certain_int(needed_cores),
-        mem_gib=certain_float(needed_memory),
-        disk_gib=certain_float(needed_disk),
-        network_mbps=certain_float(needed_network_mbps),
-        context={
-            "working_set": working_set,
-            "replication_factor": copies_per_region,
-        },
+    return (
+        CapacityRequirement(
+            requirement_type="evcache-zonal",
+            core_reference_ghz=desires.core_reference_ghz,
+            cpu_cores=certain_int(needed_cores),
+            mem_gib=certain_float(needed_memory),
+            disk_gib=certain_float(needed_disk),
+            network_mbps=certain_float(needed_network_mbps),
+            context={
+                "working_set": working_set,
+                "replication_factor": copies_per_region,
+            },
+        ),
+        regrets,
     )
 
 
@@ -137,7 +144,7 @@ def _estimate_evcache_cluster_zonal(
         target_percentile=0.99,
     ).mid
 
-    requirement = _estimate_evcache_requirement(
+    requirement, regrets = _estimate_evcache_requirement(
         instance=instance,
         desires=desires,
         working_set=working_set,
@@ -214,7 +221,9 @@ def _estimate_evcache_cluster_zonal(
     )
 
     return CapacityPlan(
-        requirements=Requirements(zonal=[requirement] * zones_per_region),
+        requirements=Requirements(
+            zonal=[requirement] * zones_per_region, regrets=regrets
+        ),
         candidate_clusters=clusters,
     )
 
@@ -230,7 +239,7 @@ class NflxEVCacheCapacityModel(CapacityModel):
     ) -> Optional[CapacityPlan]:
         # (Arun) EVCache defaults to RF=3 for tier 0 and tier 1
         default_copies = 3
-        if desires.tier > 1:
+        if desires.service_tier > 1:
             default_copies = 2
         copies_per_region: int = extra_model_arguments.get(
             "copies_per_region", default_copies
@@ -290,7 +299,13 @@ class NflxEVCacheCapacityModel(CapacityModel):
     @staticmethod
     def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
         acceptable_consistency = set((AccessConsistency.best_effort,))
-        for key, value in user_desires.query_pattern.access_consistency:
+
+        access_consistency = (
+            user_desires.dict(exclude_unset=True)
+            .get("query_pattern", {})
+            .get("access_consistency", {})
+        )
+        for key, value in access_consistency:
             if value.target_consistency not in acceptable_consistency:
                 raise ValueError(
                     f"evcache can only provide {acceptable_consistency} access."
@@ -301,6 +316,14 @@ class NflxEVCacheCapacityModel(CapacityModel):
             return CapacityDesires(
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.latency,
+                    access_consistency=GlobalConsistency(
+                        same_region=Consistency(
+                            target_consistency=AccessConsistency.best_effort
+                        ),
+                        cross_region=Consistency(
+                            target_consistency=AccessConsistency.best_effort
+                        ),
+                    ),
                     estimated_mean_read_size_bytes=Interval(
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),
@@ -352,6 +375,14 @@ class NflxEVCacheCapacityModel(CapacityModel):
                 # (FIXME): Need to pair with memcache folks on the exact values
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.throughput,
+                    access_consistency=GlobalConsistency(
+                        same_region=Consistency(
+                            target_consistency=AccessConsistency.best_effort
+                        ),
+                        cross_region=Consistency(
+                            target_consistency=AccessConsistency.best_effort
+                        ),
+                    ),
                     estimated_mean_read_size_bytes=Interval(
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),
@@ -398,3 +429,6 @@ class NflxEVCacheCapacityModel(CapacityModel):
                     reserved_instance_system_mem_gib=(1 + 2),
                 ),
             )
+
+
+nflx_evcache_capacity_model = NflxEVCacheCapacityModel()

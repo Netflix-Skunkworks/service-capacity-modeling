@@ -7,7 +7,6 @@ from typing import Tuple
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
-from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
@@ -123,45 +122,17 @@ class NflxZookeeperCapacityModel(CapacityModel):
         )
 
         return CapacityPlan(
-            requirements=Requirements(zonal=requirements), candidate_clusters=clusters
+            requirements=Requirements(
+                zonal=requirements,
+                # Zookeeper does not want to run out of disk or memory
+                regrets=("spend", "disk", "mem"),
+            ),
+            candidate_clusters=clusters,
         )
 
     @staticmethod
     def description():
         return "Netflix Zookeeper Coordination Cluster Model"
-
-    @staticmethod
-    def regret(
-        regret_params: CapacityRegretParameters,
-        optimal_plan: CapacityPlan,
-        proposed_plan: CapacityPlan,
-    ) -> Dict[str, float]:
-        regret = super(NflxZookeeperCapacityModel, NflxZookeeperCapacityModel).regret(
-            regret_params, optimal_plan, proposed_plan
-        )
-
-        # Zookeeper regrets not having enough memory for a dataset. If the
-        # requirements _might_ require_ more memory and we don't have it
-        # that is regretful to us
-        optimal_mem = sum(req.mem_gib.mid for req in optimal_plan.requirements.zonal)
-        optimal_mem += sum(
-            req.mem_gib.mid for req in optimal_plan.requirements.regional
-        )
-
-        plan_mem = sum(req.mem_gib.mid for req in proposed_plan.requirements.zonal)
-        plan_mem += sum(req.mem_gib.mid for req in proposed_plan.requirements.regional)
-
-        # Running out of memory is particularly costly because it would
-        # cause an outage that is hard to get out of
-        if optimal_mem > plan_mem:
-            mem_regret = (
-                (optimal_mem - plan_mem) * regret_params.under_provision_mem_cost
-            ) ** regret_params.mem_exponent
-        else:
-            mem_regret = 0
-
-        regret["mem_regret"] = mem_regret
-        return regret
 
     @staticmethod
     def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
