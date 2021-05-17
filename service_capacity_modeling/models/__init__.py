@@ -17,6 +17,8 @@ from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 
+__common_regrets__ = frozenset(("spend", "disk", "mem"))
+
 
 class CapacityModel:
     """Stateless interface for defining a capacity model
@@ -82,37 +84,71 @@ class CapacityModel:
         develop more complex regret functions you can debug why clusters are
         or are not being chosen
         """
+        regrets = {"spend": 0.0, "disk": 0.0, "mem": 0.0}
+
         optimal_cost = float(optimal_plan.candidate_clusters.total_annual_cost)
         plan_cost = float(proposed_plan.candidate_clusters.total_annual_cost)
+        if "spend" in optimal_plan.requirements.regrets:
+            if plan_cost >= optimal_cost:
+                regrets["spend"] = (
+                    (plan_cost - optimal_cost) * regret_params.spend.over_provision_cost
+                ) ** regret_params.spend.exponent
+            else:
+                regrets["spend"] = (
+                    (optimal_cost - plan_cost)
+                    * regret_params.spend.under_provision_cost
+                ) ** regret_params.spend.exponent
 
-        if plan_cost >= optimal_cost:
-            cost_regret = (
-                (plan_cost - optimal_cost) * regret_params.over_provision_cost
-            ) ** regret_params.cost_exponent
-        else:
-            cost_regret = (
-                (optimal_cost - plan_cost) * regret_params.under_provision_cost
-            ) ** regret_params.cost_exponent
+        if "disk" in optimal_plan.requirements.regrets:
+            optimal_disk = sum(
+                req.disk_gib.mid for req in optimal_plan.requirements.zonal
+            )
+            optimal_disk += sum(
+                req.disk_gib.mid for req in optimal_plan.requirements.regional
+            )
 
-        optimal_disk = sum(req.disk_gib.mid for req in optimal_plan.requirements.zonal)
-        optimal_disk += sum(
-            req.disk_gib.mid for req in optimal_plan.requirements.regional
-        )
+            plan_disk = sum(
+                req.disk_gib.mid for req in proposed_plan.requirements.zonal
+            )
+            plan_disk += sum(
+                req.disk_gib.mid for req in proposed_plan.requirements.regional
+            )
 
-        plan_disk = sum(req.disk_gib.mid for req in proposed_plan.requirements.zonal)
-        plan_disk += sum(
-            req.disk_gib.mid for req in proposed_plan.requirements.regional
-        )
+            # We regret not having the disk space for a dataset, but do not
+            # regret lacking disk space
+            if optimal_disk > plan_disk:
+                regrets["disk"] = (
+                    (optimal_disk - plan_disk) * regret_params.disk.under_provision_cost
+                ) ** regret_params.disk.exponent
 
-        # We regret not having the disk space for a dataset
-        if optimal_disk > plan_disk:
-            disk_regret = (
-                (optimal_disk - plan_disk) * regret_params.under_provision_disk_cost
-            ) ** regret_params.disk_exponent
-        else:
-            disk_regret = 0
+        if "mem" in optimal_plan.requirements.regrets:
+            optimal_mem = sum(
+                req.mem_gib.mid for req in optimal_plan.requirements.zonal
+            )
+            optimal_mem += sum(
+                req.mem_gib.mid for req in optimal_plan.requirements.regional
+            )
 
-        return {"cost": cost_regret, "disk_space": disk_regret}
+            plan_mem = sum(req.mem_gib.mid for req in proposed_plan.requirements.zonal)
+            plan_mem += sum(
+                req.mem_gib.mid for req in proposed_plan.requirements.regional
+            )
+
+            # Running out of memory is particularly costly because it often
+            # can cause an outage that is hard to get out of. We do not regret
+            # too much memory
+            if optimal_mem > plan_mem:
+                regrets["mem"] = (
+                    (optimal_mem - plan_mem) * regret_params.mem.under_provision_cost
+                ) ** regret_params.mem.exponent
+
+        for regret in optimal_plan.requirements.regrets:
+            if regret not in __common_regrets__:
+                regrets["regret"] = optimal_plan.requirements.regret(
+                    name=regret, optimal_plan=optimal_plan, proposed_plan=proposed_plan
+                )
+
+        return regrets
 
     @staticmethod
     def description() -> str:

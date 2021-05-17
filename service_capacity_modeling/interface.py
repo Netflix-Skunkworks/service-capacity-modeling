@@ -460,6 +460,7 @@ class CapacityRequirement(BaseModel):
     mem_gib: Interval = certain_int(0)
     network_mbps: Interval = certain_int(0)
     disk_gib: Interval = certain_int(0)
+
     context: Dict = dict()
 
 
@@ -498,6 +499,18 @@ class Requirements(BaseModel):
     zonal: Sequence[CapacityRequirement] = list()
     regional: Sequence[CapacityRequirement] = list()
 
+    # Commonly a model regrets "spend", lack of "disk" space and sometimes
+    # lack of "mem"ory. Default options are ["cost", "disk", "mem"]
+    regrets: Sequence[str] = ("spend", "disk")
+
+    # Used by models to have custom regret components
+    # pylint: disable=unused-argument
+    @staticmethod
+    def regret(
+        name: str, optimal_plan: "CapacityPlan", proposed_plan: "CapacityPlan"
+    ) -> float:
+        return 0.0
+
 
 class Clusters(BaseModel):
     total_annual_cost: Decimal = Decimal(0)
@@ -518,17 +531,31 @@ class UncertainCapacityPlan(BaseModel):
     percentiles: Dict[int, Sequence[CapacityPlan]]
 
 
+# Parameters to cost functions of the form
+# let y = the optimal value
+# let x = the proposed value
+# let cost = (x - y) ^ exponent
+class Regret(BaseModel):
+    over_provision_cost: float = 0
+    under_provision_cost: float = 0
+    exponent: float = 1.0
+
+
 class CapacityRegretParameters(BaseModel):
-    over_provision_cost: float = 1
-    under_provision_cost: float = 1.25
-    cost_exponent: float = 1.2
+    # How much do we regret spending too much or too little money
+    spend: Regret = Regret(
+        over_provision_cost=1, under_provision_cost=1.25, exponent=1.2
+    )
 
     # For every GiB we are underprovisioned by default cost $1 / year / GiB
-    under_provision_disk_cost: float = 1.1
-    disk_exponent = 1.05
+    disk: Regret = Regret(
+        over_provision_cost=0, under_provision_cost=1.1, exponent=1.05
+    )
 
     # For every GiB we are underprovisioned on memory (for datastores
     # storing data in RAM), regret under_provisioning slightly more than disk
-    # *NOTE*: the default model does not take this into account
-    under_provision_mem_cost: float = 1.5
-    mem_exponent = 1.1
+    mem: Regret = Regret(over_provision_cost=0, under_provision_cost=1.5, exponent=1.1)
+
+    # Any additional metric we want to regret from the models
+    # just have to be returned in the requirement
+    extra: Dict[str, Regret] = {}
