@@ -26,13 +26,19 @@ logger = logging.getLogger(__name__)
 # Which is related to the probability that a user queues. On low tier clusters
 # (aka critical clusters) we want a lower probability of queueing
 def _QOS(tier: int) -> float:
-    # TODO: put the math in here for why we pick these
+    # Halfin-Whitt delay function
+    # P(queue) ~= [1 + B * normal_cdf(B) / normal_pdf(B)] ^ -1
+    #
+    # P(queue) ~= 0.01
     if tier == 0:
-        return 2
+        return 2.375
+    # P(queue) ~= 0.05
     elif tier == 1:
-        return 1.5
+        return 1.761
+    # P(queue) ~= 0.2
     elif tier == 2:
-        return 1.2
+        return 1.16
+    # P(queue) ~= 0.29 ~= 0.3
     else:
         return 1
 
