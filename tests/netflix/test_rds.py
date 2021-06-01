@@ -50,7 +50,7 @@ large_footprint = CapacityDesires(
     service_tier=1,
     query_pattern=QueryPattern(
         estimated_read_per_second=certain_int(1000),
-        estimated_write_per_second=certain_int(1000),
+        estimated_write_per_second=certain_int(800),
         estimated_mean_read_latency_ms=certain_float(20),
         estimated_mean_write_latency_ms=certain_float(20),
     ),
@@ -115,7 +115,6 @@ def test_large_footprint():
         region="us-east-1",
         desires=large_footprint,
     )
-    print("result", cap_plan, "\n")
     assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.8xlarge"
     assert len(cap_plan[0].candidate_clusters.regional) == 2  # has replica
 
