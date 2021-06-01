@@ -1,5 +1,6 @@
+import logging
 import math
-from typing import Any, FrozenSet
+from typing import Any
 from typing import Dict
 from typing import Optional
 from typing import Sequence
@@ -22,17 +23,11 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.models import CapacityModel
-from service_capacity_modeling.models.common import compute_rds_region
+from service_capacity_modeling.models.common import gp2_gib_for_io
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 
-valid_rds_instance_types: FrozenSet[str] = frozenset([
-    "m5.large", "m5.xlarge", "m5.2xlarge", "m5.4xlarge", "m5.8xlarge", "m5.12xlrage", "m5.16xlarge", "m5.24xlarge",
-    "m6g.large", "m6g.xlarge", "m6g.2xlarge", "m6g.4xlarge", "m6g.8xlarge", "m6g.12xlrage", "m6g.16xlarge",
-    "r5.large", "r5.xlarge", "r5.2xlarge", "r5.4xlarge", "r5.8xlarge", "r5.12xlrage", "r5.16xlarge", "r5.24xlarge",
-    "r6g.large", "r6g.xlarge", "r6g.2xlarge", "r6g.4xlarge", "r6g.8xlarge", "r6g.12xlrage", "r6g.16xlarge"
-])
-
+logger = logging.getLogger(__name__)
 
 def _estimate_rds_requirement(
         instance: Instance,
@@ -86,6 +81,62 @@ def _rds_required_disk_ios(disk_size_gib: int, db_type: str, btree_fan_out: int 
     pages = max(1, disk_size_kb // default_block_size)
     return math.log(pages, btree_fan_out)
 
+def _compute_rds_region(
+        instance: Instance,
+        drive: Drive,
+        needed_cores: int,
+        needed_disk_gib: int,
+        needed_memory_gib: int,
+        needed_network_mbps: float,
+        required_disk_ios,
+        required_disk_space,
+        core_reference_ghz: float,
+) -> Optional[RegionClusterCapacity]:
+    """Computes a regional cluster of a RDS service
+
+    Basically just verifies that a single instance of a passed in instance type can support required cpu, memory
+    and network since we can't scale RDS horizontally by adding more instances like Cassandra. Count of instance
+    is always 1
+    """
+
+    needed_cores = math.ceil(
+        max(1, needed_cores // (instance.cpu_ghz / core_reference_ghz))
+    )
+
+    # We can't scale RDS horizontally by adding more nodes like we can for Cassandra so single instance must
+    # meet the whole cpu, disk, memory and network bandwidth requirement
+    if (instance.cpu < needed_cores or
+            instance.ram_gib < needed_memory_gib or
+            instance.net_mbps < needed_network_mbps):
+        return None
+
+    # calculate storage cost
+    attached_drives = []
+    space_gib = max(1, required_disk_space(needed_disk_gib))
+    io_gib = gp2_gib_for_io(required_disk_ios(needed_disk_gib))
+    rds_gib = max(io_gib, space_gib)
+    attached_drive = drive.copy()
+    attached_drive.size_gib = rds_gib
+    attached_drives.append(attached_drive)
+    total_annual_cost = instance.annual_cost + attached_drive.annual_cost
+
+    logger.debug(
+        "For (cpu, memory_gib, disk_gib) = (%s, %s, %s) need ( %s, %s, %s)",
+        needed_cores,
+        needed_memory_gib,
+        needed_disk_gib,
+        instance.name,
+        attached_drives,
+        total_annual_cost,
+    )
+
+    return RegionClusterCapacity(
+        cluster_type="rds-cluster",
+        count=1,
+        instance=instance,
+        attached_drives=attached_drives,
+        annual_cost=total_annual_cost
+    )
 
 def _estimate_rds_regional(
         instance: Instance,
@@ -93,7 +144,9 @@ def _estimate_rds_regional(
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
 ) -> Optional[CapacityPlan]:
-    if instance.name not in valid_rds_instance_types:
+
+    instance_family = instance.family
+    if instance_family != "m5" and instance_family != "r5":
         return None
 
     if drive.name != "gp2":
@@ -107,7 +160,7 @@ def _estimate_rds_regional(
     requirement = _estimate_rds_requirement(instance, desires, db_type)
     rps = desires.query_pattern.estimated_read_per_second.mid
 
-    cluster: Optional[RegionClusterCapacity] = compute_rds_region(
+    cluster: Optional[RegionClusterCapacity] = _compute_rds_region(
         instance=instance,
         drive=drive,
         needed_cores=int(requirement.cpu_cores.mid),

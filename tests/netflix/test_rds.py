@@ -1,3 +1,5 @@
+import json
+
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import CapacityDesires, Interval
 from service_capacity_modeling.interface import DataShape
@@ -55,11 +57,11 @@ large_footprint = CapacityDesires(
     data_shape=DataShape(
         estimated_state_size_gib=certain_int(800),
         estimated_working_set_percent=Interval(
-                    low=0.05,
-                    mid=0.30,
-                    high=0.50,
-                    confidence=0.8
-                )
+            low=0.05,
+            mid=0.30,
+            high=0.50,
+            confidence=0.8
+        )
     ),
 )
 
@@ -127,3 +129,103 @@ def test_tier_3():
     assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.4xlarge"
     assert len(cap_plan[0].candidate_clusters.regional) == 1  # no replica
     print(cap_plan[1].candidate_clusters.regional[0].instance.name)
+
+
+def test_cap_plan():
+    desire_json = """{
+      "deploy_desires": {
+        "capacity": {
+          "data_shape": {
+            "estimated_state_size_gib": {
+              "confidence": 0.98,
+              "high": 1000,
+              "low": 10,
+              "mid": 100
+            }
+          },
+          "query_pattern": {
+            "access_pattern": "latency",
+            "estimated_read_per_second": {
+              "confidence": 0.98,
+              "high": 10000,
+              "low": 100,
+              "mid": 1000
+            },
+            "estimated_write_per_second": {
+              "confidence": 0.98,
+              "high": 1000,
+              "low": 10,
+              "mid": 100
+            }
+          }
+        },
+        "config": {
+          "cdc.enable": true,
+          "context": "Test",
+          "context-memo": "test",
+          "nflx-sensitivedata": true,
+          "rds.action": "create-new",
+          "rds.engine": "mysql"
+        },
+        "consumers": [
+          {
+            "group": "read-write",
+            "type": "email",
+            "value": "saroskar@netflix.com"
+          }
+        ],
+        "locations": [
+          {
+            "account": "persistence_test",
+            "regions": [
+              "us-east-1"
+            ]
+          }
+        ],
+        "owners": [
+          {
+            "group": "owner",
+            "type": "google-group",
+            "value": "dabp@netflix.com"
+          },
+          {
+            "group": "owner",
+            "type": "pager",
+            "value": "PR06TV6"
+          },
+          {
+            "group": "owner",
+            "type": "slack",
+            "value": "data-gateway-help"
+          },
+          {
+            "group": "owner",
+            "type": "email",
+            "value": "saroskar@netflix.com"
+          }
+        ],
+        "service_tier": 1,
+        "version_set": {
+          "base": {
+            "kind": "branch",
+            "value": "release/rds"
+          },
+          "config": {
+            "kind": "branch",
+            "value": "release/rds"
+          }
+        }
+      }
+    }"""
+    desire = json.loads(desire_json)
+    capacity = desire['deploy_desires']['capacity']
+    print(capacity)
+    my_desire = CapacityDesires(service_tier=desire["deploy_desires"]["service_tier"],
+                                query_pattern=capacity["query_pattern"],
+                                data_shape=capacity["data_shape"])
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.rds",
+        region="us-east-1",
+        desires=my_desire,
+    )
+    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "m5.8xlarge"

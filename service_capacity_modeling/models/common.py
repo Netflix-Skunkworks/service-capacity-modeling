@@ -116,64 +116,6 @@ def compute_stateless_region(
     )
 
 
-def compute_rds_region(
-        instance: Instance,
-        drive: Drive,
-        needed_cores: int,
-        needed_disk_gib: int,
-        needed_memory_gib: int,
-        needed_network_mbps: float,
-        required_disk_ios,
-        required_disk_space,
-        core_reference_ghz: float,
-) -> Optional[RegionClusterCapacity]:
-    """Computes a regional cluster of a RDS service
-
-    Basically just verifies that a single instance of a passed in instance type can support required cpu, memory
-    and network since we can't scale RDS horizontally by adding more instances like Cassandra. Count of instance
-    is always 1
-    """
-
-    needed_cores = math.ceil(
-        max(1, needed_cores // (instance.cpu_ghz / core_reference_ghz))
-    )
-
-    # We can't scale RDS horizontally by adding more nodes like we can for Cassandra so single instance must
-    # meet the whole cpu, disk, memory and network bandwidth requirement
-    if (instance.cpu < needed_cores or
-            instance.ram_gib < needed_memory_gib or
-            instance.net_mbps < needed_network_mbps):
-        return None
-
-    # calculate storage cost
-    attached_drives = []
-    space_gib = max(1, required_disk_space(needed_disk_gib))
-    io_gib = _gp2_gib_for_io(required_disk_ios(needed_disk_gib))
-    rds_gib = max(io_gib, space_gib)
-    attached_drive = drive.copy()
-    attached_drive.size_gib = rds_gib
-    attached_drives.append(attached_drive)
-    total_annual_cost = instance.annual_cost + attached_drive.annual_cost
-
-    logger.debug(
-        "For (cpu, memory_gib, disk_gib) = (%s, %s, %s) need ( %s, %s, %s)",
-        needed_cores,
-        needed_memory_gib,
-        needed_disk_gib,
-        instance.name,
-        attached_drives,
-        total_annual_cost,
-    )
-
-    return RegionClusterCapacity(
-        cluster_type="rds-cluster",
-        count=1,
-        instance=instance,
-        attached_drives=attached_drives,
-        annual_cost=total_annual_cost
-    )
-
-
 # pylint: disable=too-many-locals
 def compute_stateful_zone(
         instance: Instance,
@@ -236,7 +178,7 @@ def compute_stateful_zone(
         # Note that ebs is provisioned _per node_ and must be chosen for
         # the max of space and IOS
         space_gib = max(1, (needed_disk_gib * 2) // count)
-        io_gib = _gp2_gib_for_io(required_disk_ios(needed_disk_gib // count))
+        io_gib = gp2_gib_for_io(required_disk_ios(needed_disk_gib // count))
 
         # Provision EBS in increments of 200 GiB
         ebs_gib = utils.next_n(max(1, max(io_gib, space_gib)), n=200)
@@ -269,7 +211,7 @@ def compute_stateful_zone(
 
 
 # AWS GP2 gives 3 IOS / gb stored.
-def _gp2_gib_for_io(read_ios) -> int:
+def gp2_gib_for_io(read_ios) -> int:
     return int(max(1, read_ios // 3))
 
 
