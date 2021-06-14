@@ -29,35 +29,39 @@ from service_capacity_modeling.models.common import sqrt_staffed_cores
 
 logger = logging.getLogger(__name__)
 
+
 def _estimate_rds_requirement(
         instance: Instance,
         desires: CapacityDesires,
         db_type: str
 ) -> CapacityRequirement:
-    """Estimate the capacity required for one region given a regional desire. Unlike Cassandra RDS instances are
-    deployed per region, not zone.
-    The input desires should be the **regional** desire, and this function will return the regional capacity requirement
+    """Estimate the capacity required for one region given a regional desire. Unlike
+    Cassandra RDS instances are deployed per region, not zone. The input desires
+    should be the **regional** desire, and this function will return the regional
+    capacity requirement
     """
 
     if db_type == "postgres":
         needed_cores = sqrt_staffed_cores(desires) * 1.2  # 20% head room for VACUUM
     else:
-        needed_cores = sqrt_staffed_cores(desires) * 1.1  # Unscientific guess!
+        needed_cores = sqrt_staffed_cores(desires) * 1.1  # Just a guess!
 
     needed_cores = math.ceil(
         max(1, needed_cores // (instance.cpu_ghz / desires.core_reference_ghz))
     )
 
-    needed_network_mbps = simple_network_mbps(desires) * 1.2  # 20% head room For replication, backups etc.
-
+    # 20% head room For replication, backups etc.
+    needed_network_mbps = simple_network_mbps(desires) * 1.2
     needed_disk = round(desires.data_shape.estimated_state_size_gib.mid, 2)
 
-    if desires.data_shape.estimated_working_set_percent and desires.data_shape.estimated_working_set_percent.mid:
+    if desires.data_shape.estimated_working_set_percent and \
+            desires.data_shape.estimated_working_set_percent.mid:
         working_set_percent = desires.data_shape.estimated_working_set_percent.mid
     else:
         working_set_percent = 0.10
 
-    needed_memory = (desires.data_shape.estimated_state_size_gib.mid * working_set_percent)
+    needed_memory = (
+                desires.data_shape.estimated_state_size_gib.mid * working_set_percent)
 
     return CapacityRequirement(
         requirement_type="rds-regional",
@@ -69,8 +73,8 @@ def _estimate_rds_requirement(
     )
 
 
-# MySQL default block size is 16KiB, PostGreSQL is 8KiB
-# Number of reads for B-Tree are given by log of total pages to the base of B-Tree fan out factor
+# MySQL default block size is 16KiB, PostGreSQL is 8KiB Number of reads for B-Tree
+# are given by log of total pages to the base of B-Tree fan out factor
 def _rds_required_disk_ios(disk_size_gib: int, db_type: str, btree_fan_out: int = 100):
     disk_size_kb = disk_size_gib * 1024 * 1024
     if db_type == "postgres":
@@ -80,6 +84,7 @@ def _rds_required_disk_ios(disk_size_gib: int, db_type: str, btree_fan_out: int 
 
     pages = max(1, disk_size_kb // default_block_size)
     return math.log(pages, btree_fan_out)
+
 
 def _compute_rds_region(
         instance: Instance,
@@ -94,17 +99,18 @@ def _compute_rds_region(
 ) -> Optional[RegionClusterCapacity]:
     """Computes a regional cluster of a RDS service
 
-    Basically just verifies that a single instance of a passed in instance type can support required cpu, memory
-    and network since we can't scale RDS horizontally by adding more instances like Cassandra. Count of instance
-    is always 1
+    Basically just verifies that a single instance of a passed in instance type can
+    support required cpu, memory and network since we can't scale RDS horizontally by
+    adding more instances like Cassandra. Count of instance is always 1
     """
 
     needed_cores = math.ceil(
         max(1, needed_cores // (instance.cpu_ghz / core_reference_ghz))
     )
 
-    # We can't scale RDS horizontally by adding more nodes like we can for Cassandra so single instance must
-    # meet the whole cpu, disk, memory and network bandwidth requirement
+    # We can't scale RDS horizontally by adding more nodes like we can for Cassandra
+    # so single instance must meet the whole cpu, disk, memory and network bandwidth
+    # requirement
     if (instance.cpu < needed_cores or
             instance.ram_gib < needed_memory_gib or
             instance.net_mbps < needed_network_mbps):
@@ -138,13 +144,13 @@ def _compute_rds_region(
         annual_cost=total_annual_cost
     )
 
+
 def _estimate_rds_regional(
         instance: Instance,
         drive: Drive,
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
 ) -> Optional[CapacityPlan]:
-
     instance_family = instance.family
     if instance_family != "m5" and instance_family != "r5":
         return None
@@ -167,7 +173,8 @@ def _estimate_rds_regional(
         needed_disk_gib=int(requirement.disk_gib.mid),
         needed_memory_gib=int(requirement.mem_gib.mid),
         needed_network_mbps=requirement.network_mbps.mid,
-        required_disk_ios=lambda x: _rds_required_disk_ios(x, db_type) * math.ceil(0.1 * rps),
+        required_disk_ios=lambda x: _rds_required_disk_ios(x, db_type) * math.ceil(
+            0.1 * rps),
         required_disk_space=lambda x: x * 1.2,  # Unscientific random guess!
         core_reference_ghz=requirement.core_reference_ghz,
     )
@@ -183,7 +190,7 @@ def _estimate_rds_regional(
     clusters = Clusters(
         total_annual_cost=round(cluster.annual_cost * replicas, 2),
         zonal=list(),
-        regional=[cluster] * replicas,
+        regional=[cluster],
     )
 
     return CapacityPlan(
@@ -231,14 +238,16 @@ class NflxRDSCapacityModel(CapacityModel):
     def default_desires(user_desires, extra_model_arguments):
         return CapacityDesires(
             query_pattern=QueryPattern(
-                access_pattern=AccessPattern.latency,  # can't really make latency/throughput trade-offs with RDS
+                access_pattern=AccessPattern.latency,
+                # can't really make latency/throughput trade-offs with RDS
                 estimated_mean_read_size_bytes=Interval(
                     low=128, mid=1024, high=65536, confidence=0.90
                 ),
                 estimated_mean_write_size_bytes=Interval(
                     low=64, mid=512, high=2048, confidence=0.90
                 ),
-                # probably closer to CRDB than Cassandra. Query by PK in MySQL takes total of ~300 ms end to end
+                # probably closer to CRDB than Cassandra. Query by PK in MySQL takes
+                # total of ~300 ms end to end
                 estimated_mean_read_latency_ms=Interval(
                     low=5, mid=30, high=150, confidence=0.90
                 ),

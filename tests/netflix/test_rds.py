@@ -96,7 +96,6 @@ def test_small_footprint():
         desires=small_footprint,
     )
     assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.xlarge"
-    assert len(cap_plan[0].candidate_clusters.regional) == 2  # has replica
 
 
 def test_medium_footprint():
@@ -106,7 +105,6 @@ def test_medium_footprint():
         desires=mid_footprint
     )
     assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.8xlarge"
-    assert len(cap_plan[0].candidate_clusters.regional) == 2  # has replica
 
 
 def test_large_footprint():
@@ -116,7 +114,6 @@ def test_large_footprint():
         desires=large_footprint,
     )
     assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.8xlarge"
-    assert len(cap_plan[0].candidate_clusters.regional) == 2  # has replica
 
 
 def test_tier_3():
@@ -126,7 +123,6 @@ def test_tier_3():
         desires=tier_3,
     )
     assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.4xlarge"
-    assert len(cap_plan[0].candidate_clusters.regional) == 1  # no replica
     print(cap_plan[1].candidate_clusters.regional[0].instance.name)
 
 
