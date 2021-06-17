@@ -43,7 +43,7 @@ def test_multiple_options():
         region="us-east-1",
         desires=uncertain_mid,
         num_results=4,
-        simulations=128,
+        simulations=24,
     )
     least_regret = result.least_regret
     # With only 128 simulations we only have 3 instance families
@@ -51,7 +51,7 @@ def test_multiple_options():
     families = [lr.candidate_clusters.zonal[0].instance.family for lr in least_regret]
     assert set(families) == set(("r5", "m5d", "m5"))
 
-    # With 1024 simulations we get a 4th instance family (i3)
+    # With 1024 simulations we get a 4th instance family (i3en)
     result = planner.plan(
         model_name="org.netflix.cassandra",
         region="us-east-1",
@@ -63,4 +63,4 @@ def test_multiple_options():
     assert len(least_regret) == 4
 
     families = [lr.candidate_clusters.zonal[0].instance.family for lr in least_regret]
-    assert set(families) == set(("r5", "i3", "m5d", "m5"))
+    assert set(families) == set(("r5", "i3en", "m5d", "m5"))

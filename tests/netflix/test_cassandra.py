@@ -76,9 +76,11 @@ def test_capacity_high_writes():
         extra_model_arguments={"copies_per_region": 2},
     )[0]
     high_writes_result = cap_plan.candidate_clusters.zonal[0]
-    assert high_writes_result.instance.name == "m5.2xlarge"
+    assert high_writes_result.instance.family == "m5"
     assert high_writes_result.count > 4
-    assert high_writes_result.instance.cpu * high_writes_result.count <= 128
+
+    num_cpus = high_writes_result.instance.cpu * high_writes_result.count
+    assert 32 < num_cpus <= 128
     assert high_writes_result.attached_drives[0].size_gib >= 400
     assert cap_plan.candidate_clusters.total_annual_cost < 40_000
 
