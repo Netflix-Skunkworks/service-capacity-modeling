@@ -40,12 +40,12 @@ def test_uncertain_planning():
     )
     lr = mid_plan.least_regret[0]
     lr_cluster = lr.candidate_clusters.zonal[0]
-    assert 12 <= lr_cluster.count * lr_cluster.instance.cpu <= 64
+    assert 8 <= lr_cluster.count * lr_cluster.instance.cpu <= 64
     assert 5_000 <= lr.candidate_clusters.total_annual_cost < 40_000
 
     sr = mid_plan.least_regret[1]
     sr_cluster = sr.candidate_clusters.zonal[0]
-    assert 12 <= sr_cluster.count * sr_cluster.instance.cpu <= 64
+    assert 8 <= sr_cluster.count * sr_cluster.instance.cpu <= 64
     assert 5_000 <= sr.candidate_clusters.total_annual_cost < 40_000
 
     tiny_plan = planner.plan(
@@ -55,8 +55,8 @@ def test_uncertain_planning():
     )
     lr = tiny_plan.least_regret[0]
     lr_cluster = lr.candidate_clusters.zonal[0]
-    assert 4 < lr_cluster.count * lr_cluster.instance.cpu < 16
-    assert 2_000 < lr.candidate_clusters.total_annual_cost < 8_000
+    assert 2 <= lr_cluster.count * lr_cluster.instance.cpu < 16
+    assert 1_000 < lr.candidate_clusters.total_annual_cost < 6_000
 
 
 def test_increasing_qps_simple():
@@ -96,7 +96,7 @@ def test_increasing_qps_simple():
         )
 
     # We should generally want cheap CPUs
-    assert all(r[0] in ("m5d", "m5", "i3") for r in result)
+    assert all(r[0] in ("r5", "m5d", "m5", "i3") for r in result)
 
     # Should have more capacity as requirement increases
     x = [r[1] for r in result]

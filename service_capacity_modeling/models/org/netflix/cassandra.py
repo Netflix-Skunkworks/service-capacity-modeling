@@ -134,8 +134,8 @@ def _estimate_cassandra_cluster_zonal(
     max_regional_size: int = 96,
 ) -> Optional[CapacityPlan]:
 
-    # Cassandra doesn't like to deploy on really small instances
-    if instance.cpu < 8:
+    # Netflix Cassandra doesn't like to deploy on really small instances
+    if instance.cpu < 2 or instance.ram_gib < 14:
         return None
 
     # if we're not allowed to use gp2, skip EBS only types
@@ -184,6 +184,7 @@ def _estimate_cassandra_cluster_zonal(
         desires.data_shape.reserved_instance_app_mem_gib
         + desires.data_shape.reserved_instance_system_mem_gib
     )
+
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
