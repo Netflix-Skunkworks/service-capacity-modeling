@@ -55,11 +55,10 @@ def _estimate_cassandra_requirement(
     # Keep half of the bandwidth available for backup
     needed_network_mbps = simple_network_mbps(desires) * 2
 
-    needed_disk = round(
+    needed_disk = math.ceil(
         (1.0 / desires.data_shape.estimated_compression_ratio.mid)
         * desires.data_shape.estimated_state_size_gib.mid
         * copies_per_region,
-        2,
     )
 
     # Rough estimate of how many instances we would need just for the the CPU
@@ -81,10 +80,10 @@ def _estimate_cassandra_requirement(
     needed_memory = min(working_set, rps_working_set) * needed_disk
 
     # Now convert to per zone
-    needed_cores = needed_cores // zones_per_region
-    needed_disk = needed_disk // zones_per_region
-    needed_memory = int(needed_memory // zones_per_region)
-    logger.info(
+    needed_cores = max(1, needed_cores // zones_per_region)
+    needed_disk = max(1, needed_disk // zones_per_region)
+    needed_memory = max(1, int(needed_memory // zones_per_region))
+    logger.debug(
         "Need (cpu, mem, disk, working) = (%s, %s, %s, %f)",
         needed_cores,
         needed_memory,

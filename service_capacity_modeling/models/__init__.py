@@ -20,6 +20,51 @@ from service_capacity_modeling.interface import RegionContext
 __common_regrets__ = frozenset(("spend", "disk", "mem"))
 
 
+def _disk_regret(  # noqa: C901
+    regret_params: CapacityRegretParameters,
+    optimal_plan: CapacityPlan,
+    proposed_plan: CapacityPlan,
+) -> float:
+    # type -> disk
+    optimal_disk = {}
+    plan_disk = {}
+
+    for zonal in optimal_plan.requirements.zonal:
+        typ = zonal.requirement_type
+        if typ not in optimal_disk:
+            optimal_disk[typ] = 0.0
+        optimal_disk[typ] += zonal.disk_gib.mid
+
+    for regional in optimal_plan.requirements.regional:
+        typ = regional.requirement_type
+        if typ not in optimal_disk:
+            optimal_disk[typ] = 0.0
+        optimal_disk[typ] += regional.disk_gib.mid
+
+    for zonal in proposed_plan.requirements.zonal:
+        typ = zonal.requirement_type
+        if typ not in plan_disk:
+            plan_disk[typ] = 0.0
+        plan_disk[typ] += zonal.disk_gib.mid
+
+    for regional in proposed_plan.requirements.regional:
+        typ = regional.requirement_type
+        if typ not in plan_disk:
+            plan_disk[typ] = 0.0
+        plan_disk[typ] += regional.disk_gib.mid
+
+    # We regret not having the disk space for a dataset, but do not
+    # regret lacking disk space
+    regret = 0.0
+    for typ in optimal_disk.keys() | plan_disk.keys():
+        od, pd = optimal_disk.get(typ, 0), plan_disk.get(typ, 0)
+        if od > pd:
+            regret += (
+                (od - pd) * regret_params.disk.under_provision_cost
+            ) ** regret_params.disk.exponent
+    return regret
+
+
 class CapacityModel:
     """Stateless interface for defining a capacity model
 
@@ -100,26 +145,11 @@ class CapacityModel:
                 ) ** regret_params.spend.exponent
 
         if "disk" in optimal_plan.requirements.regrets:
-            optimal_disk = sum(
-                req.disk_gib.mid for req in optimal_plan.requirements.zonal
+            regrets["disk"] = _disk_regret(
+                regret_params=regret_params,
+                optimal_plan=optimal_plan,
+                proposed_plan=proposed_plan,
             )
-            optimal_disk += sum(
-                req.disk_gib.mid for req in optimal_plan.requirements.regional
-            )
-
-            plan_disk = sum(
-                req.disk_gib.mid for req in proposed_plan.requirements.zonal
-            )
-            plan_disk += sum(
-                req.disk_gib.mid for req in proposed_plan.requirements.regional
-            )
-
-            # We regret not having the disk space for a dataset, but do not
-            # regret lacking disk space
-            if optimal_disk > plan_disk:
-                regrets["disk"] = (
-                    (optimal_disk - plan_disk) * regret_params.disk.under_provision_cost
-                ) ** regret_params.disk.exponent
 
         if "mem" in optimal_plan.requirements.regrets:
             optimal_mem = sum(
