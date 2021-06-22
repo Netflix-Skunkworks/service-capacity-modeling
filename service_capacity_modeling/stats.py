@@ -46,7 +46,7 @@ def _gamma_fn_from_params(low, mid, high, confidence):
 
 
 def _gamma_dist_from_interval(
-    interval: Interval, seed: float = 0xCAFE
+    interval: Interval, seed: int = 0xCAFE
 ) -> Tuple[float, rv_continuous]:
     # If we know cdf(high), cdf(low) and mean (mid) we can use an iterative
     # solver to find a possible gamma interval
@@ -73,11 +73,11 @@ def _gamma_dist_from_interval(
 
 # This can be expensive, so cache it
 @lru_cache(maxsize=128)
-def _gamma_for_interval(interval: Interval, seed: float = 0xCAFE) -> rv_continuous:
+def _gamma_for_interval(interval: Interval, seed: int = 0xCAFE) -> rv_continuous:
     return _gamma_dist_from_interval(interval, seed=seed)[1]
 
 
-def gamma_for_interval(interval: Interval, seed: float = 0xCAFE) -> rv_continuous:
+def gamma_for_interval(interval: Interval, seed: int = 0xCAFE) -> rv_continuous:
     result = _gamma_for_interval(interval, seed)
     # Use the new Generator API instead of RandomState for ~20% speedup
     result.random_state = np.random.default_rng(seed=seed)
@@ -111,7 +111,7 @@ def _beta_cost_fn_from_params(low, mid, high, confidence):
 
 
 def _beta_dist_from_interval(
-    interval: Interval, seed: float = 0xCAFE
+    interval: Interval, seed: int = 0xCAFE
 ) -> Tuple[Tuple[float, float, OptimizeResult], rv_continuous]:
     # If we know cdf(high), cdf(low) and mean (mid) we can use an iterative
     # solver to find a possible beta fit
@@ -140,18 +140,18 @@ def _beta_dist_from_interval(
 
 # This can be expensive, so cache it
 @lru_cache(maxsize=128)
-def _beta_for_interval(interval: Interval, seed: float = 0xCAFE) -> rv_continuous:
+def _beta_for_interval(interval: Interval, seed: int = 0xCAFE) -> rv_continuous:
     return _beta_dist_from_interval(interval, seed=seed)[1]
 
 
-def beta_for_interval(interval: Interval, seed: float = 0xCAFE) -> rv_continuous:
+def beta_for_interval(interval: Interval, seed: int = 0xCAFE) -> rv_continuous:
     result = _beta_for_interval(interval, seed)
     # Use the new Generator API instead of RandomState for ~20% speedup
     result.random_state = np.random.default_rng(seed=seed)
     return result
 
 
-def dist_for_interval(interval: Interval, seed: float = 0xCAFE) -> rv_continuous:
+def dist_for_interval(interval: Interval, seed: int = 0xCAFE) -> rv_continuous:
     if interval.model_with == IntervalModel.beta:
         result = beta_for_interval(interval=interval, seed=seed)
     elif interval.model_with == IntervalModel.gamma:
