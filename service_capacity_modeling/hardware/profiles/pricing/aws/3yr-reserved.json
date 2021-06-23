@@ -1,6 +1,7 @@
 {
   "us-east-1": {
     "instances": {
+      "m5.large":     {"annual_cost": 316.3},
       "m5.xlarge":    {"annual_cost": 632.3},
       "m5.2xlarge":   {"annual_cost": 1264.6},
       "m5.4xlarge":   {"annual_cost": 2529.7},

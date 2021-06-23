@@ -1,4 +1,5 @@
 import logging
+import math
 from decimal import Decimal
 from typing import Any
 from typing import Dict
@@ -54,9 +55,8 @@ def _estimate_evcache_requirement(
     # (Arun): Keep 20% of available bandwidth for cache warmer
     needed_network_mbps = simple_network_mbps(desires) * 1.25
 
-    needed_disk = round(
+    needed_disk = math.ceil(
         desires.data_shape.estimated_state_size_gib.mid * copies_per_region,
-        2,
     )
 
     regrets: Tuple[str, ...] = ("spend", "mem")
@@ -65,19 +65,22 @@ def _estimate_evcache_requirement(
     if instance.drive is None:
         # We can't currently store data on cloud drives, but we can put the
         # dataset into memory!
-        needed_memory = needed_disk
+        needed_memory = float(needed_disk)
         needed_disk = 0
     else:
         # We can store data on fast ephems (reducing the working set that must
         # be kept in RAM)
-        needed_memory = working_set * needed_disk
+        needed_memory = float(working_set) * float(needed_disk)
         regrets = ("spend", "disk", "mem")
 
     # Now convert to per zone
-    needed_cores = needed_cores // zones_per_region
-    needed_disk = needed_disk // zones_per_region
-    needed_memory = int(needed_memory // zones_per_region)
-    logger.info(
+    needed_cores = max(1, needed_cores // zones_per_region)
+    if needed_disk > 0:
+        needed_disk = max(1, needed_disk // zones_per_region)
+    else:
+        needed_disk = needed_disk // zones_per_region
+    needed_memory = max(1, int(needed_memory // zones_per_region))
+    logger.debug(
         "Need (cpu, mem, disk, working) = (%s, %s, %s, %f)",
         needed_cores,
         needed_memory,

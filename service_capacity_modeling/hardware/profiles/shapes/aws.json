@@ -1,6 +1,14 @@
 {
   "core_reference_ghz": 2.3,
   "instances": {
+    "m5.large": {
+      "name": "m5.large",
+      "cpu": 2,
+      "cpu_ghz": 3.1,
+      "ram_gib": 7.48,
+      "net_mbps": 500,
+      "drive": null
+    },
     "m5.xlarge": {
       "name": "m5.xlarge",
       "cpu": 4,

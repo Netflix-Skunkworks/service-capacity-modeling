@@ -84,13 +84,18 @@ def test_increasing_qps_simple():
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=simple,
+            simulations=256,
         )
-        # pr.print_stats()
 
         lr = cap_plan.least_regret[0].candidate_clusters.zonal[0]
         lr_cpu = lr.count * lr.instance.cpu
         lr_cost = cap_plan.least_regret[0].candidate_clusters.total_annual_cost
         lr_family = lr.instance.family
+        if lr.instance.drive is None:
+            assert sum(dr.size_gib for dr in lr.attached_drives) >= 200
+        else:
+            assert lr.instance.drive.size_gib >= 100
+
         result.append(
             (lr_family, lr_cpu, lr_cost, cap_plan.least_regret[0].requirements.zonal[0])
         )
@@ -149,3 +154,32 @@ def test_worn_dataset():
     assert lr_cluster.attached_drives[0].size_gib * lr_cluster.count * 3 > 204800
     # We should have S3 backup cost
     assert lr.candidate_clusters.services[0].annual_cost > 5_000
+
+
+def test_very_small_has_disk():
+    very_small = CapacityDesires(
+        service_tier=2,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=Interval(
+                low=1, mid=10, high=100, confidence=0.98
+            ),
+            estimated_write_per_second=Interval(
+                low=1, mid=10, high=100, confidence=0.98
+            ),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(low=1, mid=10, high=30, confidence=0.98),
+        ),
+    )
+    cap_plan = planner.plan(
+        model_name="org.netflix.cassandra", region="us-east-1", desires=very_small
+    )
+
+    for lr in cap_plan.least_regret:
+        lr_cluster = lr.candidate_clusters.zonal[0]
+        assert 2 <= lr_cluster.count * lr_cluster.instance.cpu < 16
+        assert 1_000 < lr.candidate_clusters.total_annual_cost < 6_000
+        if lr_cluster.instance.drive is None:
+            assert sum(dr.size_gib for dr in lr_cluster.attached_drives) > 10
+        else:
+            assert lr_cluster.instance.drive.size_gib > 10
