@@ -23,6 +23,7 @@ from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import interval
 from service_capacity_modeling.interface import interval_percentile
+from service_capacity_modeling.interface import Lifecycle
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
@@ -222,13 +223,19 @@ def _merge_models(raw_capacity_plans, zonal_requirements, regional_requirements)
 
 
 class CapacityPlanner:
-    def __init__(self, default_num_simulations=128, default_num_results=2):
+    def __init__(
+        self,
+        default_num_simulations=128,
+        default_num_results=2,
+        default_lifecycles=(Lifecycle.stable, Lifecycle.beta),
+    ):
         self._shapes: HardwareShapes = shapes
         self._models: Dict[str, CapacityModel] = dict()
 
         self._default_num_simulations = default_num_simulations
         self._default_num_results = default_num_results
         self._default_regret_params = CapacityRegretParameters()
+        self._default_lifecycles = default_lifecycles
 
     def register_group(self, group: Callable[[], Dict[str, CapacityModel]]):
         for name, model in group().items():
@@ -250,6 +257,7 @@ class CapacityPlanner:
         model_name: str,
         region: str,
         desires: CapacityDesires,
+        lifecycles: Optional[Sequence[Lifecycle]] = None,
         num_results: Optional[int] = None,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
     ) -> Sequence[CapacityPlan]:
@@ -260,6 +268,7 @@ class CapacityPlanner:
             )
 
         extra_model_arguments = extra_model_arguments or {}
+        lifecycles = lifecycles or self._default_lifecycles
 
         results = []
         composable_models = tuple(
@@ -279,6 +288,7 @@ class CapacityPlanner:
                     region=region,
                     desires=desires,
                     num_results=num_results,
+                    lifecycles=lifecycles,
                     extra_model_arguments=extra_model_arguments,
                 )
             )
@@ -291,9 +301,11 @@ class CapacityPlanner:
         region: str,
         desires: CapacityDesires,
         num_results: Optional[int] = None,
+        lifecycles: Optional[Sequence[Lifecycle]] = None,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
     ) -> Sequence[CapacityPlan]:
         extra_model_arguments = extra_model_arguments or {}
+        lifecycles = lifecycles or self._default_lifecycles
 
         hardware = self._shapes.region(region)
         num_results = num_results or self._default_num_results
@@ -305,6 +317,9 @@ class CapacityPlanner:
 
         plans = []
         for instance in hardware.instances.values():
+            if instance.lifecycle not in lifecycles:
+                continue
+
             for drive in hardware.drives.values():
                 plan = self._models[model_name].capacity_plan(
                     instance=instance,
@@ -330,6 +345,7 @@ class CapacityPlanner:
         percentiles: Tuple[int, ...] = (5, 50, 95),
         simulations: Optional[int] = None,
         num_results: Optional[int] = None,
+        lifecycles: Optional[Sequence[Lifecycle]] = None,
         regret_params: Optional[CapacityRegretParameters] = None,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
     ) -> UncertainCapacityPlan:
@@ -346,6 +362,7 @@ class CapacityPlanner:
         regret_params = regret_params or self._default_regret_params
         simulations = simulations or self._default_num_simulations
         num_results = num_results or self._default_num_results
+        lifecycles = lifecycles or self._default_lifecycles
 
         # requirement types -> values
         zonal_requirements: Dict[str, Dict] = {}

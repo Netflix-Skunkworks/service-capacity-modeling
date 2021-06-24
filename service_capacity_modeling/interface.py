@@ -111,6 +111,24 @@ def interval_percentile(
 ###############################################################################
 
 
+class Lifecycle(str, Enum):
+    """Represents the lifecycle of hardware from initial preview
+    to end-of-life.
+
+    For example a particular shape of hardware might be released under
+    preview and adventurous models may wish to use those, and then
+    more risk-averse workloads may wait for stability.
+
+    By default models are shown beta and stable shapes to pick from
+    """
+
+    alpha = "alpha"
+    beta = "beta"
+    stable = "stable"
+    deprecated = "deprecated"
+    end_of_life = "end-of-life"
+
+
 class Drive(BaseModel):
     """Represents a cloud drive e.g. EBS
 
@@ -164,6 +182,7 @@ class Instance(BaseModel):
     net_mbps: float
     drive: Optional[Drive]
     annual_cost: float = 0
+    lifecycle: Lifecycle = Lifecycle.stable
 
     family_separator: str = "."
 
@@ -236,6 +255,7 @@ class GlobalHardware(BaseModel):
 
 class InstancePricing(BaseModel):
     annual_cost: float = 0
+    lifecycle: Optional[Lifecycle] = None
 
 
 class DrivePricing(BaseModel):

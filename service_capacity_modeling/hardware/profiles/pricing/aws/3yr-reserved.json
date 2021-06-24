@@ -1,6 +1,7 @@
 {
   "us-east-1": {
     "instances": {
+      "f5.large.deprecated": {"annual_cost": 300.0, "lifecycle": "deprecated"},
       "m5.large":     {"annual_cost": 316.3},
       "m5.xlarge":    {"annual_cost": 632.3},
       "m5.2xlarge":   {"annual_cost": 1264.6},

@@ -34,6 +34,8 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
         for instance, iprice in region_pricing.instances.items():
             priced_instances[instance] = hardware.instances[instance].copy()
             priced_instances[instance].annual_cost = iprice.annual_cost
+            if iprice.lifecycle is not None:
+                priced_instances[instance].lifecycle = iprice.lifecycle
 
         for drive, dprice in region_pricing.drives.items():
             priced_drives[drive] = hardware.drives[drive].copy()
