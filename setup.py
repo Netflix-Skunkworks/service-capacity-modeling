@@ -25,6 +25,10 @@ setuptools.setup(
     entry_points={"console_scripts": []},
     include_package_data=True,
     package_data={
-        "": ["hardware/profiles/shapes/*.json", "hardware/profiles/pricing/**/*.json"]
+        "": [
+            "hardware/profiles/profiles.txt",
+            "hardware/profiles/shapes/*.json",
+            "hardware/profiles/pricing/**/*.json",
+        ]
     },
 )

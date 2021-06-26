@@ -13,11 +13,12 @@ from pathlib import Path
 current_module = import_module(__name__)
 common_profiles = {}
 
-with pkg_resources.path(current_module, "shapes") as shapes:
+with pkg_resources.path(current_module, "profiles.txt") as shape_file:
+    shapes = Path(shape_file.parent, "shapes")
     for fd in shapes.glob("**/*.json"):
         shape = fd.stem
 
-        print(f"Loading {shape} from {Path(shapes, shape)}")
+        print(f"Loading shape={shape} from {Path(shapes, shape)}")
         for pricing in Path(shapes.parent, "pricing", shape).glob("**/*.json"):
             print(f"Loading {pricing}")
             ghw = load_hardware_from_disk(price_path=pricing, shape_path=fd)
