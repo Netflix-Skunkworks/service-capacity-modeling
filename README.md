@@ -1,6 +1,5 @@
 # Service Capacity Modeling
-
-[![Build Status](https://travis-ci.org/Netflix-Skunkworks/service-capacity-modeling.svg?branch=main)](https://travis-ci.org/Netflix-Skunkworks/service-capacity-modeling)
+[![Build Status](https://api.travis-ci.com/Netflix-Skunkworks/service-capacity-modeling.svg?branch=main)](https://api.travis-ci.com/Netflix-Skunkworks/service-capacity-modeling.svg?branch=main)
 
 A generic toolkit for modeling capacity requirements in the cloud. Pricing
 information included in this repository are public prices.
@@ -26,7 +25,8 @@ tox -e dev -- ipython
 ```
 
 ## Example of Provisioning a Database
-Fire up ipython and capacity plan a tier 1 database.
+Fire up ipython and let's capacity plan a Tier 1 (important to the product aka
+"prod") Cassandra database.
 
 ```python
 from service_capacity_modeling.interface import CapacityDesires
@@ -48,7 +48,7 @@ db_desires = CapacityDesires(
     ),
     # Not sure how much data, but we think it'll be below 1 TiB
     data_shape=DataShape(
-        estimated_state_size_gib=Interval(low=100, mid=500, high=1000, confidence=0.9),
+        estimated_state_size_gib=Interval(low=100, mid=100, high=1000, confidence=0.9),
     ),
 )
 ```
@@ -58,6 +58,7 @@ Now we can load up some models and do some capacity planning
 ```python
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.models.org import netflix
+import pprint
 
 # Load up the Netflix capacity models
 planner.register_group(netflix.models)
@@ -66,24 +67,45 @@ cap_plan = planner.plan(
     model_name="org.netflix.cassandra",
     region="us-east-1",
     desires=db_desires,
-    allow_gp2=True,
+    # Simulate the possible requirements 512 times
+    simulations=512,
+    # Request 3 diverse hardware families to be returned
+    num_results=3,
 )
 
-requirement = cap_plan.requirement
+# The range of requirements in hardware resources (CPU, RAM, Disk, etc ...)
+requirements = cap_plan.requirements
+
+# The ordered list of least regretful choices for the requirement
 least_regret = cap_plan.least_regret
+
+# Show the range of requirements for a single zone
+pprint.pprint(requirements.zonal[0].dict(exclude_unset=True))
+
+# Show our least regretful choices of hardware in least regret order
+# So for example if we can buy the first set of computers we would prefer
+# to do that but we might not have availability in that family in which
+# case we'd buy the second one.
+for choice in range(3):
+    num_clusters = len(least_regret[choice].candidate_clusters.zonal)
+    print(f"Our #{choice + 1} choice is {num_clusters} zones of:")
+    pprint.pprint(least_regret[choice].candidate_clusters.zonal[0].dict(exclude_unset=True))
+
 ```
 
 Note that we _can_ customize more information given what we know about the
 use case, but each model (e.g. Cassandra) supplies reasonable defaults.
 
 For example we can specify a lot more information
-```
+
+```python
 db_desires = CapacityDesires(
     # This service is important to the business, not critical (tier 0)
     service_tier=1,
     query_pattern=QueryPattern(
         # Not sure exactly how much QPS we will do, but we think around
-        # 10,000 reads and 10,000 writes per second.
+        # 50,000 reads and 45,000 writes per second with a rather narrow
+        # bound
         estimated_read_per_second=Interval(
             low=40_000, mid=50_000, high=60_000, confidence=0.9
         ),
@@ -91,11 +113,12 @@ db_desires = CapacityDesires(
             low=42_000, mid=45_000, high=50_000, confidence=0.9
         ),
         # This use case might do some partition scan queries that are
-        # somewhat expensive
+        # somewhat expensive, so we hint a rather expensive ON-CPU time
+        # that a read will consume on the entire cluster.
         estimated_mean_read_latency_ms=Interval(
             low=0.1, mid=4, high=20, confidence=0.9
         ),
-        # Writes at LOCAL_ONE
+        # Writes at LOCAL_ONE are pretty cheap
         estimated_mean_write_latency_ms=Interval(
             low=0.1, mid=0.4, high=0.8, confidence=0.9
         ),
