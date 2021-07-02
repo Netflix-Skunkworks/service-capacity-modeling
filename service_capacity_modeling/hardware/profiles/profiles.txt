@@ -1,0 +1,1 @@
+Just to help pkg_resources locate this directory
