@@ -6,7 +6,7 @@ from service_capacity_modeling.interface import QueryPattern
 
 
 def test_timeseries_increasing_qps_simple():
-    qps_values = (100, 1000, 10_000, 100_000)
+    qps_values = (1000, 10_000, 100_000)
     zonal_result = []
     regional_result = []
     for qps in qps_values:
@@ -28,7 +28,7 @@ def test_timeseries_increasing_qps_simple():
         )
 
         cap_plan = planner.plan(
-            model_name="org.netflix.timeseries",
+            model_name="org.netflix.time-series",
             region="us-east-1",
             desires=simple,
             simulations=256,
