@@ -84,12 +84,6 @@ class NflxZookeeperCapacityModel(CapacityModel):
         if context.zones_in_region != 3:
             return None
 
-        # Only ZK team members can create tier zero ZK clusters since
-        # we generally don't want them
-        approving_zk_member = extra_model_arguments.get("zk_approver", None)
-        if desires.service_tier == 0 and approving_zk_member is None:
-            return None
-
         heap_overhead = extra_model_arguments.get("heap_overhead", 1.25)
         disk_overhead = extra_model_arguments.get("snapshot_overhead", 4)
         req = _zk_requirement(instance, desires, heap_overhead, disk_overhead)
@@ -146,11 +140,6 @@ class NflxZookeeperCapacityModel(CapacityModel):
                 "snapshot_overhead",
                 "float = 4",
                 "Amount of disk overhead to keep for snapshots",
-            ),
-            (
-                "zk_approver",
-                "str = None",
-                "Zookeeper teammate who approved this cluster",
             ),
         )
 

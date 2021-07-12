@@ -26,16 +26,6 @@ def test_zk_tier_0():
         region="us-east-1",
         desires=locking_tier_0,
     )
-    assert len(plan.least_regret) == 0
-
-    # Now have a zk team-member approve it
-
-    plan = planner.plan(
-        model_name="org.netflix.zookeeper",
-        region="us-east-1",
-        desires=locking_tier_0,
-        extra_model_arguments={"zk_approver": "jolynch"},
-    )
 
     lr = plan.least_regret[0]
     lr_cluster = lr.candidate_clusters.zonal
