@@ -10,9 +10,11 @@ from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import FixedInterval
+from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
@@ -234,7 +236,10 @@ class CapacityModel:
             AccessConsistency.linearizable,
             AccessConsistency.serializable,
         )
-        if user_desires.query_pattern.access_consistency in unlikely_consistency_models:
+        target = (
+            user_desires.query_pattern.access_consistency.same_region.target_consistency
+        )
+        if target in unlikely_consistency_models:
             raise ValueError(
                 f"Most services do not support {unlikely_consistency_models}"
             )
@@ -243,6 +248,16 @@ class CapacityModel:
             return CapacityDesires(
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.latency,
+                    access_consistency=GlobalConsistency(
+                        same_region=Consistency(
+                            target_consistency=AccessConsistency.read_your_writes,
+                            staleness_slo_sec=FixedInterval(low=0, mid=0.1, high=1),
+                        ),
+                        cross_region=Consistency(
+                            target_consistency=AccessConsistency.best_effort,
+                            staleness_slo_sec=FixedInterval(low=10, mid=60, high=600),
+                        ),
+                    ),
                     estimated_mean_read_latency_ms=certain_float(1),
                     estimated_mean_write_latency_ms=certain_float(1),
                     # "Single digit milliseconds"
@@ -259,6 +274,16 @@ class CapacityModel:
             return CapacityDesires(
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.throughput,
+                    access_consistency=GlobalConsistency(
+                        same_region=Consistency(
+                            target_consistency=AccessConsistency.read_your_writes,
+                            staleness_slo_sec=FixedInterval(low=0, mid=0.1, high=1),
+                        ),
+                        cross_region=Consistency(
+                            target_consistency=AccessConsistency.best_effort,
+                            staleness_slo_sec=FixedInterval(low=10, mid=60, high=600),
+                        ),
+                    ),
                     estimated_mean_read_latency_ms=certain_float(2),
                     estimated_mean_write_latency_ms=certain_float(4),
                     # "Tens of milliseconds"

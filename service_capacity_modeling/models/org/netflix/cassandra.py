@@ -15,9 +15,11 @@ from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
+from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import FixedInterval
+from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
@@ -368,6 +370,7 @@ class NflxCassandraCapacityModel(CapacityModel):
     def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
         acceptable_consistency = set(
             (
+                None,
                 AccessConsistency.best_effort,
                 AccessConsistency.eventual,
                 AccessConsistency.read_your_writes,
@@ -393,6 +396,14 @@ class NflxCassandraCapacityModel(CapacityModel):
             return CapacityDesires(
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.latency,
+                    access_consistency=GlobalConsistency(
+                        same_region=Consistency(
+                            target_consistency=AccessConsistency.read_your_writes,
+                        ),
+                        cross_region=Consistency(
+                            target_consistency=AccessConsistency.eventual,
+                        ),
+                    ),
                     estimated_mean_read_size_bytes=Interval(
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),
@@ -447,6 +458,14 @@ class NflxCassandraCapacityModel(CapacityModel):
             return CapacityDesires(
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.throughput,
+                    access_consistency=GlobalConsistency(
+                        same_region=Consistency(
+                            target_consistency=AccessConsistency.read_your_writes,
+                        ),
+                        cross_region=Consistency(
+                            target_consistency=AccessConsistency.eventual,
+                        ),
+                    ),
                     estimated_mean_read_size_bytes=Interval(
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),

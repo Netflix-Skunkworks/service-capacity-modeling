@@ -299,6 +299,9 @@ class AccessConsistency(str, Enum):
     within a factor of 4-5x correctly.
     """
 
+    # You cannot read writes ever
+    never = "never"
+
     #
     # Single item consistency (most services)
     #
@@ -332,8 +335,8 @@ AVG_ITEM_SIZE_BYTES: int = 1024
 
 
 class Consistency(BaseModel):
-    target_consistency: AccessConsistency = Field(
-        ...,
+    target_consistency: Optional[AccessConsistency] = Field(
+        None,
         title="Consistency requirement on access",
         description=(
             "Stronger consistency access is generally more expensive."
@@ -355,11 +358,11 @@ class Consistency(BaseModel):
 
 class GlobalConsistency(BaseModel):
     same_region: Consistency = Consistency(
-        target_consistency=AccessConsistency.read_your_writes,
+        target_consistency=None,
         staleness_slo_sec=FixedInterval(low=0, mid=0.1, high=1),
     )
     cross_region: Consistency = Consistency(
-        target_consistency=AccessConsistency.eventual,
+        target_consistency=None,
         staleness_slo_sec=FixedInterval(low=10, mid=60, high=600),
     )
 

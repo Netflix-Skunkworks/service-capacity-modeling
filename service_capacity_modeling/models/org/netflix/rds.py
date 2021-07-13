@@ -6,22 +6,25 @@ from typing import Optional
 from typing import Sequence
 from typing import Tuple
 
+from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
+from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import FixedInterval
+from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
-from service_capacity_modeling.interface import certain_float
-from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import gp2_gib_for_io
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -31,9 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 def _estimate_rds_requirement(
-        instance: Instance,
-        desires: CapacityDesires,
-        db_type: str
+    instance: Instance, desires: CapacityDesires, db_type: str
 ) -> CapacityRequirement:
     """Estimate the capacity required for one region given a regional desire. Unlike
     Cassandra RDS instances are deployed per region, not zone. The input desires
@@ -54,14 +55,17 @@ def _estimate_rds_requirement(
     needed_network_mbps = simple_network_mbps(desires) * 1.2
     needed_disk = round(desires.data_shape.estimated_state_size_gib.mid, 2)
 
-    if desires.data_shape.estimated_working_set_percent and \
-            desires.data_shape.estimated_working_set_percent.mid:
+    if (
+        desires.data_shape.estimated_working_set_percent
+        and desires.data_shape.estimated_working_set_percent.mid
+    ):
         working_set_percent = desires.data_shape.estimated_working_set_percent.mid
     else:
         working_set_percent = 0.10
 
     needed_memory = (
-                desires.data_shape.estimated_state_size_gib.mid * working_set_percent)
+        desires.data_shape.estimated_state_size_gib.mid * working_set_percent
+    )
 
     return CapacityRequirement(
         requirement_type="rds-regional",
@@ -87,15 +91,15 @@ def _rds_required_disk_ios(disk_size_gib: int, db_type: str, btree_fan_out: int 
 
 
 def _compute_rds_region(
-        instance: Instance,
-        drive: Drive,
-        needed_cores: int,
-        needed_disk_gib: int,
-        needed_memory_gib: int,
-        needed_network_mbps: float,
-        required_disk_ios,
-        required_disk_space,
-        core_reference_ghz: float,
+    instance: Instance,
+    drive: Drive,
+    needed_cores: int,
+    needed_disk_gib: int,
+    needed_memory_gib: int,
+    needed_network_mbps: float,
+    required_disk_ios,
+    required_disk_space,
+    core_reference_ghz: float,
 ) -> Optional[RegionClusterCapacity]:
     """Computes a regional cluster of a RDS service
 
@@ -111,9 +115,11 @@ def _compute_rds_region(
     # We can't scale RDS horizontally by adding more nodes like we can for Cassandra
     # so single instance must meet the whole cpu, disk, memory and network bandwidth
     # requirement
-    if (instance.cpu < needed_cores or
-            instance.ram_gib < needed_memory_gib or
-            instance.net_mbps < needed_network_mbps):
+    if (
+        instance.cpu < needed_cores
+        or instance.ram_gib < needed_memory_gib
+        or instance.net_mbps < needed_network_mbps
+    ):
         return None
 
     # calculate storage cost
@@ -141,18 +147,18 @@ def _compute_rds_region(
         count=1,
         instance=instance,
         attached_drives=attached_drives,
-        annual_cost=total_annual_cost
+        annual_cost=total_annual_cost,
     )
 
 
 def _estimate_rds_regional(
-        instance: Instance,
-        drive: Drive,
-        desires: CapacityDesires,
-        extra_model_arguments: Dict[str, Any],
+    instance: Instance,
+    drive: Drive,
+    desires: CapacityDesires,
+    extra_model_arguments: Dict[str, Any],
 ) -> Optional[CapacityPlan]:
     instance_family = instance.family
-    if instance_family != "m5" and instance_family != "r5":
+    if instance_family not in ("m5", "r5"):
         return None
 
     if drive.name != "gp2":
@@ -173,8 +179,8 @@ def _estimate_rds_regional(
         needed_disk_gib=int(requirement.disk_gib.mid),
         needed_memory_gib=int(requirement.mem_gib.mid),
         needed_network_mbps=requirement.network_mbps.mid,
-        required_disk_ios=lambda x: _rds_required_disk_ios(x, db_type) * math.ceil(
-            0.1 * rps),
+        required_disk_ios=lambda x: _rds_required_disk_ios(x, db_type)
+        * math.ceil(0.1 * rps),
         required_disk_space=lambda x: x * 1.2,  # Unscientific random guess!
         core_reference_ghz=requirement.core_reference_ghz,
     )
@@ -204,20 +210,19 @@ def _estimate_rds_regional(
 
 
 class NflxRDSCapacityModel(CapacityModel):
-
     @staticmethod
     def capacity_plan(
-            instance: Instance,
-            drive: Drive,
-            context: RegionContext,
-            desires: CapacityDesires,
-            extra_model_arguments: Dict[str, Any],
+        instance: Instance,
+        drive: Drive,
+        context: RegionContext,
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
         return _estimate_rds_regional(
             instance=instance,
             drive=drive,
             desires=desires,
-            extra_model_arguments=extra_model_arguments
+            extra_model_arguments=extra_model_arguments,
         )
 
     @staticmethod
@@ -239,6 +244,14 @@ class NflxRDSCapacityModel(CapacityModel):
         return CapacityDesires(
             query_pattern=QueryPattern(
                 access_pattern=AccessPattern.latency,
+                access_consistency=GlobalConsistency(
+                    same_region=Consistency(
+                        target_consistency=AccessConsistency.serializable_stale,
+                    ),
+                    cross_region=Consistency(
+                        target_consistency=AccessConsistency.never,
+                    ),
+                ),
                 # can't really make latency/throughput trade-offs with RDS
                 estimated_mean_read_size_bytes=Interval(
                     low=128, mid=1024, high=65536, confidence=0.90
@@ -274,10 +287,7 @@ class NflxRDSCapacityModel(CapacityModel):
             ),
             data_shape=DataShape(
                 estimated_working_set_percent=Interval(
-                    low=0.05,
-                    mid=0.50,
-                    high=0.70,
-                    confidence=0.8
+                    low=0.05, mid=0.50, high=0.70, confidence=0.8
                 )
             ),
         )

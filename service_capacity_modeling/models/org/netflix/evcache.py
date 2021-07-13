@@ -301,7 +301,7 @@ class NflxEVCacheCapacityModel(CapacityModel):
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
-        acceptable_consistency = set((AccessConsistency.best_effort,))
+        acceptable_consistency = set((AccessConsistency.best_effort, None))
 
         access_consistency = (
             user_desires.dict(exclude_unset=True)

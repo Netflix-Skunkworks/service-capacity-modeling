@@ -5,12 +5,15 @@ from typing import Sequence
 from typing import Tuple
 
 from .stateless_java import nflx_java_app_capacity_model
+from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import FixedInterval
+from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
@@ -66,6 +69,14 @@ class NflxKeyValueCapacityModel(CapacityModel):
             return CapacityDesires(
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.latency,
+                    access_consistency=GlobalConsistency(
+                        same_region=Consistency(
+                            target_consistency=AccessConsistency.read_your_writes,
+                        ),
+                        cross_region=Consistency(
+                            target_consistency=AccessConsistency.eventual,
+                        ),
+                    ),
                     estimated_mean_read_size_bytes=Interval(
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),
@@ -108,6 +119,14 @@ class NflxKeyValueCapacityModel(CapacityModel):
             return CapacityDesires(
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.latency,
+                    access_consistency=GlobalConsistency(
+                        same_region=Consistency(
+                            target_consistency=AccessConsistency.read_your_writes,
+                        ),
+                        cross_region=Consistency(
+                            target_consistency=AccessConsistency.eventual,
+                        ),
+                    ),
                     estimated_mean_read_size_bytes=Interval(
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),

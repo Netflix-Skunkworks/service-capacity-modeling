@@ -6,6 +6,7 @@ from typing import Optional
 from typing import Sequence
 from typing import Tuple
 
+from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
@@ -14,9 +15,11 @@ from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
+from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import FixedInterval
+from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
@@ -178,6 +181,14 @@ class NflxJavaAppCapacityModel(CapacityModel):
             return CapacityDesires(
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.latency,
+                    access_consistency=GlobalConsistency(
+                        same_region=Consistency(
+                            target_consistency=AccessConsistency.read_your_writes,
+                        ),
+                        cross_region=Consistency(
+                            target_consistency=AccessConsistency.never,
+                        ),
+                    ),
                     estimated_mean_read_size_bytes=Interval(
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),
@@ -212,6 +223,14 @@ class NflxJavaAppCapacityModel(CapacityModel):
             return CapacityDesires(
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.latency,
+                    access_consistency=GlobalConsistency(
+                        same_region=Consistency(
+                            target_consistency=AccessConsistency.read_your_writes,
+                        ),
+                        cross_region=Consistency(
+                            target_consistency=AccessConsistency.never,
+                        ),
+                    ),
                     estimated_mean_read_size_bytes=Interval(
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),
