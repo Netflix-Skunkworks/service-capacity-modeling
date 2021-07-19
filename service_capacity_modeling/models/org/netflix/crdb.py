@@ -305,6 +305,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
                 AccessConsistency.linearizable_stale,
                 AccessConsistency.serializable,
                 AccessConsistency.serializable_stale,
+                AccessConsistency.never,
             )
         )
         for key, value in user_desires.query_pattern.access_consistency:

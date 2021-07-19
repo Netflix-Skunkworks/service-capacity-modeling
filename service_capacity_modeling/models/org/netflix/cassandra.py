@@ -374,6 +374,7 @@ class NflxCassandraCapacityModel(CapacityModel):
                 AccessConsistency.best_effort,
                 AccessConsistency.eventual,
                 AccessConsistency.read_your_writes,
+                AccessConsistency.never,
             )
         )
         for key, value in user_desires.query_pattern.access_consistency:

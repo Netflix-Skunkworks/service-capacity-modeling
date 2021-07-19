@@ -301,17 +301,14 @@ class NflxEVCacheCapacityModel(CapacityModel):
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
-        acceptable_consistency = set((AccessConsistency.best_effort, None))
-
-        access_consistency = (
-            user_desires.dict(exclude_unset=True)
-            .get("query_pattern", {})
-            .get("access_consistency", {})
+        acceptable_consistency = set(
+            (AccessConsistency.best_effort, AccessConsistency.never, None)
         )
-        for key, value in access_consistency:
+
+        for key, value in user_desires.query_pattern.access_consistency:
             if value.target_consistency not in acceptable_consistency:
                 raise ValueError(
-                    f"evcache can only provide {acceptable_consistency} access."
+                    f"EVCache can only provide {acceptable_consistency} access."
                     f"User asked for {key}={value}"
                 )
 
@@ -323,8 +320,9 @@ class NflxEVCacheCapacityModel(CapacityModel):
                         same_region=Consistency(
                             target_consistency=AccessConsistency.best_effort
                         ),
+                        # By default EVCache does not globally replicate
                         cross_region=Consistency(
-                            target_consistency=AccessConsistency.best_effort
+                            target_consistency=AccessConsistency.never
                         ),
                     ),
                     estimated_mean_read_size_bytes=Interval(
@@ -382,8 +380,9 @@ class NflxEVCacheCapacityModel(CapacityModel):
                         same_region=Consistency(
                             target_consistency=AccessConsistency.best_effort
                         ),
+                        # By default EVCache does not globally replicate
                         cross_region=Consistency(
-                            target_consistency=AccessConsistency.best_effort
+                            target_consistency=AccessConsistency.never
                         ),
                     ),
                     estimated_mean_read_size_bytes=Interval(
