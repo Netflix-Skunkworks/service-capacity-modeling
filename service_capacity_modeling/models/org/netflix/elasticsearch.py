@@ -15,11 +15,9 @@ from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
-from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import FixedInterval
-from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
@@ -36,17 +34,31 @@ from service_capacity_modeling.stats import dist_for_interval
 logger = logging.getLogger(__name__)
 
 
-# Pebble does Leveled compaction with tieres of size??
-# (FIXME) What does pebble actually do
-def _crdb_io_per_read(node_size_gib, sstable_size_mb=1000):
-    gb = node_size_gib * 1024
-    sstables = max(1, gb // sstable_size_mb)
-    # 10 sstables per level, plus 1 for L0 (avg)
-    levels = 1 + int(math.ceil(math.log(sstables, 10)))
+def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
+    if user_copies is not None:
+        assert user_copies > 1
+        return user_copies
+
+    # Due to the relaxed durability and consistency requirements we can
+    # run with RF=2
+    if desires.data_shape.durability_slo_order.mid < 1000:
+        return 2
+    return 3
+
+
+# Looks like Elasticsearch (Lucene) uses a tiered merge strategy of 10
+# segments of 512 megs per
+# https://lucene.apache.org/core/8_1_0/core/org/apache/lucene/index/TieredMergePolicy.html#setSegmentsPerTier(double)
+# (FIXME) Verify what elastic merge actually does
+def _es_io_per_read(node_size_gib, segment_size_mb=512):
+    size_mib = node_size_gib * 1024
+    segments = max(1, size_mib // segment_size_mb)
+    # 10 segments per tier, plus 1 for L0 (avg)
+    levels = 1 + int(math.ceil(math.log(segments, 10)))
     return levels
 
 
-def _estimate_cockroachdb_requirement(
+def _estimate_elasticsearch_requirement(
     instance: Instance,
     desires: CapacityDesires,
     working_set: float,
@@ -60,15 +72,15 @@ def _estimate_cockroachdb_requirement(
     The input desires should be the **regional** desire, and this function will
     return the zonal capacity requirement
     """
-    # Keep half of the cores free for background work (compaction, backup, repair)
-    needed_cores = sqrt_staffed_cores(desires) * 2
+    # Keep half of the cores free for background work (merging mostly)
+    needed_cores = math.ceil(sqrt_staffed_cores(desires) * 1.5)
     # Keep half of the bandwidth available for backup
     needed_network_mbps = simple_network_mbps(desires) * 2
 
     needed_disk = math.ceil(
         (1.0 / desires.data_shape.estimated_compression_ratio.mid)
         * desires.data_shape.estimated_state_size_gib.mid
-        * copies_per_region
+        * copies_per_region,
     )
 
     # Rough estimate of how many instances we would need just for the the CPU
@@ -82,7 +94,7 @@ def _estimate_cockroachdb_requirement(
     # hitting disk per instance. If we don't have many reads we don't need to
     # hold much data in memory.
     instance_rps = max(1, reads_per_second // rough_count)
-    disk_rps = instance_rps * _crdb_io_per_read(max(1, needed_disk // rough_count))
+    disk_rps = instance_rps * _es_io_per_read(max(1, needed_disk // rough_count))
     rps_working_set = min(1.0, disk_rps / max_rps_to_disk)
 
     # If disk RPS will be smaller than our target because there are no
@@ -90,9 +102,9 @@ def _estimate_cockroachdb_requirement(
     needed_memory = min(working_set, rps_working_set) * needed_disk
 
     # Now convert to per zone
-    needed_cores = max(1, needed_cores // zones_per_region)
-    needed_disk = max(1, needed_disk // zones_per_region)
-    needed_memory = max(1, int(needed_memory // zones_per_region))
+    needed_cores = needed_cores // zones_per_region
+    needed_disk = needed_disk // zones_per_region
+    needed_memory = int(needed_memory // zones_per_region)
     logger.debug(
         "Need (cpu, mem, disk, working) = (%s, %s, %s, %f)",
         needed_cores,
@@ -102,7 +114,7 @@ def _estimate_cockroachdb_requirement(
     )
 
     return CapacityRequirement(
-        requirement_type="crdb-zonal",
+        requirement_type="elasticsearch-data-zonal",
         core_reference_ghz=desires.core_reference_ghz,
         cpu_cores=certain_int(needed_cores),
         mem_gib=certain_float(needed_memory),
@@ -129,22 +141,23 @@ def _upsert_params(cluster, params):
 
 
 # pylint: disable=too-many-locals
-def _estimate_cockroachdb_cluster_zonal(
+def _estimate_elasticsearch_cluster_zonal(
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
-    max_local_disk_gib: int = 2048,
-    max_regional_size: int = 288,
+    max_local_disk_gib: int = 4096,
+    max_regional_size: int = 240,
     max_rps_to_disk: int = 500,
 ) -> Optional[CapacityPlan]:
 
-    # cockroachdb doesn't like to deploy on small cpu instances
-    if instance.cpu < 8:
+    # Netflix Elasticsearch doesn't like to deploy on really small instances
+    if instance.cpu < 2 or instance.ram_gib < 14:
         return None
 
-    # Right now CRDB doesn't deploy to cloud drives, just adding this
+    # (FIXME): Need elasticsearch input
+    # Right now Elasticsearch doesn't deploy to cloud drives, just adding this
     # here and leaving the capability to handle cloud drives for the future
     if instance.drive is None:
         return None
@@ -161,12 +174,12 @@ def _estimate_cockroachdb_cluster_zonal(
             desires.query_pattern.read_latency_slo_ms
         ),
         estimated_working_set=desires.data_shape.estimated_working_set_percent,
-        # CRDB has looser latency SLOs, target the 90th percentile of disk
+        # Elasticsearch has looser latency SLOs, target the 90th percentile of disk
         # latency to keep in RAM.
         target_percentile=0.90,
     ).mid
 
-    requirement = _estimate_cockroachdb_requirement(
+    requirement = _estimate_elasticsearch_requirement(
         instance=instance,
         desires=desires,
         working_set=working_set,
@@ -192,25 +205,26 @@ def _estimate_cockroachdb_cluster_zonal(
         # a 90% hit rate, but take into account the reads per read
         # from the per node dataset using leveled compaction
         # FIXME: I feel like this can be improved
-        required_disk_ios=lambda x: _crdb_io_per_read(x) * math.ceil(0.1 * rps),
-        # CRDB requires ephemeral disks to be 80% full because leveled
-        # compaction can make progress as long as there is some headroom
-        required_disk_space=lambda x: x * 1.2,
+        required_disk_ios=lambda x: _es_io_per_read(x) * math.ceil(0.1 * rps),
+        # Elasticsearch requires ephemeral disks to be % full because tiered
+        # merging can make progress as long as there is some headroom
+        required_disk_space=lambda x: x * 1.4,
         max_local_disk_gib=max_local_disk_gib,
-        # cockroachdb clusters will autobalance tablets
+        # elasticsearch clusters can autobalance via shard placement
         cluster_size=lambda x: x,
         min_count=1,
-        # Sidecars/System takes away memory from cockroachdb
-        # (FIXME): Does CRDB have a heap hint or some such?
-        reserve_memory=lambda x: base_mem,
+        # Sidecars/System takes away memory from elasticsearch
+        # Elasticsearch uses half of available system max of 32 for compressed
+        # oops
+        reserve_memory=lambda x: base_mem + max(32, x / 2),
         core_reference_ghz=requirement.core_reference_ghz,
     )
 
     # Communicate to the actual provision that if we want reduced RF
-    params = {"cockroachdb.copies": copies_per_region}
+    params = {"elasticsearch.copies": copies_per_region}
     _upsert_params(cluster, params)
 
-    # cockroachdb clusters generally should try to stay under some total number
+    # elasticsearch clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as
     #   * Security group limits. Since you must have < 500 rules if you're
     #       ingressing public ips)
@@ -223,7 +237,7 @@ def _estimate_cockroachdb_cluster_zonal(
 
     ec2_cost = zones_per_region * cluster.annual_cost
 
-    cluster.cluster_type = "cockroachdb"
+    cluster.cluster_type = "elasticsearch-data"
     clusters = Clusters(
         total_annual_cost=round(Decimal(ec2_cost), 2),
         zonal=[cluster] * zones_per_region,
@@ -236,7 +250,7 @@ def _estimate_cockroachdb_cluster_zonal(
     )
 
 
-class NflxCockroachDBCapacityModel(CapacityModel):
+class NflxElasticsearchCapacityModel(CapacityModel):
     @staticmethod
     def capacity_plan(
         instance: Instance,
@@ -245,15 +259,17 @@ class NflxCockroachDBCapacityModel(CapacityModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
-        # (FIXME): Need crdb input
-        # TODO: Use read requirements to compute RF.
-        copies_per_region: int = extra_model_arguments.get("copies_per_region", 3)
-        max_regional_size: int = extra_model_arguments.get("max_regional_size", 500)
-        max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 500)
+        # (FIXME): Need elasticsearch input
+        # TODO: Use durability requirements to compute RF.
+        copies_per_region: int = _target_rf(
+            desires, extra_model_arguments.get("copies_per_region", None)
+        )
+        max_regional_size: int = extra_model_arguments.get("max_regional_size", 240)
+        max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 1000)
         # Very large nodes are hard to recover
-        max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 2048)
+        max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 5000)
 
-        return _estimate_cockroachdb_cluster_zonal(
+        return _estimate_elasticsearch_cluster_zonal(
             instance=instance,
             drive=drive,
             desires=desires,
@@ -266,30 +282,32 @@ class NflxCockroachDBCapacityModel(CapacityModel):
 
     @staticmethod
     def description():
-        return "Netflix Streaming CockroachDB Model"
+        return "Netflix Streaming Elasticsearch Model"
 
     @staticmethod
     def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
         return (
             (
                 "copies_per_region",
-                "int = 2",
-                "How many copies of the data will exist e.g. RF=2. If unsupplied"
+                "int = 3",
+                "How many copies of the data will exist e.g. RF=3. If unsupplied"
                 " this will be deduced from durability and consistency desires",
             ),
             (
                 "max_regional_size",
-                "int = 288",
+                # Twice the size of our largest cluster
+                "int = 240",
                 "What is the maximum size of a cluster in this region",
             ),
             (
                 "max_local_disk_gib",
-                "int = 2048",
+                # Nodes larger than 4 TiB are painful to recover
+                "int = 4096",
                 "The maximum amount of data we store per machine",
             ),
             (
                 "max_rps_to_disk",
-                "int = 500",
+                "int = 1000",
                 "How many disk IOs should be allowed to hit disk per instance",
             ),
         )
@@ -298,118 +316,102 @@ class NflxCockroachDBCapacityModel(CapacityModel):
     def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
         acceptable_consistency = set(
             (
-                None,
-                AccessConsistency.linearizable,
-                AccessConsistency.linearizable_stale,
-                AccessConsistency.serializable,
-                AccessConsistency.serializable_stale,
+                AccessConsistency.best_effort,
+                AccessConsistency.eventual,
                 AccessConsistency.never,
+                None,
             )
         )
         for key, value in user_desires.query_pattern.access_consistency:
             if value.target_consistency not in acceptable_consistency:
                 raise ValueError(
-                    f"CockroachDB can only provide {acceptable_consistency} access."
+                    f"Elasticsearch can only provide {acceptable_consistency} access."
                     f"User asked for {key}={value}"
                 )
+
+        # Lower RF = less write compute
+        rf = _target_rf(
+            user_desires, extra_model_arguments.get("copies_per_region", None)
+        )
+        if rf < 3:
+            rf_write_latency = Interval(low=0.2, mid=0.6, high=2, confidence=0.98)
+        else:
+            rf_write_latency = Interval(low=0.4, mid=1, high=2, confidence=0.98)
 
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.latency,
-                    access_consistency=GlobalConsistency(
-                        same_region=Consistency(
-                            target_consistency=AccessConsistency.serializable,
-                        ),
-                        cross_region=Consistency(
-                            target_consistency=AccessConsistency.serializable,
-                        ),
-                    ),
                     estimated_mean_read_size_bytes=Interval(
-                        low=128, mid=1024, high=65536, confidence=0.95
+                        low=128, mid=4096, high=131072, confidence=0.98
                     ),
                     estimated_mean_write_size_bytes=Interval(
-                        low=128, mid=1024, high=65536, confidence=0.95
+                        low=128, mid=4096, high=131072, confidence=0.98
                     ),
-                    # (FIXME): Need crdb input
-                    # CockroachDB reads and writes can take CPU time as
-                    # JOINs and such can be hard to predict.
+                    # Elasticsearch reads and writes can take CPU time as
+                    # large cardinality search and such can be hard to predict.
                     estimated_mean_read_latency_ms=Interval(
                         low=1, mid=2, high=100, confidence=0.98
                     ),
-                    # Writes typically involve transactions which can be
-                    # expensive, but it's rare for it to have a huge tail
-                    estimated_mean_write_latency_ms=Interval(
-                        low=1, mid=4, high=200, confidence=0.98
-                    ),
+                    # Writes depend heavily on rf and consistency
+                    estimated_mean_write_latency_ms=rf_write_latency,
                     # Assume point queries "Single digit millisecond SLO"
                     read_latency_slo_ms=FixedInterval(
-                        minimum_value=1,
-                        maximum_value=100,
                         low=1,
                         mid=10,
                         high=100,
                         confidence=0.98,
                     ),
                     write_latency_slo_ms=FixedInterval(
-                        minimum_value=1,
-                        maximum_value=100,
                         low=1,
                         mid=10,
                         high=100,
                         confidence=0.98,
                     ),
                 ),
-                # Most latency sensitive cockroachdb clusters are in the
+                # Most latency sensitive elasticsearch clusters are in the
                 # < 100GiB range
                 data_shape=DataShape(
                     estimated_state_size_gib=Interval(
-                        low=10, mid=20, high=100, confidence=0.98
+                        low=10, mid=100, high=1000, confidence=0.98
                     ),
-                    # Pebble compresses with Snappy by default
+                    # Netflix Elasticsearch compresses with Deflate (gzip)
+                    # by default
                     estimated_compression_ratio=Interval(
-                        minimum_value=1.1,
+                        minimum_value=1.4,
                         maximum_value=8,
-                        low=1.5,
-                        mid=2.4,
+                        low=2,
+                        mid=3,
                         high=4,
                         confidence=0.98,
                     ),
-                    # CRDB doesn't have a sidecar, but it does have data
-                    # gateway taking about 1 MiB of memory
-                    reserved_instance_app_mem_gib=0.001,
+                    # Elasticsearch has a 1 GiB sidecar
+                    reserved_instance_app_mem_gib=1,
                 ),
             )
         else:
             return CapacityDesires(
-                # (FIXME): Need to pair with crdb folks on the exact values
+                # (FIXME): Need to pair with ES folks on the exact values
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.throughput,
-                    access_consistency=GlobalConsistency(
-                        same_region=Consistency(
-                            target_consistency=AccessConsistency.serializable,
-                        ),
-                        cross_region=Consistency(
-                            target_consistency=AccessConsistency.serializable,
-                        ),
-                    ),
+                    # Bulk writes and reads are larger in general
                     estimated_mean_read_size_bytes=Interval(
-                        low=128, mid=4096, high=65536, confidence=0.95
+                        low=128, mid=4096, high=131072, confidence=0.95
                     ),
                     estimated_mean_write_size_bytes=Interval(
-                        low=128, mid=4096, high=65536, confidence=0.95
+                        low=4096, mid=16384, high=1048576, confidence=0.95
                     ),
-                    # (FIXME): Need crdb input
-                    # CockroachDB analytics reads probably take extra time
-                    # as they are full table scanning or doing complex JOINs
+                    # (FIXME): Need es input
+                    # Elasticsearch analytics reads probably take extra time
+                    # as they are scrolling or doing complex aggregations
                     estimated_mean_read_latency_ms=Interval(
                         low=1, mid=20, high=100, confidence=0.98
                     ),
-                    # Throughput writes typically involve large transactions
+                    # Throughput writes typically involve large bulks
                     # which can be expensive, but it's rare for it to have a
                     # huge tail
                     estimated_mean_write_latency_ms=Interval(
-                        low=1, mid=20, high=100, confidence=0.98
+                        low=1, mid=10, high=100, confidence=0.98
                     ),
                     # Assume scan queries "Tens of millisecond SLO"
                     read_latency_slo_ms=FixedInterval(
@@ -429,23 +431,26 @@ class NflxCockroachDBCapacityModel(CapacityModel):
                         confidence=0.98,
                     ),
                 ),
-                # Most throughput sensitive cockroachdb clusters are in the
-                # < 100GiB range
+                # Most throughput elasticsearch clusters are in the
+                # < 1TiB range
                 data_shape=DataShape(
                     estimated_state_size_gib=Interval(
-                        low=10, mid=20, high=100, confidence=0.98
+                        low=100, mid=1000, high=10000, confidence=0.98
                     ),
-                    # Pebble compresses with Snappy by default
+                    # Netflix Elasticsearch compresses with Deflate (gzip)
+                    # by default
                     estimated_compression_ratio=Interval(
-                        minimum_value=1.1,
+                        minimum_value=1.4,
                         maximum_value=8,
-                        low=1.5,
-                        mid=2.4,
+                        low=2,
+                        mid=3,
                         high=4,
                         confidence=0.98,
                     ),
-                    # CRDB doesn't have a sidecar, but it does have data
-                    # gateway taking about 1 MiB of memory
-                    reserved_instance_app_mem_gib=0.001,
+                    # Elasticsearch has a 1 GiB sidecar
+                    reserved_instance_app_mem_gib=1,
                 ),
             )
+
+
+nflx_elasticsearch_capacity_model = NflxElasticsearchCapacityModel()

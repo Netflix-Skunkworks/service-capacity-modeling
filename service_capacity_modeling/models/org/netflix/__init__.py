@@ -1,4 +1,5 @@
 from .cassandra import nflx_cassandra_capacity_model
+from .elasticsearch import nflx_elasticsearch_capacity_model
 from .evcache import nflx_evcache_capacity_model
 from .key_value import nflx_key_value_capacity_model
 from .time_series import nflx_time_series_capacity_model
@@ -15,5 +16,6 @@ def models():
         "org.netflix.time-series": nflx_time_series_capacity_model,
         "org.netflix.zookeeper": nflx_zookeeper_capacity_model,
         "org.netflix.evcache": nflx_evcache_capacity_model,
-        "org.netflix.rds": nflx_rds_capacity_model
+        "org.netflix.rds": nflx_rds_capacity_model,
+        "org.netflix.elasticsearch": nflx_elasticsearch_capacity_model,
     }
