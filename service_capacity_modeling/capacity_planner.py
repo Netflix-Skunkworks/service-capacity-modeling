@@ -436,18 +436,21 @@ class CapacityPlanner:
         return result
 
     def _sub_models(self, model_name, desires, extra_model_arguments):
-        queue = [(desires, model_name, lambda x: x)]
+        queue: List[Tuple[Any, str, Optional[Callable[[CapacityDesires], None]]]] = [(desires, model_name, None)]
         models_used = []
 
         while queue:
-            parent_desires, sub_model, get_sub_desires = queue.pop()
+            parent_desires, sub_model, modify_sub_desires = queue.pop()
             # prevent infinite loop of models for now
             if sub_model in models_used:
                 continue
             models_used.append(sub_model)
 
-            # apply composite model specific transform
-            sub_desires = get_sub_desires(parent_desires)
+            # start with a copy of the parent desires
+            sub_desires = parent_desires.copy(deep=True)
+            if modify_sub_desires:
+                # apply composite model specific transform
+                modify_sub_desires(sub_desires)
             # then apply model defaults because it could change the defaults applied
             sub_defaults = self._models[sub_model].default_desires(
                 sub_desires, extra_model_arguments)
@@ -457,8 +460,8 @@ class CapacityPlanner:
             # We might have to compose this model with others depending on
             # the user requirement
             queue.extend([
-                (sub_desires, child_model, get_child_desires)
-                for child_model, get_child_desires in
+                (sub_desires, child_model, modify_child_desires)
+                for child_model, modify_child_desires in
                 self._models[sub_model].compose_with(
                     sub_desires, extra_model_arguments
                 )

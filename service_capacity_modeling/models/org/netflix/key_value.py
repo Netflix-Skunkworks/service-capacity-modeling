@@ -59,10 +59,10 @@ class NflxKeyValueCapacityModel(CapacityModel):
     @staticmethod
     def compose_with(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
-    ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
+    ) -> Tuple[Tuple[str, Optional[Callable[[CapacityDesires], None]]], ...]:
         # In the future depending on the user desire we might need EVCache
         # as well, e.g. if the latency SLO is reduced
-        return (("org.netflix.cassandra", lambda x: x),)
+        return (("org.netflix.cassandra", None),)
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments):
