@@ -8,7 +8,7 @@ information included in this repository are public prices.
 consider this repository public when making changes to it.
 
 
-## Trying it out
+## Trying it out 
 
 Run the tests:
 ```bash
