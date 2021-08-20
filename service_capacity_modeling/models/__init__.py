@@ -1,4 +1,5 @@
 from typing import Any
+from typing import Callable
 from typing import Dict
 from typing import Optional
 from typing import Sequence
@@ -207,7 +208,7 @@ class CapacityModel:
     def compose_with(
         user_desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
-    ) -> Tuple[str, ...]:
+    ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
         """Return additional model names to compose with this one
 
         Often used for dependencies.
