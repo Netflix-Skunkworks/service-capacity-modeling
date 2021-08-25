@@ -271,22 +271,13 @@ class CapacityPlanner:
         lifecycles = lifecycles or self._default_lifecycles
 
         results = []
-        composable_models = tuple(
-            self._models[model_name].compose_with(
-                desires, extra_model_arguments=extra_model_arguments
-            )
-        )
-        models = (model_name,) + composable_models
 
-        for model in models:
-            desires = desires.merge_with(
-                self._models[model_name].default_desires(desires, extra_model_arguments)
-            )
+        for sub_model, sub_desires in self._sub_models(model_name, desires, extra_model_arguments):
             results.append(
                 self._plan_certain(
-                    model_name=model,
+                    model_name=sub_model,
                     region=region,
-                    desires=desires,
+                    desires=sub_desires,
                     num_results=num_results,
                     lifecycles=lifecycles,
                     extra_model_arguments=extra_model_arguments,
@@ -368,33 +359,19 @@ class CapacityPlanner:
         zonal_requirements: Dict[str, Dict] = {}
         regional_requirements: Dict[str, Dict] = {}
 
-        # We might have to compose this model with others depending on
-        # the user requirement
-        composable_models = tuple(
-            self._models[model_name].compose_with(
-                desires, extra_model_arguments=extra_model_arguments
-            )
-        )
-        models = (model_name,) + composable_models
         raw_capacity_plans: List[List[Sequence[CapacityPlan]]] = []
         for i in range(simulations):
-            raw_capacity_plans.append([list(tuple()) for i in range(len(models))])
+            raw_capacity_plans.append(list())
 
-        for i, model in enumerate(models):
-            merged_desires = desires.merge_with(
-                self._models[model].default_desires(
-                    desires, extra_model_arguments=extra_model_arguments
-                )
-            )
-
-            for j, sim_desires in enumerate(model_desires(merged_desires, simulations)):
-                raw_capacity_plans[j][i] = self._plan_certain(
-                    model_name=model,
+        for sub_model, sub_desires in self._sub_models(model_name, desires, extra_model_arguments):
+            for j, sim_desires in enumerate(model_desires(sub_desires, simulations)):
+                raw_capacity_plans[j].append(self._plan_certain(
+                    model_name=sub_model,
                     region=region,
                     desires=sim_desires,
                     num_results=1,
                     extra_model_arguments=extra_model_arguments,
-                )
+                ))
 
         # Now accumulate across the composed models
         capacity_plans = _merge_models(
@@ -457,6 +434,37 @@ class CapacityPlanner:
             percentiles=percentile_plans,
         )
         return result
+
+    def _sub_models(self, model_name, desires, extra_model_arguments):
+        queue = [(desires, model_name, lambda x: x)]
+        models_used = []
+
+        while queue:
+            parent_desires, sub_model, get_sub_desires = queue.pop()
+            # prevent infinite loop of models for now
+            if sub_model in models_used:
+                continue
+            models_used.append(sub_model)
+
+            # apply composite model specific transform
+            sub_desires = get_sub_desires(parent_desires)
+            # then apply model defaults because it could change the defaults applied
+            sub_defaults = self._models[sub_model].default_desires(
+                sub_desires, extra_model_arguments)
+            # apply the defaults to the desires to allow the model code to be simpler
+            sub_desires = sub_desires.merge_with(sub_defaults)
+
+            # We might have to compose this model with others depending on
+            # the user requirement
+            queue.extend([
+                (sub_desires, child_model, get_child_desires)
+                for child_model, get_child_desires in
+                self._models[sub_model].compose_with(
+                    sub_desires, extra_model_arguments
+                )
+            ])
+
+            yield sub_model, sub_desires
 
 
 planner = CapacityPlanner()

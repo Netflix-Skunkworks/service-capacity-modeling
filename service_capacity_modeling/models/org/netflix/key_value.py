@@ -1,4 +1,5 @@
 from typing import Any
+from typing import Callable
 from typing import Dict
 from typing import Optional
 from typing import Sequence
@@ -58,10 +59,10 @@ class NflxKeyValueCapacityModel(CapacityModel):
     @staticmethod
     def compose_with(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
-    ) -> Tuple[str, ...]:
+    ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
         # In the future depending on the user desire we might need EVCache
         # as well, e.g. if the latency SLO is reduced
-        return ("org.netflix.cassandra",)
+        return (("org.netflix.cassandra", lambda x: x),)
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments):
