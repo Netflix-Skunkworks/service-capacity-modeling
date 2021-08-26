@@ -208,7 +208,7 @@ class CapacityModel:
     def compose_with(
         user_desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
-    ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
+    ) -> Tuple[Tuple[str, Optional[Callable[[CapacityDesires], None]]], ...]:
         """Return additional model names to compose with this one
 
         Often used for dependencies.

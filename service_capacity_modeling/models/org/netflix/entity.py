@@ -22,7 +22,7 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models import CapacityModel
 
 
-class NflxTimeSeriesCapacityModel(CapacityModel):
+class NflxEntityCapacityModel(CapacityModel):
     @staticmethod
     def capacity_plan(
         instance: Instance,
@@ -31,30 +31,34 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
-        # TimeSeries wants 20GiB root volumes
+        # Entity wants 20GiB root volumes
         extra_model_arguments.setdefault("root_disk_gib", 20)
 
-        ts_app = nflx_java_app_capacity_model.capacity_plan(
+        entity_app = nflx_java_app_capacity_model.capacity_plan(
             instance=instance,
             drive=drive,
             context=context,
             desires=desires,
             extra_model_arguments=extra_model_arguments,
         )
-        if ts_app is None:
+        if entity_app is None:
             return None
 
-        for cluster in ts_app.candidate_clusters.regional:
-            cluster.cluster_type = "dgwts"
-        return ts_app
+        for cluster in entity_app.candidate_clusters.regional:
+            cluster.cluster_type = "dgwmes"
+        return entity_app
 
     @staticmethod
     def description():
-        return "Netflix Streaming TimeSeries Model"
+        return "Netflix Streaming Entity Model"
 
     @staticmethod
     def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
         return nflx_java_app_capacity_model.extra_model_arguments()
+
+    @staticmethod
+    def _modify_elasticsearch_desires(user_desires: CapacityDesires):
+        user_desires.query_pattern.access_consistency.same_region.target_consistency = AccessConsistency.eventual
 
     @staticmethod
     def compose_with(
@@ -62,7 +66,10 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
     ) -> Tuple[Tuple[str, Optional[Callable[[CapacityDesires], None]]], ...]:
         # In the future depending on the user desire we might need EVCache
         # as well, e.g. if the latency SLO is reduced
-        return (("org.netflix.cassandra", None),)
+        return (
+            ("org.netflix.cassandra", None),
+            ("org.netflix.elasticsearch", NflxEntityCapacityModel._modify_elasticsearch_desires)
+        )
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments):
@@ -72,7 +79,7 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
                     access_pattern=AccessPattern.latency,
                     access_consistency=GlobalConsistency(
                         same_region=Consistency(
-                            target_consistency=AccessConsistency.eventual,
+                            target_consistency=AccessConsistency.read_your_writes,
                         ),
                         cross_region=Consistency(
                             target_consistency=AccessConsistency.eventual,
@@ -108,6 +115,7 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
                         confidence=0.98,
                     ),
                 ),
+                # Most Entity clusters are small
                 data_shape=DataShape(
                     estimated_state_size_gib=Interval(
                         low=10, mid=50, high=200, confidence=0.98
@@ -121,7 +129,7 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
                     access_pattern=AccessPattern.latency,
                     access_consistency=GlobalConsistency(
                         same_region=Consistency(
-                            target_consistency=AccessConsistency.eventual,
+                            target_consistency=AccessConsistency.read_your_writes,
                         ),
                         cross_region=Consistency(
                             target_consistency=AccessConsistency.eventual,
@@ -133,7 +141,7 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
                     estimated_mean_write_size_bytes=Interval(
                         low=64, mid=128, high=1024, confidence=0.95
                     ),
-                    # ts scan queries can be more expensive
+                    # Entity scan queries can be more expensive
                     estimated_mean_read_latency_ms=Interval(
                         low=0.2, mid=4, high=6, confidence=0.98
                     ),
@@ -159,7 +167,7 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
                         confidence=0.98,
                     ),
                 ),
-                # Most throughput ts clusters are large
+                # Most throughput Entity clusters are large
                 data_shape=DataShape(
                     estimated_state_size_gib=Interval(
                         low=100, mid=1000, high=4000, confidence=0.98
@@ -169,4 +177,4 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
             )
 
 
-nflx_time_series_capacity_model = NflxTimeSeriesCapacityModel()
+nflx_entity_capacity_model = NflxEntityCapacityModel()
