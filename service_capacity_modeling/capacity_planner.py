@@ -230,7 +230,7 @@ class CapacityPlanner:
         default_lifecycles=(Lifecycle.stable, Lifecycle.beta),
     ):
         self._shapes: HardwareShapes = shapes
-        self._models: Dict[str, CapacityModel] = dict()
+        self._models: Dict[str, CapacityModel] = {}
 
         self._default_num_simulations = default_num_simulations
         self._default_num_results = default_num_results
@@ -272,7 +272,9 @@ class CapacityPlanner:
 
         results = []
 
-        for sub_model, sub_desires in self._sub_models(model_name, desires, extra_model_arguments):
+        for sub_model, sub_desires in self._sub_models(
+            model_name, desires, extra_model_arguments
+        ):
             results.append(
                 self._plan_certain(
                     model_name=sub_model,
@@ -306,9 +308,18 @@ class CapacityPlanner:
             services={n: s.copy(deep=True) for n, s in hardware.services.items()},
         )
 
+        # Applications often set fixed reservations of heap or OS memory, we
+        # should not even bother with shapes that don't meet the minimums
+        per_instance_mem = (
+            desires.data_shape.reserved_instance_app_mem_gib
+            + desires.data_shape.reserved_instance_system_mem_gib
+        )
+
         plans = []
         for instance in hardware.instances.values():
             if instance.lifecycle not in lifecycles:
+                continue
+            if per_instance_mem > instance.ram_gib:
                 continue
 
             for drive in hardware.drives.values():
@@ -360,18 +371,22 @@ class CapacityPlanner:
         regional_requirements: Dict[str, Dict] = {}
 
         raw_capacity_plans: List[List[Sequence[CapacityPlan]]] = []
-        for i in range(simulations):
-            raw_capacity_plans.append(list())
+        for _ in range(simulations):
+            raw_capacity_plans.append([])
 
-        for sub_model, sub_desires in self._sub_models(model_name, desires, extra_model_arguments):
+        for sub_model, sub_desires in self._sub_models(
+            model_name, desires, extra_model_arguments
+        ):
             for j, sim_desires in enumerate(model_desires(sub_desires, simulations)):
-                raw_capacity_plans[j].append(self._plan_certain(
-                    model_name=sub_model,
-                    region=region,
-                    desires=sim_desires,
-                    num_results=1,
-                    extra_model_arguments=extra_model_arguments,
-                ))
+                raw_capacity_plans[j].append(
+                    self._plan_certain(
+                        model_name=sub_model,
+                        region=region,
+                        desires=sim_desires,
+                        num_results=1,
+                        extra_model_arguments=extra_model_arguments,
+                    )
+                )
 
         # Now accumulate across the composed models
         capacity_plans = _merge_models(
@@ -436,7 +451,9 @@ class CapacityPlanner:
         return result
 
     def _sub_models(self, model_name, desires, extra_model_arguments):
-        queue: List[Tuple[Any, str, Optional[Callable[[CapacityDesires], None]]]] = [(desires, model_name, None)]
+        queue: List[Tuple[Any, str, Optional[Callable[[CapacityDesires], None]]]] = [
+            (desires, model_name, None)
+        ]
         models_used = []
 
         while queue:
@@ -453,19 +470,21 @@ class CapacityPlanner:
                 modify_sub_desires(sub_desires)
             # then apply model defaults because it could change the defaults applied
             sub_defaults = self._models[sub_model].default_desires(
-                sub_desires, extra_model_arguments)
+                sub_desires, extra_model_arguments
+            )
             # apply the defaults to the desires to allow the model code to be simpler
             sub_desires = sub_desires.merge_with(sub_defaults)
 
             # We might have to compose this model with others depending on
             # the user requirement
-            queue.extend([
-                (sub_desires, child_model, modify_child_desires)
-                for child_model, modify_child_desires in
-                self._models[sub_model].compose_with(
-                    sub_desires, extra_model_arguments
-                )
-            ])
+            queue.extend(
+                [
+                    (sub_desires, child_model, modify_child_desires)
+                    for child_model, modify_child_desires in self._models[
+                        sub_model
+                    ].compose_with(sub_desires, extra_model_arguments)
+                ]
+            )
 
             yield sub_model, sub_desires
 

@@ -57,11 +57,7 @@ def _estimate_java_app_requirement(
     heap_allocation_gibps = (mem_allocation_mbps / 8) / 1024
     network_heap = heap_allocation_gibps * 2
 
-    needed_memory_gib = (
-        network_heap
-        + desires.data_shape.reserved_instance_app_mem_gib
-        + desires.data_shape.reserved_instance_system_mem_gib
-    )
+    needed_memory_gib = network_heap
 
     return CapacityRequirement(
         requirement_type="java-app",
@@ -116,7 +112,7 @@ def _estimate_java_app_region(
             candidate_clusters=Clusters(
                 total_annual_cost=round(Decimal(cluster.annual_cost), 2),
                 regional=[cluster],
-                zonal=list(),
+                zonal=[],
             ),
         )
     return None
