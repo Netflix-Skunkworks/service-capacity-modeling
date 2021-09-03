@@ -7,13 +7,15 @@ information included in this repository are public prices.
 **NOTE**: Netflix confidential information should never enter this repo. Please
 consider this repository public when making changes to it.
 
-
 ## Trying it out
 
 Run the tests:
 ```bash
 # Test the capacity planner on included netflix models
 $ tox -e py38
+
+# Run a single test with a debugger attached if the test fails
+$ .tox/py38/bin/pytest -n0 -k test_java_heap_heavy --pdb --pdbcls=IPython.terminal.debugger:Pdb
 
 # Verify all type contracts
 $ tox -e mypy
