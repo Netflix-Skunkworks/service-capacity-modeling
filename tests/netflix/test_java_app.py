@@ -103,17 +103,16 @@ def test_uncertain_java_app():
 
 
 def test_java_heap_heavy():
-    needs_heap = CapacityDesires(
+    large_heap = CapacityDesires(
         service_tier=1,
         query_pattern=QueryPattern(
             estimated_read_per_second=Interval(
-                low=2_000, mid=30_000, high=60_000, confidence=0.98
+                low=2_000, mid=10_000, high=60_000, confidence=0.98
             ),
             estimated_write_per_second=Interval(
-                low=2_000, mid=30_000, high=60_000, confidence=0.98
+                low=2_000, mid=10_000, high=60_000, confidence=0.98
             ),
         ),
-        # Should be ignored
         data_shape=DataShape(
             reserved_instance_app_mem_gib=40,
         ),
@@ -122,12 +121,42 @@ def test_java_heap_heavy():
     java_cap_plan = planner.plan(
         model_name="org.netflix.stateless-java",
         region="us-east-1",
-        desires=needs_heap,
+        desires=large_heap,
     )
     java_least_regret = java_cap_plan.least_regret[0]
     java_result = java_least_regret.candidate_clusters.regional[0]
 
     cores = java_result.count * java_result.instance.cpu
-    assert java_result.instance.name.startswith("r5.")
+    assert 20 <= cores <= 100
+    assert java_result.instance.ram_gib > 40
+
+    # Should bump the heap due to the traffic
+    large_traffic = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=Interval(
+                low=2_000, mid=30_000, high=60_000, confidence=0.98
+            ),
+            estimated_write_per_second=Interval(
+                low=2_000, mid=30_000, high=60_000, confidence=0.98
+            ),
+            estimated_mean_write_size_bytes=Interval(
+                low=1024, mid=32768, high=262144, confidence=0.98
+            ),
+        ),
+    )
+
+    java_cap_plan = planner.plan(
+        model_name="org.netflix.stateless-java",
+        region="us-east-1",
+        desires=large_traffic,
+    )
+    java_least_regret = java_cap_plan.least_regret[0]
+    java_result = java_least_regret.candidate_clusters.regional[0]
+
+    cores = java_result.count * java_result.instance.cpu
     assert 100 <= cores <= 300
-    assert java_result.instance.mem_gib > 40
+    # 32 KiB payloads * 30k/second is around 1 GiB per second
+    # which should require a decent chunk of heap memory
+    memory = java_result.count * java_result.instance.ram_gib
+    assert memory > 50
