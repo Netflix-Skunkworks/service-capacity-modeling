@@ -26,6 +26,7 @@ from service_capacity_modeling.interface import interval_percentile
 from service_capacity_modeling.interface import Lifecycle
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
+from service_capacity_modeling.interface import PlanExplanation
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import UncertainCapacityPlan
 from service_capacity_modeling.models import CapacityModel
@@ -350,6 +351,7 @@ class CapacityPlanner:
         lifecycles: Optional[Sequence[Lifecycle]] = None,
         regret_params: Optional[CapacityRegretParameters] = None,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
+        explain: bool = False,
     ) -> UncertainCapacityPlan:
         extra_model_arguments = extra_model_arguments or {}
 
@@ -378,6 +380,7 @@ class CapacityPlanner:
             model_name, desires, extra_model_arguments
         ):
             for j, sim_desires in enumerate(model_desires(sub_desires, simulations)):
+                print(j)
                 raw_capacity_plans[j].append(
                     self._plan_certain(
                         model_name=sub_model,
@@ -447,7 +450,15 @@ class CapacityPlanner:
                 extra_model_arguments=extra_model_arguments,
             ),
             percentiles=percentile_plans,
+            explanation=PlanExplanation(
+                regret_params=regret_params
+            )
         )
+        if explain:
+            result.explanation.regret_clusters_by_model = {
+                model_name: raw_capacity_plans
+            }
+
         return result
 
     def _sub_models(self, model_name, desires, extra_model_arguments):
