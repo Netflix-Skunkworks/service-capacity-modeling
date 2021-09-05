@@ -1,6 +1,7 @@
 from decimal import Decimal
 from enum import Enum
 from functools import lru_cache
+from typing import Any
 from typing import Dict
 from typing import Optional
 from typing import Sequence
@@ -484,7 +485,7 @@ class CapacityRequirement(BaseModel):
     network_mbps: Interval = certain_int(0)
     disk_gib: Interval = certain_int(0)
 
-    context: Dict = dict()
+    context: Dict = {}
 
 
 class ClusterCapacity(BaseModel):
@@ -519,8 +520,8 @@ class RegionClusterCapacity(ClusterCapacity):
 
 
 class Requirements(BaseModel):
-    zonal: Sequence[CapacityRequirement] = list()
-    regional: Sequence[CapacityRequirement] = list()
+    zonal: Sequence[CapacityRequirement] = []
+    regional: Sequence[CapacityRequirement] = []
 
     # Commonly a model regrets "spend", lack of "disk" space and sometimes
     # lack of "mem"ory. Default options are ["cost", "disk", "mem"]
@@ -537,21 +538,14 @@ class Requirements(BaseModel):
 
 class Clusters(BaseModel):
     total_annual_cost: Decimal = Decimal(0)
-    zonal: Sequence[ZoneClusterCapacity] = list()
-    regional: Sequence[RegionClusterCapacity] = list()
-    services: Sequence[ServiceCapacity] = list()
+    zonal: Sequence[ZoneClusterCapacity] = []
+    regional: Sequence[RegionClusterCapacity] = []
+    services: Sequence[ServiceCapacity] = []
 
 
 class CapacityPlan(BaseModel):
     requirements: Requirements
     candidate_clusters: Clusters
-
-
-class UncertainCapacityPlan(BaseModel):
-    requirements: Requirements
-    least_regret: Sequence[CapacityPlan]
-    mean: Sequence[CapacityPlan]
-    percentiles: Dict[int, Sequence[CapacityPlan]]
 
 
 # Parameters to cost functions of the form
@@ -582,3 +576,17 @@ class CapacityRegretParameters(BaseModel):
     # Any additional metric we want to regret from the models
     # just have to be returned in the requirement
     extra: Dict[str, Regret] = {}
+
+
+class PlanExplanation(BaseModel):
+    regret_params: CapacityRegretParameters
+    regret_clusters_by_model: Dict[str, Sequence[CapacityPlan]] = {}
+    context: Dict[str, Any] = {}
+
+
+class UncertainCapacityPlan(BaseModel):
+    requirements: Requirements
+    least_regret: Sequence[CapacityPlan]
+    mean: Sequence[CapacityPlan]
+    percentiles: Dict[int, Sequence[CapacityPlan]]
+    explanation: PlanExplanation
