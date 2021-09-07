@@ -67,6 +67,9 @@ def test_capacity_small_fast():
         if small_result.attached_drives:
             assert sum(d.size_gib for d in small_result.attached_drives) > 1000
 
+        assert small_result.cluster_params["cassandra.heap.write.percent"] == 0.25
+        assert small_result.cluster_params["cassandra.heap.table.percent"] == 0.11
+
 
 def test_capacity_high_writes():
     cap_plan = planner.plan_certain(
@@ -85,6 +88,36 @@ def test_capacity_high_writes():
     assert cap_plan.candidate_clusters.total_annual_cost < 40_000
 
 
+def test_high_write_throughput():
+    desires = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(1000),
+            estimated_write_per_second=certain_int(1_000_000),
+            # Really large writes
+            estimated_mean_write_size_bytes=certain_int(4096),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=certain_int(100_000),
+        ),
+    )
+
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=desires,
+    )[0]
+    high_writes_result = cap_plan.candidate_clusters.zonal[0]
+    assert high_writes_result.instance.family in ("m5", "r5")
+    assert high_writes_result.count > 8
+
+    assert high_writes_result.attached_drives[0].size_gib >= 400
+    assert 125_000 < cap_plan.candidate_clusters.total_annual_cost < 275_000
+
+    # We should require more than 4 tiering in order to meet this requirement
+    assert high_writes_result.cluster_params["cassandra.compaction.min_threshold"] > 4
+
+
 def test_capacity_large_footprint():
     cap_plan = planner.plan_certain(
         model_name="org.netflix.cassandra",
@@ -96,6 +129,13 @@ def test_capacity_large_footprint():
     large_footprint_result = cap_plan.candidate_clusters.zonal[0]
     assert large_footprint_result.instance.name.startswith("i3")
     assert large_footprint_result.count == 16
+
+    # Should have been able to use default heap settings
+    assert large_footprint_result.cluster_params["cassandra.heap.write.percent"] == 0.25
+    assert large_footprint_result.cluster_params["cassandra.heap.table.percent"] == 0.11
+    assert (
+        large_footprint_result.cluster_params["cassandra.compaction.min_threshold"] == 4
+    )
 
 
 def test_reduced_durability():
@@ -144,6 +184,27 @@ def test_reduced_durability():
     # use less compute
     assert expensive_plan.requirements.zonal[0].context["replication_factor"] == 3
     assert cheap_plan.requirements.zonal[0].context["replication_factor"] == 2
+
+    # Due to high writes both should have high heap write buffering
+    for plan in (expensive_plan, cheap_plan):
+        assert (
+            plan.candidate_clusters.zonal[0].cluster_params[
+                "cassandra.heap.write.percent"
+            ]
+            == 0.5
+        )
+        assert (
+            plan.candidate_clusters.zonal[0].cluster_params[
+                "cassandra.heap.table.percent"
+            ]
+            == 0.2
+        )
+        assert (
+            plan.candidate_clusters.zonal[0].cluster_params[
+                "cassandra.compaction.min_threshold"
+            ]
+            == 4
+        )
 
     assert (
         cheap_plan.candidate_clusters.zonal[0].cluster_params["cassandra.keyspace.rf"]

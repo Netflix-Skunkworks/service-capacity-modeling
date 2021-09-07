@@ -127,20 +127,27 @@ def compute_stateful_zone(
     instance: Instance,
     drive: Drive,
     needed_cores: int,
-    needed_disk_gib: int,
-    needed_memory_gib: int,
+    needed_disk_gib: float,
+    needed_memory_gib: float,
     needed_network_mbps: float,
-    # EBS may need to scale for IOs, and datastores might need more
-    # or less IOs for a given data size as well as space
-    required_disk_ios,
-    required_disk_space,
-    max_local_disk_gib,
-    # Some stateful clusters have sidecars that take memory
-    reserve_memory,
-    # Some stateful clusters have preferences on per zone sizing
-    cluster_size,
     # Faster CPUs can execute operations faster
     core_reference_ghz: float,
+    # EBS may need to scale for IOs, and datastores might need more
+    # or less IOs for a given data size as well as space
+    required_disk_ios: Callable[[float], float] = lambda x: 0,
+    required_disk_space: Callable[[float], float] = lambda x: x,
+    # The maximum amount of state we can hold per node in the database
+    # typically you don't want stateful systems going much higher than a
+    # few TiB so that recovery functions properly
+    max_local_disk_gib: float = 2048,
+    # Some stateful clusters have sidecars that take memory
+    reserve_memory: Callable[[float], float] = lambda x: 0,
+    # How much write buffer we get per instance (usually a percentage of
+    # the reserved memory, e.g. for buffering writes in heap)
+    write_buffer: Callable[[float], float] = lambda x: 0,
+    required_write_buffer_gib: float = 0,
+    # Some stateful clusters have preferences on per zone sizing
+    cluster_size: Callable[[int], int] = lambda x: x,
     min_count: int = 0,
 ) -> ZoneClusterCapacity:
     # Normalize the cores of this instance type to the latency reference
@@ -150,7 +157,7 @@ def compute_stateful_zone(
 
     # Datastores often require disk headroom for e.g. compaction and such
     if instance.drive is not None:
-        needed_disk_gib = required_disk_space(needed_disk_gib)
+        needed_disk_gib = math.ceil(required_disk_space(needed_disk_gib))
 
     # How many instances do we need for the CPU
     count = math.ceil(needed_cores / instance.cpu)
@@ -163,6 +170,13 @@ def compute_stateful_zone(
             needed_memory_gib / (instance.ram_gib - reserve_memory(instance.ram_gib))
         ),
     )
+    # Account for if the stateful service needs a certain amount of reserved
+    # memory for a given throughput.
+    if write_buffer(instance.ram_gib) > 0:
+        count = max(
+            count,
+            math.ceil(required_write_buffer_gib / (write_buffer(instance.ram_gib))),
+        )
 
     # How many instances do we need for the network
     count = max(count, math.ceil(needed_network_mbps / instance.net_mbps))
@@ -170,7 +184,7 @@ def compute_stateful_zone(
     # How many instances do we need for the disk
     if instance.drive is not None and instance.drive.size_gib > 0:
         disk_per_node = min(max_local_disk_gib, instance.drive.size_gib)
-        count = max(count, needed_disk_gib // disk_per_node)
+        count = max(count, math.ceil(needed_disk_gib // disk_per_node))
 
     count = max(cluster_size(count), min_count)
 

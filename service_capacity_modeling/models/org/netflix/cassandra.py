@@ -2,6 +2,7 @@ import logging
 import math
 from decimal import Decimal
 from typing import Any
+from typing import Callable
 from typing import Dict
 from typing import Optional
 from typing import Sequence
@@ -36,6 +37,29 @@ from service_capacity_modeling.stats import dist_for_interval
 
 
 logger = logging.getLogger(__name__)
+
+
+def _write_buffer_gib_zone(
+    desires: CapacityDesires, zones_per_region: int, flushes_before_compaction: int = 4
+) -> float:
+    # Cassandra has to buffer writes before flushing to disk, and assuming
+    # we will compact every 4 flushes and we want no more than 2 redundant
+    # compactions in an hour, we want <= 4**2 = 16 flushes per hour
+    # or a flush of data every 3600 / 16 = 225 seconds
+    write_bytes_per_second = (
+        desires.query_pattern.estimated_write_per_second.mid
+        * desires.query_pattern.estimated_mean_write_size_bytes.mid
+    )
+
+    compactions_per_hour = 2
+    hour_in_seconds = 60 * 60
+
+    write_buffer_gib = (
+        (write_bytes_per_second * hour_in_seconds)
+        / (flushes_before_compaction ** compactions_per_hour)
+    ) / (1 << 30)
+
+    return float(write_buffer_gib) / zones_per_region
 
 
 def _estimate_cassandra_requirement(
@@ -93,6 +117,24 @@ def _estimate_cassandra_requirement(
         working_set,
     )
 
+    # Cassandra can defer writes either by buffering in memory or by
+    # waiting longer before recompacting (the min-threshold on the
+    # L0 compactions or STCS compactions)
+    min_threshold = 4
+    write_buffer_gib = _write_buffer_gib_zone(
+        desires=desires,
+        zones_per_region=zones_per_region,
+        flushes_before_compaction=min_threshold,
+    )
+
+    while write_buffer_gib > 12 and min_threshold < 16:
+        min_threshold *= 2
+        write_buffer_gib = _write_buffer_gib_zone(
+            desires=desires,
+            zones_per_region=zones_per_region,
+            flushes_before_compaction=min_threshold,
+        )
+
     return CapacityRequirement(
         requirement_type="cassandra-zonal",
         core_reference_ghz=desires.core_reference_ghz,
@@ -109,6 +151,8 @@ def _estimate_cassandra_requirement(
                 1.0 / desires.data_shape.estimated_compression_ratio.mid, 2
             ),
             "read_per_second": reads_per_second,
+            "write_buffer_gib": write_buffer_gib,
+            "min_threshold": min_threshold,
         },
     )
 
@@ -133,6 +177,8 @@ def _estimate_cassandra_cluster_zonal(
     max_rps_to_disk: int = 500,
     max_local_disk_gib: int = 2048,
     max_regional_size: int = 96,
+    max_write_buffer_percent: float = 0.25,
+    max_table_buffer_percent: float = 0.11,
 ) -> Optional[CapacityPlan]:
 
     # Netflix Cassandra doesn't like to deploy on really small instances
@@ -186,6 +232,13 @@ def _estimate_cassandra_cluster_zonal(
         + desires.data_shape.reserved_instance_system_mem_gib
     )
 
+    heap_fn = _cass_heap_for_write_buffer(
+        instance=instance,
+        max_zonal_size=max_regional_size // zones_per_region,
+        write_buffer_gib=requirement.context["write_buffer_gib"],
+        buffer_percent=(max_write_buffer_percent * max_table_buffer_percent),
+    )
+
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
@@ -193,6 +246,7 @@ def _estimate_cassandra_cluster_zonal(
         needed_disk_gib=int(requirement.disk_gib.mid),
         needed_memory_gib=int(requirement.mem_gib.mid),
         needed_network_mbps=requirement.network_mbps.mid,
+        core_reference_ghz=requirement.core_reference_ghz,
         # Assume that by provisioning enough memory we'll get
         # a 90% hit rate, but take into account the reads per read
         # from the per node dataset using leveled compaction
@@ -208,12 +262,24 @@ def _estimate_cassandra_cluster_zonal(
         cluster_size=next_power_of_2,
         min_count=max(min_count, required_cluster_size or 0),
         # C* heap usage takes away from OS page cache memory
-        reserve_memory=lambda x: base_mem + max(min(x // 2, 4), min(x // 4, 12)),
-        core_reference_ghz=requirement.core_reference_ghz,
+        reserve_memory=lambda x: base_mem + heap_fn(x),
+        # C* heap buffers the writes at roughly a rate of
+        # memtable_cleanup_threshold * memtable_size. At Netflix this
+        # is 0.11 * 25 * heap
+        write_buffer=lambda x: heap_fn(x) * max_write_buffer_percent * 0.25,
+        required_write_buffer_gib=float(requirement.context["write_buffer_gib"]),
     )
 
     # Communicate to the actual provision that if we want reduced RF
-    params = {"cassandra.keyspace.rf": copies_per_region}
+    params = {
+        "cassandra.keyspace.rf": copies_per_region,
+        # In order to handle high write loads we have to shift memory
+        # to heap memory, communicate with C* about this
+        "cassandra.heap.gib": heap_fn(instance.ram_gib),
+        "cassandra.heap.write.percent": max_write_buffer_percent,
+        "cassandra.heap.table.percent": max_table_buffer_percent,
+        "cassandra.compaction.min_threshold": requirement.context["min_threshold"],
+    }
     _upsert_params(cluster, params)
 
     # Sometimes we don't want modify cluster topology, so only allow
@@ -258,7 +324,7 @@ def _estimate_cassandra_cluster_zonal(
     clusters = Clusters(
         total_annual_cost=round(Decimal(ec2_cost + backup_cost), 2),
         zonal=[cluster] * zones_per_region,
-        regional=list(),
+        regional=[],
         services=cap_services,
     )
 
@@ -275,6 +341,27 @@ def _cass_io_per_read(node_size_gib, sstable_size_mb=160):
     # 10 sstables per level, plus 1 for L0 (avg)
     levels = 1 + int(math.ceil(math.log(sstables, 10)))
     return levels
+
+
+def _cass_heap_for_write_buffer(
+    instance: Instance,
+    write_buffer_gib: float,
+    max_zonal_size: int,
+    buffer_percent: float,
+) -> Callable[[float], float]:
+    # If there is no way we can get enough heap with the max zonal size, try
+    # letting max heap grow to 31 GiB per node to get more write buffer
+    if write_buffer_gib > (
+        max_zonal_size * _cass_heap(instance.ram_gib) * buffer_percent
+    ):
+        return lambda x: _cass_heap(x, max_heap_gib=31)
+    else:
+        return _cass_heap
+
+
+# C* follows the following formula for calculating heap
+def _cass_heap(node_memory_gib: float, max_heap_gib: float = 12) -> float:
+    return max(min(node_memory_gib // 2, 4), min(node_memory_gib // 4, max_heap_gib))
 
 
 def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
@@ -316,6 +403,20 @@ class NflxCassandraCapacityModel(CapacityModel):
         max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 500)
         max_regional_size: int = extra_model_arguments.get("max_regional_size", 96)
         max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 2048)
+        max_write_buffer_percent: float = min(
+            0.5, extra_model_arguments.get("max_write_buffer_percent", 0.25)
+        )
+        max_table_buffer_percent: float = min(
+            0.5, extra_model_arguments.get("max_table_buffer_percent", 0.11)
+        )
+
+        # Adjust heap defaults for high write clusters
+        if (
+            desires.query_pattern.estimated_write_per_second.mid >= 100_000
+            and desires.data_shape.estimated_state_size_gib.mid >= 100
+        ):
+            max_write_buffer_percent = max(0.5, max_write_buffer_percent)
+            max_table_buffer_percent = max(0.2, max_table_buffer_percent)
 
         return _estimate_cassandra_cluster_zonal(
             instance=instance,
@@ -329,6 +430,8 @@ class NflxCassandraCapacityModel(CapacityModel):
             max_rps_to_disk=max_rps_to_disk,
             max_regional_size=max_regional_size,
             max_local_disk_gib=max_local_disk_gib,
+            max_write_buffer_percent=max_write_buffer_percent,
+            max_table_buffer_percent=max_table_buffer_percent,
         )
 
     @staticmethod
@@ -363,6 +466,20 @@ class NflxCassandraCapacityModel(CapacityModel):
                 "max_local_disk_gib",
                 "int = 2048",
                 "The maximum amount of data we store per machine",
+            ),
+            (
+                "max_write_buffer_percent",
+                "float = 0.25",
+                "The amount of heap memory that can be used to buffer writes. "
+                "Note that if there are more than 100k writes this will "
+                "automatically adjust to 0.5",
+            ),
+            (
+                "max_table_buffer_percent",
+                "float = 0.11",
+                "How much of heap memory can be used for a single table. "
+                "Note that if there are more than 100k writes this will "
+                "automatically adjust to 0.2",
             ),
         )
 
