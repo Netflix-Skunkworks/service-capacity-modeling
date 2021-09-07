@@ -208,8 +208,15 @@ class CapacityModel:
     def compose_with(
         user_desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
-    ) -> Tuple[Tuple[str, Optional[Callable[[CapacityDesires], None]]], ...]:
+    ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
         """Return additional model names to compose with this one
+
+        The second element of the tuple is a capacity desire transform that
+        takes the original user desire and modifies it for the composed
+        model.
+
+        (("model1", lambda x: x),
+         ("model2", lambda x: transform(x)))
 
         Often used for dependencies.
         """

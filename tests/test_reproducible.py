@@ -37,6 +37,33 @@ def test_repeated_plans():
     assert all(i == a[0] for i in a)
 
 
+def test_compositional():
+    direct_result = planner.plan(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=uncertain_mid,
+        num_results=4,
+        explain=True,
+    )
+    composed_result = planner.plan(
+        model_name="org.netflix.key-value",
+        region="us-east-1",
+        desires=uncertain_mid,
+        num_results=4,
+        explain=True,
+    )
+
+    for i in range(4):
+        direct_cluster = direct_result.least_regret[i].candidate_clusters.zonal[0]
+        composed_cluster = composed_result.least_regret[i].candidate_clusters.zonal[0]
+        assert direct_cluster == composed_cluster
+
+        java = composed_result.least_regret[i].candidate_clusters.regional[0]
+        assert java.cluster_type == "dgwkv"
+        # usually like 15 * 4 = ~50
+        assert 100 > java.count * java.instance.cpu > 20
+
+
 def test_multiple_options():
     result = planner.plan(
         model_name="org.netflix.cassandra",

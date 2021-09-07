@@ -24,9 +24,9 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import interval
 from service_capacity_modeling.interface import interval_percentile
 from service_capacity_modeling.interface import Lifecycle
+from service_capacity_modeling.interface import PlanExplanation
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
-from service_capacity_modeling.interface import PlanExplanation
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import UncertainCapacityPlan
 from service_capacity_modeling.models import CapacityModel
@@ -159,12 +159,11 @@ def model_desires_percentiles(
     return results, d
 
 
-def _least_regret(
+def _regret(
     capacity_plans: Sequence[CapacityPlan],
     regret_params: CapacityRegretParameters,
     model: CapacityModel,
-    num_results: int,
-) -> Sequence[CapacityPlan]:
+) -> Sequence[Tuple[CapacityPlan, float]]:
     plans_by_regret = []
 
     # Unfortunately has to be O(N^2) since regret isn't symmetric.
@@ -187,7 +186,7 @@ def _least_regret(
         plans_by_regret.append((proposed_plan, np.einsum("i->", regret)))
 
     plans_by_regret.sort(key=lambda p: p[1])
-    return reduce_by_family(p[0] for p in plans_by_regret)[:num_results]
+    return plans_by_regret
 
 
 def _add_requirement(requirement, accum):
@@ -205,12 +204,10 @@ def _add_requirement(requirement, accum):
                 requirements[field].append(d)
 
 
-def _merge_models(raw_capacity_plans, zonal_requirements, regional_requirements):
+def _merge_models(plans_by_model, zonal_requirements, regional_requirements):
     capacity_plans = []
-    for components in raw_capacity_plans:
-        merged_plans = [
-            functools.reduce(merge_plan, composed) for composed in zip(*components)
-        ]
+    for composed in zip(*plans_by_model):
+        merged_plans = [functools.reduce(merge_plan, composed)]
         if len(merged_plans) == 0:
             continue
 
@@ -274,7 +271,9 @@ class CapacityPlanner:
         results = []
 
         for sub_model, sub_desires in self._sub_models(
-            model_name, desires, extra_model_arguments
+            model_name=model_name,
+            desires=desires,
+            extra_model_arguments=extra_model_arguments,
         ):
             results.append(
                 self._plan_certain(
@@ -372,16 +371,15 @@ class CapacityPlanner:
         zonal_requirements: Dict[str, Dict] = {}
         regional_requirements: Dict[str, Dict] = {}
 
-        raw_capacity_plans: List[List[Sequence[CapacityPlan]]] = []
-        for _ in range(simulations):
-            raw_capacity_plans.append([])
-
+        regret_clusters_by_model: Dict[str, Sequence[Tuple[CapacityPlan, float]]] = {}
         for sub_model, sub_desires in self._sub_models(
-            model_name, desires, extra_model_arguments
+            model_name=model_name,
+            desires=desires,
+            extra_model_arguments=extra_model_arguments,
         ):
-            for j, sim_desires in enumerate(model_desires(sub_desires, simulations)):
-                print(j)
-                raw_capacity_plans[j].append(
+            model_plans: List[Sequence[CapacityPlan]] = []
+            for sim_desires in model_desires(sub_desires, simulations):
+                model_plans.append(
                     self._plan_certain(
                         model_name=sub_model,
                         region=region,
@@ -390,11 +388,25 @@ class CapacityPlanner:
                         extra_model_arguments=extra_model_arguments,
                     )
                 )
+            regret_clusters_by_model[sub_model] = _regret(
+                capacity_plans=[plan[0] for plan in model_plans if plan],
+                regret_params=regret_params,
+                model=self._models[sub_model],
+            )
 
-        # Now accumulate across the composed models
-        capacity_plans = _merge_models(
-            raw_capacity_plans, zonal_requirements, regional_requirements
-        )
+        # Now accumulate across the composed models and return the top N
+        # by distinct hardware type
+        least_regret = reduce_by_family(
+            _merge_models(
+                # Second param is the regret which we don't care about
+                [
+                    [plan[0] for plan in component]
+                    for component in regret_clusters_by_model.values()
+                ],
+                zonal_requirements,
+                regional_requirements,
+            )
+        )[:num_results]
 
         low_p, high_p = sorted(percentiles)[0], sorted(percentiles)[-1]
 
@@ -437,12 +449,7 @@ class CapacityPlanner:
 
         result = UncertainCapacityPlan(
             requirements=final_requirement,
-            least_regret=_least_regret(
-                capacity_plans,
-                regret_params,
-                self._models[model_name],
-                num_results,
-            ),
+            least_regret=least_regret,
             mean=self.plan_certain(
                 model_name=model_name,
                 region=region,
@@ -450,50 +457,44 @@ class CapacityPlanner:
                 extra_model_arguments=extra_model_arguments,
             ),
             percentiles=percentile_plans,
-            explanation=PlanExplanation(
-                regret_params=regret_params
-            )
+            explanation=PlanExplanation(regret_params=regret_params),
         )
         if explain:
-            result.explanation.regret_clusters_by_model = {
-                model_name: raw_capacity_plans
-            }
+            result.explanation.regret_clusters_by_model = regret_clusters_by_model
+            result.explanation.context["regret"] = least_regret
 
         return result
 
-    def _sub_models(self, model_name, desires, extra_model_arguments):
-        queue: List[Tuple[Any, str, Optional[Callable[[CapacityDesires], None]]]] = [
-            (desires, model_name, None)
-        ]
+    def _sub_models(
+        self,
+        model_name: str,
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
+    ):
+        queue: List[Tuple[CapacityDesires, str]] = [(desires, model_name)]
         models_used = []
 
         while queue:
-            parent_desires, sub_model, modify_sub_desires = queue.pop()
+            parent_desires, sub_model = queue.pop()
             # prevent infinite loop of models for now
             if sub_model in models_used:
                 continue
             models_used.append(sub_model)
 
-            # start with a copy of the parent desires
-            sub_desires = parent_desires.copy(deep=True)
-            if modify_sub_desires:
-                # apply composite model specific transform
-                modify_sub_desires(sub_desires)
-            # then apply model defaults because it could change the defaults applied
-            sub_defaults = self._models[sub_model].default_desires(
-                sub_desires, extra_model_arguments
+            sub_desires = parent_desires.merge_with(
+                self._models[sub_model].default_desires(
+                    parent_desires, extra_model_arguments
+                )
             )
-            # apply the defaults to the desires to allow the model code to be simpler
-            sub_desires = sub_desires.merge_with(sub_defaults)
 
             # We might have to compose this model with others depending on
             # the user requirement
             queue.extend(
                 [
-                    (sub_desires, child_model, modify_child_desires)
+                    (modify_child_desires(desires), child_model)
                     for child_model, modify_child_desires in self._models[
                         sub_model
-                    ].compose_with(sub_desires, extra_model_arguments)
+                    ].compose_with(desires, extra_model_arguments)
                 ]
             )
 
