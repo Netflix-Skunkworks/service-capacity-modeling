@@ -62,3 +62,4 @@ disable =
 
 [DESIGN]
 max-attributes=12
+max-locals=25
