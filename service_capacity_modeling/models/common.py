@@ -7,6 +7,8 @@ from typing import Optional
 from service_capacity_modeling.interface import AVG_ITEM_SIZE_BYTES
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Instance
@@ -14,8 +16,6 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
-from service_capacity_modeling.interface import certain_float
-from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.models import utils
 
 logger = logging.getLogger(__name__)
@@ -69,12 +69,12 @@ def sqrt_staffed_cores(desires: CapacityDesires) -> int:
 def simple_network_mbps(desires: CapacityDesires) -> int:
     """Computes network mbps with a simple model"""
     read_bytes_per_second = (
-            desires.query_pattern.estimated_read_per_second.mid
-            * desires.query_pattern.estimated_mean_read_size_bytes.mid
+        desires.query_pattern.estimated_read_per_second.mid
+        * desires.query_pattern.estimated_mean_read_size_bytes.mid
     )
     write_bytes_per_second = (
-            desires.query_pattern.estimated_write_per_second.mid
-            * desires.query_pattern.estimated_mean_write_size_bytes.mid
+        desires.query_pattern.estimated_write_per_second.mid
+        * desires.query_pattern.estimated_mean_write_size_bytes.mid
     )
 
     net_bytes_per_sec = read_bytes_per_second + write_bytes_per_second
@@ -83,13 +83,13 @@ def simple_network_mbps(desires: CapacityDesires) -> int:
 
 
 def compute_stateless_region(
-        instance: Instance,
-        needed_cores: int,
-        needed_memory_gib: float,
-        needed_network_mbps: float,
-        # Faster CPUs can execute operations faster
-        core_reference_ghz: float,
-        num_zones: int = 3,
+    instance: Instance,
+    needed_cores: int,
+    needed_memory_gib: float,
+    needed_network_mbps: float,
+    # Faster CPUs can execute operations faster
+    core_reference_ghz: float,
+    num_zones: int = 3,
 ) -> RegionClusterCapacity:
     """Computes a regional cluster of a stateless app
 
@@ -124,24 +124,24 @@ def compute_stateless_region(
 
 # pylint: disable=too-many-locals
 def compute_stateful_zone(
-        instance: Instance,
-        drive: Drive,
-        needed_cores: int,
-        needed_disk_gib: int,
-        needed_memory_gib: int,
-        needed_network_mbps: float,
-        # EBS may need to scale for IOs, and datastores might need more
-        # or less IOs for a given data size as well as space
-        required_disk_ios,
-        required_disk_space,
-        max_local_disk_gib,
-        # Some stateful clusters have sidecars that take memory
-        reserve_memory,
-        # Some stateful clusters have preferences on per zone sizing
-        cluster_size,
-        # Faster CPUs can execute operations faster
-        core_reference_ghz: float,
-        min_count: int = 0,
+    instance: Instance,
+    drive: Drive,
+    needed_cores: int,
+    needed_disk_gib: int,
+    needed_memory_gib: int,
+    needed_network_mbps: float,
+    # EBS may need to scale for IOs, and datastores might need more
+    # or less IOs for a given data size as well as space
+    required_disk_ios,
+    required_disk_space,
+    max_local_disk_gib,
+    # Some stateful clusters have sidecars that take memory
+    reserve_memory,
+    # Some stateful clusters have preferences on per zone sizing
+    cluster_size,
+    # Faster CPUs can execute operations faster
+    core_reference_ghz: float,
+    min_count: int = 0,
 ) -> ZoneClusterCapacity:
     # Normalize the cores of this instance type to the latency reference
     needed_cores = math.ceil(
@@ -226,15 +226,15 @@ class WorkingSetEstimator:
         self._cache = {}
 
     def working_set_percent(
-            self,
-            # latency distributions of the read SLOs versus the drives
-            # expressed as scipy rv_continuous objects
-            drive_read_latency_dist,
-            read_slo_latency_dist,
-            # what percentile of disk latency should we target for keeping in
-            # memory. Not as this is _increased_ more memory will be reserved
-            target_percentile: float = 0.90,
-            min_working_set: float = 0.01,
+        self,
+        # latency distributions of the read SLOs versus the drives
+        # expressed as scipy rv_continuous objects
+        drive_read_latency_dist,
+        read_slo_latency_dist,
+        # what percentile of disk latency should we target for keeping in
+        # memory. Not as this is _increased_ more memory will be reserved
+        target_percentile: float = 0.90,
+        min_working_set: float = 0.01,
     ) -> Interval:
         # random cache eviction
         if len(self._cache) >= 100:
@@ -266,15 +266,15 @@ _working_set_estimator = WorkingSetEstimator()
 
 
 def working_set_from_drive_and_slo(
-        # latency distributions of the read SLOs versus the drives
-        # expressed as scipy rv_continuous objects
-        drive_read_latency_dist,
-        read_slo_latency_dist,
-        estimated_working_set: Optional[Interval] = None,
-        # what percentile of disk latency should we target for keeping in
-        # memory. Not as this is _increased_ more memory will be reserved
-        target_percentile: float = 0.90,
-        min_working_set: float = 0.01,
+    # latency distributions of the read SLOs versus the drives
+    # expressed as scipy rv_continuous objects
+    drive_read_latency_dist,
+    read_slo_latency_dist,
+    estimated_working_set: Optional[Interval] = None,
+    # what percentile of disk latency should we target for keeping in
+    # memory. Not as this is _increased_ more memory will be reserved
+    target_percentile: float = 0.90,
+    min_working_set: float = 0.01,
 ) -> Interval:
     if estimated_working_set is not None:
         return estimated_working_set
@@ -288,8 +288,8 @@ def working_set_from_drive_and_slo(
 
 
 def item_count_from_state(
-        estimated_state_size_gib: Interval,
-        estimated_state_item_count: Optional[Interval] = None,
+    estimated_state_size_gib: Interval,
+    estimated_state_item_count: Optional[Interval] = None,
 ) -> Interval:
     if estimated_state_item_count is not None:
         return estimated_state_item_count
@@ -300,7 +300,7 @@ def item_count_from_state(
 
 
 def _add_optional_float(
-        left: Optional[float], right: Optional[float]
+    left: Optional[float], right: Optional[float]
 ) -> Optional[float]:
     if left is None and right is None:
         return None
@@ -332,8 +332,8 @@ def _noop_region(x: RegionClusterCapacity) -> RegionClusterCapacity:
 
 
 def merge_requirements(
-        left_req: Requirements,
-        right_req: Requirements,
+    left_req: Requirements,
+    right_req: Requirements,
 ) -> Requirements:
     merged_zonal, merged_regional = [], []
     for req in list(left_req.zonal) + list(right_req.zonal):
@@ -349,12 +349,12 @@ def merge_requirements(
 
 
 def merge_plan(
-        left: Optional[CapacityPlan],
-        right: Optional[CapacityPlan],
-        zonal_transform: Callable[[ZoneClusterCapacity], ZoneClusterCapacity] = _noop_zone,
-        regional_transform: Callable[
-            [RegionClusterCapacity], RegionClusterCapacity
-        ] = _noop_region,
+    left: Optional[CapacityPlan],
+    right: Optional[CapacityPlan],
+    zonal_transform: Callable[[ZoneClusterCapacity], ZoneClusterCapacity] = _noop_zone,
+    regional_transform: Callable[
+        [RegionClusterCapacity], RegionClusterCapacity
+    ] = _noop_region,
 ) -> Optional[CapacityPlan]:
     if left is None or right is None:
         return None
@@ -366,15 +366,15 @@ def merge_plan(
 
     merged_clusters = Clusters(
         total_annual_cost=(
-                left_cluster.total_annual_cost + right_cluster.total_annual_cost
+            left_cluster.total_annual_cost + right_cluster.total_annual_cost
         ),
         zonal=(
-                [zonal_transform(z) for z in left_cluster.zonal]
-                + [zonal_transform(z) for z in right_cluster.zonal]
+            [zonal_transform(z) for z in left_cluster.zonal]
+            + [zonal_transform(z) for z in right_cluster.zonal]
         ),
         regional=(
-                [regional_transform(z) for z in left_cluster.regional]
-                + [regional_transform(z) for z in right_cluster.regional]
+            [regional_transform(z) for z in left_cluster.regional]
+            + [regional_transform(z) for z in right_cluster.regional]
         ),
     )
     return CapacityPlan(

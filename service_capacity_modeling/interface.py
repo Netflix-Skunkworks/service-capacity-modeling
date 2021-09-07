@@ -5,6 +5,7 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 from typing import Sequence
+from typing import Tuple
 
 import numpy as np
 from pydantic import BaseModel
@@ -580,7 +581,7 @@ class CapacityRegretParameters(BaseModel):
 
 class PlanExplanation(BaseModel):
     regret_params: CapacityRegretParameters
-    regret_clusters_by_model: Dict[str, Sequence[CapacityPlan]] = {}
+    regret_clusters_by_model: Dict[str, Sequence[Tuple[CapacityPlan, float]]] = {}
     context: Dict[str, Any] = {}
 
 

@@ -57,18 +57,21 @@ class NflxEntityCapacityModel(CapacityModel):
         return nflx_java_app_capacity_model.extra_model_arguments()
 
     @staticmethod
-    def _modify_elasticsearch_desires(user_desires: CapacityDesires):
-        user_desires.query_pattern.access_consistency.same_region.target_consistency = AccessConsistency.eventual
-
-    @staticmethod
     def compose_with(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
-    ) -> Tuple[Tuple[str, Optional[Callable[[CapacityDesires], None]]], ...]:
-        # In the future depending on the user desire we might need EVCache
-        # as well, e.g. if the latency SLO is reduced
+    ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
+        def _modify_elasticsearch_desires(
+            user_desires: CapacityDesires,
+        ) -> CapacityDesires:
+            relaxed = user_desires.copy(deep=True)
+            relaxed.query_pattern.access_consistency.same_region.target_consistency = (
+                AccessConsistency.eventual
+            )
+            return relaxed
+
         return (
-            ("org.netflix.cassandra", None),
-            ("org.netflix.elasticsearch", NflxEntityCapacityModel._modify_elasticsearch_desires)
+            ("org.netflix.cassandra", lambda x: x),
+            ("org.netflix.elasticsearch", _modify_elasticsearch_desires),
         )
 
     @staticmethod
