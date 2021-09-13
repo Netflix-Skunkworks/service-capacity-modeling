@@ -145,7 +145,7 @@ def test_worn_dataset():
 
     lr = cap_plan.least_regret[0]
     lr_cluster = lr.candidate_clusters.zonal[0]
-    assert 256 <= lr_cluster.count * lr_cluster.instance.cpu <= 1024
+    assert 128 <= lr_cluster.count * lr_cluster.instance.cpu <= 512
     assert 100_000 <= lr.candidate_clusters.total_annual_cost < 500_000
     assert lr_cluster.instance.name.startswith(
         "m5."
