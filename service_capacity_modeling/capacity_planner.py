@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import functools
 import logging
+from hashlib import blake2b
 from typing import Any
 from typing import Callable
 from typing import Dict
@@ -38,12 +39,24 @@ from service_capacity_modeling.stats import dist_for_interval
 logger = logging.getLogger(__name__)
 
 
-def simulate_interval(interval: Interval) -> Callable[[int], Sequence[Interval]]:
+def simulate_interval(
+    interval: Interval, name: str
+) -> Callable[[int], Sequence[Interval]]:
     if interval.can_simulate:
+        # We need to convert the name of the field to a positive 32 bit seed
+        # and we don't really need collision prevention so just take a 24 bit
+        # digest and enforce it is not signed
+        seed = int.from_bytes(
+            blake2b(name.encode(), digest_size=3).digest(),
+            byteorder="big",
+            signed=False,
+        )
 
         def sim_uncertan(count: int) -> Sequence[Interval]:
-            sims = dist_for_interval(interval).rvs(count)
-            return [certain_float(s) for s in sims]
+            return [
+                certain_float(s)
+                for s in dist_for_interval(interval, seed=seed).rvs(count)
+            ]
 
         return sim_uncertan
 
@@ -66,7 +79,7 @@ def model_desires(
     for field in sorted(query_pattern.__fields__):
         d = getattr(query_pattern, field)
         if isinstance(d, Interval):
-            query_pattern_simulation[field] = simulate_interval(d)(num_sims)
+            query_pattern_simulation[field] = simulate_interval(d, field)(num_sims)
         else:
             query_pattern_simulation[field] = [d] * num_sims
 
@@ -74,7 +87,7 @@ def model_desires(
     for field in sorted(data_shape.__fields__):
         d = getattr(data_shape, field)
         if isinstance(d, Interval):
-            data_shape_simulation[field] = simulate_interval(d)(num_sims)
+            data_shape_simulation[field] = simulate_interval(d, field)(num_sims)
         else:
             data_shape_simulation[field] = [d] * num_sims
 
@@ -160,10 +173,10 @@ def model_desires_percentiles(
 
 
 def _regret(
-    capacity_plans: Sequence[CapacityPlan],
+    capacity_plans: Sequence[Tuple[CapacityDesires, CapacityPlan]],
     regret_params: CapacityRegretParameters,
     model: CapacityModel,
-) -> Sequence[Tuple[CapacityPlan, float]]:
+) -> Sequence[Tuple[CapacityPlan, CapacityDesires, float]]:
     plans_by_regret = []
 
     # Unfortunately has to be O(N^2) since regret isn't symmetric.
@@ -179,13 +192,15 @@ def _regret(
             regret[j] = sum(
                 model.regret(
                     regret_params=regret_params,
-                    optimal_plan=optimal_plan,
-                    proposed_plan=proposed_plan,
+                    optimal_plan=optimal_plan[1],
+                    proposed_plan=proposed_plan[1],
                 ).values()
             )
-        plans_by_regret.append((proposed_plan, np.einsum("i->", regret)))
+        plans_by_regret.append(
+            (proposed_plan[1], proposed_plan[0], np.einsum("i->", regret))
+        )
 
-    plans_by_regret.sort(key=lambda p: p[1])
+    plans_by_regret.sort(key=lambda p: p[2])
     return plans_by_regret
 
 
@@ -371,25 +386,32 @@ class CapacityPlanner:
         zonal_requirements: Dict[str, Dict] = {}
         regional_requirements: Dict[str, Dict] = {}
 
-        regret_clusters_by_model: Dict[str, Sequence[Tuple[CapacityPlan, float]]] = {}
+        regret_clusters_by_model: Dict[
+            str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]
+        ] = {}
         for sub_model, sub_desires in self._sub_models(
             model_name=model_name,
             desires=desires,
             extra_model_arguments=extra_model_arguments,
         ):
-            model_plans: List[Sequence[CapacityPlan]] = []
+            model_plans: List[Tuple[CapacityDesires, Sequence[CapacityPlan]]] = []
             for sim_desires in model_desires(sub_desires, simulations):
                 model_plans.append(
-                    self._plan_certain(
-                        model_name=sub_model,
-                        region=region,
-                        desires=sim_desires,
-                        num_results=1,
-                        extra_model_arguments=extra_model_arguments,
+                    (
+                        sim_desires,
+                        self._plan_certain(
+                            model_name=sub_model,
+                            region=region,
+                            desires=sim_desires,
+                            num_results=1,
+                            extra_model_arguments=extra_model_arguments,
+                        ),
                     )
                 )
             regret_clusters_by_model[sub_model] = _regret(
-                capacity_plans=[plan[0] for plan in model_plans if plan],
+                capacity_plans=[
+                    (sim_desires, plan[0]) for sim_desires, plan in model_plans if plan
+                ],
                 regret_params=regret_params,
                 model=self._models[sub_model],
             )
@@ -398,7 +420,7 @@ class CapacityPlanner:
         # by distinct hardware type
         least_regret = reduce_by_family(
             _merge_models(
-                # Second param is the regret which we don't care about
+                # First param is the actual plan which we care about
                 [
                     [plan[0] for plan in component]
                     for component in regret_clusters_by_model.values()
@@ -457,7 +479,17 @@ class CapacityPlanner:
                 extra_model_arguments=extra_model_arguments,
             ),
             percentiles=percentile_plans,
-            explanation=PlanExplanation(regret_params=regret_params),
+            explanation=PlanExplanation(
+                regret_params=regret_params,
+                desires_by_model={
+                    model: desires.merge_with(
+                        self._models[model].default_desires(
+                            desires, extra_model_arguments
+                        )
+                    )
+                    for model in regret_clusters_by_model
+                },
+            ),
         )
         if explain:
             result.explanation.regret_clusters_by_model = regret_clusters_by_model

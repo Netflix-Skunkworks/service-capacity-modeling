@@ -581,7 +581,10 @@ class CapacityRegretParameters(BaseModel):
 
 class PlanExplanation(BaseModel):
     regret_params: CapacityRegretParameters
-    regret_clusters_by_model: Dict[str, Sequence[Tuple[CapacityPlan, float]]] = {}
+    regret_clusters_by_model: Dict[
+        str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]
+    ] = {}
+    desires_by_model: Dict[str, CapacityDesires] = {}
     context: Dict[str, Any] = {}
 
 
