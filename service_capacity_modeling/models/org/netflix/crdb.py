@@ -161,9 +161,10 @@ def _estimate_cockroachdb_cluster_zonal(
             desires.query_pattern.read_latency_slo_ms
         ),
         estimated_working_set=desires.data_shape.estimated_working_set_percent,
-        # CRDB has looser latency SLOs, target the 90th percentile of disk
-        # latency to keep in RAM.
-        target_percentile=0.90,
+        # CRDB has looser latency SLOs but we still want a lot of the data
+        # hot in cache. Target the 95th percentile of disk latency to
+        # keep in RAM.
+        target_percentile=0.95,
     ).mid
 
     requirement = _estimate_cockroachdb_requirement(
@@ -185,9 +186,10 @@ def _estimate_cockroachdb_cluster_zonal(
         instance=instance,
         drive=drive,
         needed_cores=int(requirement.cpu_cores.mid),
-        needed_disk_gib=int(requirement.disk_gib.mid),
-        needed_memory_gib=int(requirement.mem_gib.mid),
+        needed_disk_gib=requirement.disk_gib.mid,
+        needed_memory_gib=requirement.mem_gib.mid,
         needed_network_mbps=requirement.network_mbps.mid,
+        core_reference_ghz=requirement.core_reference_ghz,
         # Assume that by provisioning enough memory we'll get
         # a 90% hit rate, but take into account the reads per read
         # from the per node dataset using leveled compaction
@@ -197,13 +199,17 @@ def _estimate_cockroachdb_cluster_zonal(
         # compaction can make progress as long as there is some headroom
         required_disk_space=lambda x: x * 1.2,
         max_local_disk_gib=max_local_disk_gib,
-        # cockroachdb clusters will autobalance tablets
+        # cockroachdb clusters will autobalance across available nodes
         cluster_size=lambda x: x,
         min_count=1,
         # Sidecars/System takes away memory from cockroachdb
-        # (FIXME): Does CRDB have a heap hint or some such?
-        reserve_memory=lambda x: base_mem,
-        core_reference_ghz=requirement.core_reference_ghz,
+        # cockroachdb by default uses --max-sql-memory of 25% of system memory
+        # that cannot be used for caching
+        reserve_memory=lambda x: base_mem + 0.25 * x,
+        # TODO: Figure out how much memory CRDB needs to buffer writes
+        # in memtables in order to only flush occasionally
+        # write_buffer=...
+        # required_write_buffer_gib=...
     )
 
     # Communicate to the actual provision that if we want reduced RF
@@ -227,7 +233,7 @@ def _estimate_cockroachdb_cluster_zonal(
     clusters = Clusters(
         total_annual_cost=round(Decimal(ec2_cost), 2),
         zonal=[cluster] * zones_per_region,
-        regional=list(),
+        regional=[],
     )
 
     return CapacityPlan(
@@ -273,8 +279,8 @@ class NflxCockroachDBCapacityModel(CapacityModel):
         return (
             (
                 "copies_per_region",
-                "int = 2",
-                "How many copies of the data will exist e.g. RF=2. If unsupplied"
+                "int = 3",
+                "How many copies of the data will exist e.g. RF=3. If unsupplied"
                 " this will be deduced from durability and consistency desires",
             ),
             (
@@ -348,7 +354,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
                         maximum_value=100,
                         low=1,
                         mid=10,
-                        high=100,
+                        high=20,
                         confidence=0.98,
                     ),
                     write_latency_slo_ms=FixedInterval(
@@ -356,7 +362,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
                         maximum_value=100,
                         low=1,
                         mid=10,
-                        high=100,
+                        high=20,
                         confidence=0.98,
                     ),
                 ),
@@ -417,7 +423,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
                         maximum_value=100,
                         low=10,
                         mid=20,
-                        high=100,
+                        high=99,
                         confidence=0.98,
                     ),
                     write_latency_slo_ms=FixedInterval(
@@ -425,7 +431,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
                         maximum_value=100,
                         low=10,
                         mid=20,
-                        high=100,
+                        high=99,
                         confidence=0.98,
                     ),
                 ),
@@ -449,3 +455,6 @@ class NflxCockroachDBCapacityModel(CapacityModel):
                     reserved_instance_app_mem_gib=0.001,
                 ),
             )
+
+
+nflx_cockroachdb_capacity_model = NflxCockroachDBCapacityModel()

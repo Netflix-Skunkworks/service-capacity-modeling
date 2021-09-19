@@ -184,7 +184,7 @@ def compute_stateful_zone(
     # How many instances do we need for the disk
     if instance.drive is not None and instance.drive.size_gib > 0:
         disk_per_node = min(max_local_disk_gib, instance.drive.size_gib)
-        count = max(count, math.ceil(needed_disk_gib // disk_per_node))
+        count = max(count, math.ceil(needed_disk_gib / disk_per_node))
 
     count = max(cluster_size(count), min_count)
 
@@ -197,8 +197,8 @@ def compute_stateful_zone(
 
         # Note that ebs is provisioned _per node_ and must be chosen for
         # the max of space and IOS
-        space_gib = max(1, (needed_disk_gib * 2) // count)
-        io_gib = gp2_gib_for_io(required_disk_ios(needed_disk_gib // count))
+        space_gib = max(1, math.ceil((needed_disk_gib * 2) / count))
+        io_gib = gp2_gib_for_io(required_disk_ios(needed_disk_gib / count))
 
         # Provision EBS in increments of 200 GiB
         ebs_gib = utils.next_n(max(1, max(io_gib, space_gib)), n=200)
