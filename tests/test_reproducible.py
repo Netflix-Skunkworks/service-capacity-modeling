@@ -77,9 +77,9 @@ def test_multiple_options():
     assert len(least_regret) < 4
     families = [lr.candidate_clusters.zonal[0].instance.family for lr in least_regret]
     for f in families:
-        assert f in set(("r5", "m5d", "m5"))
+        assert f in set(("i3en", "m5d", "m5"))
 
-    # With 1024 simulations we get a 4th instance family (i3en)
+    # With 1024 simulations we get a 4th instance family (r5)
     result = planner.plan(
         model_name="org.netflix.cassandra",
         region="us-east-1",
