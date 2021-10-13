@@ -221,7 +221,7 @@ def _add_requirement(requirement, accum):
 
 def _merge_models(plans_by_model, zonal_requirements, regional_requirements):
     capacity_plans = []
-    for composed in zip(*plans_by_model):
+    for composed in zip(*filter(lambda x:x, plans_by_model)):
         merged_plans = [functools.reduce(merge_plan, composed)]
         if len(merged_plans) == 0:
             continue
