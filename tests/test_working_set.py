@@ -7,7 +7,6 @@ from service_capacity_modeling.stats import dist_for_interval
 def test_working_set():
     gp2_interval = shapes.region("us-east-1").drives["gp2"].read_io_latency_ms
     drive_gp2 = dist_for_interval(gp2_interval)
-    print(gp2_interval)
 
     ephem_drive = shapes.region("us-east-1").instances["m5d.2xlarge"].drive
     if ephem_drive is None:
@@ -15,7 +14,6 @@ def test_working_set():
 
     ephem_interval = ephem_drive.read_io_latency_ms
     drive_ephem = dist_for_interval(ephem_interval)
-    print(ephem_interval)
 
     slo_dist_db = dist_for_interval(
         FixedInterval(
@@ -59,14 +57,6 @@ def test_working_set():
     ).mid
 
     assert cache_gp2_working_set > cache_ephem_working_set
-
-    print(
-        db_gp2_working_set,
-        db_ephem_working_set,
-        cache_gp2_working_set,
-        cache_ephem_working_set,
-    )
-
     assert cache_gp2_working_set >= 0.90
     assert 0.4 >= cache_ephem_working_set >= 0.01
     assert 0.5 >= db_gp2_working_set >= 0.25

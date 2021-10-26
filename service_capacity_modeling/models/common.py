@@ -182,7 +182,7 @@ def compute_stateful_zone(
     count = max(count, math.ceil(needed_network_mbps / instance.net_mbps))
 
     # How many instances do we need for the disk
-    if instance.drive is not None and instance.drive.size_gib > 0:
+    if instance.drive is not None and instance.drive.size_gib > 0 and max_local_disk_gib > 0:
         disk_per_node = min(max_local_disk_gib, instance.drive.size_gib)
         count = max(count, math.ceil(needed_disk_gib / disk_per_node))
 

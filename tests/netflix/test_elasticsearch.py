@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import DataShape
@@ -7,7 +9,7 @@ from service_capacity_modeling.interface import QueryPattern
 
 def test_es_increasing_qps_simple():
     qps_values = (100, 1000, 10_000, 100_000)
-    zonal_result = []
+    zonal_result = defaultdict(list)
     for qps in qps_values:
         simple = CapacityDesires(
             service_tier=1,
@@ -34,28 +36,47 @@ def test_es_increasing_qps_simple():
         )
 
         # Check the ES cluster
-        zlr = cap_plan.least_regret[0].candidate_clusters.zonal[0]
-        zlr_cpu = zlr.count * zlr.instance.cpu
-        zlr_cost = cap_plan.least_regret[0].candidate_clusters.total_annual_cost
-        zlr_family = zlr.instance.family
-        if zlr.instance.drive is None:
-            assert sum(dr.size_gib for dr in zlr.attached_drives) >= 200
-        else:
-            assert zlr.instance.drive.size_gib >= 50
+        for zonal in cap_plan.least_regret[0].candidate_clusters.zonal:
+            zonal_result[zonal.cluster_type].append(zonal_summary(zonal))
 
-        zonal_result.append(
-            (
-                zlr_family,
-                zlr_cpu,
-                zlr_cost,
-                cap_plan.least_regret[0].requirements.zonal[0],
-            )
-        )
+    expected_families = set(["r5", "r5d", "m5", "m5d", "i3"])
+    for cluster_type in list(zonal_result.keys()):
+        zonal_by_increasing_qps = zonal_result[cluster_type]
 
-    # We should generally want cheap CPUs for Cassandra
-    assert all(r[0] in ("r5", "r5d", "m5", "m5d") for r in zonal_result)
+        families = set([r[0] for r in zonal_by_increasing_qps])
+        unexpected_families = families - expected_families
+        assert (
+            len(unexpected_families) == 0
+        ), f"unexpected instance type {unexpected_families}"
 
-    # Should have more capacity as requirement increases
-    x = [r[1] for r in zonal_result]
-    assert x[0] < x[-1]
-    assert sorted(x) == x
+        # Should have more CPU and Disk capacity as requirement increases
+        cpu = [r[2] for r in zonal_by_increasing_qps]
+        assert cpu[0] <= cpu[-1], f"cpu for {cluster_type} going down as QPS went up?"
+
+        cost = [r[3] for r in zonal_by_increasing_qps]
+        assert (
+            cost[0] <= cost[-1]
+        ), f"cost for {cluster_type} going down as QPS went up?"
+
+        disk = [r[4] for r in zonal_by_increasing_qps]
+        assert (
+            disk[0] <= disk[-1]
+        ), f"disk for {cluster_type} going down as QPS went up?"
+
+
+def zonal_summary(zlr):
+    zlr_cpu = zlr.count * zlr.instance.cpu
+    zlr_cost = zlr.annual_cost
+    zlr_family = zlr.instance.family
+    zlr_drive_gib = sum(dr.size_gib for dr in zlr.attached_drives)
+    if zlr.instance.drive is not None:
+        zlr_drive_gib += zlr.instance.drive.size_gib
+    zlr_drive_gib *= zlr.count
+
+    return (
+        zlr_family,
+        zlr.count,
+        zlr_cpu,
+        zlr_cost,
+        zlr_drive_gib,
+    )

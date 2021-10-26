@@ -123,7 +123,6 @@ def test_tier_3():
         desires=tier_3,
     )
     assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.4xlarge"
-    print(cap_plan[1].candidate_clusters.regional[0].instance.name)
 
 
 def test_cap_plan():
@@ -214,7 +213,6 @@ def test_cap_plan():
     }"""
     desire = json.loads(desire_json)
     capacity = desire['deploy_desires']['capacity']
-    print(capacity)
     my_desire = CapacityDesires(service_tier=desire["deploy_desires"]["service_tier"],
                                 query_pattern=capacity["query_pattern"],
                                 data_shape=capacity["data_shape"])

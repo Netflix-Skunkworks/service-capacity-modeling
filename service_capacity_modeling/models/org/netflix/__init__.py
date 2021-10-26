@@ -1,6 +1,8 @@
 from .cassandra import nflx_cassandra_capacity_model
 from .crdb import nflx_cockroachdb_capacity_model
 from .elasticsearch import nflx_elasticsearch_capacity_model
+from .elasticsearch import nflx_elasticsearch_data_capacity_model
+from .elasticsearch import nflx_elasticsearch_master_capacity_model
 from .entity import nflx_entity_capacity_model
 from .evcache import nflx_evcache_capacity_model
 from .key_value import nflx_key_value_capacity_model
@@ -20,6 +22,8 @@ def models():
         "org.netflix.evcache": nflx_evcache_capacity_model,
         "org.netflix.rds": nflx_rds_capacity_model,
         "org.netflix.elasticsearch": nflx_elasticsearch_capacity_model,
+        "org.netflix.elasticsearch.node": nflx_elasticsearch_data_capacity_model,
+        "org.netflix.elasticsearch.master": nflx_elasticsearch_master_capacity_model,
         "org.netflix.entity": nflx_entity_capacity_model,
         "org.netflix.cockroachdb": nflx_cockroachdb_capacity_model,
     }
