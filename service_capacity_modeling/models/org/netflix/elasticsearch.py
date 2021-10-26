@@ -159,6 +159,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
+
         # (FIXME): Need elasticsearch input
         # TODO: Use durability requirements to compute RF.
         copies_per_region: int = _target_rf(
@@ -168,6 +169,13 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 1000)
         # Very large nodes are hard to recover
         max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 5000)
+
+        # the ratio of traffic that should be handled by search nodes.
+        #  0.0 = no search nodes, all searches handled by data nodes
+        #  1.0 = requests split 50/50 between search and data nodes
+        search_to_data_rps_ratio = extra_model_arguments.get(
+            "search_to_data_rps_ratio", 0.0
+        )
 
         # Netflix Elasticsearch doesn't like to deploy on really small instances
         if instance.cpu < 2 or instance.ram_gib < 14:
@@ -181,7 +189,10 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
 
         zones_in_region = context.zones_in_region
 
-        rps = desires.query_pattern.estimated_read_per_second.mid // zones_in_region
+        _rps = desires.query_pattern.estimated_read_per_second.mid // zones_in_region
+
+        data_rps = _rps / (search_to_data_rps_ratio + 1)
+        search_rps = search_to_data_rps_ratio * data_rps
 
         # Based on the disk latency and the read latency SLOs we adjust our
         # working set to keep more or less data in RAM. Faster drives need
@@ -198,34 +209,33 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             target_percentile=0.90,
         ).mid
 
-        requirement = _estimate_elasticsearch_requirement(
+        data_requirement = _estimate_elasticsearch_requirement(
             node_type="data",
             instance=instance,
             desires=desires,
             working_set=working_set,
-            reads_per_second=rps,
+            reads_per_second=data_rps,
             zones_in_region=zones_in_region,
             copies_per_region=copies_per_region,
             max_rps_to_disk=max_rps_to_disk,
         )
-
         base_mem = (
             desires.data_shape.reserved_instance_app_mem_gib
             + desires.data_shape.reserved_instance_system_mem_gib
         )
 
-        cluster = compute_stateful_zone(
+        data_cluster = compute_stateful_zone(
             instance=instance,
             drive=drive,
-            needed_cores=int(requirement.cpu_cores.mid),
-            needed_disk_gib=int(requirement.disk_gib.mid),
-            needed_memory_gib=int(requirement.mem_gib.mid),
-            needed_network_mbps=requirement.network_mbps.mid,
+            needed_cores=int(data_requirement.cpu_cores.mid),
+            needed_disk_gib=int(data_requirement.disk_gib.mid),
+            needed_memory_gib=int(data_requirement.mem_gib.mid),
+            needed_network_mbps=data_requirement.network_mbps.mid,
             # Assume that by provisioning enough memory we'll get
             # a 90% hit rate, but take into account the reads per read
             # from the per node dataset using leveled compaction
             # FIXME: I feel like this can be improved
-            required_disk_ios=lambda x: _es_io_per_read(x) * math.ceil(0.1 * rps),
+            required_disk_ios=lambda x: _es_io_per_read(x) * math.ceil(0.1 * data_rps),
             # Elasticsearch requires ephemeral disks to be % full because tiered
             # merging can make progress as long as there is some headroom
             required_disk_space=lambda x: x * 1.4,
@@ -237,12 +247,13 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             # Elasticsearch uses half of available system max of 32 for compressed
             # oops
             reserve_memory=lambda x: base_mem + max(32, x / 2),
-            core_reference_ghz=requirement.core_reference_ghz,
+            core_reference_ghz=data_requirement.core_reference_ghz,
         )
+        data_cluster.cluster_type = "elasticsearch-data"
 
         # Communicate to the actual provision that if we want reduced RF
         params = {"elasticsearch.copies": copies_per_region}
-        _upsert_params(cluster, params)
+        _upsert_params(data_cluster, params)
 
         # elasticsearch clusters generally should try to stay under some total number
         # of nodes. Orgs do this for all kinds of reasons such as
@@ -252,119 +263,74 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         #       smaller clusters so your restarts don't take months.
         #   * NxN network issues. Sometimes smaller clusters of bigger nodes
         #       are better for network propagation
-        if cluster.count > (max_regional_size // zones_in_region):
+        if data_cluster.count > (max_regional_size // zones_in_region):
             return None
+        data_requirements = [data_requirement] * zones_in_region
+        data_clusters = [data_cluster] * zones_in_region
 
-        ec2_cost = zones_in_region * cluster.annual_cost
+        ec2_cost = zones_in_region * data_cluster.annual_cost
 
-        cluster.cluster_type = "elasticsearch-data"
+        if search_rps > 0:
+            search_requirement = _estimate_elasticsearch_requirement(
+                node_type="search",
+                instance=instance,
+                desires=desires,
+                working_set=0.0,
+                reads_per_second=search_rps,
+                zones_in_region=zones_in_region,
+                copies_per_region=0,
+                max_rps_to_disk=1,  # to avoid divide by zero
+            )
+            search_cluster = compute_stateful_zone(
+                instance=instance,
+                drive=drive,
+                needed_cores=int(search_requirement.cpu_cores.mid),
+                needed_disk_gib=int(search_requirement.disk_gib.mid),
+                needed_memory_gib=int(search_requirement.mem_gib.mid),
+                needed_network_mbps=search_requirement.network_mbps.mid,
+                # Assume that by provisioning enough memory we'll get
+                # a 90% hit rate, but take into account the reads per read
+                # from the per node dataset using leveled compaction
+                # FIXME: I feel like this can be improved
+                required_disk_ios=lambda x: _es_io_per_read(x)
+                * math.ceil(0.1 * search_rps),
+                # Elasticsearch requires ephemeral disks to be % full because tiered
+                # merging can make progress as long as there is some headroom
+                required_disk_space=lambda x: x * 1.4,
+                max_local_disk_gib=0,
+                # elasticsearch clusters can autobalance via shard placement
+                cluster_size=lambda x: x,
+                min_count=1,
+                # Sidecars/System takes away memory from elasticsearch
+                # Elasticsearch uses half of available system max of 32 for compressed
+                # oops
+                reserve_memory=lambda x: base_mem + max(32, x / 2),
+                core_reference_ghz=search_requirement.core_reference_ghz,
+            )
+            search_cluster.cluster_type = "elasticsearch-search"
+
+            if search_cluster.count > (max_regional_size // zones_in_region):
+                return None
+            ec2_cost += zones_in_region * search_cluster.annual_cost
+
+            search_requirements = [search_requirement] * zones_in_region
+            search_clusters = [search_cluster] * zones_in_region
+        else:
+            search_requirements = []
+            search_clusters = []
+
         clusters = Clusters(
             total_annual_cost=round(Decimal(ec2_cost), 2),
-            zonal=[cluster] * zones_in_region,
+            zonal=data_clusters + search_clusters,
             regional=list(),
         )
 
-        return CapacityPlan(
-            requirements=Requirements(zonal=[requirement] * zones_in_region),
+        plan = CapacityPlan(
+            requirements=Requirements(zonal=data_requirements + search_requirements),
             candidate_clusters=clusters,
         )
 
-
-class NflxElasticsearchSearchCapacityModel(CapacityModel):
-    @staticmethod
-    def capacity_plan(
-        instance: Instance,
-        drive: Drive,
-        context: RegionContext,
-        desires: CapacityDesires,
-        extra_model_arguments: Dict[str, Any],
-    ) -> Optional[CapacityPlan]:
-        # (FIXME): Need elasticsearch input
-        # TODO: Use durability requirements to compute RF.
-        copies_per_region: int = _target_rf(
-            desires, extra_model_arguments.get("copies_per_region", None)
-        )
-        max_regional_size: int = extra_model_arguments.get("max_regional_size", 240)
-
-        # Netflix Elasticsearch doesn't like to deploy on really small instances
-        if instance.cpu < 2 or instance.ram_gib < 14:
-            return None
-
-        zones_in_region = context.zones_in_region
-        rps = desires.query_pattern.estimated_read_per_second.mid // zones_in_region
-
-        requirement = _estimate_elasticsearch_requirement(
-            node_type="search",
-            instance=instance,
-            desires=desires,
-            working_set=0.0,
-            reads_per_second=rps,
-            zones_in_region=zones_in_region,
-            copies_per_region=0,
-            max_rps_to_disk=1,  # to avoid divide by zero
-        )
-
-        base_mem = (
-            desires.data_shape.reserved_instance_app_mem_gib
-            + desires.data_shape.reserved_instance_system_mem_gib
-        )
-
-        cluster = compute_stateful_zone(
-            instance=instance,
-            drive=drive,
-            needed_cores=int(requirement.cpu_cores.mid),
-            needed_disk_gib=int(requirement.disk_gib.mid),
-            needed_memory_gib=int(requirement.mem_gib.mid),
-            needed_network_mbps=requirement.network_mbps.mid,
-            # Assume that by provisioning enough memory we'll get
-            # a 90% hit rate, but take into account the reads per read
-            # from the per node dataset using leveled compaction
-            # FIXME: I feel like this can be improved
-            required_disk_ios=lambda x: _es_io_per_read(x) * math.ceil(0.1 * rps),
-            # Elasticsearch requires ephemeral disks to be % full because tiered
-            # merging can make progress as long as there is some headroom
-            required_disk_space=lambda x: x * 1.4,
-            max_local_disk_gib=0,
-            # elasticsearch clusters can autobalance via shard placement
-            cluster_size=lambda x: x,
-            min_count=1,
-            # Sidecars/System takes away memory from elasticsearch
-            # Elasticsearch uses half of available system max of 32 for compressed
-            # oops
-            reserve_memory=lambda x: base_mem + max(32, x / 2),
-            core_reference_ghz=requirement.core_reference_ghz,
-        )
-
-        zones_in_region = context.zones_in_region
-
-        # Communicate to the actual provision that if we want reduced RF
-        params = {"elasticsearch.copies": copies_per_region}
-        _upsert_params(cluster, params)
-
-        # elasticsearch clusters generally should try to stay under some total number
-        # of nodes. Orgs do this for all kinds of reasons such as
-        #   * Security group limits. Since you must have < 500 rules if you're
-        #       ingressing public ips)
-        #   * Maintenance. If your restart script does one node at a time you want
-        #       smaller clusters so your restarts don't take months.
-        #   * NxN network issues. Sometimes smaller clusters of bigger nodes
-        #       are better for network propagation
-        if cluster.count > (max_regional_size // zones_in_region):
-            return None
-
-        ec2_cost = zones_in_region * cluster.annual_cost
-
-        cluster.cluster_type = "elasticsearch-search"
-        clusters = Clusters(
-            total_annual_cost=round(Decimal(ec2_cost), 2),
-            zonal=[cluster] * zones_in_region,
-            regional=list(),
-        )
-
-        return CapacityPlan(
-            requirements=Requirements(zonal=[requirement] * zones_in_region),
-            candidate_clusters=clusters,
-        )
+        return plan
 
 
 class NflxElasticsearchMasterCapacityModel(CapacityModel):
@@ -384,11 +350,11 @@ class NflxElasticsearchMasterCapacityModel(CapacityModel):
 
         zones_in_region = context.zones_in_region
         requirement = CapacityRequirement(
-            requirement_type= "elasticsearch-master-zonal",
+            requirement_type="elasticsearch-master-zonal",
             core_reference_ghz=desires.core_reference_ghz,
-            cpu_cores= certain_int(2),
-            mem_gib= certain_int(24),
-            context= {}
+            cpu_cores=certain_int(2),
+            mem_gib=certain_int(24),
+            context={},
         )
 
         cluster = ZoneClusterCapacity(
@@ -401,7 +367,8 @@ class NflxElasticsearchMasterCapacityModel(CapacityModel):
 
         ec2_cost = zones_in_region * cluster.annual_cost
         clusters = Clusters(
-            total_annual_cost=round(Decimal(ec2_cost), 2), zonal=[cluster] * zones_in_region
+            total_annual_cost=round(Decimal(ec2_cost), 2),
+            zonal=[cluster] * zones_in_region,
         )
 
         return CapacityPlan(
@@ -435,14 +402,6 @@ class NflxElasticsearchCapacityModel(CapacityModel):
             # data node's model use the full desires
             return user_desires
 
-        def _modify_search_desires(
-            user_desires: CapacityDesires,
-        ) -> CapacityDesires:
-            # search node's model like a data node without data.
-            node_desires = user_desires.copy(deep=True)
-            node_desires.data_shape = DataShape()
-            return node_desires
-
         def _modify_master_desires(
             user_desires: CapacityDesires,
         ) -> CapacityDesires:
@@ -450,8 +409,7 @@ class NflxElasticsearchCapacityModel(CapacityModel):
             return user_desires
 
         return (
-            ("org.netflix.elasticsearch.data", _modify_data_desires),
-            ("org.netflix.elasticsearch.search", _modify_search_desires),
+            ("org.netflix.elasticsearch.node", _modify_data_desires),
             ("org.netflix.elasticsearch.master", _modify_master_desires),
         )
 
@@ -626,5 +584,4 @@ class NflxElasticsearchCapacityModel(CapacityModel):
 
 nflx_elasticsearch_capacity_model = NflxElasticsearchCapacityModel()
 nflx_elasticsearch_data_capacity_model = NflxElasticsearchDataCapacityModel()
-nflx_elasticsearch_search_capacity_model = NflxElasticsearchSearchCapacityModel()
 nflx_elasticsearch_master_capacity_model = NflxElasticsearchMasterCapacityModel()
