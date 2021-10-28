@@ -34,7 +34,7 @@ def test_entity_increasing_qps_simple():
         )
 
         # Check the Java cluster
-        entity_plan = next(filter(lambda c: c.cluster_type == 'dgwmes', cap_plan.least_regret[0].candidate_clusters.regional))
+        entity_plan = next(filter(lambda c: c.cluster_type == 'dgwentity', cap_plan.least_regret[0].candidate_clusters.regional))
         entity_results_trend.append(
             (
                 entity_plan.count * entity_plan.instance.cpu,

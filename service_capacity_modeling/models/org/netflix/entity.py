@@ -45,7 +45,7 @@ class NflxEntityCapacityModel(CapacityModel):
             return None
 
         for cluster in entity_app.candidate_clusters.regional:
-            cluster.cluster_type = "dgwmes"
+            cluster.cluster_type = "dgwentity"
         return entity_app
 
     @staticmethod
