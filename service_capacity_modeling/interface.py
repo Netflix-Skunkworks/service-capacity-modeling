@@ -144,6 +144,8 @@ class Drive(BaseModel):
     # If this drive has single tenant IO capacity, for example a single
     # physical drive versus a virtualised drive
     single_tenant: bool = True
+    # If this drive can scale, how large can it scale to
+    max_scale_size_gib: int = 0
 
     annual_cost_per_gib: float = 0
     annual_cost_per_read_io: float = 0
@@ -157,6 +159,13 @@ class Drive(BaseModel):
     write_io_latency_ms: FixedInterval = FixedInterval(
         low=0.6, mid=2, high=3, confidence=0.9
     )
+
+    @property
+    def max_size_gib(self):
+        if self.max_scale_size_gib != 0:
+            return self.max_scale_size_gib
+        else:
+            return self.size_gib
 
     @property
     def annual_cost(self):

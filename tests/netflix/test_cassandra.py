@@ -65,7 +65,11 @@ def test_capacity_small_fast():
         # Even though it's a small dataset we need IOs so should end up
         # with lots of ebs_gp2 to handle the read IOs
         if small_result.attached_drives:
-            assert sum(d.size_gib for d in small_result.attached_drives) > 1000
+            assert (
+                small_result.count
+                * sum(d.size_gib for d in small_result.attached_drives)
+                > 1000
+            )
 
         assert small_result.cluster_params["cassandra.heap.write.percent"] == 0.25
         assert small_result.cluster_params["cassandra.heap.table.percent"] == 0.11
@@ -84,7 +88,9 @@ def test_capacity_high_writes():
 
     num_cpus = high_writes_result.instance.cpu * high_writes_result.count
     assert 32 < num_cpus <= 128
-    assert high_writes_result.attached_drives[0].size_gib >= 400
+    assert (
+        high_writes_result.count * high_writes_result.attached_drives[0].size_gib >= 400
+    )
     assert cap_plan.candidate_clusters.total_annual_cost < 40_000
 
 
@@ -106,12 +112,18 @@ def test_high_write_throughput():
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=desires,
+        extra_model_arguments={"max_regional_size": 96 * 2},
     )[0]
     high_writes_result = cap_plan.candidate_clusters.zonal[0]
     assert high_writes_result.instance.family in ("m5", "r5")
-    assert high_writes_result.count > 8
+    assert high_writes_result.count > 16
 
     assert high_writes_result.attached_drives[0].size_gib >= 400
+    assert (
+        300_000
+        > high_writes_result.count * high_writes_result.attached_drives[0].size_gib
+        >= 100_000
+    )
     assert 125_000 < cap_plan.candidate_clusters.total_annual_cost < 275_000
 
     # We should require more than 4 tiering in order to meet this requirement

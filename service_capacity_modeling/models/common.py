@@ -132,10 +132,10 @@ def compute_stateful_zone(
     needed_network_mbps: float,
     # Faster CPUs can execute operations faster
     core_reference_ghz: float,
-    # EBS may need to scale for IOs, and datastores might need more
+    # Cloud drives may need to scale for IOs, and datastores might need more
     # or less IOs for a given data size as well as space
-    required_disk_ios: Callable[[float], float] = lambda x: 0,
-    required_disk_space: Callable[[float], float] = lambda x: x,
+    required_disk_ios: Callable[[float, int], float] = lambda size_gib, count: 0,
+    required_disk_space: Callable[[float], float] = lambda size_gib: size_gib,
     # The maximum amount of state we can hold per node in the database
     # typically you don't want stateful systems going much higher than a
     # few TiB so that recovery functions properly
@@ -182,12 +182,15 @@ def compute_stateful_zone(
     count = max(count, math.ceil(needed_network_mbps / instance.net_mbps))
 
     # How many instances do we need for the disk
-    if instance.drive is not None and instance.drive.size_gib > 0 and max_local_disk_gib > 0:
+    if (
+        instance.drive is not None
+        and instance.drive.size_gib > 0
+        and max_local_disk_gib > 0
+    ):
         disk_per_node = min(max_local_disk_gib, instance.drive.size_gib)
         count = max(count, math.ceil(needed_disk_gib / disk_per_node))
 
     count = max(cluster_size(count), min_count)
-
     cost = count * instance.annual_cost
 
     attached_drives = []
@@ -196,12 +199,22 @@ def compute_stateful_zone(
         # because we can only (as of 2020-10-31) scale EBS once per 6 hours
 
         # Note that ebs is provisioned _per node_ and must be chosen for
-        # the max of space and IOS
-        space_gib = max(1, math.ceil((needed_disk_gib * 2) / count))
-        io_gib = gp2_gib_for_io(required_disk_ios(needed_disk_gib / count))
+        # the max of space and IOS.
+        space_gib = max(1, required_disk_space(needed_disk_gib) / count) * 1.5
+        io_gib = gp2_gib_for_io(required_disk_ios(space_gib, count))
 
         # Provision EBS in increments of 200 GiB
         ebs_gib = utils.next_n(max(1, max(io_gib, space_gib)), n=200)
+
+        # When initially provisioniong we don't want to attach more than
+        # 1/3 the maximum volume size in one node (preferring more nodes
+        # with smaller volumes)
+        max_size = drive.max_size_gib / 3
+        if ebs_gib > max_size > 0:
+            ratio = ebs_gib / max_size
+            count = max(cluster_size(math.ceil(count * ratio)), min_count)
+            cost = count * instance.annual_cost
+
         attached_drive = drive.copy()
         attached_drive.size_gib = ebs_gib
 
