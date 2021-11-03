@@ -179,7 +179,7 @@ def _estimate_rds_regional(
         needed_disk_gib=int(requirement.disk_gib.mid),
         needed_memory_gib=int(requirement.mem_gib.mid),
         needed_network_mbps=requirement.network_mbps.mid,
-        required_disk_ios=lambda x: _rds_required_disk_ios(x, db_type)
+        required_disk_ios=lambda size_gib: _rds_required_disk_ios(size_gib, db_type)
         * math.ceil(0.1 * rps),
         required_disk_space=lambda x: x * 1.2,  # Unscientific random guess!
         core_reference_ghz=requirement.core_reference_ghz,
@@ -195,13 +195,13 @@ def _estimate_rds_regional(
 
     clusters = Clusters(
         total_annual_cost=round(cluster.annual_cost * replicas, 2),
-        zonal=list(),
+        zonal=[],
         regional=[cluster],
     )
 
     return CapacityPlan(
         requirements=Requirements(
-            zonal=list(),
+            zonal=[],
             regional=[requirement] * replicas,
             regrets=("spend", "disk", "mem"),
         ),

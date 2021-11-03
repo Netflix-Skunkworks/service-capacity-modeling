@@ -235,7 +235,8 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             # a 90% hit rate, but take into account the reads per read
             # from the per node dataset using leveled compaction
             # FIXME: I feel like this can be improved
-            required_disk_ios=lambda x: _es_io_per_read(x) * math.ceil(0.1 * data_rps),
+            required_disk_ios=lambda size, count: _es_io_per_read(size)
+            * math.ceil(0.1 * data_rps / count),
             # Elasticsearch requires ephemeral disks to be % full because tiered
             # merging can make progress as long as there is some headroom
             required_disk_space=lambda x: x * 1.4,
@@ -292,7 +293,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
                 # a 90% hit rate, but take into account the reads per read
                 # from the per node dataset using leveled compaction
                 # FIXME: I feel like this can be improved
-                required_disk_ios=lambda x: _es_io_per_read(x)
+                required_disk_ios=lambda size_gib, count: _es_io_per_read(size_gib)
                 * math.ceil(0.1 * search_rps),
                 # Elasticsearch requires ephemeral disks to be % full because tiered
                 # merging can make progress as long as there is some headroom
@@ -322,7 +323,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         clusters = Clusters(
             total_annual_cost=round(Decimal(ec2_cost), 2),
             zonal=data_clusters + search_clusters,
-            regional=list(),
+            regional=[],
         )
 
         plan = CapacityPlan(

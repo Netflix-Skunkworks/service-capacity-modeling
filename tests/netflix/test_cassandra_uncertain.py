@@ -151,6 +151,8 @@ def test_worn_dataset():
         "m5."
     ) or lr_cluster.instance.name.startswith("r5.")
     assert lr_cluster.attached_drives[0].name == "gp2"
+    # gp2 should not provision massive drives, prefer to upcolor
+    assert lr_cluster.attached_drives[0].size_gib < 9000
     assert lr_cluster.attached_drives[0].size_gib * lr_cluster.count * 3 > 204800
     # We should have S3 backup cost
     assert lr.candidate_clusters.services[0].annual_cost > 5_000
