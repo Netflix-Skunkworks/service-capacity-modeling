@@ -176,7 +176,7 @@ def _estimate_cassandra_cluster_zonal(
     required_cluster_size: Optional[int] = None,
     max_rps_to_disk: int = 500,
     max_local_disk_gib: int = 2048,
-    max_regional_size: int = 192,
+    max_regional_size: int = 96,
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
 ) -> Optional[CapacityPlan]:
@@ -247,12 +247,11 @@ def _estimate_cassandra_cluster_zonal(
         needed_memory_gib=int(requirement.mem_gib.mid),
         needed_network_mbps=requirement.network_mbps.mid,
         core_reference_ghz=requirement.core_reference_ghz,
-        # Assume that by provisioning enough memory we'll get
-        # a 90% hit rate, but take into account the reads per read
+        # Take into account the reads per read
         # from the per node dataset using leveled compaction
-        # FIXME: I feel like this can be improved
-        required_disk_ios=lambda size, count: _cass_io_per_read(size)
-        * math.ceil(0.1 * rps / count),
+        required_disk_ios=lambda size, count: (
+            _cass_io_per_read(size) * math.ceil(rps / count)
+        ),
         # C* requires ephemeral disks to be 25% full because compaction
         # and replacement time if we're underscaled.
         required_disk_space=lambda x: x * 4,
@@ -341,7 +340,9 @@ def _cass_io_per_read(node_size_gib, sstable_size_mb=160):
     sstables = max(1, gb // sstable_size_mb)
     # 10 sstables per level, plus 1 for L0 (avg)
     levels = 1 + int(math.ceil(math.log(sstables, 10)))
-    return levels
+    # One disk IO per data read and one per index read (assume we miss
+    # the key cache)
+    return 2 * levels
 
 
 def _cass_heap_for_write_buffer(
@@ -402,7 +403,7 @@ class NflxCassandraCapacityModel(CapacityModel):
             "required_cluster_size", None
         )
         max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 500)
-        max_regional_size: int = extra_model_arguments.get("max_regional_size", 192)
+        max_regional_size: int = extra_model_arguments.get("max_regional_size", 96)
         max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 2048)
         max_write_buffer_percent: float = min(
             0.5, extra_model_arguments.get("max_write_buffer_percent", 0.25)
@@ -460,7 +461,7 @@ class NflxCassandraCapacityModel(CapacityModel):
             ),
             (
                 "max_regional_size",
-                "int = 192",
+                "int = 96",
                 "What is the maximum size of a cluster in this region",
             ),
             (

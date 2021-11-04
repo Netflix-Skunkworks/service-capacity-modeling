@@ -231,12 +231,11 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             needed_disk_gib=int(data_requirement.disk_gib.mid),
             needed_memory_gib=int(data_requirement.mem_gib.mid),
             needed_network_mbps=data_requirement.network_mbps.mid,
-            # Assume that by provisioning enough memory we'll get
-            # a 90% hit rate, but take into account the reads per read
+            # Take into account the reads per read
             # from the per node dataset using leveled compaction
-            # FIXME: I feel like this can be improved
-            required_disk_ios=lambda size, count: _es_io_per_read(size)
-            * math.ceil(0.1 * data_rps / count),
+            required_disk_ios=lambda size, count: (
+                _es_io_per_read(size) * math.ceil(data_rps / count)
+            ),
             # Elasticsearch requires ephemeral disks to be % full because tiered
             # merging can make progress as long as there is some headroom
             required_disk_space=lambda x: x * 1.4,
@@ -289,12 +288,11 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
                 needed_disk_gib=int(search_requirement.disk_gib.mid),
                 needed_memory_gib=int(search_requirement.mem_gib.mid),
                 needed_network_mbps=search_requirement.network_mbps.mid,
-                # Assume that by provisioning enough memory we'll get
-                # a 90% hit rate, but take into account the reads per read
-                # from the per node dataset using leveled compaction
-                # FIXME: I feel like this can be improved
-                required_disk_ios=lambda size_gib, count: _es_io_per_read(size_gib)
-                * math.ceil(0.1 * search_rps),
+                # FIXME: do search nodes need disk io? are they even
+                # having disk?
+                required_disk_ios=lambda size_gib, count: (
+                    _es_io_per_read(size_gib) * math.ceil(search_rps / count)
+                ),
                 # Elasticsearch requires ephemeral disks to be % full because tiered
                 # merging can make progress as long as there is some headroom
                 required_disk_space=lambda x: x * 1.4,
