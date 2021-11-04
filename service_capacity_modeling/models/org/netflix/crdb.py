@@ -193,7 +193,9 @@ def _estimate_cockroachdb_cluster_zonal(
         # from the per node dataset using leveled compaction
         # FIXME: I feel like this can be improved
         required_disk_ios=lambda size, count: (
-            _crdb_io_per_read(size) * math.ceil(rps / count)
+            _crdb_io_per_read(size) * math.ceil(rps / count),
+            # TODO: presumably there are some write IOs here
+            0,
         ),
         # CRDB requires ephemeral disks to be 80% full because leveled
         # compaction can make progress as long as there is some headroom

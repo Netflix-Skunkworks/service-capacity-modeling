@@ -1,4 +1,5 @@
 import logging
+import math
 from decimal import Decimal
 from typing import Any
 from typing import Callable
@@ -6,14 +7,16 @@ from typing import Dict
 from typing import Optional
 from typing import Tuple
 
-import math
-from pydantic import Field, BaseModel
+from pydantic import BaseModel
+from pydantic import Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
@@ -24,8 +27,6 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
-from service_capacity_modeling.interface import certain_float
-from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -207,7 +208,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         # (FIXME): Need elasticsearch input
         # Right now Elasticsearch doesn't deploy to cloud drives, just adding this
         # here and leaving the capability to handle cloud drives for the future
-        if instance.drive is None:
+        if instance.drive is None and drive.name not in ("io2", "gp3"):
             return None
 
         zones_in_region = context.zones_in_region
@@ -247,6 +248,22 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             + desires.data_shape.reserved_instance_system_mem_gib
         )
 
+        data_write_per_sec = (
+            desires.query_pattern.estimated_write_per_second.mid // zones_in_region
+        )
+        data_write_bytes_per_sec = (
+            data_write_per_sec
+            * desires.query_pattern.estimated_mean_write_size_bytes.mid
+        )
+
+        # Write IO will be 1 to translog + 5 read+writes in the first hour
+        # during segment merges. Drives don't differentiate writes from reads
+        # for the most part so we just account for the merge reads here
+        # as writes.
+        # https://aws.amazon.com/ebs/volume-types/ says IOPS are 16k for
+        # io2/gp2 so for now we're just hardcoding.
+        data_write_io_per_sec = (1 + 10) * max(1, data_write_bytes_per_sec // 16384)
+
         data_cluster = compute_stateful_zone(
             instance=instance,
             drive=drive,
@@ -257,7 +274,8 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             # Take into account the reads per read
             # from the per node dataset using leveled compaction
             required_disk_ios=lambda size, count: (
-                _es_io_per_read(size) * math.ceil(data_rps / count)
+                _es_io_per_read(size) * math.ceil(data_rps / count),
+                data_write_io_per_sec / count,
             ),
             # Elasticsearch requires ephemeral disks to be % full because tiered
             # merging can make progress as long as there is some headroom

@@ -172,6 +172,24 @@ def model_desires_percentiles(
     return results, d
 
 
+def _allow_hardware(
+    name: str,
+    lifecycle: Lifecycle,
+    allowed_names: Sequence[str],
+    allowed_lifecycles: Sequence[Lifecycle],
+) -> bool:
+    # If the user has explicitly asked for particular families instead
+    # of all lifecycles filter based on that
+    if allowed_names:
+        if name not in allowed_names:
+            return False
+    # Otherwise consider lifecycle (default)
+    else:
+        if lifecycle not in allowed_lifecycles:
+            return False
+    return True
+
+
 def _regret(
     capacity_plans: Sequence[Tuple[CapacityDesires, CapacityPlan]],
     regret_params: CapacityRegretParameters,
@@ -235,6 +253,13 @@ def _merge_models(plans_by_model, zonal_requirements, regional_requirements):
     return capacity_plans
 
 
+def _in_allowed(inp: str, allowed: Sequence[str]) -> bool:
+    if not allowed:
+        return True
+    else:
+        return inp in allowed
+
+
 class CapacityPlanner:
     def __init__(
         self,
@@ -271,6 +296,8 @@ class CapacityPlanner:
         region: str,
         desires: CapacityDesires,
         lifecycles: Optional[Sequence[Lifecycle]] = None,
+        instance_families: Optional[List[str]] = None,
+        drives: Optional[List[str]] = None,
         num_results: Optional[int] = None,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
     ) -> Sequence[CapacityPlan]:
@@ -296,8 +323,10 @@ class CapacityPlanner:
                     region=region,
                     desires=sub_desires,
                     num_results=num_results,
-                    lifecycles=lifecycles,
                     extra_model_arguments=extra_model_arguments,
+                    lifecycles=lifecycles,
+                    instance_families=instance_families,
+                    drives=drives,
                 )
             )
 
@@ -310,10 +339,14 @@ class CapacityPlanner:
         desires: CapacityDesires,
         num_results: Optional[int] = None,
         lifecycles: Optional[Sequence[Lifecycle]] = None,
+        instance_families: Optional[Sequence[str]] = None,
+        drives: Optional[Sequence[str]] = None,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
     ) -> Sequence[CapacityPlan]:
         extra_model_arguments = extra_model_arguments or {}
         lifecycles = lifecycles or self._default_lifecycles
+        instance_families = instance_families or []
+        drives = drives or []
 
         hardware = self._shapes.region(region)
         num_results = num_results or self._default_num_results
@@ -332,12 +365,18 @@ class CapacityPlanner:
 
         plans = []
         for instance in hardware.instances.values():
-            if instance.lifecycle not in lifecycles:
+            if not _allow_hardware(
+                instance.family, instance.lifecycle, instance_families, lifecycles
+            ):
                 continue
+
             if per_instance_mem > instance.ram_gib:
                 continue
 
             for drive in hardware.drives.values():
+                if not _allow_hardware(drive.name, drive.lifecycle, drives, lifecycles):
+                    continue
+
                 plan = self._models[model_name].capacity_plan(
                     instance=instance,
                     drive=drive,
@@ -363,6 +402,8 @@ class CapacityPlanner:
         simulations: Optional[int] = None,
         num_results: Optional[int] = None,
         lifecycles: Optional[Sequence[Lifecycle]] = None,
+        instance_families: Optional[Sequence[str]] = None,
+        drives: Optional[Sequence[str]] = None,
         regret_params: Optional[CapacityRegretParameters] = None,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
         explain: bool = False,
@@ -405,6 +446,9 @@ class CapacityPlanner:
                             desires=sim_desires,
                             num_results=1,
                             extra_model_arguments=extra_model_arguments,
+                            lifecycles=lifecycles,
+                            instance_families=instance_families,
+                            drives=drives,
                         ),
                     )
                 )
