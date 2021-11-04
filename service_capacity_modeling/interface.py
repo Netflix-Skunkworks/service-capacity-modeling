@@ -3,6 +3,7 @@ from enum import Enum
 from functools import lru_cache
 from typing import Any
 from typing import Dict
+from typing import List
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
@@ -89,9 +90,7 @@ def certain_float(x: float) -> Interval:
 
 
 def interval(samples: Sequence[float], low_p: int = 5, high_p: int = 95) -> Interval:
-    p = np.percentile(
-        samples, [0, low_p, 50, high_p, 100], None, None, False, "nearest"
-    )
+    p = np.percentile(a=samples, q=[0, low_p, 50, high_p, 100])
     conf = (high_p - low_p) / 100
     return Interval(
         low=p[1],
@@ -106,7 +105,7 @@ def interval(samples: Sequence[float], low_p: int = 5, high_p: int = 95) -> Inte
 def interval_percentile(
     samples: Sequence[float], percentiles: Sequence[int]
 ) -> Sequence[Interval]:
-    p = np.percentile(samples, percentiles, None, None, False, "nearest")
+    p = np.percentile(samples, percentiles)
     return [certain_float(i) for i in p]
 
 
@@ -149,9 +148,14 @@ class Drive(BaseModel):
     # If this drive can scale, how large can it scale to
     max_scale_size_gib: int = 0
 
+    lifecycle: Lifecycle = Lifecycle.stable
+    compatible_families: List[str] = []
+
     annual_cost_per_gib: float = 0
-    annual_cost_per_read_io: float = 0
-    annual_cost_per_write_io: float = 0
+    # Tuples of [max_size, annual cost]
+    # [32000, 0.78], ...
+    annual_cost_per_read_io: List[Tuple[float, float]] = []
+    annual_cost_per_write_io: List[Tuple[float, float]] = []
 
     # These defaults are assuming a cloud SSD like a gp2 volume
     # If you disagree please change them in your hardware description
@@ -175,11 +179,30 @@ class Drive(BaseModel):
         r_ios = self.read_io_per_s or 0
         w_ios = self.write_io_per_s or 0
 
-        return (
-            size * self.annual_cost_per_gib
-            + r_ios * self.annual_cost_per_read_io
-            + w_ios * self.annual_cost_per_write_io
-        )
+        # Time to do income taxes ...
+        # Inputs are ranges of io limits and costs for ios in that range
+        # [(32000.0, 0.78),
+        #  (64000.0, 0.552),
+        #  (160000.0, 0.384)]
+        r_cost, w_cost, offset = 0.0, 0.0, 0.0
+        if self.annual_cost_per_read_io:
+            for (end, cost) in self.annual_cost_per_read_io:
+                charge_ios = min(r_ios, end) - offset
+                r_cost += charge_ios * cost
+                offset += charge_ios
+                if offset >= r_ios:
+                    break
+
+        offset = 0.0
+        if self.annual_cost_per_write_io:
+            for (end, cost) in self.annual_cost_per_write_io:
+                charge_ios = min(w_ios, end) - offset
+                w_cost += charge_ios * cost
+                offset += charge_ios
+                if offset >= w_ios:
+                    break
+
+        return size * self.annual_cost_per_gib + r_cost + w_cost
 
 
 class Instance(BaseModel):
@@ -273,8 +296,8 @@ class InstancePricing(BaseModel):
 
 class DrivePricing(BaseModel):
     annual_cost_per_gib: float = 0
-    annual_cost_per_read_io: float = 0
-    annual_cost_per_write_io: float = 0
+    annual_cost_per_read_io: List[Tuple[float, float]] = []
+    annual_cost_per_write_io: List[Tuple[float, float]] = []
 
 
 class ServicePricing(BaseModel):

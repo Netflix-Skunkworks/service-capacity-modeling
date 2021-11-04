@@ -48,7 +48,17 @@
       "r5dn.8xlarge":  {"annual_cost": 8295}
     },
     "drives": {
-      "gp2": {"annual_cost_per_gib": 1.2}
+      "gp2": {"annual_cost_per_gib": 1.2},
+      "io2": {
+        "annual_cost_per_gib": 1.5,
+        "annual_cost_per_read_io": [[32000, 0.78], [64000, 0.552], [160000, 0.384], [256000, 0.384]],
+        "annual_cost_per_write_io": [[32000, 0.78], [64000, 0.552], [160000, 0.384], [256000, 0.384]]
+      },
+      "gp3": {
+        "annual_cost_per_gib": 0.96,
+        "annual_cost_per_read_io": [[3000, 0], [16000, 0.06]],
+        "annual_cost_per_write_io": [[3000, 0], [16000, 0.06]]
+      }
     },
     "services": {
       "blob.standard": {

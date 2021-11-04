@@ -188,7 +188,7 @@ def _estimate_evcache_cluster_zonal(
         needed_network_mbps=requirement.network_mbps.mid,
         # EVCache doesn't use cloud drives to store data, we will have
         # accounted for the data going on drives or memory via working set
-        required_disk_ios=lambda x, y: 0,
+        required_disk_ios=lambda x, y: (0, 0),
         required_disk_space=lambda x: 0,
         max_local_disk_gib=max_local_disk_gib,
         # EVCache clusters should be balanced per zone

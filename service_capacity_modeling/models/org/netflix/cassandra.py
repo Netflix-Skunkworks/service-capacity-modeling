@@ -193,6 +193,17 @@ def _estimate_cassandra_cluster_zonal(
         return None
 
     rps = desires.query_pattern.estimated_read_per_second.mid // zones_per_region
+    write_per_sec = (
+        desires.query_pattern.estimated_write_per_second.mid // zones_per_region
+    )
+    write_bytes_per_sec = (
+        write_per_sec * desires.query_pattern.estimated_mean_write_size_bytes.mid
+    )
+    # Write IO will be 1 to commitlog + 2 writes (plus 2 reads) in the first
+    # hour during compaction.
+    # https://aws.amazon.com/ebs/volume-types/ says IOPS are 16k for io2/gp2
+    # so for now we're just hardcoding.
+    write_io_per_sec = (1 + 4) * max(1, write_bytes_per_sec // 16384)
 
     # Based on the disk latency and the read latency SLOs we adjust our
     # working set to keep more or less data in RAM. Faster drives need
@@ -249,7 +260,8 @@ def _estimate_cassandra_cluster_zonal(
         # Take into account the reads per read
         # from the per node dataset using leveled compaction
         required_disk_ios=lambda size, count: (
-            _cass_io_per_read(size) * math.ceil(rps / count)
+            _cass_io_per_read(size) * math.ceil(rps / count),
+            write_io_per_sec / count,
         ),
         # C* requires ephemeral disks to be 25% full because compaction
         # and replacement time if we're underscaled.

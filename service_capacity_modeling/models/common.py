@@ -3,6 +3,7 @@ import math
 import random
 from typing import Callable
 from typing import Optional
+from typing import Tuple
 
 from service_capacity_modeling.interface import AVG_ITEM_SIZE_BYTES
 from service_capacity_modeling.interface import CapacityDesires
@@ -134,7 +135,11 @@ def compute_stateful_zone(
     core_reference_ghz: float,
     # Cloud drives may need to scale for IOs, and datastores might need more
     # or less IOs for a given data size as well as space
-    required_disk_ios: Callable[[float, int], float] = lambda size_gib, count: 0,
+    # Contract for disk ios is
+    # (per_node_size_gib, node_count) -> (read_ios, write_ios)
+    required_disk_ios: Callable[
+        [float, int], Tuple[float, float]
+    ] = lambda size_gib, count: (0, 0),
     required_disk_space: Callable[[float], float] = lambda size_gib: size_gib,
     # The maximum amount of state we can hold per node in the database
     # typically you don't want stateful systems going much higher than a
@@ -198,10 +203,16 @@ def compute_stateful_zone(
         # If we don't have disks attach the cloud drive with enough
         # space and IO for the requirement
 
-        # Note that ebs is provisioned _per node_ and must be chosen for
+        # Note that cloud drivers are provisioned _per node_ and must be chosen for
         # the max of space and IOS.
         space_gib = max(1, math.ceil(required_disk_space(needed_disk_gib) / count))
-        io_gib = gp2_gib_for_io(required_disk_ios(space_gib, count))
+        read_io, write_io = required_disk_ios(space_gib, count)
+        read_io, write_io = (
+            utils.next_n(read_io, n=200),
+            utils.next_n(write_io, n=200),
+        )
+        total_ios = read_io + write_io
+        io_gib = cloud_gib_for_io(drive, total_ios, space_gib)
 
         # Provision EBS in increments of 200 GiB
         ebs_gib = utils.next_n(max(1, max(io_gib, space_gib)), n=200)
@@ -214,9 +225,17 @@ def compute_stateful_zone(
             ratio = ebs_gib / max_size
             count = max(cluster_size(math.ceil(count * ratio)), min_count)
             cost = count * instance.annual_cost
+            ebs_gib = max_size
 
+        read_io, write_io = required_disk_ios(space_gib, count)
+        read_io, write_io = (
+            utils.next_n(read_io, n=200),
+            utils.next_n(write_io, n=200),
+        )
         attached_drive = drive.copy()
         attached_drive.size_gib = ebs_gib
+        attached_drive.read_io_per_s = int(round(read_io, 2))
+        attached_drive.write_io_per_s = int(round(write_io, 2))
 
         # TODO: appropriately handle RAID setups for throughput requirements
         attached_drives.append(attached_drive)
@@ -246,6 +265,13 @@ def compute_stateful_zone(
 # AWS GP2 gives 3 IOS / gb stored.
 def gp2_gib_for_io(read_ios) -> int:
     return int(max(1, read_ios // 3))
+
+
+def cloud_gib_for_io(drive, read_ios, space_gib) -> int:
+    if drive.name == "gp2":
+        return gp2_gib_for_io(read_ios)
+    else:
+        return space_gib
 
 
 class WorkingSetEstimator:
