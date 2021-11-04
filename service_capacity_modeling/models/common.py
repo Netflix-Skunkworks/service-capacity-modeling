@@ -195,12 +195,12 @@ def compute_stateful_zone(
 
     attached_drives = []
     if instance.drive is None and required_disk_space(needed_disk_gib) > 0:
-        # If we don't have disks attach GP2 in at 50% space overprovision
-        # because we can only (as of 2020-10-31) scale EBS once per 6 hours
+        # If we don't have disks attach the cloud drive with enough
+        # space and IO for the requirement
 
         # Note that ebs is provisioned _per node_ and must be chosen for
         # the max of space and IOS.
-        space_gib = max(1, required_disk_space(needed_disk_gib) / count) * 1.5
+        space_gib = max(1, math.ceil(required_disk_space(needed_disk_gib) / count))
         io_gib = gp2_gib_for_io(required_disk_ios(space_gib, count))
 
         # Provision EBS in increments of 200 GiB
