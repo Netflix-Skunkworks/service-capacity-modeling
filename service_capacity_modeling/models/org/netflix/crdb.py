@@ -1,19 +1,17 @@
 import logging
-import math
 from decimal import Decimal
 from typing import Any
 from typing import Dict
 from typing import Optional
-from typing import Sequence
-from typing import Tuple
+
+import math
+from pydantic import BaseModel, Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
-from service_capacity_modeling.interface import certain_float
-from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
@@ -25,13 +23,14 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
 from service_capacity_modeling.stats import dist_for_interval
-
 
 logger = logging.getLogger(__name__)
 
@@ -243,6 +242,26 @@ def _estimate_cockroachdb_cluster_zonal(
     )
 
 
+class NflxCockroachDBArguments(BaseModel):
+    copies_per_region: int = Field(
+        default=3,
+        description="How many copies of the data will exist e.g. RF=3. If unsupplied"
+        " this will be deduced from durability and consistency desires",
+    )
+    max_regional_size: int = Field(
+        default=288,
+        description="What is the maximum size of a cluster in this region",
+    )
+    max_local_disk_gib: int = Field(
+        default=2048,
+        description="The maximum amount of data we store per machine",
+    )
+    max_rps_to_disk: int = Field(
+        default=500,
+        description="How many disk IOs should be allowed to hit disk per instance",
+    )
+
+
 class NflxCockroachDBCapacityModel(CapacityModel):
     @staticmethod
     def capacity_plan(
@@ -276,43 +295,19 @@ class NflxCockroachDBCapacityModel(CapacityModel):
         return "Netflix Streaming CockroachDB Model"
 
     @staticmethod
-    def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
-        return (
-            (
-                "copies_per_region",
-                "int = 3",
-                "How many copies of the data will exist e.g. RF=3. If unsupplied"
-                " this will be deduced from durability and consistency desires",
-            ),
-            (
-                "max_regional_size",
-                "int = 288",
-                "What is the maximum size of a cluster in this region",
-            ),
-            (
-                "max_local_disk_gib",
-                "int = 2048",
-                "The maximum amount of data we store per machine",
-            ),
-            (
-                "max_rps_to_disk",
-                "int = 500",
-                "How many disk IOs should be allowed to hit disk per instance",
-            ),
-        )
+    def extra_model_arguments_schema() -> Dict[str, Any]:
+        return NflxCockroachDBArguments.schema()
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
-        acceptable_consistency = set(
-            (
-                None,
-                AccessConsistency.linearizable,
-                AccessConsistency.linearizable_stale,
-                AccessConsistency.serializable,
-                AccessConsistency.serializable_stale,
-                AccessConsistency.never,
-            )
-        )
+        acceptable_consistency = {
+            None,
+            AccessConsistency.linearizable,
+            AccessConsistency.linearizable_stale,
+            AccessConsistency.serializable,
+            AccessConsistency.serializable_stale,
+            AccessConsistency.never,
+        }
         for key, value in user_desires.query_pattern.access_consistency:
             if value.target_consistency not in acceptable_consistency:
                 raise ValueError(

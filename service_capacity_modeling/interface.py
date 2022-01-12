@@ -89,7 +89,9 @@ def certain_float(x: float) -> Interval:
 
 
 def interval(samples: Sequence[float], low_p: int = 5, high_p: int = 95) -> Interval:
-    p = np.percentile(samples, [0, low_p, 50, high_p, 100], interpolation="nearest")
+    p = np.percentile(
+        samples, [0, low_p, 50, high_p, 100], None, None, False, "nearest"
+    )
     conf = (high_p - low_p) / 100
     return Interval(
         low=p[1],
@@ -104,7 +106,7 @@ def interval(samples: Sequence[float], low_p: int = 5, high_p: int = 95) -> Inte
 def interval_percentile(
     samples: Sequence[float], percentiles: Sequence[int]
 ) -> Sequence[Interval]:
-    p = np.percentile(samples, percentiles, interpolation="nearest")
+    p = np.percentile(samples, percentiles, None, None, False, "nearest")
     return [certain_float(i) for i in p]
 
 

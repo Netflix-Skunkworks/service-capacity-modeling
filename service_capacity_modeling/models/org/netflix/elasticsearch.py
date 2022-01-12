@@ -1,20 +1,19 @@
 import logging
-import math
 from decimal import Decimal
 from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import Optional
-from typing import Sequence
 from typing import Tuple
+
+import math
+from pydantic import Field, BaseModel
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
-from service_capacity_modeling.interface import certain_float
-from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
@@ -25,6 +24,8 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -148,6 +149,28 @@ def _upsert_params(cluster, params):
 
 
 # pylint: disable=too-many-locals
+
+
+class NflxElasticsearchArguments(BaseModel):
+    copies_per_region: int = Field(
+        default=3,
+        description="How many copies of the data will exist e.g. RF=3. If unsupplied"
+        " this will be deduced from durability and consistency desires",
+    )
+    max_regional_size: int = Field(
+        # Twice the size of our largest cluster
+        default=240,
+        description="What is the maximum size of a cluster in this region",
+    )
+    max_local_disk_gib: int = Field(
+        # Nodes larger than 4 TiB are painful to recover
+        default=4096,
+        description="The maximum amount of data we store per machine",
+    )
+    max_rps_to_disk: int = Field(
+        default=1000,
+        description="How many disk IOs should be allowed to hit disk per instance",
+    )
 
 
 class NflxElasticsearchDataCapacityModel(CapacityModel):
@@ -413,43 +436,17 @@ class NflxElasticsearchCapacityModel(CapacityModel):
         )
 
     @staticmethod
-    def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
-        return (
-            (
-                "copies_per_region",
-                "int = 3",
-                "How many copies of the data will exist e.g. RF=3. If unsupplied"
-                " this will be deduced from durability and consistency desires",
-            ),
-            (
-                "max_regional_size",
-                # Twice the size of our largest cluster
-                "int = 240",
-                "What is the maximum size of a cluster in this region",
-            ),
-            (
-                "max_local_disk_gib",
-                # Nodes larger than 4 TiB are painful to recover
-                "int = 4096",
-                "The maximum amount of data we store per machine",
-            ),
-            (
-                "max_rps_to_disk",
-                "int = 1000",
-                "How many disk IOs should be allowed to hit disk per instance",
-            ),
-        )
+    def extra_model_arguments_schema() -> Dict[str, Any]:
+        return NflxElasticsearchArguments.schema()
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
-        acceptable_consistency = set(
-            (
-                AccessConsistency.best_effort,
-                AccessConsistency.eventual,
-                AccessConsistency.never,
-                None,
-            )
-        )
+        acceptable_consistency = {
+            AccessConsistency.best_effort,
+            AccessConsistency.eventual,
+            AccessConsistency.never,
+            None,
+        }
         for key, value in user_desires.query_pattern.access_consistency:
             if value.target_consistency not in acceptable_consistency:
                 raise ValueError(

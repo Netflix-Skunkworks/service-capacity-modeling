@@ -2,7 +2,6 @@ from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import Optional
-from typing import Sequence
 from typing import Tuple
 
 from .stateless_java import nflx_java_app_capacity_model
@@ -53,8 +52,8 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
         return "Netflix Streaming TimeSeries Model"
 
     @staticmethod
-    def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
-        return nflx_java_app_capacity_model.extra_model_arguments()
+    def extra_model_arguments_schema() -> Dict[str, Any]:
+        return nflx_java_app_capacity_model.extra_model_arguments_schema()
 
     @staticmethod
     def compose_with(
