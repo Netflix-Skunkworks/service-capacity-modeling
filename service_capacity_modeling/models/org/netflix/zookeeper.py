@@ -1,16 +1,14 @@
 from typing import Any
 from typing import Dict
 from typing import Optional
-from typing import Sequence
-from typing import Tuple
+
+from pydantic import BaseModel, Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
-from service_capacity_modeling.interface import certain_float
-from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
@@ -23,6 +21,8 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -70,6 +70,17 @@ def _zk_requirement(
         mem_gib=certain_float(needed_memory),
         disk_gib=certain_float(needed_disk),
         network_mbps=certain_float(needed_network_mbps),
+    )
+
+
+class NflxZookeeperArguments(BaseModel):
+    heap_overhead: float = Field(
+        default=1.25,
+        description="Amount of heap overhead per byte stored",
+    )
+    snapshot_overhead: float = Field(
+        default=4,
+        description="Amount of disk overhead to keep for snapshots",
     )
 
 
@@ -132,19 +143,8 @@ class NflxZookeeperCapacityModel(CapacityModel):
         return "Netflix Zookeeper Coordination Cluster Model"
 
     @staticmethod
-    def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
-        return (
-            (
-                "heap_overhead",
-                "float = 1.25",
-                "Amount of heap overhead per byte stored",
-            ),
-            (
-                "snapshot_overhead",
-                "float = 4",
-                "Amount of disk overhead to keep for snapshots",
-            ),
-        )
+    def extra_model_arguments_schema() -> Dict[str, Any]:
+        return NflxZookeeperArguments.schema()
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments):

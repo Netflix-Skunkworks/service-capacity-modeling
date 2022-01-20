@@ -2,7 +2,6 @@ from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import Optional
-from typing import Sequence
 from typing import Tuple
 
 from service_capacity_modeling.interface import AccessConsistency
@@ -10,7 +9,6 @@ from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRegretParameters
-from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
@@ -19,6 +17,7 @@ from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
+from service_capacity_modeling.interface import certain_float
 
 __common_regrets__ = frozenset(("spend", "disk", "mem"))
 
@@ -185,24 +184,18 @@ class CapacityModel:
 
     @staticmethod
     def description() -> str:
-        """ Optional description of the model """
+        """Optional description of the model"""
         return "No description"
 
     @staticmethod
-    def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
-        """Optional list of extra keyword arguments
+    def extra_model_arguments_schema() -> Dict[str, Any]:
+        """Optional json schema of extra keyword arguments
 
         Some models might take additional arguments to capacity_plan.
         They can convey that context to callers here along with a
         description of each argument
-
-        Result is a sequence of (name, type = default, description) pairs
-        For example:
-            (
-                ("arg_name", "int = 3", "my custom arg"),
-            )
         """
-        return tuple()
+        return {"type": "object"}
 
     @staticmethod
     def compose_with(

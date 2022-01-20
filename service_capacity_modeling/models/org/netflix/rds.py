@@ -1,18 +1,16 @@
 import logging
-import math
 from typing import Any
 from typing import Dict
 from typing import Optional
-from typing import Sequence
-from typing import Tuple
+
+import math
+from pydantic import BaseModel, Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
-from service_capacity_modeling.interface import certain_float
-from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
@@ -25,6 +23,8 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import gp2_gib_for_io
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -209,6 +209,14 @@ def _estimate_rds_regional(
     )
 
 
+class NflxRDSArguments(BaseModel):
+    rds_engine: str = Field(
+        alias="rds.engine",
+        default="mysql",
+        description="RDS Database type",
+    )
+
+
 class NflxRDSCapacityModel(CapacityModel):
     @staticmethod
     def capacity_plan(
@@ -230,14 +238,8 @@ class NflxRDSCapacityModel(CapacityModel):
         return "Netflix RDS Cluster Model"
 
     @staticmethod
-    def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
-        return (
-            (
-                "rds.engine",
-                "str = mysql",
-                "RDS Database type",
-            ),
-        )
+    def extra_model_arguments_schema() -> Dict[str, Any]:
+        return NflxRDSArguments.schema()
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments):

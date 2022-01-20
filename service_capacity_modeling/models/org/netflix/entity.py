@@ -53,8 +53,8 @@ class NflxEntityCapacityModel(CapacityModel):
         return "Netflix Streaming Entity Model"
 
     @staticmethod
-    def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
-        return nflx_java_app_capacity_model.extra_model_arguments()
+    def extra_model_arguments_schema() -> Dict[str, Any]:
+        return nflx_java_app_capacity_model.extra_model_arguments_schema()
 
     @staticmethod
     def compose_with(

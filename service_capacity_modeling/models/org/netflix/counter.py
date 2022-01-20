@@ -1,3 +1,5 @@
+import json
+from enum import Enum
 from typing import Any
 from typing import Callable
 from typing import Dict
@@ -5,7 +7,9 @@ from typing import Optional
 from typing import Sequence
 from typing import Tuple
 
-from .stateless_java import nflx_java_app_capacity_model
+from pydantic import BaseModel
+from pydantic import Field
+
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
@@ -20,9 +24,40 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models import CapacityModel
+from .stateless_java import nflx_java_app_capacity_model, NflxJavaAppArguments
 
 
-class NflxKeyValueCapacityModel(CapacityModel):
+class NflxCounterCardinality(Enum):
+    low = "low"
+    medium = "medium"
+    unbounded = "unbounded"
+
+
+class NflxCounterMode(Enum):
+    best_effort = "best-effort"
+    eventual = "eventual"
+    exact = "exact"
+
+
+class NflxCounterArguments(NflxJavaAppArguments):
+    counter_global: bool = Field(
+        alias="counter.global",
+        description="Indicate if this use case requires global counts which "
+        "is more expensive than regional",
+    )
+    counter_cardinality: NflxCounterCardinality = Field(
+        alias="counter.cardinality",
+        description="Low means < 100, "
+        "medium means < 100000. "
+        "Unbounded means that. We assume unbounded",
+    )
+    counter_mode: NflxCounterMode = Field(
+        alias="counter.mode",
+        description="What mode of counting",
+    )
+
+
+class NflxCounterCapacityModel(CapacityModel):
     @staticmethod
     def capacity_plan(
         instance: Instance,
@@ -31,38 +66,39 @@ class NflxKeyValueCapacityModel(CapacityModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
-        # KeyValue wants 20GiB root volumes
+        # Counter wants 20GiB root volumes
         extra_model_arguments.setdefault("root_disk_gib", 20)
 
-        kv_app = nflx_java_app_capacity_model.capacity_plan(
+        counter_app = nflx_java_app_capacity_model.capacity_plan(
             instance=instance,
             drive=drive,
             context=context,
             desires=desires,
             extra_model_arguments=extra_model_arguments,
         )
-        if kv_app is None:
+        if counter_app is None:
             return None
 
-        for cluster in kv_app.candidate_clusters.regional:
-            cluster.cluster_type = "dgwkv"
-        return kv_app
+        for cluster in counter_app.candidate_clusters.regional:
+            cluster.cluster_type = "dgwcounter"
+        return counter_app
 
     @staticmethod
     def description():
-        return "Netflix Streaming Key-Value Model"
+        return "Netflix Streaming Counter Model"
 
     @staticmethod
     def extra_model_arguments_schema() -> Dict[str, Any]:
-        return nflx_java_app_capacity_model.extra_model_arguments_schema()
+        return NflxCounterArguments.schema()
 
     @staticmethod
     def compose_with(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
-        # In the future depending on the user desire we might need EVCache
-        # as well, e.g. if the latency SLO is reduced
-        return (("org.netflix.cassandra", lambda x: x),)
+        stores = [("org.netflix.evcache", lambda x: x)]
+        if extra_model_arguments["counter.mode"] != NflxCounterMode.best_effort.name:
+            stores.append(("org.netflix.cassandra", lambda x: x))
+        return tuple(stores)
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments):
@@ -72,7 +108,7 @@ class NflxKeyValueCapacityModel(CapacityModel):
                     access_pattern=AccessPattern.latency,
                     access_consistency=GlobalConsistency(
                         same_region=Consistency(
-                            target_consistency=AccessConsistency.read_your_writes,
+                            target_consistency=AccessConsistency.eventual,
                         ),
                         cross_region=Consistency(
                             target_consistency=AccessConsistency.eventual,
@@ -108,7 +144,6 @@ class NflxKeyValueCapacityModel(CapacityModel):
                         confidence=0.98,
                     ),
                 ),
-                # Most KeyValue clusters are small
                 data_shape=DataShape(
                     estimated_state_size_gib=Interval(
                         low=10, mid=50, high=200, confidence=0.98
@@ -122,7 +157,7 @@ class NflxKeyValueCapacityModel(CapacityModel):
                     access_pattern=AccessPattern.latency,
                     access_consistency=GlobalConsistency(
                         same_region=Consistency(
-                            target_consistency=AccessConsistency.read_your_writes,
+                            target_consistency=AccessConsistency.eventual,
                         ),
                         cross_region=Consistency(
                             target_consistency=AccessConsistency.eventual,
@@ -134,7 +169,7 @@ class NflxKeyValueCapacityModel(CapacityModel):
                     estimated_mean_write_size_bytes=Interval(
                         low=64, mid=128, high=1024, confidence=0.95
                     ),
-                    # KV scan queries can be more expensive
+                    # counter scan queries can be more expensive
                     estimated_mean_read_latency_ms=Interval(
                         low=0.2, mid=4, high=6, confidence=0.98
                     ),
@@ -160,7 +195,7 @@ class NflxKeyValueCapacityModel(CapacityModel):
                         confidence=0.98,
                     ),
                 ),
-                # Most throughput KV clusters are large
+                # Most throughput counter clusters are large
                 data_shape=DataShape(
                     estimated_state_size_gib=Interval(
                         low=100, mid=1000, high=4000, confidence=0.98
@@ -170,4 +205,4 @@ class NflxKeyValueCapacityModel(CapacityModel):
             )
 
 
-nflx_key_value_capacity_model = NflxKeyValueCapacityModel()
+nflx_counter_capacity_model = NflxCounterCapacityModel()

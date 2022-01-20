@@ -1,19 +1,18 @@
 import logging
-import math
 from decimal import Decimal
 from typing import Any
 from typing import Dict
 from typing import Optional
-from typing import Sequence
 from typing import Tuple
+
+import math
+from pydantic import BaseModel, Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
-from service_capacity_modeling.interface import certain_float
-from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
@@ -25,6 +24,8 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -32,7 +33,6 @@ from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
 from service_capacity_modeling.models.utils import next_n
 from service_capacity_modeling.stats import dist_for_interval
-
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +231,26 @@ def _estimate_evcache_cluster_zonal(
     )
 
 
+class NflxEVCacheArguments(BaseModel):
+    copies_per_region: int = Field(
+        default=3,
+        description="How many copies of the data will exist e.g. RF=3. If not supplied"
+        " this will be deduced from tier",
+    )
+    max_regional_size: int = Field(
+        default=999,
+        description="What is the maximum size of a cluster in this region",
+    )
+    max_local_disk_gib: int = Field(
+        default=6144,
+        description="The maximum amount of data we store per machine",
+    )
+    min_instance_memory_gib: int = Field(
+        default=12,
+        description="The minimum amount of instance memory to allow",
+    )
+
+
 class NflxEVCacheCapacityModel(CapacityModel):
     @staticmethod
     def capacity_plan(
@@ -274,36 +294,16 @@ class NflxEVCacheCapacityModel(CapacityModel):
         return "Netflix Streaming EVCache (memcached) Model"
 
     @staticmethod
-    def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
-        return (
-            (
-                "copies_per_region",
-                "int = 3",
-                "How many copies of the data will exist e.g. RF=3. If unsupplied"
-                " this will be deduced from tier",
-            ),
-            (
-                "max_regional_size",
-                "int = 999",
-                "What is the maximum size of a cluster in this region",
-            ),
-            (
-                "max_local_disk_gib",
-                "int = 6144",
-                "The maximum amount of data we store per machine",
-            ),
-            (
-                "min_instance_memory_gib",
-                "int = 12",
-                "The minimum amount of instance memory to allow",
-            ),
-        )
+    def extra_model_arguments_schema() -> Dict[str, Any]:
+        return NflxEVCacheArguments.schema()
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
-        acceptable_consistency = set(
-            (AccessConsistency.best_effort, AccessConsistency.never, None)
-        )
+        acceptable_consistency = {
+            AccessConsistency.best_effort,
+            AccessConsistency.never,
+            None,
+        }
 
         for key, value in user_desires.query_pattern.access_consistency:
             if value.target_consistency not in acceptable_consistency:

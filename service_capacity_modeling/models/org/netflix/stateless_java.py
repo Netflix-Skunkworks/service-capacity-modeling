@@ -1,10 +1,10 @@
-import math
 from decimal import Decimal
 from typing import Any
 from typing import Dict
 from typing import Optional
-from typing import Sequence
-from typing import Tuple
+
+import math
+from pydantic import BaseModel, Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
@@ -12,8 +12,6 @@ from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
-from service_capacity_modeling.interface import certain_float
-from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
@@ -26,6 +24,8 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateless_region
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -118,6 +118,19 @@ def _estimate_java_app_region(
     return None
 
 
+class NflxJavaAppArguments(BaseModel):
+    failover: bool = Field(
+        default=True, description="If this app participates in failover"
+    )
+    jvm_memory_overhead: float = Field(
+        default=1.2,
+        description="How much overhead does the heap have per read byte",
+    )
+    root_disk_gib: int = Field(
+        default=10, description="How many GiB of root volume to attach"
+    )
+
+
 class NflxJavaAppCapacityModel(CapacityModel):
     @staticmethod
     def capacity_plan(
@@ -148,16 +161,8 @@ class NflxJavaAppCapacityModel(CapacityModel):
         return "Netflix Streaming Java App Model"
 
     @staticmethod
-    def extra_model_arguments() -> Sequence[Tuple[str, str, str]]:
-        return (
-            ("failover", "bool = 1", "If this app participates in failover"),
-            (
-                "jvm_memory_overhead",
-                "float = 1.2",
-                "How much overhead does the heap have per read byte",
-            ),
-            ("root_disk_gib", "int = 10", "How many GiB of root volume to attach"),
-        )
+    def extra_model_arguments_schema() -> Dict[str, Any]:
+        return NflxJavaAppArguments.schema()
 
     @staticmethod
     def regret(
