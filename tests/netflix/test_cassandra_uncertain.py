@@ -101,7 +101,7 @@ def test_increasing_qps_simple():
         )
 
     # We should generally want cheap CPUs
-    assert all(r[0] in ("r5", "m5d", "m5", "i3") for r in result)
+    assert all(r[0] in ("r5", "m5d", "m5", "i3en") for r in result)
 
     # Should have more capacity as requirement increases
     x = [r[1] for r in result]
@@ -146,7 +146,7 @@ def test_worn_dataset():
     lr = cap_plan.least_regret[0]
     lr_cluster = lr.candidate_clusters.zonal[0]
     assert 128 <= lr_cluster.count * lr_cluster.instance.cpu <= 512
-    assert 100_000 <= lr.candidate_clusters.total_annual_cost < 500_000
+    assert 100_000 <= lr.candidate_clusters.total_annual_cost < 900_000
     assert lr_cluster.instance.name.startswith(
         "m5."
     ) or lr_cluster.instance.name.startswith("r5.")
