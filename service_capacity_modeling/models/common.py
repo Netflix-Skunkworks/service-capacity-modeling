@@ -221,7 +221,7 @@ def compute_stateful_zone(
         # TODO: appropriately handle RAID setups for throughput requirements
         attached_drives.append(attached_drive)
 
-        cost = cost + attached_drive.annual_cost
+        cost = cost + (attached_drive.annual_cost * count)
 
     logger.debug(
         "For (cpu, memory_gib, disk_gib) = (%s, %s, %s) need (%s, %s, %s, %s)",

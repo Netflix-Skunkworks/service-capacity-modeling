@@ -53,7 +53,8 @@ def test_compositional():
         explain=True,
     )
 
-    for i in range(4):
+    count = len(direct_result.least_regret)
+    for i in range(count):
         direct_cluster = direct_result.least_regret[i].candidate_clusters.zonal[0]
         composed_cluster = composed_result.least_regret[i].candidate_clusters.zonal[0]
         assert direct_cluster == composed_cluster

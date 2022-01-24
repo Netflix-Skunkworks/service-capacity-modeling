@@ -83,14 +83,22 @@ def test_capacity_high_writes():
         extra_model_arguments={"copies_per_region": 2},
     )[0]
     high_writes_result = cap_plan.candidate_clusters.zonal[0]
-    assert high_writes_result.instance.family == "m5"
+    assert high_writes_result.instance.family.startswith("m5")
     assert high_writes_result.count > 4
 
     num_cpus = high_writes_result.instance.cpu * high_writes_result.count
     assert 32 < num_cpus <= 128
-    assert (
-        high_writes_result.count * high_writes_result.attached_drives[0].size_gib >= 400
-    )
+    if high_writes_result.attached_drives:
+        assert (
+            high_writes_result.count * high_writes_result.attached_drives[0].size_gib
+            >= 400
+        )
+    elif high_writes_result.instance.drive is not None:
+        assert (
+            high_writes_result.count * high_writes_result.instance.drive.size_gib >= 400
+        )
+    else:
+        raise Exception("Should have drives")
     assert cap_plan.candidate_clusters.total_annual_cost < 40_000
 
 
@@ -124,7 +132,7 @@ def test_high_write_throughput():
         > high_writes_result.count * high_writes_result.attached_drives[0].size_gib
         >= 100_000
     )
-    assert 125_000 < cap_plan.candidate_clusters.total_annual_cost < 275_000
+    assert 125_000 < cap_plan.candidate_clusters.total_annual_cost < 900_000
 
     # We should require more than 4 tiering in order to meet this requirement
     assert high_writes_result.cluster_params["cassandra.compaction.min_threshold"] > 4
