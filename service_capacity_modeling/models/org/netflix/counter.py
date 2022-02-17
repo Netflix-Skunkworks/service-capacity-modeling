@@ -1,15 +1,14 @@
-import json
 from enum import Enum
 from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import Optional
-from typing import Sequence
 from typing import Tuple
 
-from pydantic import BaseModel
 from pydantic import Field
 
+from .stateless_java import nflx_java_app_capacity_model
+from .stateless_java import NflxJavaAppArguments
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
@@ -24,13 +23,12 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models import CapacityModel
-from .stateless_java import nflx_java_app_capacity_model, NflxJavaAppArguments
 
 
 class NflxCounterCardinality(Enum):
     low = "low"
     medium = "medium"
-    unbounded = "unbounded"
+    high = "high"
 
 
 class NflxCounterMode(Enum):
@@ -47,9 +45,7 @@ class NflxCounterArguments(NflxJavaAppArguments):
     )
     counter_cardinality: NflxCounterCardinality = Field(
         alias="counter.cardinality",
-        description="Low means < 100, "
-        "medium means < 100000. "
-        "Unbounded means that. We assume unbounded",
+        description="Low means < 1,000, medium (1,000—100,000), high means > 100,000.",
     )
     counter_mode: NflxCounterMode = Field(
         alias="counter.mode",
@@ -96,7 +92,7 @@ class NflxCounterCapacityModel(CapacityModel):
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
         stores = [("org.netflix.evcache", lambda x: x)]
-        if extra_model_arguments["counter.mode"] != NflxCounterMode.best_effort.name:
+        if extra_model_arguments["counter.mode"] != NflxCounterMode.best_effort.value:
             stores.append(("org.netflix.cassandra", lambda x: x))
         return tuple(stores)
 
