@@ -32,12 +32,12 @@ def test_counter_increasing_qps_simple():
             region="us-east-1",
             desires=simple,
             simulations=256,
-            extra_model_arguments={'counter.mode': "exact"}
+            extra_model_arguments={"counter.mode": "exact"},
         )
 
         # Check the C* cluster
         zlrs = cap_plan.least_regret[0].candidate_clusters.zonal
-        zlr = next(filter(lambda zlr: zlr.cluster_type == 'cassandra', zlrs))
+        zlr = next(filter(lambda zlr: zlr.cluster_type == "cassandra", zlrs))
         zlr_cpu = zlr.count * zlr.instance.cpu
         zlr_cost = cap_plan.least_regret[0].candidate_clusters.total_annual_cost
         zlr_family = zlr.instance.family
@@ -64,7 +64,7 @@ def test_counter_increasing_qps_simple():
         assert rlr.instance.drive is None
 
     # We should generally want cheap CPUs for Cassandra
-    assert all(r[0] in ("r5", "m5d", "m5", "i3en") for r in zonal_result)
+    assert all(r[0] in ("r5", "m5d", "i3") for r in zonal_result)
 
     # We just want ram and cpus for a java app
     assert all(r[0] in ("m5", "r5") for r in regional_result)
