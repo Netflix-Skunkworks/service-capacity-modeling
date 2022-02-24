@@ -93,7 +93,26 @@ class NflxCounterCapacityModel(CapacityModel):
     ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
         stores = [("org.netflix.evcache", lambda x: x)]
         if extra_model_arguments["counter.mode"] != NflxCounterMode.best_effort.value:
-            stores.append(("org.netflix.cassandra", lambda x: x))
+
+            def _modify_cassandra_desires(
+                user_desires: CapacityDesires,
+            ) -> CapacityDesires:
+                modified = user_desires.copy(deep=True)
+                # reduce read/s by a tenth because counter buffers rollups for 10s.
+                rps = modified.query_pattern.estimated_read_per_second.dict(
+                    exclude_unset=True
+                )
+                rps["low"] /= 10
+                rps["mid"] /= 10
+                rps["high"] /= 10
+                if "minimum_value" in rps:
+                    rps["minimum_value"] /= 10
+                if "maximum_value" in rps:
+                    rps["maximum_value"] /= 10
+                modified.query_pattern.estimated_read_per_second = Interval(**rps)
+                return modified
+
+            stores.append(("org.netflix.cassandra", _modify_cassandra_desires))
         return tuple(stores)
 
     @staticmethod
