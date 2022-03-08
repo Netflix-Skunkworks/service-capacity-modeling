@@ -1,3 +1,4 @@
+from datetime import timedelta
 from enum import Enum
 from typing import Any
 from typing import Callable
@@ -98,18 +99,30 @@ class NflxCounterCapacityModel(CapacityModel):
                 user_desires: CapacityDesires,
             ) -> CapacityDesires:
                 modified = user_desires.copy(deep=True)
-                # reduce read/s by a tenth because counter buffers rollups for 10s.
-                rps = modified.query_pattern.estimated_read_per_second.dict(
-                    exclude_unset=True
-                )
-                rps["low"] /= 10
-                rps["mid"] /= 10
-                rps["high"] /= 10
-                if "minimum_value" in rps:
-                    rps["minimum_value"] /= 10
-                if "maximum_value" in rps:
-                    rps["maximum_value"] /= 10
-                modified.query_pattern.estimated_read_per_second = Interval(**rps)
+
+                # counts per second
+                cps = user_desires.query_pattern.estimated_write_per_second
+
+                # rollups happen once every 10 seconds after a write
+                rps = cps.scale(0.1)
+                modified.query_pattern.estimated_read_per_second = rps
+
+                # storage size fix
+                event_size = 128  # bytes
+                count_size = 64  # bytes
+                GiB = 1024 * 1024 * 1024
+                retention = timedelta(days=1).total_seconds()
+                cardinality = {
+                    "low": 1_000,
+                    "medium": 10_000,
+                    "high": 100_000,
+                }[extra_model_arguments["counter.cardinality"]]
+
+                event_store = cps.scale(count_size * retention / GiB)
+                count_store = event_size * cardinality / GiB
+                store = event_store.offset(count_store)
+                modified.data_shape.estimated_state_size_gib = store
+
                 return modified
 
             stores.append(("org.netflix.cassandra", _modify_cassandra_desires))

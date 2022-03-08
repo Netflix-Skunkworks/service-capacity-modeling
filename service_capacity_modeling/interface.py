@@ -1,3 +1,4 @@
+from __future__ import annotations
 from decimal import Decimal
 from enum import Enum
 from functools import lru_cache
@@ -73,6 +74,38 @@ class Interval(BaseModel):
 
     def __eq__(self, other):
         return self.__hash__() == other.__hash__()
+
+    def scale(self, factor: float) -> Interval:
+        minimum_value = (
+            self.minimum * factor if self.minimum_value is not None else None
+        )
+        maximum_value = (
+            self.maximum * factor if self.maximum_value is not None else None
+        )
+        return Interval(
+            low=self.low * factor,
+            mid=self.mid * factor,
+            high=self.high * factor,
+            confidence=self.confidence,
+            model_with=self.model_with,
+            allow_simulate=self.allow_simulate,
+            minimum_value=minimum_value,
+            maximum_value=maximum_value,
+        )
+
+    def offset(self, delta: float) -> Interval:
+        minimum_value = self.minimum + delta if self.minimum_value is not None else None
+        maximum_value = self.maximum + delta if self.maximum_value is not None else None
+        return Interval(
+            low=self.low + delta,
+            mid=self.mid + delta,
+            high=self.high + delta,
+            confidence=self.confidence,
+            model_with=self.model_with,
+            allow_simulate=self.allow_simulate,
+            minimum_value=minimum_value,
+            maximum_value=maximum_value,
+        )
 
 
 class FixedInterval(Interval):
