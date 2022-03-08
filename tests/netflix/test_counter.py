@@ -32,7 +32,10 @@ def test_counter_increasing_qps_simple():
             region="us-east-1",
             desires=simple,
             simulations=256,
-            extra_model_arguments={"counter.mode": "exact"},
+            extra_model_arguments={
+                "counter.mode": "exact",
+                "counter.cardinality": "high",
+            },
         )
 
         # Check the C* cluster
@@ -44,7 +47,7 @@ def test_counter_increasing_qps_simple():
         if zlr.instance.drive is None:
             assert sum(dr.size_gib for dr in zlr.attached_drives) >= 200
         else:
-            assert zlr.instance.drive.size_gib >= 100
+            assert zlr.instance.drive.size_gib >= 70
 
         zonal_result.append(
             (
@@ -64,10 +67,12 @@ def test_counter_increasing_qps_simple():
         assert rlr.instance.drive is None
 
     # We should generally want cheap CPUs for Cassandra
-    assert all(r[0] in ("r5", "m5d", "i3") for r in zonal_result)
+    zonal_families = {r[0] for r in zonal_result}
+    assert all(family in ("r5d", "m5d", "i3en") for family in zonal_families), f"{zonal_families}"
 
     # We just want ram and cpus for a java app
-    assert all(r[0] in ("m5", "r5") for r in regional_result)
+    regional_families = {r[0] for r in regional_result}
+    assert all(family in ("m5", "r5") for family in regional_families), f"{regional_families}"
 
     # Should have more capacity as requirement increases
     x = [r[1] for r in zonal_result]

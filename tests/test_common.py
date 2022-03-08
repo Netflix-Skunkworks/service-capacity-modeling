@@ -91,3 +91,39 @@ def test_merge_plan():
 
     assert left_plan.candidate_clusters.zonal[0] in result.candidate_clusters.zonal
     assert right_plan.candidate_clusters.zonal[0] in result.candidate_clusters.zonal
+
+
+def test_interval_scale():
+    without_minmax = Interval(low=10, mid=100, high=1000)
+    s = without_minmax.scale(3)
+    assert s.low == 30
+    assert s.mid == 300
+    assert s.high == 3000
+    assert s.minimum < s.low
+    assert s.maximum > s.high
+
+    with_minmax = Interval(low=10, mid=100, high=1000, minimum_value=1, maximum_value=1010)
+    s = with_minmax.scale(3)
+    assert s.low == 30
+    assert s.mid == 300
+    assert s.high == 3000
+    assert s.minimum == 3
+    assert s.maximum == 3030
+
+
+def test_interval_offset():
+    without_minmax = Interval(low=10, mid=100, high=1000)
+    s = without_minmax.offset(3)
+    assert s.low == 13
+    assert s.mid == 103
+    assert s.high == 1003
+    assert s.minimum < s.low
+    assert s.maximum > s.high
+
+    with_minmax = Interval(low=10, mid=100, high=1000, minimum_value=1, maximum_value=1010)
+    s = with_minmax.offset(3)
+    assert s.low == 13
+    assert s.mid == 103
+    assert s.high == 1003
+    assert s.minimum == 4
+    assert s.maximum == 1013
