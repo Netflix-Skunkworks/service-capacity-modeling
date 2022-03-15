@@ -169,7 +169,8 @@
       "net_mbps": 1000,
       "drive": {
         "name": "ephem", "size_gib": 885,
-        "read_io_latency_ms": {"minimum_value":0.09, "low":0.10, "mid":0.16, "high":0.20, "maximum_value":3, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.09, "low":0.10, "mid":0.16, "high":0.20, "maximum_value":3, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": ,"write_io_per_s": , "block_size_kib": 
       }
     },
     "i3.2xlarge": {
@@ -180,7 +181,8 @@
       "net_mbps": 2000,
       "drive": {
         "name": "ephem", "size_gib": 1900,
-        "read_io_latency_ms": {"minimum_value":0.09, "low":0.10, "mid":0.16, "high":0.20, "maximum_value":3, "confidence":0.9}
+        "read_io_latency_ms": {"minimum_value":0.09, "low":0.10, "mid":0.16, "high":0.20, "maximum_value":3, "confidence":0.9},
+        "read_io_per_s": ,"write_io_per_s": , "block_size_kib": 
       }
     },
     "i3.4xlarge": {
@@ -191,7 +193,8 @@
       "net_mbps": 4000,
       "drive": {
         "name": "ephem", "size_gib": 3800,
-        "read_io_latency_ms": {"minimum_value":0.09, "low":0.10, "mid":0.16, "high":0.20, "maximum_value":3, "confidence":0.9}
+        "read_io_latency_ms": {"minimum_value":0.09, "low":0.10, "mid":0.16, "high":0.20, "maximum_value":3, "confidence":0.9},
+        "read_io_per_s": ,"write_io_per_s": , "block_size_kib": 
       }
     },
     "i3en.xlarge": {
@@ -202,7 +205,9 @@
       "net_mbps": 4000,
       "drive": {
         "name": "ephem", "size_gib": 2300,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": ,"write_io_per_s": , "block_size_kib": 
+      }
     },
     "i3en.2xlarge": {
       "name": "i3en.2xlarge",
@@ -212,7 +217,9 @@
       "net_mbps": 8000,
       "drive": {
         "name": "ephem", "size_gib": 4600,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": ,"write_io_per_s": , "block_size_kib": 
+      }
     },
     "i3en.3xlarge": {
       "name": "i3en.3xlarge",
@@ -220,7 +227,10 @@
       "cpu_ghz": 3.1,
       "ram_gib": 95.54,
       "net_mbps": 12000,
-      "drive": {"name": "ephem", "size_gib": 6819, "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.16, "maximum_value":2, "confidence":0.9}}
+      "drive": {"name": "ephem", "size_gib": 6819, 
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.16, "maximum_value":2, "confidence":0.9},
+        "read_io_per_s": ,"write_io_per_s": , "block_size_kib": 
+      }
     },
     "m5d.large": {
       "name": "m5d.large",
@@ -230,9 +240,8 @@
       "net_mbps": 500,
       "drive": {
         "name": "ephem", "size_gib": 70,
-        "read_io_latency_ms": {
-          "minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false
-        }
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 30000,"write_io_per_s": 15000, "block_size_kib": 4 
       }
     },
     "m5d.xlarge": {
@@ -243,9 +252,8 @@
       "net_mbps": 1000,
       "drive": {
         "name": "ephem", "size_gib": 140,
-        "read_io_latency_ms": {
-          "minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false
-        }
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 59000,"write_io_per_s": 29000, "block_size_kib": 4
       }
     },
     "m5d.2xlarge": {
@@ -256,7 +264,8 @@
       "net_mbps": 2000,
       "drive": {
         "name": "ephem", "size_gib": 280,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 117000,"write_io_per_s": 57000, "block_size_kib": 4
       }
     },
     "m5d.4xlarge": {
@@ -267,7 +276,8 @@
       "net_mbps": 4000,
       "drive": {
         "name": "ephem", "size_gib": 559,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 234000,"write_io_per_s": 114000, "block_size_kib": 4
       }
     },
     "m5d.8xlarge": {
@@ -278,7 +288,9 @@
       "net_mbps": 10000,
       "drive": {
         "name": "ephem", "size_gib": 1120,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 466666,"write_io_per_s": 233333, "block_size_kib": 4
+      }
     },
     "m5dn.xlarge": {
       "name": "m5dn.xlarge",
@@ -288,7 +300,8 @@
       "net_mbps": 3125,
       "drive": {
         "name": "ephem", "size_gib": 140,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 59000,"write_io_per_s": 29000, "block_size_kib": 4
       }
     },
     "m5dn.2xlarge": {
@@ -299,7 +312,8 @@
       "net_mbps": 6250,
       "drive": {
         "name": "ephem", "size_gib": 280,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 117000,"write_io_per_s": 57000, "block_size_kib": 4
       }
     },
     "m5dn.4xlarge": {
@@ -310,7 +324,8 @@
       "net_mbps": 12500,
       "drive": {
         "name": "ephem", "size_gib": 559,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 234000,"write_io_per_s": 114000, "block_size_kib": 4
       }
     },
     "m5dn.8xlarge": {
@@ -321,7 +336,8 @@
       "net_mbps": 25000,
       "drive": {
         "name": "ephem", "size_gib": 1120,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 466666,"write_io_per_s": 233333, "block_size_kib": 4
       }
     },
     "r5d.large": {
@@ -332,7 +348,8 @@
       "net_mbps": 500,
       "drive": {
         "name": "ephem", "size_gib": 70,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 30000,"write_io_per_s": 15000, "block_size_kib": 4
       }
     },
     "r5d.xlarge": {
@@ -343,7 +360,8 @@
       "net_mbps": 1000,
       "drive": {
         "name": "ephem", "size_gib": 140,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 59000,"write_io_per_s": 29000, "block_size_kib": 4
       }
     },
     "r5d.2xlarge": {
@@ -354,7 +372,8 @@
       "net_mbps": 2000,
       "drive": {
         "name": "ephem", "size_gib": 280,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 117000,"write_io_per_s": 57000, "block_size_kib": 4
       }
     },
     "r5d.4xlarge": {
@@ -365,7 +384,8 @@
       "net_mbps": 4000,
       "drive": {
         "name": "ephem", "size_gib": 559,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 234000,"write_io_per_s": 114000, "block_size_kib": 4
       }
     },
     "r5d.8xlarge": {
@@ -376,7 +396,8 @@
       "net_mbps": 10000,
       "drive": {
         "name": "ephem", "size_gib": 1120,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 466666,"write_io_per_s": 233333, "block_size_kib": 4
       }
     },
     "r5dn.large": {
@@ -387,7 +408,8 @@
       "net_mbps": 1562,
       "drive": {
         "name": "ephem", "size_gib": 70,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 30000,"write_io_per_s": 15000, "block_size_kib": 4
       }
     },
     "r5dn.xlarge": {
@@ -398,7 +420,8 @@
       "net_mbps": 3125,
       "drive": {
         "name": "ephem", "size_gib": 140,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 59000,"write_io_per_s": 29000, "block_size_kib": 4
       }
     },
     "r5dn.2xlarge": {
@@ -409,7 +432,8 @@
       "net_mbps": 6250,
       "drive": {
         "name": "ephem", "size_gib": 280,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 117000,"write_io_per_s": 57000, "block_size_kib": 4
       }
     },
     "r5dn.4xlarge": {
@@ -420,7 +444,8 @@
       "net_mbps": 12500,
       "drive": {
         "name": "ephem", "size_gib": 559,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 234000,"write_io_per_s": 114000, "block_size_kib": 4
       }
     },
     "r5dn.8xlarge": {
@@ -431,7 +456,8 @@
       "net_mbps": 25000,
       "drive": {
         "name": "ephem", "size_gib": 1120,
-        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false}
+        "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
+        "read_io_per_s": 466666,"write_io_per_s": 233333, "block_size_kib": 4
       }
     }
   },
@@ -440,20 +466,20 @@
       "name": "gp2",
       "read_io_latency_ms": {"low": 0.8, "mid": 1.05, "high": 1.8, "maximum_value": 10, "confidence": 0.90},
       "write_io_latency_ms": {"low": 1.2, "mid": 2, "high": 4, "maximum_value": 20, "confidence": 0.90},
-      "max_scale_size_gib": 16384
+      "max_scale_size_gib": 16384, "block_size_kib": 16
     },
     "io2": {
       "name": "io2",
       "read_io_latency_ms": {"low": 0.5, "mid": 0.8, "high": 1.2, "maximum_value": 2, "confidence": 0.90},
       "write_io_latency_ms": {"low": 0.9, "mid": 1.2, "high": 2, "maximum_value": 4, "confidence": 0.90},
-      "max_scale_size_gib": 16384,
+      "max_scale_size_gib": 16384, "block_size_kib": 16,
       "lifecycle": "alpha"
     },
     "gp3": {
       "name": "gp3",
       "read_io_latency_ms": {"low": 0.8, "mid": 1.05, "high": 1.8, "maximum_value": 10, "confidence": 0.90},
       "write_io_latency_ms": {"low": 1.2, "mid": 2, "high": 4, "maximum_value": 20, "confidence": 0.90},
-      "max_scale_size_gib": 16384,
+      "max_scale_size_gib": 16384, "block_size_kib": 16, 
       "lifecycle": "alpha"
     }
   },
