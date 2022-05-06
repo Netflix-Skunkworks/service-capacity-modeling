@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 import functools
 import logging
+import multiprocessing
 from hashlib import blake2b
+from multiprocessing import Pool
 from typing import Any
 from typing import Callable
 from typing import Dict
@@ -436,22 +438,32 @@ class CapacityPlanner:
             extra_model_arguments=extra_model_arguments,
         ):
             model_plans: List[Tuple[CapacityDesires, Sequence[CapacityPlan]]] = []
-            for sim_desires in model_desires(sub_desires, simulations):
-                model_plans.append(
-                    (
-                        sim_desires,
-                        self._plan_certain(
-                            model_name=sub_model,
-                            region=region,
-                            desires=sim_desires,
-                            num_results=1,
-                            extra_model_arguments=extra_model_arguments,
-                            lifecycles=lifecycles,
-                            instance_families=instance_families,
-                            drives=drives,
-                        ),
+            with Pool(multiprocessing.cpu_count()) as worker:
+                results = []
+                for sim_desires in model_desires(sub_desires, simulations):
+                    results.append(
+                        (
+                            sim_desires,
+                            worker.apply_async(
+                                self._plan_certain,
+                                tuple(),
+                                {
+                                    "model_name": sub_model,
+                                    "region": region,
+                                    "desires": sim_desires,
+                                    "num_results": 1,
+                                    "extra_model_arguments": extra_model_arguments,
+                                    "lifecycles": lifecycles,
+                                    "instance_families": instance_families,
+                                    "drives": drives,
+                                },
+                            ),
+                        )
                     )
-                )
+
+                for r in results:
+                    model_plans.append((r[0], r[1].get()))
+
             regret_clusters_by_model[sub_model] = _regret(
                 capacity_plans=[
                     (sim_desires, plan[0]) for sim_desires, plan in model_plans if plan
