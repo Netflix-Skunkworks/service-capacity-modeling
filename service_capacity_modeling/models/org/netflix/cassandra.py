@@ -1,18 +1,21 @@
 import logging
+import math
 from decimal import Decimal
 from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import Optional
 
-import math
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from pydantic import Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
@@ -25,8 +28,6 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
-from service_capacity_modeling.interface import certain_float
-from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -403,6 +404,10 @@ class NflxCassandraArguments(BaseModel):
     require_local_disks: bool = Field(
         default=False,
         description="If local (ephemeral) drives are required",
+    )
+    required_cluster_size: Optional[int] = Field(
+        default=None,
+        description="Require zonal clusters to be this size (force vertical scaling)",
     )
     max_rps_to_disk: int = Field(
         default=500,
