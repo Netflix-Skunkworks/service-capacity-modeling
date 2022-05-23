@@ -170,7 +170,7 @@
       "drive": {
         "name": "ephem", "size_gib": 885,
         "read_io_latency_ms": {"minimum_value":0.09, "low":0.10, "mid":0.16, "high":0.20, "maximum_value":3, "confidence":0.9, "single_tenant": false},
-        "read_io_per_s": ,"write_io_per_s": , "block_size_kib": 
+        "read_io_per_s": 206250,"write_io_per_s": 70000, "block_size_kib": 4
       }
     },
     "i3.2xlarge": {
@@ -182,7 +182,7 @@
       "drive": {
         "name": "ephem", "size_gib": 1900,
         "read_io_latency_ms": {"minimum_value":0.09, "low":0.10, "mid":0.16, "high":0.20, "maximum_value":3, "confidence":0.9},
-        "read_io_per_s": ,"write_io_per_s": , "block_size_kib": 
+        "read_io_per_s": 412500,"write_io_per_s": 180000, "block_size_kib": 4
       }
     },
     "i3.4xlarge": {
@@ -194,7 +194,7 @@
       "drive": {
         "name": "ephem", "size_gib": 3800,
         "read_io_latency_ms": {"minimum_value":0.09, "low":0.10, "mid":0.16, "high":0.20, "maximum_value":3, "confidence":0.9},
-        "read_io_per_s": ,"write_io_per_s": , "block_size_kib": 
+        "read_io_per_s": 825000,"write_io_per_s": 360000, "block_size_kib": 4
       }
     },
     "i3en.xlarge": {
@@ -206,7 +206,7 @@
       "drive": {
         "name": "ephem", "size_gib": 2300,
         "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
-        "read_io_per_s": ,"write_io_per_s": , "block_size_kib": 
+        "read_io_per_s": 85000,"write_io_per_s": 65000, "block_size_kib": 4
       }
     },
     "i3en.2xlarge": {
@@ -218,7 +218,7 @@
       "drive": {
         "name": "ephem", "size_gib": 4600,
         "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
-        "read_io_per_s": ,"write_io_per_s": , "block_size_kib": 
+        "read_io_per_s": 170000,"write_io_per_s": 130000, "block_size_kib": 4
       }
     },
     "i3en.3xlarge": {
@@ -229,7 +229,7 @@
       "net_mbps": 12000,
       "drive": {"name": "ephem", "size_gib": 6819, 
         "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.16, "maximum_value":2, "confidence":0.9},
-        "read_io_per_s": ,"write_io_per_s": , "block_size_kib": 
+        "read_io_per_s": 250000,"write_io_per_s": 200000, "block_size_kib": 4
       }
     },
     "m5d.large": {
