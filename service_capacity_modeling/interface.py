@@ -13,6 +13,19 @@ import numpy as np
 from pydantic import BaseModel
 from pydantic import Field
 
+
+class ExcludeUnsetModel(BaseModel):
+    def dict(self, *args, **kwargs):
+        if "exclude_unset" not in kwargs:
+            kwargs["exclude_unset"] = True
+        return super().dict(*args, **kwargs)
+
+    def json(self, *args, **kwargs):
+        if "exclude_unset" not in kwargs:
+            kwargs["exclude_unset"] = True
+        return super().json(*args, **kwargs)
+
+
 ###############################################################################
 #              Models (structs) for how we describe intervals                 #
 ###############################################################################
@@ -29,7 +42,7 @@ class IntervalModel(str, Enum):
     beta = "beta"
 
 
-class Interval(BaseModel):
+class Interval(ExcludeUnsetModel):
     low: float
     mid: float
     high: float
@@ -165,7 +178,7 @@ class Lifecycle(str, Enum):
     end_of_life = "end-of-life"
 
 
-class Drive(BaseModel):
+class Drive(ExcludeUnsetModel):
     """Represents a cloud drive e.g. EBS
 
     This model is generic to any cloud
@@ -238,7 +251,7 @@ class Drive(BaseModel):
         return size * self.annual_cost_per_gib + r_cost + w_cost
 
 
-class Instance(BaseModel):
+class Instance(ExcludeUnsetModel):
     """Represents a cloud instance aka Hardware Shape
 
     This model is generic to any cloud.
@@ -264,7 +277,7 @@ class Instance(BaseModel):
         return self.name.split(self.family_separator)[1]
 
 
-class Service(BaseModel):
+class Service(ExcludeUnsetModel):
     """Represents a cloud service, such as a blob store (S3) or
     managed service such as DynamoDB or RDS.
 
@@ -287,12 +300,12 @@ class Service(BaseModel):
     )
 
 
-class RegionContext(BaseModel):
+class RegionContext(ExcludeUnsetModel):
     services: Dict[str, Service] = {}
     zones_in_region: int = 3
 
 
-class Hardware(BaseModel):
+class Hardware(ExcludeUnsetModel):
     """Represents a hardware deployment
 
     In EC2 this maps to:
@@ -311,7 +324,7 @@ class Hardware(BaseModel):
     services: Dict[str, Service]
 
 
-class GlobalHardware(BaseModel):
+class GlobalHardware(ExcludeUnsetModel):
     """Represents all possible hardware shapes in all regions
 
     In EC2 this maps to:
@@ -322,31 +335,31 @@ class GlobalHardware(BaseModel):
     regions: Dict[str, Hardware]
 
 
-class InstancePricing(BaseModel):
+class InstancePricing(ExcludeUnsetModel):
     annual_cost: float = 0
     lifecycle: Optional[Lifecycle] = None
 
 
-class DrivePricing(BaseModel):
+class DrivePricing(ExcludeUnsetModel):
     annual_cost_per_gib: float = 0
     annual_cost_per_read_io: List[Tuple[float, float]] = []
     annual_cost_per_write_io: List[Tuple[float, float]] = []
 
 
-class ServicePricing(BaseModel):
+class ServicePricing(ExcludeUnsetModel):
     annual_cost_per_gib: float = 0
     annual_cost_per_read_io: float = 0
     annual_cost_per_write_io: float = 0
 
 
-class HardwarePricing(BaseModel):
+class HardwarePricing(ExcludeUnsetModel):
     instances: Dict[str, InstancePricing]
     drives: Dict[str, DrivePricing]
     services: Dict[str, ServicePricing]
     zones_in_region: int = 3
 
 
-class Pricing(BaseModel):
+class Pricing(ExcludeUnsetModel):
     regions: Dict[str, HardwarePricing]
 
 
@@ -403,7 +416,7 @@ class AccessConsistency(str, Enum):
 AVG_ITEM_SIZE_BYTES: int = 1024
 
 
-class Consistency(BaseModel):
+class Consistency(ExcludeUnsetModel):
     target_consistency: Optional[AccessConsistency] = Field(
         None,
         title="Consistency requirement on access",
@@ -425,7 +438,7 @@ class Consistency(BaseModel):
     )
 
 
-class GlobalConsistency(BaseModel):
+class GlobalConsistency(ExcludeUnsetModel):
     same_region: Consistency = Consistency(
         target_consistency=None,
         staleness_slo_sec=FixedInterval(low=0, mid=0.1, high=1),
@@ -436,7 +449,7 @@ class GlobalConsistency(BaseModel):
     )
 
 
-class QueryPattern(BaseModel):
+class QueryPattern(ExcludeUnsetModel):
     # Will the service primarily be accessed in a latency sensitive mode
     # (aka we care about P99) or throughput (we care about averages)
     access_pattern: AccessPattern = AccessPattern.latency
@@ -472,7 +485,7 @@ class QueryPattern(BaseModel):
     )
 
 
-class DataShape(BaseModel):
+class DataShape(ExcludeUnsetModel):
     estimated_state_size_gib: Interval = certain_int(0)
     estimated_state_item_count: Optional[Interval] = None
     estimated_working_set_percent: Optional[Interval] = Field(
@@ -512,7 +525,7 @@ class DataShape(BaseModel):
     )
 
 
-class CapacityDesires(BaseModel):
+class CapacityDesires(ExcludeUnsetModel):
     # How critical is this cluster, impacts how much "extra" we provision
     # 0 = Critical to the product            (Product does not function)
     # 1 = Important to product with fallback (User experience degraded)
@@ -544,7 +557,7 @@ class CapacityDesires(BaseModel):
         return CapacityDesires(**default_dict)
 
 
-class CapacityRequirement(BaseModel):
+class CapacityRequirement(ExcludeUnsetModel):
     requirement_type: str
 
     core_reference_ghz: float
@@ -556,7 +569,7 @@ class CapacityRequirement(BaseModel):
     context: Dict = {}
 
 
-class ClusterCapacity(BaseModel):
+class ClusterCapacity(ExcludeUnsetModel):
     cluster_type: str
 
     count: int
@@ -569,7 +582,7 @@ class ClusterCapacity(BaseModel):
     cluster_params: Dict = {}
 
 
-class ServiceCapacity(BaseModel):
+class ServiceCapacity(ExcludeUnsetModel):
     service_type: str
     annual_cost: float
     # Often while provisioning cloud services we need to represent
@@ -587,7 +600,7 @@ class RegionClusterCapacity(ClusterCapacity):
     pass
 
 
-class Requirements(BaseModel):
+class Requirements(ExcludeUnsetModel):
     zonal: Sequence[CapacityRequirement] = []
     regional: Sequence[CapacityRequirement] = []
 
@@ -604,14 +617,14 @@ class Requirements(BaseModel):
         return 0.0
 
 
-class Clusters(BaseModel):
+class Clusters(ExcludeUnsetModel):
     total_annual_cost: Decimal = Decimal(0)
     zonal: Sequence[ZoneClusterCapacity] = []
     regional: Sequence[RegionClusterCapacity] = []
     services: Sequence[ServiceCapacity] = []
 
 
-class CapacityPlan(BaseModel):
+class CapacityPlan(ExcludeUnsetModel):
     requirements: Requirements
     candidate_clusters: Clusters
 
@@ -620,13 +633,13 @@ class CapacityPlan(BaseModel):
 # let y = the optimal value
 # let x = the proposed value
 # let cost = (x - y) ^ exponent
-class Regret(BaseModel):
+class Regret(ExcludeUnsetModel):
     over_provision_cost: float = 0
     under_provision_cost: float = 0
     exponent: float = 1.0
 
 
-class CapacityRegretParameters(BaseModel):
+class CapacityRegretParameters(ExcludeUnsetModel):
     # How much do we regret spending too much or too little money
     spend: Regret = Regret(
         over_provision_cost=1, under_provision_cost=1.25, exponent=1.2
@@ -646,7 +659,7 @@ class CapacityRegretParameters(BaseModel):
     extra: Dict[str, Regret] = {}
 
 
-class PlanExplanation(BaseModel):
+class PlanExplanation(ExcludeUnsetModel):
     regret_params: CapacityRegretParameters
     regret_clusters_by_model: Dict[
         str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]
@@ -655,7 +668,7 @@ class PlanExplanation(BaseModel):
     context: Dict[str, Any] = {}
 
 
-class UncertainCapacityPlan(BaseModel):
+class UncertainCapacityPlan(ExcludeUnsetModel):
     requirements: Requirements
     least_regret: Sequence[CapacityPlan]
     mean: Sequence[CapacityPlan]
