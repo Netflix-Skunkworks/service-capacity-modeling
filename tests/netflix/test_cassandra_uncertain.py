@@ -109,7 +109,7 @@ def test_increasing_qps_simple():
         )
 
     # We should generally want cheap CPUs
-    assert all(r[0] in ("r5", "m5d", "m5", "i3en") for r in result)
+    assert all(r[0][0] in ("r", "m", "i") for r in result)
 
     # Should have more capacity as requirement increases
     x = [r[1] for r in result]

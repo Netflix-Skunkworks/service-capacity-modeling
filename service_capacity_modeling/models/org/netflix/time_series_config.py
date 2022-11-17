@@ -1,9 +1,13 @@
 import math
 from datetime import timedelta
-from typing import Dict, Any
+from typing import Any
+from typing import Dict
 
-from service_capacity_modeling.models.org.netflix.iso_date_math import _iso_to_seconds, \
-    _iso_to_proto_duration, _iso_to_timedelta
+from service_capacity_modeling.models.org.netflix.iso_date_math import (
+    _iso_to_proto_duration,
+)
+from service_capacity_modeling.models.org.netflix.iso_date_math import _iso_to_seconds
+from service_capacity_modeling.models.org.netflix.iso_date_math import _iso_to_timedelta
 
 DURATION_1H = timedelta(hours=1)
 DURATION_4H = timedelta(hours=4)
@@ -22,7 +26,8 @@ _4MiB = 4 * 1024 * 1024
 class TimeSeriesConfiguration:
     def __init__(self, extra_model_arguments: Dict[str, Any]):
         self.read_interval_seconds = self.__get_read_interval_seconds(
-            extra_model_arguments)
+            extra_model_arguments
+        )
         self.retention_duration = str(
             extra_model_arguments.get("ts.hot.retention-interval", "unlimited")
         )
@@ -40,8 +45,9 @@ class TimeSeriesConfiguration:
         )
         self.coalesce_duration = self.__get_coalesce_duration(extra_model_arguments)
         self.consistency_target = self.__get_consistency_target(extra_model_arguments)
-        self.accept_limit = self.__get_accept_limit(extra_model_arguments,
-                                               self.retention_duration)
+        self.accept_limit = self.__get_accept_limit(
+            extra_model_arguments, self.retention_duration
+        )
         self.read_amplification = self.__get_read_amplification(
             self.read_interval_seconds, self.seconds_per_interval, self.buckets_per_id
         )
@@ -49,8 +55,9 @@ class TimeSeriesConfiguration:
     # We force dependent parameters to be passed into these methods
     # instead of using self to make dependencies between them more explicit
     @staticmethod
-    def __get_accept_limit(extra_model_arguments: Dict[str, Any],
-                           retention_duration: str) -> str:
+    def __get_accept_limit(
+        extra_model_arguments: Dict[str, Any], retention_duration: str
+    ) -> str:
         if "ts.accept-limit" in extra_model_arguments:
             return _iso_to_proto_duration(extra_model_arguments["ts.accept-limit"])
         elif retention_duration == "unlimited":
@@ -60,15 +67,16 @@ class TimeSeriesConfiguration:
             return _iso_to_proto_duration("PT10M")
 
     @staticmethod
-    def __get_buckets_per_id(extra_model_arguments: Dict[str, Any],
-                             seconds_per_interval: int) -> int:
+    def __get_buckets_per_id(
+        extra_model_arguments: Dict[str, Any], seconds_per_interval: int
+    ) -> int:
         events_per_day_per_ts = int(
             extra_model_arguments.get("ts.events-per-day-per-ts", "10")
         )
         event_size = int(extra_model_arguments.get("ts.event-size", "1024"))
         bytes_per_interval = (
-                                     seconds_per_interval * events_per_day_per_ts * event_size
-                             ) / 86400
+            seconds_per_interval * events_per_day_per_ts * event_size
+        ) / 86400
         return round(max(min(8, bytes_per_interval / _4MiB), 1))
 
     @staticmethod
@@ -81,7 +89,7 @@ class TimeSeriesConfiguration:
 
     @staticmethod
     def __get_seconds_per_bucket(
-            read_interval_seconds: int, buckets: int, seconds_per_interval: int
+        read_interval_seconds: int, buckets: int, seconds_per_interval: int
     ) -> int:
         if buckets == 1:
             return seconds_per_interval
@@ -110,7 +118,7 @@ class TimeSeriesConfiguration:
             return timedelta(seconds=0)
         retention_seconds = _iso_to_timedelta(retention)
         if retention_seconds < DURATION_6H:
-            raise Exception("Data retention should be at least 6 hours")
+            raise ValueError("Data retention should be at least 6 hours")
         # 6h - 1d retention - 4h slice
         if retention_seconds <= DURATION_1D:
             return DURATION_4H
@@ -162,6 +170,6 @@ class TimeSeriesConfiguration:
 
     @staticmethod
     def __get_read_amplification(
-            read_interval_seconds: int, seconds_per_interval: int, buckets_per_id: int
+        read_interval_seconds: int, seconds_per_interval: int, buckets_per_id: int
     ) -> int:
         return math.ceil(read_interval_seconds / seconds_per_interval) * buckets_per_id

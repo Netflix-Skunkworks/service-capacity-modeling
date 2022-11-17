@@ -39,15 +39,13 @@ def test_es_increasing_qps_simple():
         for zonal in cap_plan.least_regret[0].candidate_clusters.zonal:
             zonal_result[zonal.cluster_type].append(zonal_summary(zonal))
 
-    expected_families = set(["r5", "r5d", "m5", "m5d", "i3"])
+    expected_families = set(["r", "m", "i"])
     for cluster_type in list(zonal_result.keys()):
         zonal_by_increasing_qps = zonal_result[cluster_type]
 
-        families = set([r[0] for r in zonal_by_increasing_qps])
-        unexpected_families = families - expected_families
-        assert (
-            len(unexpected_families) == 0
-        ), f"unexpected instance type {unexpected_families}"
+        families = {r[0] for r in zonal_by_increasing_qps}
+        for f in families:
+            assert f[0] in expected_families
 
         # Should have more CPU and Disk capacity as requirement increases
         cpu = [r[2] for r in zonal_by_increasing_qps]

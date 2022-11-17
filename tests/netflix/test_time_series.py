@@ -30,14 +30,14 @@ def test_timeseries_read_amplification():
             "ts.events-per-day-per-ts": "1000",
             "ts.event-size": "10000",
             "ts.read-interval": "P7D",
-            "ts.hot.retention-interval": "P1M"
+            "ts.hot.retention-interval": "P1M",
         }
         cap_plan_16x_read_amp = planner.plan(
             model_name="org.netflix.time-series",
             region="us-east-1",
             desires=simple,
             simulations=256,
-            extra_model_arguments=extra_model_args
+            extra_model_arguments=extra_model_args,
         )
 
         extra_model_args["ts.event-size"] = "10"
@@ -48,18 +48,27 @@ def test_timeseries_read_amplification():
             region="us-east-1",
             desires=simple,
             simulations=256,
-            extra_model_arguments=extra_model_args
+            extra_model_arguments=extra_model_args,
         )
 
         # Should be a ~8x requirement for reads comparing the mean of cap plans
-        assert int(cap_plan_16x_read_amp.mean[0].requirements.zonal[0].context[
-                       "read_per_second"] /
-                   cap_plan_1x_read_amp.mean[0].requirements.zonal[0].context[
-                       "read_per_second"]) == 8
+        assert (
+            int(
+                cap_plan_16x_read_amp.mean[0]
+                .requirements.zonal[0]
+                .context["read_per_second"]
+                / cap_plan_1x_read_amp.mean[0]
+                .requirements.zonal[0]
+                .context["read_per_second"]
+            )
+            == 8
+        )
 
         # Should be equivalent cap plans between java-apps
-        assert cap_plan_16x_read_amp.mean[0].requirements.regional == \
-               cap_plan_1x_read_amp.mean[0].requirements.regional
+        assert (
+            cap_plan_16x_read_amp.mean[0].requirements.regional
+            == cap_plan_1x_read_amp.mean[0].requirements.regional
+        )
 
 
 def test_timeseries_increasing_qps_simple():
@@ -119,10 +128,10 @@ def test_timeseries_increasing_qps_simple():
         assert rlr.instance.drive is None
 
     # We should generally want cheap CPUs for Cassandra
-    assert all(r[0] in ("r5", "m5d", "m5", "i3en") for r in zonal_result)
+    assert all(r[0][0] in ("r", "m", "i") for r in zonal_result)
 
     # We just want ram and cpus for a java app
-    assert all(r[0] in ("m5", "r5") for r in regional_result)
+    assert all(r[0][0] in ("m", "r") for r in regional_result)
 
     # Should have more capacity as requirement increases
     x = [r[1] for r in zonal_result]

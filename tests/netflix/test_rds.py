@@ -1,11 +1,12 @@
 import json
 
 from service_capacity_modeling.capacity_planner import planner
-from service_capacity_modeling.interface import CapacityDesires, Interval
-from service_capacity_modeling.interface import DataShape
-from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import Interval
+from service_capacity_modeling.interface import QueryPattern
 
 tier_0 = CapacityDesires(
     service_tier=0,
@@ -57,11 +58,8 @@ large_footprint = CapacityDesires(
     data_shape=DataShape(
         estimated_state_size_gib=certain_int(800),
         estimated_working_set_percent=Interval(
-            low=0.05,
-            mid=0.30,
-            high=0.50,
-            confidence=0.8
-        )
+            low=0.05, mid=0.30, high=0.50, confidence=0.8
+        ),
     ),
 )
 
@@ -100,9 +98,7 @@ def test_small_footprint():
 
 def test_medium_footprint():
     cap_plan = planner.plan_certain(
-        model_name="org.netflix.rds",
-        region="us-east-1",
-        desires=mid_footprint
+        model_name="org.netflix.rds", region="us-east-1", desires=mid_footprint
     )
     assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.8xlarge"
 
@@ -212,10 +208,12 @@ def test_cap_plan():
       }
     }"""
     desire = json.loads(desire_json)
-    capacity = desire['deploy_desires']['capacity']
-    my_desire = CapacityDesires(service_tier=desire["deploy_desires"]["service_tier"],
-                                query_pattern=capacity["query_pattern"],
-                                data_shape=capacity["data_shape"])
+    capacity = desire["deploy_desires"]["capacity"]
+    my_desire = CapacityDesires(
+        service_tier=desire["deploy_desires"]["service_tier"],
+        query_pattern=capacity["query_pattern"],
+        data_shape=capacity["data_shape"],
+    )
     cap_plan = planner.plan_certain(
         model_name="org.netflix.rds",
         region="us-east-1",

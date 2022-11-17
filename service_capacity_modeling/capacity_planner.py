@@ -357,7 +357,7 @@ class CapacityPlanner:
         context = RegionContext(
             zones_in_region=hardware.zones_in_region,
             services={n: s.copy(deep=True) for n, s in hardware.services.items()},
-            num_regions=num_regions
+            num_regions=num_regions,
         )
 
         # Applications often set fixed reservations of heap or OS memory, we

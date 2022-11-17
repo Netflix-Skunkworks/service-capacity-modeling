@@ -42,7 +42,7 @@ def test_java_app():
     )[0]
     java_result = java_cap_plan.candidate_clusters.regional[0]
     cores = java_result.count * java_result.instance.cpu
-    assert java_result.instance.name.startswith("m5.")
+    assert java_result.instance.family.startswith("m")
     assert 100 <= cores <= 300
 
     java_cap_plan = planner.plan(
@@ -52,7 +52,7 @@ def test_java_app():
     ).least_regret[0]
     java_result = java_cap_plan.candidate_clusters.regional[0]
     cores = java_result.count * java_result.instance.cpu
-    assert java_result.instance.name.startswith("m5.")
+    assert java_result.instance.family.startswith("m")
     assert 100 <= cores <= 300
 
 
@@ -83,7 +83,7 @@ def test_uncertain_java_app():
     java_result = java_least_regret.candidate_clusters.regional[0]
 
     cores = java_result.count * java_result.instance.cpu
-    assert java_result.instance.name.startswith("m5.")
+    assert java_result.instance.family.startswith("m")
     assert 100 <= cores <= 300
 
     # KeyValue regional clusters should match
@@ -96,7 +96,7 @@ def test_uncertain_java_app():
     kv_result = kv_least_regret.candidate_clusters.regional[0]
 
     kv_cores = kv_result.count * kv_result.instance.cpu
-    assert kv_result.instance.name.startswith("m5.")
+    assert java_result.instance.family.startswith("m")
     assert 0.5 <= float(kv_cores) / cores <= 1.5
 
     assert kv_least_regret.candidate_clusters.zonal[0].count > 0

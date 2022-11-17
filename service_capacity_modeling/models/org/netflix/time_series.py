@@ -5,6 +5,7 @@ from typing import Optional
 from typing import Tuple
 
 from .stateless_java import nflx_java_app_capacity_model
+from .time_series_config import TimeSeriesConfiguration
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
@@ -19,17 +20,16 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models import CapacityModel
-from .time_series_config import TimeSeriesConfiguration
 
 
 class NflxTimeSeriesCapacityModel(CapacityModel):
     @staticmethod
     def capacity_plan(
-            instance: Instance,
-            drive: Drive,
-            context: RegionContext,
-            desires: CapacityDesires,
-            extra_model_arguments: Dict[str, Any],
+        instance: Instance,
+        drive: Drive,
+        context: RegionContext,
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
         # TimeSeries wants 20GiB root volumes
         extra_model_arguments.setdefault("root_disk_gib", 20)
@@ -58,21 +58,22 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
 
     @staticmethod
     def compose_with(
-            user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
         # In the future depending on the user desire we might need EVCache
         # as well, e.g. if the latency SLO is reduced
         ts_config = TimeSeriesConfiguration(extra_model_arguments)
 
-        def _modify_cassandra_desires(
-                user_desires: CapacityDesires
-        ) -> CapacityDesires:
+        def _modify_cassandra_desires(user_desires: CapacityDesires) -> CapacityDesires:
             modified = user_desires.copy(deep=True)
-            modified.query_pattern.estimated_read_per_second = modified.query_pattern\
-                .estimated_read_per_second.scale(ts_config.read_amplification)
+            modified.query_pattern.estimated_read_per_second = (
+                modified.query_pattern.estimated_read_per_second.scale(
+                    ts_config.read_amplification
+                )
+            )
             return modified
 
-        return ("org.netflix.cassandra", lambda x: _modify_cassandra_desires(x)),
+        return (("org.netflix.cassandra", _modify_cassandra_desires),)
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments):
