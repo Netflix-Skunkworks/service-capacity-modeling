@@ -12,20 +12,24 @@ def reduce_by_family(plans: Iterable[CapacityPlan]) -> List[CapacityPlan]:
 
     Useful for showing different family options.
     """
-    zonal_families: Set[Tuple[str, ...]] = set()
-    regional_families: Set[Tuple[str, ...]] = set()
+    zonal_families: Set[Tuple[Tuple[str, str], ...]] = set()
+    regional_families: Set[Tuple[Tuple[str, str], ...]] = set()
 
     result: List[CapacityPlan] = []
     for plan in plans:
         topo = plan.candidate_clusters
-        regional_type: Tuple[str, ...] = tuple()
-        zonal_type: Tuple[str, ...] = tuple()
+        regional_type: Tuple[Tuple[str, str], ...] = tuple()
+        zonal_type: Tuple[Tuple[str, str], ...] = tuple()
 
         if topo.regional:
-            regional_type = tuple(sorted({c.instance.family for c in topo.regional}))
+            regional_type = tuple(
+                sorted({(c.cluster_type, c.instance.family) for c in topo.regional})
+            )
 
         if topo.zonal:
-            zonal_type = tuple(sorted({c.instance.family for c in topo.zonal}))
+            zonal_type = tuple(
+                sorted({(c.cluster_type, c.instance.family) for c in topo.zonal})
+            )
 
         if not (zonal_type in zonal_families and regional_type in regional_families):
             result.append(plan)

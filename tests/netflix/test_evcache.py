@@ -16,14 +16,14 @@ def test_evcache_high_qps():
             estimated_write_per_second=Interval(
                 low=10_000, mid=100_000, high=1_000_000, confidence=0.98
             ),
+            estimated_write_size_bytes=Interval(
+                low=10, mid=100, high=1000, confidence=0.98
+            ),
         ),
         data_shape=DataShape(
             estimated_state_size_gib=Interval(
                 low=10, mid=100, high=1000, confidence=0.98
-            ),
-            estimated_state_item_size=Interval(
-                low=10, mid=100, high=1000, confidence=0.98
-            ),
+            )
         ),
     )
     plan = planner.plan(
@@ -91,9 +91,9 @@ def test_evcache_replication():
     set_inter_region = lr.candidate_clusters.annual_costs["evcache.net.inter.region"]
 
     # With replication should have network costs
-    assert 10000 < set_inter_region < 15000
+    assert 10000 < set_inter_region < 40000
     assert (
-        20000 < lr.candidate_clusters.annual_costs["evcache.net.intra.region"] < 50000
+        50000 < lr.candidate_clusters.annual_costs["evcache.net.intra.region"] < 120000
     )
 
     delete_plan = planner.plan(
@@ -114,7 +114,7 @@ def test_evcache_replication():
     assert evict_inter_region < set_inter_region
 
     # With replication should have network costs
-    assert 2000 < evict_inter_region < 6000
+    assert 5000 < evict_inter_region < 15000
     assert (
-        12000 < lr.candidate_clusters.annual_costs["evcache.net.intra.region"] < 18000
+        12000 < lr.candidate_clusters.annual_costs["evcache.net.intra.region"] < 40000
     )

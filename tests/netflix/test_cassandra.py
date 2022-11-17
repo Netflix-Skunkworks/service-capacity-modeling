@@ -58,10 +58,10 @@ def test_capacity_small_fast():
         )[0]
         small_result = cap_plan.candidate_clusters.zonal[0]
         # We really should just pay for CPU here
-        assert small_result.instance.name.startswith("m5")
+        assert small_result.instance.name.startswith("m")
 
         cores = small_result.count * small_result.instance.cpu
-        assert 50 <= cores <= 80
+        assert 30 <= cores <= 80
         # Even though it's a small dataset we need IOs so should end up
         # with lots of ebs_gp2 to handle the read IOs
         if small_result.attached_drives:
@@ -83,11 +83,11 @@ def test_capacity_high_writes():
         extra_model_arguments={"copies_per_region": 2},
     )[0]
     high_writes_result = cap_plan.candidate_clusters.zonal[0]
-    assert high_writes_result.instance.family.startswith("m5")
+    assert high_writes_result.instance.family.startswith("m")
     assert high_writes_result.count > 4
 
     num_cpus = high_writes_result.instance.cpu * high_writes_result.count
-    assert 32 < num_cpus <= 128
+    assert 30 <= num_cpus <= 128
     if high_writes_result.attached_drives:
         assert (
             high_writes_result.count * high_writes_result.attached_drives[0].size_gib
@@ -152,7 +152,7 @@ def test_capacity_large_footprint():
     )[0]
 
     large_footprint_result = cap_plan.candidate_clusters.zonal[0]
-    assert large_footprint_result.instance.name.startswith("i3")
+    assert large_footprint_result.instance.name.startswith("i")
     assert large_footprint_result.count == 16
 
     # Should have been able to use default heap settings

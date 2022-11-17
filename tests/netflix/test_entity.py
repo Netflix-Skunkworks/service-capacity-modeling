@@ -34,14 +34,15 @@ def test_entity_increasing_qps_simple():
         )
 
         # Check the Java cluster
-        entity_plan = next(filter(lambda c: c.cluster_type == 'dgwentity', cap_plan.least_regret[0].candidate_clusters.regional))
-        entity_results_trend.append(
-            (
-                entity_plan.count * entity_plan.instance.cpu,
+        entity_plan = next(
+            filter(
+                lambda c: c.cluster_type == "dgwentity",
+                cap_plan.least_regret[0].candidate_clusters.regional,
             )
         )
+        entity_results_trend.append((entity_plan.count * entity_plan.instance.cpu,))
         # We just want ram and cpus for a java app
-        assert entity_plan.instance.family in ("m5", "r5")
+        assert entity_plan.instance.family[0] in ("m", "r")
         # We should never be paying for ephemeral drives
         assert entity_plan.instance.drive is None
 

@@ -62,10 +62,10 @@ def test_kv_increasing_qps_simple():
         assert rlr.instance.drive is None
 
     # We should generally want cheap CPUs for Cassandra
-    assert all(r[0] in ("r5", "m5d", "m5", "i3en") for r in zonal_result)
+    assert all(r[0][0] in ("r", "m", "i") for r in zonal_result)
 
     # We just want ram and cpus for a java app
-    assert all(r[0] in ("m5", "r5") for r in regional_result)
+    assert all(r[0][0] in ("m", "r") for r in regional_result)
 
     # Should have more capacity as requirement increases
     x = [r[1] for r in zonal_result]
