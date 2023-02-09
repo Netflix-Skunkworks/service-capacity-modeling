@@ -177,12 +177,21 @@ def _allow_hardware(
     lifecycle: Lifecycle,
     allowed_names: Sequence[str],
     allowed_lifecycles: Sequence[Lifecycle],
+    exact_match: bool
 ) -> bool:
+
     # If the user has explicitly asked for particular families instead
     # of all lifecycles filter based on that
     if allowed_names:
-        if name not in allowed_names:
+        if exact_match:
+           for allowed_name in allowed_names:
+               if name == allowed_name:
+                   return True
             return False
+        else:
+            if name not in allowed_names:
+               return False
+            return True
     # Otherwise consider lifecycle (default)
     else:
         if lifecycle not in allowed_lifecycles:
@@ -365,8 +374,9 @@ class CapacityPlanner:
 
         plans = []
         for instance in hardware.instances.values():
+            exact_match = instance.family_separator in instance.family
             if not _allow_hardware(
-                instance.family, instance.lifecycle, instance_families, lifecycles
+                instance.family, instance.lifecycle, instance_families, lifecycles, exact_match
             ):
                 continue
 
@@ -374,7 +384,7 @@ class CapacityPlanner:
                 continue
 
             for drive in hardware.drives.values():
-                if not _allow_hardware(drive.name, drive.lifecycle, drives, lifecycles):
+                if not _allow_hardware(drive.name, drive.lifecycle, drives, lifecycles, False):
                     continue
 
                 plan = self._models[model_name].capacity_plan(
