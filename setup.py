@@ -13,6 +13,7 @@ setuptools.setup(
         "scipy",
         "numpy",
         'importlib_resources; python_version < "3.7"',
+        "isodate",
     ],
     extras_require={
         "aws": ["boto3"],

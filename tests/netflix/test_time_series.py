@@ -5,6 +5,63 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 
 
+def test_timeseries_read_amplification():
+    qps_values = (1000, 10_000, 100_000)
+    for qps in qps_values:
+        pre_amplified_qps = Interval(
+            low=qps // 10, mid=qps, high=qps * 10, confidence=0.98
+        )
+        simple = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=pre_amplified_qps,
+                estimated_write_per_second=Interval(
+                    low=qps // 10, mid=qps, high=qps * 10, confidence=0.98
+                ),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=Interval(
+                    low=20, mid=200, high=2000, confidence=0.98
+                ),
+            ),
+        )
+        extra_model_args = {
+            "ts.accept-limit": "PT1000S",
+            "ts.events-per-day-per-ts": "1000",
+            "ts.event-size": "10000",
+            "ts.read-interval": "P7D",
+            "ts.hot.retention-interval": "P1M"
+        }
+        cap_plan_16x_read_amp = planner.plan(
+            model_name="org.netflix.time-series",
+            region="us-east-1",
+            desires=simple,
+            simulations=256,
+            extra_model_arguments=extra_model_args
+        )
+
+        extra_model_args["ts.event-size"] = "10"
+
+        # this second plan should have 1 read amp
+        cap_plan_1x_read_amp = planner.plan(
+            model_name="org.netflix.time-series",
+            region="us-east-1",
+            desires=simple,
+            simulations=256,
+            extra_model_arguments=extra_model_args
+        )
+
+        # Should be a ~16x requirement for reads comparing the mean of cap plans
+        assert int(cap_plan_16x_read_amp.mean[0].requirements.zonal[0].context[
+                       "read_per_second"] /
+                   cap_plan_1x_read_amp.mean[0].requirements.zonal[0].context[
+                       "read_per_second"]) == 16
+
+        # Should be equivalent cap plans between java-apps
+        assert cap_plan_16x_read_amp.mean[0].requirements.regional == \
+               cap_plan_1x_read_amp.mean[0].requirements.regional
+
+
 def test_timeseries_increasing_qps_simple():
     qps_values = (1000, 10_000, 100_000)
     zonal_result = []
