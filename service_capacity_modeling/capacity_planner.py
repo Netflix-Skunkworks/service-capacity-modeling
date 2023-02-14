@@ -21,6 +21,8 @@ from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import interval
 from service_capacity_modeling.interface import interval_percentile
@@ -171,33 +173,42 @@ def model_desires_percentiles(
 
     return results, d
 
-
-def _allow_hardware(
-    name: str,
-    lifecycle: Lifecycle,
+def _allow_instance(
+    instance: Instance,
     allowed_names: Sequence[str],
     allowed_lifecycles: Sequence[Lifecycle],
-    exact_match: bool
 ) -> bool:
-
     # If the user has explicitly asked for particular families instead
     # of all lifecycles filter based on that
     if allowed_names:
-        if exact_match:
-           for allowed_name in allowed_names:
-               if name == allowed_name:
-                   return True
-            return False
-        else:
-            if name not in allowed_names:
-               return False
-            return True
+        for name in allowed_names:
+            exact_match = instance.family_separator in name
+            if exact_match and name == instance.name:
+                return True
+            if (not exact_match) and name == instance.family:
+                return True
+        return False
     # Otherwise consider lifecycle (default)
     else:
-        if lifecycle not in allowed_lifecycles:
+        if instance.lifecycle not in allowed_lifecycles:
             return False
     return True
 
+def _allow_drive(
+    drive: Drive,
+    allowed_names: Sequence[str],
+    allowed_lifecycles: Sequence[Lifecycle],
+) -> bool:
+    # If the user has explicitly asked for particular families instead
+    # of all lifecycles filter based on that
+    if allowed_names:
+        if drive.name not in allowed_names:
+            return False
+    # Otherwise consider lifecycle (default)
+    else:
+        if drive.lifecycle not in allowed_lifecycles:
+            return False
+    return True
 
 def _regret(
     capacity_plans: Sequence[Tuple[CapacityDesires, CapacityPlan]],
@@ -374,9 +385,8 @@ class CapacityPlanner:
 
         plans = []
         for instance in hardware.instances.values():
-            exact_match = instance.family_separator in instance.family
-            if not _allow_hardware(
-                instance.family, instance.lifecycle, instance_families, lifecycles, exact_match
+            if not _allow_instance(
+                instance, instance_families, lifecycles
             ):
                 continue
 
@@ -384,7 +394,7 @@ class CapacityPlanner:
                 continue
 
             for drive in hardware.drives.values():
-                if not _allow_hardware(drive.name, drive.lifecycle, drives, lifecycles, False):
+                if not _allow_drive(drive, drives, lifecycles):
                     continue
 
                 plan = self._models[model_name].capacity_plan(
