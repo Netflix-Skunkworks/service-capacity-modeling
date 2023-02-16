@@ -1,7 +1,9 @@
 import logging
 import math
 import random
+from decimal import Decimal
 from typing import Callable
+from typing import List
 from typing import Optional
 from typing import Tuple
 
@@ -15,11 +17,16 @@ from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import RegionClusterCapacity
+from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import utils
 
 logger = logging.getLogger(__name__)
+
+
+SECONDS_IN_YEAR = 31556926
 
 
 # In square root staffing we have to take into account the QOS parameter
@@ -81,6 +88,49 @@ def simple_network_mbps(desires: CapacityDesires) -> int:
     net_bytes_per_sec = read_bytes_per_second + write_bytes_per_second
 
     return int(max(1, math.ceil(net_bytes_per_sec / 125000)))
+
+
+def network_services(
+    service_type: str,
+    context: RegionContext,
+    desires: CapacityDesires,
+    copies_per_region: int,
+) -> List[ServiceCapacity]:
+    result = []
+    # Network transfer is for every other zone and then for every region
+    # other than us as well.
+    num_zones = copies_per_region - 1
+    num_regions = context.num_regions - 1
+
+    # have bytes and / second
+    size = desires.query_pattern.estimated_mean_write_size_bytes.mid
+    wps = desires.query_pattern.estimated_write_per_second.mid
+    # need gib and / year
+
+    txfer_gib = (wps * size / (1024 * 1024 * 1024)) * (SECONDS_IN_YEAR)
+
+    inter_txfer = context.services.get("net.inter.region", None)
+    if inter_txfer:
+        price_per_gib = inter_txfer.annual_cost_per_gib
+        result.append(
+            ServiceCapacity(
+                service_type=f"{service_type}.net.inter.region",
+                annual_cost=(price_per_gib * txfer_gib * num_regions),
+                service_params={"txfer_gib": txfer_gib, "num_regions": num_regions},
+            )
+        )
+
+    intra_txfer = context.services.get("net.intra.region", None)
+    if intra_txfer:
+        price_per_gib = intra_txfer.annual_cost_per_gib
+        result.append(
+            ServiceCapacity(
+                service_type=f"{service_type}.net.intra.region",
+                annual_cost=(price_per_gib * txfer_gib * num_zones),
+                service_params={"txfer_gib": txfer_gib, "num_zones": num_zones},
+            )
+        )
+    return result
 
 
 def compute_stateless_region(
@@ -215,7 +265,7 @@ def compute_stateful_zone(
         io_gib = cloud_gib_for_io(drive, total_ios, space_gib)
 
         # Provision EBS in increments of 200 GiB
-        ebs_gib = utils.next_n(max(1, max(io_gib, space_gib)), n=200)
+        ebs_gib = utils.next_n(max(1, io_gib, space_gib), n=200)
 
         # When initially provisioniong we don't want to attach more than
         # 1/3 the maximum volume size in one node (preferring more nodes
@@ -417,10 +467,21 @@ def merge_plan(
     left_cluster = left.candidate_clusters
     right_cluster = right.candidate_clusters
 
+    merged_annual_costs = {}
+    all_sources = set(
+        left_cluster.annual_costs.keys() | right_cluster.annual_costs.keys()
+    )
+
+    merged_annual_costs = {
+        k: (
+            left_cluster.annual_costs.get(k, Decimal(0))
+            + right_cluster.annual_costs.get(k, Decimal(0))
+        )
+        for k in all_sources
+    }
+
     merged_clusters = Clusters(
-        total_annual_cost=(
-            left_cluster.total_annual_cost + right_cluster.total_annual_cost
-        ),
+        annual_costs=merged_annual_costs,
         zonal=(
             [zonal_transform(z) for z in left_cluster.zonal]
             + [zonal_transform(z) for z in right_cluster.zonal]
@@ -429,6 +490,7 @@ def merge_plan(
             [regional_transform(z) for z in left_cluster.regional]
             + [regional_transform(z) for z in right_cluster.regional]
         ),
+        services=(list(left_cluster.services) + list(right_cluster.services)),
     )
     return CapacityPlan(
         requirements=merged_requirements, candidate_clusters=merged_clusters

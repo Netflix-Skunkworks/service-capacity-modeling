@@ -13,8 +13,6 @@ disable =
   useless-return,
   # gets angry when you declare a module-level logger
   invalid-name,
-  # we use black for continuations
-  bad-continuation,
   # missing-*-docstring: we have no intention to require docstrings on everything
   C0111,
   # wrong-import-order classifies relative imports differently from the

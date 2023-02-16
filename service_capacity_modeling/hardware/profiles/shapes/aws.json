@@ -227,7 +227,7 @@
       "cpu_ghz": 3.1,
       "ram_gib": 95.54,
       "net_mbps": 12000,
-      "drive": {"name": "ephem", "size_gib": 6819, 
+      "drive": {"name": "ephem", "size_gib": 6819,
         "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.16, "maximum_value":2, "confidence":0.9},
         "read_io_per_s": 250000,"write_io_per_s": 200000, "block_size_kib": 4
       }
@@ -241,7 +241,7 @@
       "drive": {
         "name": "ephem", "size_gib": 70,
         "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.20, "maximum_value":2, "confidence":0.9, "single_tenant": false},
-        "read_io_per_s": 30000,"write_io_per_s": 15000, "block_size_kib": 4 
+        "read_io_per_s": 30000,"write_io_per_s": 15000, "block_size_kib": 4
       }
     },
     "m5d.xlarge": {
@@ -479,7 +479,7 @@
       "name": "gp3",
       "read_io_latency_ms": {"low": 0.8, "mid": 1.05, "high": 1.8, "maximum_value": 10, "confidence": 0.90},
       "write_io_latency_ms": {"low": 1.2, "mid": 2, "high": 4, "maximum_value": 20, "confidence": 0.90},
-      "max_scale_size_gib": 16384, "block_size_kib": 16, 
+      "max_scale_size_gib": 16384, "block_size_kib": 16,
       "lifecycle": "alpha"
     }
   },
@@ -488,6 +488,12 @@
       "name": "s3-standard",
       "read_io_latency_ms": {"low": 1, "mid": 5, "high": 50, "confidence": 0.90},
       "write_io_latency_ms": {"low": 1, "mid": 10, "high": 50, "confidence": 0.90}
+    },
+    "net.inter.region": {
+      "name": "Inter-region transfer costs"
+    },
+    "net.intra.region": {
+      "name": "Intra-region (within) transfer costs"
     }
   }
 }

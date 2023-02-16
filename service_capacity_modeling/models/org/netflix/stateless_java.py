@@ -1,10 +1,10 @@
-from decimal import Decimal
+import math
 from typing import Any
 from typing import Dict
 from typing import Optional
 
-import math
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from pydantic import Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
@@ -12,6 +12,8 @@ from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
@@ -24,10 +26,9 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
-from service_capacity_modeling.interface import certain_float
-from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateless_region
+from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 
@@ -76,15 +77,16 @@ def _estimate_java_app_region(
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,
+    context: RegionContext,
     root_disk_gib: int = 10,
     failover: bool = True,
     jvm_memory_overhead: float = 2,
-    zones_per_region: int = 3,
 ) -> Optional[CapacityPlan]:
 
     if drive.name != "gp2":
         return None
 
+    zones_per_region = context.zones_in_region
     requirement = _estimate_java_app_requirement(desires, failover, jvm_memory_overhead)
 
     drive = drive.copy()
@@ -107,10 +109,18 @@ def _estimate_java_app_region(
     # with such large clusters
 
     if cluster.count <= 256:
+        costs = {"nflx-java-app.regional-clusters": cluster.annual_cost}
+        # Assume stateless java stays in the same region but crosses a zone
+        network = network_services(
+            "nflx-java-app", RegionContext(num_regions=1), desires, copies_per_region=2
+        )
+        for s in network:
+            costs[s.service_type] = s.annual_cost
+
         return CapacityPlan(
             requirements=Requirements(regional=[requirement]),
             candidate_clusters=Clusters(
-                total_annual_cost=round(Decimal(cluster.annual_cost), 2),
+                annual_costs=costs,
                 regional=[cluster],
                 zonal=[],
             ),
@@ -153,7 +163,7 @@ class NflxJavaAppCapacityModel(CapacityModel):
             failover=failover,
             root_disk_gib=root_disk_gib,
             jvm_memory_overhead=jvm_memory_overhead,
-            zones_per_region=context.zones_in_region,
+            context=context,
         )
 
     @staticmethod

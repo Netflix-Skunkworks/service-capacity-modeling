@@ -299,6 +299,7 @@ class CapacityPlanner:
         instance_families: Optional[List[str]] = None,
         drives: Optional[List[str]] = None,
         num_results: Optional[int] = None,
+        num_regions: int = 3,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
     ) -> Sequence[CapacityPlan]:
         if model_name not in self._models:
@@ -323,6 +324,7 @@ class CapacityPlanner:
                     region=region,
                     desires=sub_desires,
                     num_results=num_results,
+                    num_regions=num_regions,
                     extra_model_arguments=extra_model_arguments,
                     lifecycles=lifecycles,
                     instance_families=instance_families,
@@ -338,6 +340,7 @@ class CapacityPlanner:
         region: str,
         desires: CapacityDesires,
         num_results: Optional[int] = None,
+        num_regions: int = 3,
         lifecycles: Optional[Sequence[Lifecycle]] = None,
         instance_families: Optional[Sequence[str]] = None,
         drives: Optional[Sequence[str]] = None,
@@ -354,6 +357,7 @@ class CapacityPlanner:
         context = RegionContext(
             zones_in_region=hardware.zones_in_region,
             services={n: s.copy(deep=True) for n, s in hardware.services.items()},
+            num_regions=num_regions
         )
 
         # Applications often set fixed reservations of heap or OS memory, we
@@ -401,6 +405,7 @@ class CapacityPlanner:
         percentiles: Tuple[int, ...] = (5, 50, 95),
         simulations: Optional[int] = None,
         num_results: Optional[int] = None,
+        num_regions: int = 3,
         lifecycles: Optional[Sequence[Lifecycle]] = None,
         instance_families: Optional[Sequence[str]] = None,
         drives: Optional[Sequence[str]] = None,
@@ -445,6 +450,7 @@ class CapacityPlanner:
                             region=region,
                             desires=sim_desires,
                             num_results=1,
+                            num_regions=num_regions,
                             extra_model_arguments=extra_model_arguments,
                             lifecycles=lifecycles,
                             instance_families=instance_families,
@@ -511,6 +517,7 @@ class CapacityPlanner:
                 region=region,
                 desires=percentile_inputs[index],
                 extra_model_arguments=extra_model_arguments,
+                num_regions=num_regions,
             )
 
         result = UncertainCapacityPlan(
@@ -521,6 +528,7 @@ class CapacityPlanner:
                 region=region,
                 desires=mean_desires,
                 extra_model_arguments=extra_model_arguments,
+                num_regions=num_regions,
             ),
             percentiles=percentile_plans,
             explanation=PlanExplanation(

@@ -1,6 +1,5 @@
 import logging
 import math
-from decimal import Decimal
 from typing import Any
 from typing import Callable
 from typing import Dict
@@ -309,7 +308,10 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         data_requirements = [data_requirement] * zones_in_region
         data_clusters = [data_cluster] * zones_in_region
 
-        ec2_cost = zones_in_region * data_cluster.annual_cost
+        ec2_costs = {
+            "elasticsearch-data.zonal-clusters": zones_in_region
+            * data_cluster.annual_cost
+        }
 
         if search_rps > 0:
             search_requirement = _estimate_elasticsearch_requirement(
@@ -351,7 +353,9 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
 
             if search_cluster.count > (max_regional_size // zones_in_region):
                 return None
-            ec2_cost += zones_in_region * search_cluster.annual_cost
+            ec2_costs["elasticsearch-search.zonal-clusters"] = (
+                zones_in_region * search_cluster.annual_cost
+            )
 
             search_requirements = [search_requirement] * zones_in_region
             search_clusters = [search_cluster] * zones_in_region
@@ -360,7 +364,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             search_clusters = []
 
         clusters = Clusters(
-            total_annual_cost=round(Decimal(ec2_cost), 2),
+            annual_costs=ec2_costs,
             zonal=data_clusters + search_clusters,
             regional=[],
         )
@@ -405,9 +409,11 @@ class NflxElasticsearchMasterCapacityModel(CapacityModel):
             annual_cost=instance.annual_cost,
         )
 
+        # TODO(josephl): This probably needs network transfer costs like
+        # C*, EVCache, etc ... have
         ec2_cost = zones_in_region * cluster.annual_cost
         clusters = Clusters(
-            total_annual_cost=round(Decimal(ec2_cost), 2),
+            annual_costs={"elasticsearch-master.zonal-clusters": ec2_cost},
             zonal=[cluster] * zones_in_region,
         )
 

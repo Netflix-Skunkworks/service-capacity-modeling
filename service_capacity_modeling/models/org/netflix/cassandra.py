@@ -1,6 +1,5 @@
 import logging
 import math
-from decimal import Decimal
 from typing import Any
 from typing import Callable
 from typing import Dict
@@ -30,6 +29,7 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
@@ -56,7 +56,7 @@ def _write_buffer_gib_zone(
 
     write_buffer_gib = (
         (write_bytes_per_second * hour_in_seconds)
-        / (flushes_before_compaction ** compactions_per_hour)
+        / (flushes_before_compaction**compactions_per_hour)
     ) / (1 << 30)
 
     return float(write_buffer_gib) / zones_per_region
@@ -165,6 +165,7 @@ def _upsert_params(cluster, params):
 
 
 # pylint: disable=too-many-locals
+# flake8: noqa: C901
 def _estimate_cassandra_cluster_zonal(
     instance: Instance,
     drive: Drive,
@@ -319,7 +320,7 @@ def _estimate_cassandra_cluster_zonal(
         if blob:
             cap_services = [
                 ServiceCapacity(
-                    service_type=f"{blob.name}",
+                    service_type=f"cassandra.backup.{blob.name}",
                     annual_cost=blob.annual_cost_per_gib * requirement.disk_gib.mid,
                     service_params={
                         "nines_required": (
@@ -329,12 +330,20 @@ def _estimate_cassandra_cluster_zonal(
                 )
             ]
 
-    ec2_cost = zones_per_region * cluster.annual_cost
-    backup_cost = sum([s.annual_cost for s in cap_services])
+    network_costs = network_services("cassandra", context, desires, copies_per_region)
+    if network_costs:
+        cap_services.extend(network_costs)
+
+    # Account for the clusters, backup, and network costs
+    cassandra_costs = {
+        "cassandra.zonal-clusters": zones_per_region * cluster.annual_cost,
+    }
+    for s in cap_services:
+        cassandra_costs[f"{s.service_type}"] = s.annual_cost
 
     cluster.cluster_type = "cassandra"
     clusters = Clusters(
-        total_annual_cost=round(Decimal(ec2_cost + backup_cost), 2),
+        annual_costs=cassandra_costs,
         zonal=[cluster] * zones_per_region,
         regional=[],
         services=cap_services,
