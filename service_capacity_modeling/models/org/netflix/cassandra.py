@@ -331,10 +331,11 @@ def _estimate_cassandra_cluster_zonal(
 
     ec2_cost = zones_per_region * cluster.annual_cost
     backup_cost = sum([s.annual_cost for s in cap_services])
+    data_transfer_cost = cluster.annual_data_transfer_cost
 
     cluster.cluster_type = "cassandra"
     clusters = Clusters(
-        total_annual_cost=round(Decimal(ec2_cost + backup_cost), 2),
+        total_annual_cost=round(Decimal(ec2_cost + backup_cost + data_transfer_cost), 2),
         zonal=[cluster] * zones_per_region,
         regional=[],
         services=cap_services,

@@ -197,6 +197,7 @@ def _estimate_evcache_cluster_zonal(
         # Sidecars and Variable OS Memory
         reserve_memory=lambda x: base_mem,
         core_reference_ghz=requirement.core_reference_ghz,
+        desires=desires
     )
 
     # Communicate to the actual provision that if we want reduced RF
@@ -215,10 +216,11 @@ def _estimate_evcache_cluster_zonal(
         return None
 
     ec2_cost = zones_per_region * cluster.annual_cost
+    data_transfer_cost = cluster.annual_data_transfer_cost
 
     cluster.cluster_type = "evcache"
     clusters = Clusters(
-        total_annual_cost=round(Decimal(ec2_cost), 2),
+        total_annual_cost=round(Decimal(ec2_cost + data_transfer_cost), 2),
         zonal=[cluster] * zones_per_region,
         regional=[],
     )
@@ -331,7 +333,7 @@ class NflxEVCacheCapacityModel(CapacityModel):
                     estimated_mean_write_size_bytes=Interval(
                         low=64, mid=128, high=1024, confidence=0.95
                     ),
-                    # memcache point queries usualy take just around 100us
+                    # memcache point queries usually take just around 100us
                     # of on CPU time for reads and writes. Memcache is very
                     # fast
                     estimated_mean_read_latency_ms=Interval(

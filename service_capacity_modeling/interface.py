@@ -488,6 +488,7 @@ class QueryPattern(ExcludeUnsetModel):
 class DataShape(ExcludeUnsetModel):
     estimated_state_size_gib: Interval = certain_int(0)
     estimated_state_item_count: Optional[Interval] = None
+    estimated_state_item_size: Optional[Interval] = None
     estimated_working_set_percent: Optional[Interval] = Field(
         None,
         title="Estimated working set percentage",
@@ -576,6 +577,7 @@ class ClusterCapacity(ExcludeUnsetModel):
     instance: Instance
     attached_drives: Sequence[Drive] = ()
     annual_cost: float
+    annual_data_transfer_cost: float
     # When provisioning services we might need to signal they
     # should have certain configuration, for example flags that
     # affect durability shut off
@@ -622,6 +624,7 @@ class Clusters(ExcludeUnsetModel):
     zonal: Sequence[ZoneClusterCapacity] = []
     regional: Sequence[RegionClusterCapacity] = []
     services: Sequence[ServiceCapacity] = []
+    annual_data_transfer_cost: Decimal = Decimal(0)
 
 
 class CapacityPlan(ExcludeUnsetModel):
