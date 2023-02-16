@@ -1,8 +1,10 @@
 from __future__ import annotations
+
 from decimal import Decimal
 from enum import Enum
 from functools import lru_cache
 from typing import Any
+from typing import cast
 from typing import Dict
 from typing import List
 from typing import Optional
@@ -303,6 +305,7 @@ class Service(ExcludeUnsetModel):
 class RegionContext(ExcludeUnsetModel):
     services: Dict[str, Service] = {}
     zones_in_region: int = 3
+    num_regions: int = 3
 
 
 class Hardware(ExcludeUnsetModel):
@@ -488,6 +491,7 @@ class QueryPattern(ExcludeUnsetModel):
 class DataShape(ExcludeUnsetModel):
     estimated_state_size_gib: Interval = certain_int(0)
     estimated_state_item_count: Optional[Interval] = None
+
     estimated_working_set_percent: Optional[Interval] = Field(
         None,
         title="Estimated working set percentage",
@@ -585,6 +589,9 @@ class ClusterCapacity(ExcludeUnsetModel):
 class ServiceCapacity(ExcludeUnsetModel):
     service_type: str
     annual_cost: float
+    # If this cost should impact regret. Usually they do not since they
+    # are proportional to the input desire not the output cluster
+    regret_cost: bool = False
     # Often while provisioning cloud services we need to represent
     # parameters to the cloud APIs, use this to inject those from models
     service_params: Dict = {}
@@ -618,10 +625,15 @@ class Requirements(ExcludeUnsetModel):
 
 
 class Clusters(ExcludeUnsetModel):
-    total_annual_cost: Decimal = Decimal(0)
+    annual_costs: Dict[str, Decimal]
     zonal: Sequence[ZoneClusterCapacity] = []
     regional: Sequence[RegionClusterCapacity] = []
     services: Sequence[ServiceCapacity] = []
+
+    # Backwards compatibility for total_annual_cost
+    @property
+    def total_annual_cost(self) -> Decimal:
+        return cast(Decimal, round(sum(self.annual_costs.values()), 2))
 
 
 class CapacityPlan(ExcludeUnsetModel):

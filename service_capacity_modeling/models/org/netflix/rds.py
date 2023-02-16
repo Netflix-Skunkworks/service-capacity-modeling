@@ -1,16 +1,19 @@
 import logging
+import math
 from typing import Any
 from typing import Dict
 from typing import Optional
 
-import math
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from pydantic import Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
@@ -23,8 +26,6 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
-from service_capacity_modeling.interface import certain_float
-from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import gp2_gib_for_io
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -193,8 +194,9 @@ def _estimate_rds_regional(
     else:
         replicas = 1
 
+    costs = {"rds-cluster.regional-clusters": cluster.annual_cost * replicas}
     clusters = Clusters(
-        total_annual_cost=round(cluster.annual_cost * replicas, 2),
+        annual_costs=costs,
         zonal=[],
         regional=[cluster],
     )

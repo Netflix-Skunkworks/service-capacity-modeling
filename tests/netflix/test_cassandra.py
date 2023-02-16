@@ -54,7 +54,7 @@ def test_capacity_small_fast():
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=small_but_high_qps,
-            extra_model_arguments=dict(require_local_disks=require_local_disks),
+            extra_model_arguments={"require_local_disks": require_local_disks},
         )[0]
         small_result = cap_plan.candidate_clusters.zonal[0]
         # We really should just pay for CPU here
@@ -98,8 +98,8 @@ def test_capacity_high_writes():
             high_writes_result.count * high_writes_result.instance.drive.size_gib >= 400
         )
     else:
-        raise Exception("Should have drives")
-    assert cap_plan.candidate_clusters.total_annual_cost < 40_000
+        raise AssertionError("Should have drives")
+    assert cap_plan.candidate_clusters.annual_costs["cassandra.zonal-clusters"] < 40_000
 
 
 def test_high_write_throughput():
@@ -132,7 +132,9 @@ def test_high_write_throughput():
         > high_writes_result.count * high_writes_result.attached_drives[0].size_gib
         >= 100_000
     )
-    assert 125_000 < cap_plan.candidate_clusters.total_annual_cost < 900_000
+
+    cluster_cost = cap_plan.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
+    assert 125_000 < cluster_cost < 900_000
 
     # We should require more than 4 tiering in order to meet this requirement
     assert high_writes_result.cluster_params["cassandra.compaction.min_threshold"] > 4
@@ -143,7 +145,10 @@ def test_capacity_large_footprint():
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=large_footprint,
-        extra_model_arguments=dict(require_local_disks=True, required_cluster_size=16),
+        extra_model_arguments={
+            "require_local_disks": True,
+            "required_cluster_size": 16,
+        },
     )[0]
 
     large_footprint_result = cap_plan.candidate_clusters.zonal[0]

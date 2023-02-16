@@ -13,16 +13,18 @@ def test_evcache_high_qps():
                 low=10_000, mid=100_000, high=1_000_000, confidence=0.98
             ),
             estimated_write_per_second=Interval(
-                low=1_000, mid=10_000, high=100_000, confidence=0.98
+                low=10_000, mid=100_000, high=1_000_000, confidence=0.98
             ),
         ),
         data_shape=DataShape(
             estimated_state_size_gib=Interval(
                 low=10, mid=100, high=1000, confidence=0.98
             ),
+            estimated_state_item_size=Interval(
+                low=10, mid=100, high=1000, confidence=0.98
+            ),
         ),
     )
-
     plan = planner.plan(
         model_name="org.netflix.evcache",
         region="us-east-1",
@@ -35,7 +37,7 @@ def test_evcache_high_qps():
     assert all(k in lr.requirements.regrets for k in ("spend", "mem", "disk"))
 
     # EVCache should be pretty cheap for 100k RPS with 10k WPS
-    assert lr.candidate_clusters.total_annual_cost < 10000
+    assert lr.candidate_clusters.annual_costs["evcache.zonal-clusters"] < 10000
 
     zc = lr.candidate_clusters.zonal[0]
 

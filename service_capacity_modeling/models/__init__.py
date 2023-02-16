@@ -9,6 +9,7 @@ from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRegretParameters
+from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
@@ -17,7 +18,6 @@ from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
-from service_capacity_modeling.interface import certain_float
 
 __common_regrets__ = frozenset(("spend", "disk", "mem"))
 
@@ -133,8 +133,27 @@ class CapacityModel:
         """
         regrets = {"spend": 0.0, "disk": 0.0, "mem": 0.0}
 
-        optimal_cost = float(optimal_plan.candidate_clusters.total_annual_cost)
-        plan_cost = float(proposed_plan.candidate_clusters.total_annual_cost)
+        # Have to subtract out service costs which should be proprotional
+        # to the input not the output.
+        optimal_service_spend = sum(
+            s.annual_cost
+            for s in optimal_plan.candidate_clusters.services
+            if s.regret_cost is False
+        )
+        optimal_cost = (
+            float(optimal_plan.candidate_clusters.total_annual_cost)
+            - optimal_service_spend
+        )
+        plan_service_spend = sum(
+            s.annual_cost
+            for s in proposed_plan.candidate_clusters.services
+            if s.regret_cost is False
+        )
+        plan_cost = (
+            float(proposed_plan.candidate_clusters.total_annual_cost)
+            - plan_service_spend
+        )
+
         if "spend" in optimal_plan.requirements.regrets:
             if plan_cost >= optimal_cost:
                 regrets["spend"] = (

@@ -65,6 +65,12 @@
         "annual_cost_per_gib": "0.252",
         "annual_cost_per_write_io": "0.000005",
         "annual_cost_per_read_io": "0.0000004"
+      },
+      "net.inter.region": {
+        "annual_cost_per_gib": 0.02
+      },
+      "net.intra.region": {
+        "annual_cost_per_gib": 0.02
       }
     },
     "zones_in_region": 3

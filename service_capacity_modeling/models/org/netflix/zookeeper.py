@@ -2,13 +2,16 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from pydantic import Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
@@ -21,8 +24,6 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
-from service_capacity_modeling.interface import certain_float
-from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -123,10 +124,12 @@ class NflxZookeeperCapacityModel(CapacityModel):
             zonal = [soln(1), soln(1), soln(1)]
 
         clusters = Clusters(
-            total_annual_cost=round(sum(z.annual_cost for z in zonal), 2),
+            annual_costs={
+                "zk-zonal.zonal-clusters": (round(sum(z.annual_cost for z in zonal), 2))
+            },
             zonal=zonal,
-            regional=list(),
-            services=list(),
+            regional=[],
+            services=[],
         )
 
         return CapacityPlan(

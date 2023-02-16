@@ -1,18 +1,20 @@
 import logging
-from decimal import Decimal
+import math
 from typing import Any
 from typing import Dict
 from typing import Optional
 from typing import Tuple
 
-import math
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from pydantic import Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
@@ -24,10 +26,9 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
-from service_capacity_modeling.interface import certain_float
-from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
@@ -117,6 +118,7 @@ def _estimate_evcache_cluster_zonal(
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,
+    context: RegionContext,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
     max_local_disk_gib: int = 2048,
@@ -214,13 +216,20 @@ def _estimate_evcache_cluster_zonal(
     if cluster.count > (max_regional_size // zones_per_region):
         return None
 
+    services = network_services("evcache", context, desires, copies_per_region)
     ec2_cost = zones_per_region * cluster.annual_cost
+
+    # Account for the clusters and replication costs
+    evcache_costs = {"evcache.zonal-clusters": ec2_cost}
+    for s in services:
+        evcache_costs[f"{s.service_type}"] = s.annual_cost
 
     cluster.cluster_type = "evcache"
     clusters = Clusters(
-        total_annual_cost=round(Decimal(ec2_cost), 2),
+        annual_costs=evcache_costs,
         zonal=[cluster] * zones_per_region,
         regional=[],
+        services=services,
     )
 
     return CapacityPlan(
@@ -287,6 +296,7 @@ class NflxEVCacheCapacityModel(CapacityModel):
             max_regional_size=max_regional_size,
             max_local_disk_gib=max_local_disk_gib,
             min_instance_memory_gib=min_instance_memory_gib,
+            context=context,
         )
 
     @staticmethod
@@ -331,7 +341,7 @@ class NflxEVCacheCapacityModel(CapacityModel):
                     estimated_mean_write_size_bytes=Interval(
                         low=64, mid=128, high=1024, confidence=0.95
                     ),
-                    # memcache point queries usualy take just around 100us
+                    # memcache point queries usually take just around 100us
                     # of on CPU time for reads and writes. Memcache is very
                     # fast
                     estimated_mean_read_latency_ms=Interval(
