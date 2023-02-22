@@ -1,5 +1,6 @@
 import logging
 import math
+from enum import Enum
 from typing import Any
 from typing import Dict
 from typing import Optional
@@ -36,6 +37,12 @@ from service_capacity_modeling.models.utils import next_n
 from service_capacity_modeling.stats import dist_for_interval
 
 logger = logging.getLogger(__name__)
+
+
+class Replication(str, Enum):
+    none = "none"
+    sets = "sets"
+    evicts = "evicts"
 
 
 def _estimate_evcache_requirement(
@@ -124,6 +131,7 @@ def _estimate_evcache_cluster_zonal(
     max_local_disk_gib: int = 2048,
     max_regional_size: int = 999,
     min_instance_memory_gib: int = 12,
+    cross_region_replication: Replication = Replication.none,
 ) -> Optional[CapacityPlan]:
 
     # EVCache doesn't like to deploy on single CPU instances
@@ -216,7 +224,20 @@ def _estimate_evcache_cluster_zonal(
     if cluster.count > (max_regional_size // zones_per_region):
         return None
 
-    services = network_services("evcache", context, desires, copies_per_region)
+    services = []
+    if cross_region_replication is Replication.sets:
+        services.extend(
+            network_services("evcache", context, desires, copies_per_region)
+        )
+    elif cross_region_replication is Replication.evicts:
+        modified = desires.copy(deep=True)
+        # Assume that DELETES replicating cross region mean 128 bytes
+        # of key per evict.
+        modified.query_pattern.estimated_mean_write_size_bytes.mid = 128
+        services.extend(
+            network_services("evcache", context, modified, copies_per_region)
+        )
+
     ec2_cost = zones_per_region * cluster.annual_cost
 
     # Account for the clusters and replication costs
@@ -258,6 +279,13 @@ class NflxEVCacheArguments(BaseModel):
         default=12,
         description="The minimum amount of instance memory to allow",
     )
+    cross_region_replication: Replication = Field(
+        default=Replication.none,
+        description=(
+            "Whether this evcache service does cross region replication. "
+            "By default we do no replication"
+        ),
+    )
 
 
 class NflxEVCacheCapacityModel(CapacityModel):
@@ -286,6 +314,9 @@ class NflxEVCacheCapacityModel(CapacityModel):
         min_instance_memory_gib: int = extra_model_arguments.get(
             "min_instance_memory_gib", 12
         )
+        cross_region_replication = Replication(
+            extra_model_arguments.get("cross_region_replication", "none")
+        )
 
         return _estimate_evcache_cluster_zonal(
             instance=instance,
@@ -296,6 +327,7 @@ class NflxEVCacheCapacityModel(CapacityModel):
             max_regional_size=max_regional_size,
             max_local_disk_gib=max_local_disk_gib,
             min_instance_memory_gib=min_instance_memory_gib,
+            cross_region_replication=cross_region_replication,
             context=context,
         )
 
