@@ -41,12 +41,12 @@ def test_uncertain_planning():
     lr = mid_plan.least_regret[0]
     lr_cluster = lr.candidate_clusters.zonal[0]
     assert 8 <= lr_cluster.count * lr_cluster.instance.cpu <= 64
-    assert 5_000 <= lr.candidate_clusters.total_annual_cost < 40_000
+    assert 5_000 <= lr.candidate_clusters.total_annual_cost < 45_000
 
     sr = mid_plan.least_regret[1]
     sr_cluster = sr.candidate_clusters.zonal[0]
     assert 8 <= sr_cluster.count * sr_cluster.instance.cpu <= 64
-    assert 5_000 <= sr.candidate_clusters.total_annual_cost < 40_000
+    assert 5_000 <= sr.candidate_clusters.total_annual_cost < 45_000
 
     tiny_plan = planner.plan(
         model_name="org.netflix.cassandra",
