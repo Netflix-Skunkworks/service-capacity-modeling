@@ -546,7 +546,7 @@ class NflxCassandraCapacityModel(CapacityModel):
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),
                     estimated_mean_write_size_bytes=Interval(
-                        low=64, mid=128, high=1024, confidence=0.95
+                        low=64, mid=256, high=1024, confidence=0.95
                     ),
                     # Cassandra point queries usualy take just around 2ms
                     # of on CPU time for reads and 1ms for writes
@@ -608,7 +608,7 @@ class NflxCassandraCapacityModel(CapacityModel):
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),
                     estimated_mean_write_size_bytes=Interval(
-                        low=64, mid=128, high=1024, confidence=0.95
+                        low=128, mid=1024, high=65536, confidence=0.95
                     ),
                     # Cassandra scan queries usually take longer
                     estimated_mean_read_latency_ms=Interval(

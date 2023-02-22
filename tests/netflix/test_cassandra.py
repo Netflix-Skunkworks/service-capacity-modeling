@@ -228,7 +228,7 @@ def test_reduced_durability():
             plan.candidate_clusters.zonal[0].cluster_params[
                 "cassandra.compaction.min_threshold"
             ]
-            == 4
+            == 8
         )
 
     assert (

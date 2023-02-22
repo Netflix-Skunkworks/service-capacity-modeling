@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 from enum import Enum
 from functools import lru_cache
@@ -14,6 +15,9 @@ from typing import Tuple
 import numpy as np
 from pydantic import BaseModel
 from pydantic import Field
+
+
+GIB_IN_BYTES = 1024 * 1024 * 1024
 
 
 class ExcludeUnsetModel(BaseModel):
@@ -489,7 +493,14 @@ class QueryPattern(ExcludeUnsetModel):
 
 
 class DataShape(ExcludeUnsetModel):
-    estimated_state_size_gib: Interval = certain_int(0)
+    estimated_state_size_gib: Interval = Field(
+        certain_int(0),
+        title="Estimated amounnt of state in the system in GiB",
+        description=(
+            "The estimated amount of state that will be stored."
+            " Note that this is an estimate and doesn't need to be exact"
+        ),
+    )
     estimated_state_item_count: Optional[Interval] = None
 
     estimated_working_set_percent: Optional[Interval] = Field(
@@ -549,6 +560,7 @@ class CapacityDesires(ExcludeUnsetModel):
     core_reference_ghz: float = 2.3
 
     def merge_with(self, defaults: "CapacityDesires") -> "CapacityDesires":
+        # Now merge with the models default
         desires_dict = self.dict(exclude_unset=True)
         default_dict = defaults.dict(exclude_unset=True)
 
@@ -558,7 +570,28 @@ class CapacityDesires(ExcludeUnsetModel):
         default_dict.get("data_shape", {}).update(desires_dict.pop("data_shape", {}))
         default_dict.update(desires_dict)
 
-        return CapacityDesires(**default_dict)
+        desires = CapacityDesires(**default_dict)
+
+        # If user gave state item count but not size or size but not count
+        # calculate the missing one from the other
+        user_size = (
+            self.dict(exclude_unset=True)
+            .get("data_shape", {})
+            .get("estimated_state_size_gib", None)
+        )
+        user_count = self.data_shape.estimated_state_item_count
+        item_size_bytes = desires.query_pattern.estimated_mean_write_size_bytes.mid
+        if user_size is None and user_count is not None:
+            desires.data_shape.estimated_state_size_gib = user_count.scale(
+                factor=(item_size_bytes / GIB_IN_BYTES)
+            )
+        elif user_size is not None and user_count is None:
+            user_size_gib = self.data_shape.estimated_state_size_gib
+            desires.data_shape.estimated_state_item_count = user_size_gib.scale(
+                factor=(GIB_IN_BYTES / item_size_bytes)
+            )
+
+        return desires
 
 
 class CapacityRequirement(ExcludeUnsetModel):
@@ -634,6 +667,23 @@ class Clusters(ExcludeUnsetModel):
     @property
     def total_annual_cost(self) -> Decimal:
         return cast(Decimal, round(sum(self.annual_costs.values()), 2))
+
+    # TODO(josephl): Once https://github.com/pydantic/pydantic/issues/935
+    # resolves use w.e. that does to make it so total_annual_cost
+    # is present in the JSON. For now we do this hack.
+    def dict(self, *args, **kwargs):
+        attribs = super().dict(*args, **kwargs)
+        attribs["total_annual_cost"] = self.total_annual_cost
+        return attribs
+
+    def json(self, *args, **kwargs):
+        # I can't figure out how to get all of pydantics JSON
+        # serialization goodness (e.g. handling Decimals and nested
+        # models) without just roundtriping ... let's wait for #935
+        pydantic_json = super().json(*args, **kwargs)
+        data = json.loads(pydantic_json)
+        data["total_annual_cost"] = float(round(self.total_annual_cost, 2))
+        return json.dumps(data)
 
 
 class CapacityPlan(ExcludeUnsetModel):

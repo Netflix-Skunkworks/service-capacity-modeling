@@ -233,7 +233,7 @@ def _estimate_evcache_cluster_zonal(
         modified = desires.copy(deep=True)
         # Assume that DELETES replicating cross region mean 128 bytes
         # of key per evict.
-        modified.query_pattern.estimated_mean_write_size_bytes.mid = 128
+        modified.query_pattern.estimated_mean_write_size_bytes = certain_int(128)
         services.extend(
             network_services("evcache", context, modified, copies_per_region)
         )
@@ -371,7 +371,7 @@ class NflxEVCacheCapacityModel(CapacityModel):
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),
                     estimated_mean_write_size_bytes=Interval(
-                        low=64, mid=128, high=1024, confidence=0.95
+                        low=64, mid=512, high=1024, confidence=0.95
                     ),
                     # memcache point queries usually take just around 100us
                     # of on CPU time for reads and writes. Memcache is very
