@@ -69,7 +69,7 @@ class TimeSeriesConfiguration:
         bytes_per_interval = (
                                      seconds_per_interval * events_per_day_per_ts * event_size
                              ) / 86400
-        return round(max(min(16, bytes_per_interval / _4MiB), 1))
+        return round(max(min(8, bytes_per_interval / _4MiB), 1))
 
     @staticmethod
     def __get_time_interval(seconds_per_slice: int, read_interval_seconds: int) -> int:

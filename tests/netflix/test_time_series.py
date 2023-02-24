@@ -51,11 +51,11 @@ def test_timeseries_read_amplification():
             extra_model_arguments=extra_model_args
         )
 
-        # Should be a ~16x requirement for reads comparing the mean of cap plans
+        # Should be a ~8x requirement for reads comparing the mean of cap plans
         assert int(cap_plan_16x_read_amp.mean[0].requirements.zonal[0].context[
                        "read_per_second"] /
                    cap_plan_1x_read_amp.mean[0].requirements.zonal[0].context[
-                       "read_per_second"]) == 16
+                       "read_per_second"]) == 8
 
         # Should be equivalent cap plans between java-apps
         assert cap_plan_16x_read_amp.mean[0].requirements.regional == \
