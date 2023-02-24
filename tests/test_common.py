@@ -168,4 +168,4 @@ def test_network_services():
         cost_by_service[service.service_type] = service.annual_cost
 
     assert 3 * 1500 < cost_by_service["test.net.inter.region"] < 3 * 1500 + 100
-    assert 2 * 1500 < cost_by_service["test.net.intra.region"] < 2 * 1500 + 100
+    assert 2 * 4 * 1500 < cost_by_service["test.net.intra.region"] < 2 * 4 * 1500 + 100
