@@ -75,6 +75,7 @@ def test_evcache_replication():
         model_name="org.netflix.evcache",
         region="us-east-1",
         desires=high_qps,
+        num_regions=3,
         extra_model_arguments={"cross_region_replication": "sets"},
     )
     assert len(plan.least_regret) >= 2
@@ -84,7 +85,7 @@ def test_evcache_replication():
     assert all(k in lr.requirements.regrets for k in ("spend", "mem", "disk"))
     assert lr.requirements.zonal[0].disk_gib.mid > 200
 
-    # EVCache should be pretty cheap for 100k RPS with 10k WPS
+    # EVCache compute should be pretty cheap for 100k RPS with 10k WPS
     assert lr.candidate_clusters.annual_costs["evcache.zonal-clusters"] < 10000
 
     set_inter_region = lr.candidate_clusters.annual_costs["evcache.net.inter.region"]
@@ -92,14 +93,18 @@ def test_evcache_replication():
     # With replication should have network costs
     assert 10000 < set_inter_region < 15000
     assert (
-        10000 < lr.candidate_clusters.annual_costs["evcache.net.intra.region"] < 15000
+        20000 < lr.candidate_clusters.annual_costs["evcache.net.intra.region"] < 50000
     )
 
     delete_plan = planner.plan(
         model_name="org.netflix.evcache",
         region="us-east-1",
         desires=high_qps,
-        extra_model_arguments={"cross_region_replication": "evicts"},
+        num_regions=3,
+        extra_model_arguments={
+            "cross_region_replication": "evicts",
+            "copies_per_region": 3,
+        },
     )
 
     lr = delete_plan.least_regret[0]
@@ -110,4 +115,6 @@ def test_evcache_replication():
 
     # With replication should have network costs
     assert 2000 < evict_inter_region < 6000
-    assert 2000 < lr.candidate_clusters.annual_costs["evcache.net.intra.region"] < 6000
+    assert (
+        12000 < lr.candidate_clusters.annual_costs["evcache.net.intra.region"] < 18000
+    )

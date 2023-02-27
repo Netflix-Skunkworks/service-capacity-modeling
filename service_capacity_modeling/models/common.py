@@ -99,8 +99,8 @@ def network_services(
     result = []
     # Network transfer is for every other zone and then for every region
     # other than us as well.
-    num_zones = copies_per_region - 1
-    num_regions = context.num_regions - 1
+    num_zones = max(copies_per_region - 1, 0)
+    num_regions = max(context.num_regions - 1, 0)
 
     # have bytes and / second
     size = desires.query_pattern.estimated_mean_write_size_bytes.mid
@@ -109,6 +109,8 @@ def network_services(
 
     txfer_gib = (wps * size / (1024 * 1024 * 1024)) * (SECONDS_IN_YEAR)
 
+    # For each cross region replication we have to pay to move bytes
+    # inter region. This is the number of regions minus 1
     inter_txfer = context.services.get("net.inter.region", None)
     if inter_txfer:
         price_per_gib = inter_txfer.annual_cost_per_gib
@@ -120,14 +122,21 @@ def network_services(
             )
         )
 
+    # Same zone is free, but we pay for replication from our zone to others
     intra_txfer = context.services.get("net.intra.region", None)
     if intra_txfer:
         price_per_gib = intra_txfer.annual_cost_per_gib
         result.append(
             ServiceCapacity(
                 service_type=f"{service_type}.net.intra.region",
-                annual_cost=(price_per_gib * txfer_gib * num_zones),
-                service_params={"txfer_gib": txfer_gib, "num_zones": num_zones},
+                annual_cost=(
+                    price_per_gib * txfer_gib * num_zones * context.num_regions
+                ),
+                service_params={
+                    "txfer_gib": txfer_gib,
+                    "num_zones": num_zones,
+                    "num_regions": context.num_regions,
+                },
             )
         )
     return result
