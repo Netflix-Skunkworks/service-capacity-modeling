@@ -435,11 +435,13 @@ class CapacityPlanner:
         regret_clusters_by_model: Dict[
             str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]
         ] = {}
+        desires_by_model: Dict[str, CapacityDesires] = {}
         for sub_model, sub_desires in self._sub_models(
             model_name=model_name,
             desires=desires,
             extra_model_arguments=extra_model_arguments,
         ):
+            desires_by_model[sub_model] = sub_desires
             model_plans: List[Tuple[CapacityDesires, Sequence[CapacityPlan]]] = []
             for sim_desires in model_desires(sub_desires, simulations):
                 model_plans.append(
@@ -536,7 +538,7 @@ class CapacityPlanner:
                 desires_by_model={
                     model: desires.merge_with(
                         self._models[model].default_desires(
-                            desires, extra_model_arguments
+                            desires_by_model[model], extra_model_arguments
                         )
                     )
                     for model in regret_clusters_by_model

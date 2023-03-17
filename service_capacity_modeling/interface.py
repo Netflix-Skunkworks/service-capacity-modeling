@@ -495,7 +495,7 @@ class QueryPattern(ExcludeUnsetModel):
 class DataShape(ExcludeUnsetModel):
     estimated_state_size_gib: Interval = Field(
         certain_int(0),
-        title="Estimated amounnt of state in the system in GiB",
+        title="Estimated amount of state in the system in GiB",
         description=(
             "The estimated amount of state that will be stored."
             " Note that this is an estimate and doesn't need to be exact"
