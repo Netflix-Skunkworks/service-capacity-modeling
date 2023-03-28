@@ -247,6 +247,17 @@ class CapacityModel:
         return (Platform.amd64,)
 
     @staticmethod
+    def allowed_cloud_drives() -> Tuple[Optional[str], ...]:
+        """Return which cloud drives this model accepts.
+
+        This will _override_ the lifecycle of the drive.
+
+        Note that an empty tuple means _all_ drives. If you want to
+        only accept local hard drives emit None
+        """
+        return tuple()
+
+    @staticmethod
     def default_desires(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ):

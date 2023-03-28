@@ -178,13 +178,23 @@ class Lifecycle(str, Enum):
     end_of_life = "end-of-life"
 
 
+class DriveType(str, Enum):
+    """Represents the type of drive"""
+
+    local_ssd = "local-ssd"
+    local_hdd = "local-hdd"
+    attached_ssd = "attached-ssd"
+    attached_hdd = "attached-hhd"
+
+
 class Drive(ExcludeUnsetModel):
-    """Represents a cloud drive e.g. EBS
+    """Represents a cloud drive e.g. EBS or ephemeral drives
 
     This model is generic to any cloud
     """
 
     name: str
+    drive_type: DriveType = DriveType.local_ssd
     size_gib: int = 0
     read_io_per_s: Optional[int] = None
     write_io_per_s: Optional[int] = None
@@ -195,6 +205,8 @@ class Drive(ExcludeUnsetModel):
     max_scale_size_gib: int = 0
     # If this drive can scale IO, how large can it scale to
     max_scale_io_per_s: int = 0
+    # How large is an "IO" against this device
+    block_size_kib: int = 4
 
     lifecycle: Lifecycle = Lifecycle.stable
     compatible_families: List[str] = []
@@ -265,7 +277,6 @@ class Platform(str, Enum):
 
     For example a particular hardware type might offer x86_64, arm, or be a managed
     instance type that only works with managed RDBMS like Aurora Postgres.
-
     """
 
     # Most Intel and AMD instance types
