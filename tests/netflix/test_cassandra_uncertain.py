@@ -155,9 +155,9 @@ def test_worn_dataset():
     lr_cluster = lr.candidate_clusters.zonal[0]
     assert 128 <= lr_cluster.count * lr_cluster.instance.cpu <= 512
     assert (
-        100_000
+        250_000
         <= lr.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
-        < 900_000
+        < 1_000_000
     )
     assert lr_cluster.instance.name.startswith(
         "m5."
