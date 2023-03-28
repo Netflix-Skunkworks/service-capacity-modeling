@@ -377,14 +377,18 @@ def _cass_heap_for_write_buffer(
     if write_buffer_gib > (
         max_zonal_size * _cass_heap(instance.ram_gib) * buffer_percent
     ):
-        return lambda x: _cass_heap(x, max_heap_gib=31)
+        return lambda x: _cass_heap(x, max_heap_gib=30)
     else:
         return _cass_heap
 
 
 # C* follows the following formula for calculating heap
-def _cass_heap(node_memory_gib: float, max_heap_gib: float = 12) -> float:
-    return max(min(node_memory_gib // 2, 4), min(node_memory_gib // 4, max_heap_gib))
+def _cass_heap(node_memory_gib: float, max_heap_gib: float = 30) -> float:
+    # OSS Cassandra does this
+    # max(min(node_memory_gib // 2, 4), min(node_memory_gib // 4, max_heap_gib))
+
+    # Netflix Cassandra does this
+    return min(max(4, node_memory_gib // 2), max_heap_gib)
 
 
 def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
