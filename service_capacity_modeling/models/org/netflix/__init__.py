@@ -12,6 +12,7 @@ from .stateless_java import nflx_java_app_capacity_model
 from .time_series import nflx_time_series_capacity_model
 from .counter import nflx_counter_capacity_model
 from .zookeeper import nflx_zookeeper_capacity_model
+from .kafka import nflx_kafka_capacity_model
 
 
 def models():
@@ -30,4 +31,5 @@ def models():
         "org.netflix.entity": nflx_entity_capacity_model,
         "org.netflix.cockroachdb": nflx_cockroachdb_capacity_model,
         "org.netflix.aurora": nflx_aurora_capacity_model,
+        "org.netflix.kafka": nflx_kafka_capacity_model,
     }

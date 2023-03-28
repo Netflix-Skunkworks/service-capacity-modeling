@@ -200,7 +200,7 @@ least_regret = cache_cap_plan.least_regret
 We have a demo notebook in `notebooks` you can use to experiment. Start it with
 
 ```
-tox -e notebook jupyter notebook notebooks/demo.ipynb
+tox -e notebook -- jupyter notebook notebooks/demo.ipynb
 ```
 
 ## Development

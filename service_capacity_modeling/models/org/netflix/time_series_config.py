@@ -6,7 +6,7 @@ from typing import Dict
 from service_capacity_modeling.models.org.netflix.iso_date_math import (
     _iso_to_proto_duration,
 )
-from service_capacity_modeling.models.org.netflix.iso_date_math import _iso_to_seconds
+from service_capacity_modeling.models.org.netflix.iso_date_math import iso_to_seconds
 from service_capacity_modeling.models.org.netflix.iso_date_math import _iso_to_timedelta
 
 DURATION_1H = timedelta(hours=1)
@@ -149,7 +149,7 @@ class TimeSeriesConfiguration:
         read_interval = extra_model_arguments.get("ts.read-interval", "PT24H")
         if read_interval == "unlimited":
             return DURATION_1Y * 100
-        return _iso_to_seconds(read_interval)
+        return iso_to_seconds(read_interval)
 
     @staticmethod
     def __get_coalesce_duration(extra_model_arguments: Dict[str, Any]) -> str:

@@ -73,6 +73,8 @@ def simulate_interval(
 
 
 # Take uncertain inputs and simulate a desired number of certain inputs
+# e.g. read_per_second[100, 1000] -> [rps[107, 107], rps[756, 756], ...]
+# num_sims concrete values are generated.
 def model_desires(
     desires: CapacityDesires, num_sims: int = 1000
 ) -> Generator[CapacityDesires, None, None]:
@@ -204,16 +206,20 @@ def _allow_drive(
     drive: Drive,
     allowed_names: Sequence[str],
     allowed_lifecycles: Sequence[Lifecycle],
+    allowed_drives: Set[str],
 ) -> bool:
     # If the user has explicitly asked for particular families instead
     # of all lifecycles filter based on that
     if allowed_names:
         if drive.name not in allowed_names:
             return False
-    # Otherwise consider lifecycle (default) and platform
+    # Otherwise consider lifecycle (default)
     else:
         if drive.lifecycle not in allowed_lifecycles:
             return False
+
+    if drive.name not in allowed_drives:
+        return False
 
     return True
 
@@ -396,6 +402,14 @@ class CapacityPlanner:
         )
         model = self._models[model_name]
         allowed_platforms: Set[Platform] = set(model.allowed_platforms())
+        allowed_drives: Set[str] = set(drives or [])
+        for drive_name in model.allowed_cloud_drives():
+            if drive_name is None:
+                allowed_drives = set()
+                break
+            allowed_drives.add(drive_name)
+        if len(allowed_drives) == 0:
+            allowed_drives.update(hardware.drives.keys())
 
         plans = []
         for instance in hardware.instances.values():
@@ -408,7 +422,7 @@ class CapacityPlanner:
                 continue
 
             for drive in hardware.drives.values():
-                if not _allow_drive(drive, drives, lifecycles):
+                if not _allow_drive(drive, drives, lifecycles, allowed_drives):
                     continue
 
                 plan = model.capacity_plan(

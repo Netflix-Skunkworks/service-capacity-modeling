@@ -16,7 +16,7 @@ def _iso_to_proto_duration(iso_duration: str):
     return f"{int(parsed.total_seconds())}s"
 
 
-def _iso_to_seconds(iso_duration: str, unlimited=0) -> int:
+def iso_to_seconds(iso_duration: str, unlimited=0) -> int:
     if iso_duration == "unlimited":
         return unlimited
     parsed = isodate.parse_duration(iso_duration)
@@ -31,4 +31,4 @@ def _iso_to_seconds(iso_duration: str, unlimited=0) -> int:
 
 
 def _iso_to_timedelta(iso_duration: str, unlimited=0) -> timedelta:
-    return timedelta(seconds=_iso_to_seconds(iso_duration, unlimited))
+    return timedelta(seconds=iso_to_seconds(iso_duration, unlimited))
