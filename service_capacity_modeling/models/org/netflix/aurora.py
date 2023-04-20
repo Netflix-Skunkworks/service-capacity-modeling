@@ -150,6 +150,7 @@ def _compute_aurora_region(
         instance=instance,
         attached_drives=attached_drives,
         annual_cost=total_annual_cost,
+        cluster_params={"instance_cost": instance.annual_cost}
     )
 
 
@@ -160,7 +161,7 @@ def _estimate_aurora_regional(
     extra_model_arguments: Dict[str, Any],
 ) -> Optional[CapacityPlan]:
     instance_family = instance.family
-    if instance_family not in ("m5", "r5"):  # todo: find out all the allowed instance family, seems to be a little different
+    if instance_family not in ("x2g", "r6g", "r6i", "r5", "t4g"):  # TODO: split db instance and ec2 instance
         return None
 
     if drive.name != "aurora":
@@ -195,7 +196,7 @@ def _estimate_aurora_regional(
     else:
         replicas = 1
 
-    costs = {"aurora-cluster.regional-clusters": cluster.annual_cost * replicas}  #todo: Storage in Aurora is different, the read replica is just an instance
+    costs = {"aurora-cluster.regional-clusters": cluster.annual_cost + (replicas - 1) * cluster.cluster_params["instance_cost"]}
     clusters = Clusters(
         annual_costs=costs,
         zonal=[],

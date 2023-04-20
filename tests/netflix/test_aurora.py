@@ -1,5 +1,4 @@
 import json
-import logging
 
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import CapacityDesires
@@ -95,6 +94,9 @@ def test_small_footprint():
         desires=small_footprint,
     )
     assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.xlarge"
+
+    # two instance plus storage
+    assert cap_plan[0].candidate_clusters.annual_costs["aurora-cluster.regional-clusters"] == 830 * 2 + 60 * 1.2
 
 
 def test_medium_footprint():
@@ -220,4 +222,4 @@ def test_cap_plan():
         region="us-east-1",
         desires=my_desire,
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "m5.8xlarge"
+    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.8xlarge"
