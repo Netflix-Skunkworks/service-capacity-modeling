@@ -11,7 +11,7 @@ from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
-from service_capacity_modeling.models.common import merge_plan
+from service_capacity_modeling.models.common import merge_plan, sqrt_staffed_cores
 from service_capacity_modeling.models.common import network_services
 
 
@@ -169,3 +169,24 @@ def test_network_services():
 
     assert 3 * 1500 < cost_by_service["test.net.inter.region"] < 3 * 1500 + 100
     assert 2 * 4 * 1500 < cost_by_service["test.net.intra.region"] < 2 * 4 * 1500 + 100
+
+
+def test_different_tier_qos():
+    tiers = (3, 2, 1, 0)
+    prev_cores = 0
+    for tier in tiers:
+        desires = CapacityDesires(
+            service_tier=tier,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=Interval(
+                    low=1000, mid=10000, high=100000, confidence=0.98
+                ),
+                estimated_write_per_second=Interval(
+                    low=1000, mid=10000, high=100000, confidence=0.98
+                ),
+            ),
+        )
+        cores = sqrt_staffed_cores(desires)
+        assert cores >= prev_cores
+        prev_cores = cores
+
