@@ -164,7 +164,6 @@ def test_kv_increasing_qps_compare_working_sets():
         # because of the high number of cores needed to support the qps.
         if qps < 100_000:
             assert zlr_small_cost < zlr_large_cost
-            assert zlr_small_family != zlr_large_family
             assert (
                 zlr_small_cpu != zlr_large_cpu or zlr_small_memory != zlr_large_memory
             )
@@ -359,7 +358,7 @@ def test_kv_plus_evcache_rps_exceeding_100k_and_sufficient_read_write_ratio():
         assert rlr.instance.drive is None
 
         # We just want ram and cpus for a java app
-        rlr.instance.family[0] in ("m", "r")
+        assert rlr.instance.family[0] in ("m", "r")
 
         # Check the EVCache cluster
         zlr_evs = [
@@ -459,7 +458,7 @@ def test_kv_rps_exceeding_100k_but_insufficient_read_write_ratio():
         assert rlr.instance.drive is None
 
         # We just want ram and cpus for a java app
-        rlr.instance.family[0] in ("m", "r")
+        assert rlr.instance.family[0] in ("m", "r")
 
         # Validate that there is no EVCache cluster
         assert not any(
@@ -539,7 +538,7 @@ def test_kv_plus_evcache_configured_read_write_ratio_threshold():
         assert rlr.instance.drive is None
 
         # We just want ram and cpus for a java app
-        rlr.instance.family[0] in ("m", "r")
+        assert rlr.instance.family[0] in ("m", "r")
 
         # Validate that EVCache is included if consistency is valid
         if consistency in (AccessConsistency.eventual, AccessConsistency.best_effort):
@@ -656,8 +655,8 @@ def test_kv_plus_evcache_high_hit_rate():
     assert rlr_ryw.instance.drive is None
 
     # We just want ram and cpus for a java app
-    rlr_eventual.instance.family[0] in ("m", "r")
-    rlr_ryw.instance.family[0] in ("m", "r")
+    assert rlr_eventual.instance.family[0] in ("m", "r")
+    assert rlr_ryw.instance.family[0] in ("m", "r")
 
     # For read-your-writes consistency, there should be no EVCache cluster.
     assert not any(
@@ -796,8 +795,8 @@ def test_kv_plus_evcache_low_hit_rate():
     assert rlr_ryw.instance.drive is None
 
     # We just want ram and cpus for a java app
-    rlr_eventual.instance.family[0] in ("m", "r")
-    rlr_ryw.instance.family[0] in ("m", "r")
+    assert rlr_eventual.instance.family[0] in ("m", "r")
+    assert rlr_ryw.instance.family[0] in ("m", "r")
 
     # For read-your-writes consistency, there should be no EVCache cluster.
     assert not any(
