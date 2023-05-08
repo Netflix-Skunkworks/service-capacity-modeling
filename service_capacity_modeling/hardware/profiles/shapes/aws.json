@@ -718,6 +718,70 @@
         "read_io_per_s": 466666, "write_io_per_s": 233333,
         "block_size_kib": 4, "single_tenant": true
       }
+    },
+    "db.r5.large": {
+      "name": "db.r5.large",
+      "cpu": 2,
+      "cpu_ghz": 3.1,
+      "ram_gib": 15.71,
+      "net_mbps": 500,
+      "drive": null
+    },
+    "db.r5.xlarge": {
+      "name": "db.r5.xlarge",
+      "cpu": 4,
+      "cpu_ghz": 3.1,
+      "ram_gib": 31.65,
+      "net_mbps": 1000,
+      "drive": null
+    },
+    "db.r5.2xlarge": {
+      "name": "db.r5.2xlarge",
+      "cpu": 8,
+      "cpu_ghz": 3.1,
+      "ram_gib": 63.62,
+      "net_mbps": 2000,
+      "drive": null
+    },
+    "db.r5.4xlarge": {
+      "name": "db.r5.4xlarge",
+      "cpu": 16,
+      "cpu_ghz": 3.1,
+      "ram_gib": 128,
+      "net_mbps": 4000,
+      "drive": null
+    },
+    "db.r5.8xlarge": {
+      "name": "db.r5.8xlarge",
+      "cpu": 32,
+      "cpu_ghz": 3.1,
+      "ram_gib": 256,
+      "net_mbps": 10000,
+      "drive": null
+    },
+    "db.r5.12xlarge": {
+      "name": "db.r5.12xlarge",
+      "cpu": 48,
+      "cpu_ghz": 3.1,
+      "ram_gib": 384,
+      "net_mbps": 10000,
+      "drive": null
+    },
+    "db.r5.16xlarge": {
+      "name": "db.r5.16xlarge",
+      "cpu": 64,
+      "cpu_ghz": 3.1,
+      "ram_gib": 512,
+      "net_mbps": 13600,
+      "drive": null
+    },
+    "db.r5.24xlarge": {
+      "name": "db.r5.24xlarge",
+      "cpu": 96,
+      "cpu_ghz": 3.1,
+      "ram_gib": 768,
+      "net_mbps": 19000,
+      "drive": null
     }
   },
   "drives": {

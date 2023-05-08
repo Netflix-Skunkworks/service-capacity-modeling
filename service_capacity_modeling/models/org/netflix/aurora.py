@@ -161,7 +161,7 @@ def _estimate_aurora_regional(
     extra_model_arguments: Dict[str, Any],
 ) -> Optional[CapacityPlan]:
     instance_family = instance.family
-    if instance_family not in ("x2g", "r6g", "r6i", "r5", "t4g"):  # TODO: split db instance and ec2 instance
+    if instance_family not in ("db.x2g", "db.r6g", "db.r6i", "db.r5", "db.t4g"):
         return None
 
     if drive.name != "aurora":
