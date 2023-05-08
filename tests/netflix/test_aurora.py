@@ -95,9 +95,8 @@ def test_small_footprint():
     )
     assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.xlarge"
 
-    # two instance plus storage
-    print(cap_plan[0].candidate_clusters.annual_costs["aurora-cluster.regional-clusters"])
-    assert (3000 < cap_plan[0].candidate_clusters.annual_costs["aurora-cluster.regional-clusters"] < 4000)
+    # two instance plus storage and io
+    assert (3500 < cap_plan[0].candidate_clusters.annual_costs["aurora-cluster.regional-clusters"] < 4500)
 
 
 def test_medium_footprint():

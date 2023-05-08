@@ -91,6 +91,24 @@ def _rds_required_disk_ios(disk_size_gib: int, db_type: str, btree_fan_out: int 
     return math.log(pages, btree_fan_out)
 
 
+# This is a start, we should iterate based on the actual work load
+def _estimate_io_cost(db_type: str, desires, read_io_price: float, write_io_price: float, cache_hit_rate: float = 0.8):
+    if db_type == "postgres":
+        read_byte_per_io = 8192
+    else:
+        read_byte_per_io = 16384
+
+    write_byte_per_io = 4096
+
+    r_io = desires.query_pattern.estimated_read_per_second.mid * math.ceil(desires.query_pattern.estimated_mean_read_size_bytes.mid / read_byte_per_io)
+    # Assuming write can be batched
+    w_io = desires.query_pattern.estimated_write_per_second.mid * desires.query_pattern.estimated_mean_write_size_bytes.mid / write_byte_per_io
+
+    r_cost = r_io * (1 - cache_hit_rate) * read_io_price
+    w_cost = w_io * write_io_price
+    return r_cost + w_cost
+
+
 def _compute_aurora_region(
     instance: Instance,
     drive: Drive,  # always to be Aurora Storage
@@ -101,6 +119,8 @@ def _compute_aurora_region(
     required_disk_ios,
     required_disk_space,
     core_reference_ghz: float,
+    db_type:str,
+    desires:CapacityDesires
 ) -> Optional[RegionClusterCapacity]:
     """Computes a regional cluster of a Aurora service
 
@@ -129,10 +149,9 @@ def _compute_aurora_region(
     attached_drive.size_gib = max(1, required_disk_space(needed_disk_gib))  # todo: Figure out the IO vs disk
     attached_drives.append(attached_drive)
 
-    # print(f"hardware {attached_drive}, driver cost: {attached_drive.annual_cost}")
-
-    # todo: add IO cost
-    total_annual_cost = instance.annual_cost + attached_drive.annual_cost
+    io_cost = _estimate_io_cost(db_type, desires, drive.annual_cost_per_read_io[0][1],
+                                drive.annual_cost_per_write_io[0][1])
+    total_annual_cost = instance.annual_cost + attached_drive.annual_cost + io_cost
 
     logger.debug(
         "For (cpu, memory_gib, disk_gib) = (%s, %s, %s) need ( %s, %s, %s)",
@@ -186,6 +205,8 @@ def _estimate_aurora_regional(
         * math.ceil(0.1 * rps),
         required_disk_space=lambda x: x * 1.2,  # Unscientific random guess!
         core_reference_ghz=requirement.core_reference_ghz,
+        db_type=db_type,
+        desires=desires
     )
 
     if not cluster:
