@@ -1,3 +1,4 @@
+from .aurora import nflx_aurora_capacity_model
 from .cassandra import nflx_cassandra_capacity_model
 from .crdb import nflx_cockroachdb_capacity_model
 from .elasticsearch import nflx_elasticsearch_capacity_model
@@ -28,4 +29,5 @@ def models():
         "org.netflix.elasticsearch.master": nflx_elasticsearch_master_capacity_model,
         "org.netflix.entity": nflx_entity_capacity_model,
         "org.netflix.cockroachdb": nflx_cockroachdb_capacity_model,
+        "org.netflix.aurora": nflx_aurora_capacity_model,
     }

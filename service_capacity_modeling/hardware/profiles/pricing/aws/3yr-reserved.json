@@ -73,6 +73,11 @@
         "annual_cost_per_gib": 0.96,
         "annual_cost_per_read_io": [[3000, 0], [16000, 0.06]],
         "annual_cost_per_write_io": [[3000, 0], [16000, 0.06]]
+      },
+      "aurora": {
+        "annual_cost_per_gib": 1.2,
+        "annual_cost_per_read_io": [[256000, 6.3072]],
+        "annual_cost_per_write_io": [[256000, 6.3072]]
       }
     },
     "services": {

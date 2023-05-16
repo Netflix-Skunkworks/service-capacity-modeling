@@ -740,6 +740,12 @@
       "write_io_latency_ms": {"low": 1.2, "mid": 2, "high": 4, "maximum_value": 20, "confidence": 0.90},
       "max_scale_size_gib": 16384, "block_size_kib": 16,
       "lifecycle": "alpha"
+    },
+    "aurora": {
+      "name": "aurora",
+      "read_io_latency_ms": {"low": 0.8, "mid": 1.05, "high": 1.8, "maximum_value": 10, "confidence": 0.90},
+      "write_io_latency_ms": {"low": 1.2, "mid": 2, "high": 4, "maximum_value": 20, "confidence": 0.90},
+      "max_scale_size_gib": 16384, "block_size_kib": 16
     }
   },
   "services": {
