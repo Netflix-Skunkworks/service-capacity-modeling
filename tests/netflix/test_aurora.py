@@ -93,17 +93,17 @@ def test_small_footprint():
         region="us-east-1",
         desires=small_footprint,
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.xlarge"
+    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.xlarge"
 
-    # two instance plus storage
-    assert cap_plan[0].candidate_clusters.annual_costs["aurora-cluster.regional-clusters"] == 830 * 2 + 60 * 1.2
+    # two instance plus storage and io
+    assert (3500 < cap_plan[0].candidate_clusters.annual_costs["aurora-cluster.regional-clusters"] < 4500)
 
 
 def test_medium_footprint():
     cap_plan = planner.plan_certain(
         model_name="org.netflix.aurora", region="us-east-1", desires=mid_footprint
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.8xlarge"
+    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.8xlarge"
 
 
 def test_large_footprint():
@@ -112,7 +112,7 @@ def test_large_footprint():
         region="us-east-1",
         desires=large_footprint,
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.8xlarge"
+    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.8xlarge"
 
 
 def test_tier_3():
@@ -121,7 +121,7 @@ def test_tier_3():
         region="us-east-1",
         desires=tier_3,
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.4xlarge"
+    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.4xlarge"
 
 
 def test_cap_plan():
@@ -222,4 +222,4 @@ def test_cap_plan():
         region="us-east-1",
         desires=my_desire,
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.8xlarge"
+    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.8xlarge"
