@@ -24,7 +24,7 @@ tier_0 = CapacityDesires(
 small_footprint = CapacityDesires(
     service_tier=1,
     query_pattern=QueryPattern(
-        estimated_read_per_second=certain_int(200),
+        estimated_read_per_second=certain_int(100),
         estimated_write_per_second=certain_int(100),
         estimated_mean_read_latency_ms=certain_float(10),
         estimated_mean_write_latency_ms=certain_float(10),
@@ -112,7 +112,7 @@ def test_large_footprint():
         region="us-east-1",
         desires=large_footprint,
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.8xlarge"
+    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.12xlarge"
 
 
 def test_tier_3():

@@ -179,9 +179,13 @@ def _estimate_aurora_regional(
     desires: CapacityDesires,
     extra_model_arguments: Dict[str, Any],
 ) -> Optional[CapacityPlan]:
-    instance_family = instance.family
-    if instance_family not in ("db.x2g", "db.r6g", "db.r6i", "db.r5", "db.t4g"):
-        return None
+    db_type = extra_model_arguments.get("aurora.engine", "postgres")
+    if db_type == "postgres":
+        if "Aurora PostgreSQL" not in instance.platforms:
+            return None
+    else:
+        if "Aurora MySQL" not in instance.platforms:
+            return None
 
     if drive.name != "aurora":
         return None
@@ -190,7 +194,6 @@ def _estimate_aurora_regional(
     if desires.service_tier == 0:
         return None
 
-    db_type = extra_model_arguments.get("aurora.engine", "mysql")  # maybe we use postgres as default?
     requirement = _estimate_aurora_requirement(instance, desires, db_type)
     rps = desires.query_pattern.estimated_read_per_second.mid
 
