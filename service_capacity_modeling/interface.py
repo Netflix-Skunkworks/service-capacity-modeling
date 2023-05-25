@@ -271,16 +271,21 @@ class Instance(ExcludeUnsetModel):
     drive: Optional[Drive]
     annual_cost: float = 0
     lifecycle: Lifecycle = Lifecycle.stable
+    platforms: str = "EC2"
 
     family_separator: str = "."
 
     @property
     def family(self):
-        return self.name[:self.name.rindex(self.family_separator)]
+        if self.name.startswith("db."):
+            return f"db.{self.name.split(self.family_separator)[1]}"
+        return self.name.split(self.family_separator)[0]
 
     @property
     def size(self):
-        return self.name.split(self.family_separator)[-1]
+        if self.name.startswith("db."):
+            return self.name.split(self.family_separator)[2]
+        return self.name.split(self.family_separator)[1]
 
 
 class Service(ExcludeUnsetModel):
