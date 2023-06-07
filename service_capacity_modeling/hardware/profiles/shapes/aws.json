@@ -726,7 +726,7 @@
       "ram_gib": 15.71,
       "net_mbps": 500,
       "drive": null,
-      "platforms": "Aurora MySQL,Aurora PostgreSQL"
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
     },
     "db.r5.xlarge": {
       "name": "db.r5.xlarge",
@@ -735,7 +735,7 @@
       "ram_gib": 31.65,
       "net_mbps": 1000,
       "drive": null,
-      "platforms": "Aurora MySQL,Aurora PostgreSQL"
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
     },
     "db.r5.2xlarge": {
       "name": "db.r5.2xlarge",
@@ -744,7 +744,7 @@
       "ram_gib": 63.62,
       "net_mbps": 2000,
       "drive": null,
-      "platforms": "Aurora MySQL,Aurora PostgreSQL"
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
     },
     "db.r5.4xlarge": {
       "name": "db.r5.4xlarge",
@@ -753,7 +753,7 @@
       "ram_gib": 128,
       "net_mbps": 4000,
       "drive": null,
-      "platforms": "Aurora MySQL,Aurora PostgreSQL"
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
     },
     "db.r5.8xlarge": {
       "name": "db.r5.8xlarge",
@@ -762,7 +762,7 @@
       "ram_gib": 256,
       "net_mbps": 10000,
       "drive": null,
-      "platforms": "Aurora MySQL,Aurora PostgreSQL"
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
     },
     "db.r5.12xlarge": {
       "name": "db.r5.12xlarge",
@@ -771,7 +771,7 @@
       "ram_gib": 384,
       "net_mbps": 10000,
       "drive": null,
-      "platforms": "Aurora MySQL,Aurora PostgreSQL"
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
     },
     "db.r5.16xlarge": {
       "name": "db.r5.16xlarge",
@@ -780,7 +780,7 @@
       "ram_gib": 512,
       "net_mbps": 13600,
       "drive": null,
-      "platforms": "Aurora MySQL,Aurora PostgreSQL"
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
     },
     "db.r5.24xlarge": {
       "name": "db.r5.24xlarge",
@@ -789,7 +789,7 @@
       "ram_gib": 768,
       "net_mbps": 19000,
       "drive": null,
-      "platforms": "Aurora MySQL,Aurora PostgreSQL"
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
     }
   },
   "drives": {

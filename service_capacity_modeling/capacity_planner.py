@@ -9,6 +9,7 @@ from typing import Generator
 from typing import List
 from typing import Optional
 from typing import Sequence
+from typing import Set
 from typing import Tuple
 
 import numpy as np
@@ -21,11 +22,14 @@ from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import interval
 from service_capacity_modeling.interface import interval_percentile
 from service_capacity_modeling.interface import Lifecycle
 from service_capacity_modeling.interface import PlanExplanation
+from service_capacity_modeling.interface import Platform
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
@@ -172,21 +176,42 @@ def model_desires_percentiles(
     return results, d
 
 
-def _allow_hardware(
-    name: str,
-    lifecycle: Lifecycle,
+def _allow_instance(
+    instance: Instance,
+    allowed_names: Sequence[str],
+    allowed_lifecycles: Sequence[Lifecycle],
+    allowed_platforms: Set[Platform],
+) -> bool:
+    # If the user has explicitly asked for particular families instead
+    # of all lifecycles filter based on that
+    if allowed_names:
+        if instance.name not in allowed_names:
+            return False
+    # Otherwise consider lifecycle (default) and platform
+    else:
+        if instance.lifecycle not in allowed_lifecycles:
+            return False
+        if allowed_platforms.isdisjoint(instance.platforms):
+            return False
+
+    return True
+
+
+def _allow_drive(
+    drive: Drive,
     allowed_names: Sequence[str],
     allowed_lifecycles: Sequence[Lifecycle],
 ) -> bool:
     # If the user has explicitly asked for particular families instead
     # of all lifecycles filter based on that
     if allowed_names:
-        if name not in allowed_names:
+        if drive.name not in allowed_names:
             return False
-    # Otherwise consider lifecycle (default)
+    # Otherwise consider lifecycle (default) and platform
     else:
-        if lifecycle not in allowed_lifecycles:
+        if drive.lifecycle not in allowed_lifecycles:
             return False
+
     return True
 
 
@@ -366,11 +391,13 @@ class CapacityPlanner:
             desires.data_shape.reserved_instance_app_mem_gib
             + desires.data_shape.reserved_instance_system_mem_gib
         )
+        model = self._models[model_name]
+        allowed_platforms: Set[Platform] = set(model.allowed_platforms())
 
         plans = []
         for instance in hardware.instances.values():
-            if not _allow_hardware(
-                instance.family, instance.lifecycle, instance_families, lifecycles
+            if not _allow_instance(
+                instance, instance_families, lifecycles, allowed_platforms
             ):
                 continue
 
@@ -378,10 +405,10 @@ class CapacityPlanner:
                 continue
 
             for drive in hardware.drives.values():
-                if not _allow_hardware(drive.name, drive.lifecycle, drives, lifecycles):
+                if not _allow_drive(drive, drives, lifecycles):
                     continue
 
-                plan = self._models[model_name].capacity_plan(
+                plan = model.capacity_plan(
                     instance=instance,
                     drive=drive,
                     context=context,

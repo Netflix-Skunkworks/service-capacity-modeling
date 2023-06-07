@@ -16,6 +16,7 @@ from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
+from service_capacity_modeling.interface import Platform
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 
@@ -235,6 +236,15 @@ class CapacityModel:
         # quiet pylint
         (_, _) = user_desires, extra_model_arguments
         return tuple()
+
+    @staticmethod
+    def allowed_platforms() -> Tuple[Platform, ...]:
+        """Return which platforms this model accepts.
+
+        Most software can run on amd64 (Intel and AMD), but some models might
+        accept others
+        """
+        return (Platform.amd64,)
 
     @staticmethod
     def default_desires(
