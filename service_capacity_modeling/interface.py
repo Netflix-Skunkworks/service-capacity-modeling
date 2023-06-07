@@ -257,6 +257,24 @@ class Drive(ExcludeUnsetModel):
         return size * self.annual_cost_per_gib + r_cost + w_cost
 
 
+class Platform(str, Enum):
+    """Represents the platform of the hardware
+
+    For example a particular hardware type might offer x86_64, arm, or be a managed
+    instance type that only works with managed RDBMS like Aurora Postgres.
+
+    """
+
+    # Most Intel and AMD instance types
+    amd64 = "amd64"
+    # Graviton and other ARM based instance types
+    arm64 = "arm64"
+    # Special purpose aurora type
+    aurora_mysql = "Aurora MySQL"
+    # Special purpose aurora type
+    aurora_postgres = "Aurora PostgreSQL"
+
+
 class Instance(ExcludeUnsetModel):
     """Represents a cloud instance aka Hardware Shape
 
@@ -271,21 +289,18 @@ class Instance(ExcludeUnsetModel):
     drive: Optional[Drive]
     annual_cost: float = 0
     lifecycle: Lifecycle = Lifecycle.stable
-    platforms: str = "EC2"
+    # Typically hardware has a single platform, but sometimes they can act in multiple
+    platforms: List[Platform] = [Platform.amd64]
 
     family_separator: str = "."
 
     @property
     def family(self):
-        if self.name.startswith("db."):
-            return f"db.{self.name.split(self.family_separator)[1]}"
-        return self.name.split(self.family_separator)[0]
+        return self.name.rsplit(self.family_separator, 1)[0]
 
     @property
     def size(self):
-        if self.name.startswith("db."):
-            return self.name.split(self.family_separator)[2]
-        return self.name.split(self.family_separator)[1]
+        return self.name.rsplit(self.family_separator, 1)[1]
 
 
 class Service(ExcludeUnsetModel):

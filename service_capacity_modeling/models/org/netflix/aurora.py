@@ -3,6 +3,7 @@ import math
 from typing import Any
 from typing import Dict
 from typing import Optional
+from typing import Tuple
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -22,6 +23,7 @@ from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
+from service_capacity_modeling.interface import Platform
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
@@ -40,7 +42,8 @@ def _estimate_aurora_requirement(
     Cassandra aurora instances are deployed per region, not zone. The input desires
     should be the **regional** desire, and this function will return the regional
     capacity requirement
-    Todo: We'll start with what we have for RDS, given there shouldn't be too much different in engine itself
+    Todo: We'll start with what we have for RDS, given there shouldn't be too
+    much difference in engine itself
     """
 
     if db_type == "postgres":
@@ -92,7 +95,13 @@ def _rds_required_disk_ios(disk_size_gib: int, db_type: str, btree_fan_out: int 
 
 
 # This is a start, we should iterate based on the actual work load
-def _estimate_io_cost(db_type: str, desires, read_io_price: float, write_io_price: float, cache_hit_rate: float = 0.8):
+def _estimate_io_cost(
+    db_type: str,
+    desires,
+    read_io_price: float,
+    write_io_price: float,
+    cache_hit_rate: float = 0.8,
+):
     if db_type == "postgres":
         read_byte_per_io = 8192
     else:
@@ -100,9 +109,15 @@ def _estimate_io_cost(db_type: str, desires, read_io_price: float, write_io_pric
 
     write_byte_per_io = 4096
 
-    r_io = desires.query_pattern.estimated_read_per_second.mid * math.ceil(desires.query_pattern.estimated_mean_read_size_bytes.mid / read_byte_per_io)
+    r_io = desires.query_pattern.estimated_read_per_second.mid * math.ceil(
+        desires.query_pattern.estimated_mean_read_size_bytes.mid / read_byte_per_io
+    )
     # Assuming write can be batched
-    w_io = desires.query_pattern.estimated_write_per_second.mid * desires.query_pattern.estimated_mean_write_size_bytes.mid / write_byte_per_io
+    w_io = (
+        desires.query_pattern.estimated_write_per_second.mid
+        * desires.query_pattern.estimated_mean_write_size_bytes.mid
+        / write_byte_per_io
+    )
 
     r_cost = r_io * (1 - cache_hit_rate) * read_io_price
     w_cost = w_io * write_io_price
@@ -119,8 +134,8 @@ def _compute_aurora_region(
     required_disk_ios,
     required_disk_space,
     core_reference_ghz: float,
-    db_type:str,
-    desires:CapacityDesires
+    db_type: str,
+    desires: CapacityDesires,
 ) -> Optional[RegionClusterCapacity]:
     """Computes a regional cluster of a Aurora service
 
@@ -129,12 +144,16 @@ def _compute_aurora_region(
     adding more instances like Cassandra. Count of instance is always 1
     """
 
+    # TODO: This probably needs to be used ...
+    _ = required_disk_ios
     needed_cores = math.ceil(
         max(1, needed_cores // (instance.cpu_ghz / core_reference_ghz))
     )
 
-    # We can't scale Aurora horizontally by adding more nodes like we can for Cassandra
-    # so single instance must meet the whole cpu, memory and network bandwidth requirement
+    # We can't scale Aurora horizontally by adding more nodes like we can for
+    # Cassandra
+    # so single instance must meet the whole cpu, memory and network bandwidth
+    # requirement
     # Disk Scaling will be handled differently
     if (
         instance.cpu < needed_cores
@@ -146,11 +165,17 @@ def _compute_aurora_region(
     # calculate storage cost
     attached_drives = []
     attached_drive = drive.copy()
-    attached_drive.size_gib = max(1, required_disk_space(needed_disk_gib))  # todo: Figure out the IO vs disk
+    attached_drive.size_gib = max(
+        1, required_disk_space(needed_disk_gib)
+    )  # todo: Figure out the IO vs disk
     attached_drives.append(attached_drive)
 
-    io_cost = _estimate_io_cost(db_type, desires, drive.annual_cost_per_read_io[0][1],
-                                drive.annual_cost_per_write_io[0][1])
+    io_cost = _estimate_io_cost(
+        db_type,
+        desires,
+        drive.annual_cost_per_read_io[0][1],
+        drive.annual_cost_per_write_io[0][1],
+    )
     total_annual_cost = instance.annual_cost + attached_drive.annual_cost + io_cost
 
     logger.debug(
@@ -169,7 +194,7 @@ def _compute_aurora_region(
         instance=instance,
         attached_drives=attached_drives,
         annual_cost=total_annual_cost,
-        cluster_params={"instance_cost": instance.annual_cost}
+        cluster_params={"instance_cost": instance.annual_cost},
     )
 
 
@@ -181,10 +206,10 @@ def _estimate_aurora_regional(
 ) -> Optional[CapacityPlan]:
     db_type = extra_model_arguments.get("aurora.engine", "postgres")
     if db_type == "postgres":
-        if "Aurora PostgreSQL" not in instance.platforms:
+        if Platform.aurora_postgres not in instance.platforms:
             return None
     else:
-        if "Aurora MySQL" not in instance.platforms:
+        if Platform.aurora_mysql not in instance.platforms:
             return None
 
     if drive.name != "aurora":
@@ -209,7 +234,7 @@ def _estimate_aurora_regional(
         required_disk_space=lambda x: x * 1.2,  # Unscientific random guess!
         core_reference_ghz=requirement.core_reference_ghz,
         db_type=db_type,
-        desires=desires
+        desires=desires,
     )
 
     if not cluster:
@@ -220,7 +245,10 @@ def _estimate_aurora_regional(
     else:
         replicas = 1
 
-    costs = {"aurora-cluster.regional-clusters": cluster.annual_cost + (replicas - 1) * cluster.cluster_params["instance_cost"]}
+    costs = {
+        "aurora-cluster.regional-clusters": cluster.annual_cost
+        + (replicas - 1) * cluster.cluster_params["instance_cost"]
+    }
     clusters = Clusters(
         annual_costs=costs,
         zonal=[],
@@ -268,6 +296,10 @@ class NflxAuroraCapacityModel(CapacityModel):
     @staticmethod
     def extra_model_arguments_schema() -> Dict[str, Any]:
         return NflxAuroraArguments.schema()
+
+    @staticmethod
+    def allowed_platforms() -> Tuple[Platform, ...]:
+        return Platform.aurora_mysql, Platform.aurora_mysql
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments):
