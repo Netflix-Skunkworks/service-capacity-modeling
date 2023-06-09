@@ -138,10 +138,10 @@ def _estimate_cockroachdb_cluster_zonal(
     max_local_disk_gib: int = 2048,
     max_regional_size: int = 288,
     max_rps_to_disk: int = 500,
+    min_vcpu_per_instance: int = 4,
 ) -> Optional[CapacityPlan]:
 
-    # cockroachdb doesn't like to deploy on small cpu instances
-    if instance.cpu < 8:
+    if instance.cpu < min_vcpu_per_instance:
         return None
 
     # Right now CRDB doesn't deploy to cloud drives, just adding this
@@ -281,6 +281,8 @@ class NflxCockroachDBCapacityModel(CapacityModel):
         max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 500)
         # Very large nodes are hard to recover
         max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 2048)
+        # Cockroach Labs recommends a minimum of 8 vCPUs and strongly recommends no fewer than 4 vCPUs per node.
+        min_vcpu_per_instance: int = extra_model_arguments.get("min_vcpu_per_instance", 4)
 
         return _estimate_cockroachdb_cluster_zonal(
             instance=instance,
@@ -291,6 +293,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
             max_regional_size=max_regional_size,
             max_local_disk_gib=max_local_disk_gib,
             max_rps_to_disk=max_rps_to_disk,
+            min_vcpu_per_instance=min_vcpu_per_instance,
         )
 
     @staticmethod
