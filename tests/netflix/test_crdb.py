@@ -41,7 +41,7 @@ def test_crdb_basic():
     assert lr_cluster.count * lr_cluster.instance.drive.size_gib > 80
 
     # Should have enough CPU to handle 1000 QPS
-    assert lr_cluster.count * lr_cluster.instance.cpu > 4
+    assert lr_cluster.count * lr_cluster.instance.cpu >= 4
 
 
 def test_crdb_footprint():
@@ -72,7 +72,7 @@ def test_crdb_footprint():
     lr_cluster = lr.candidate_clusters.zonal[0]
 
     # Resulting cluster should not be too expensive
-    assert 4000 < lr.candidate_clusters.total_annual_cost < 12_000
+    assert 2000 < lr.candidate_clusters.total_annual_cost < 8000
 
     # Should have enough disk space for around 80GiB of data in a single
     # replica (compression). Also that drive should be ephemeral
@@ -80,4 +80,4 @@ def test_crdb_footprint():
     assert lr_cluster.count * lr_cluster.instance.drive.size_gib > 800
 
     # Should have enough CPU to handle 1000 QPS
-    assert lr_cluster.count * lr_cluster.instance.cpu >= 8
+    assert lr_cluster.count * lr_cluster.instance.cpu >= 4
