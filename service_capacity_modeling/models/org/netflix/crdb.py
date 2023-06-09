@@ -139,6 +139,7 @@ def _estimate_cockroachdb_cluster_zonal(
     max_regional_size: int = 288,
     max_rps_to_disk: int = 500,
     min_vcpu_per_instance: int = 4,
+    license_fee_per_core: float = 0.0,
 ) -> Optional[CapacityPlan]:
 
     if instance.cpu < min_vcpu_per_instance:
@@ -231,10 +232,11 @@ def _estimate_cockroachdb_cluster_zonal(
         return None
 
     ec2_cost = zones_per_region * cluster.annual_cost
+    license_fee = zones_per_region * (cluster.instance.cpu * license_fee_per_core)
 
     cluster.cluster_type = "cockroachdb"
     clusters = Clusters(
-        annual_costs={"cockroachdb-zonal": Decimal(ec2_cost)},
+        annual_costs={"cockroachdb-zonal": Decimal(ec2_cost + license_fee)},
         zonal=[cluster] * zones_per_region,
         regional=[],
     )
@@ -283,6 +285,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
         max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 2048)
         # Cockroach Labs recommends a minimum of 8 vCPUs and strongly recommends no fewer than 4 vCPUs per node.
         min_vcpu_per_instance: int = extra_model_arguments.get("min_vcpu_per_instance", 4)
+        license_fee_per_core: float = extra_model_arguments.get("license_fee_per_core", 0.0)
 
         return _estimate_cockroachdb_cluster_zonal(
             instance=instance,
@@ -294,6 +297,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
             max_local_disk_gib=max_local_disk_gib,
             max_rps_to_disk=max_rps_to_disk,
             min_vcpu_per_instance=min_vcpu_per_instance,
+            license_fee_per_core=license_fee_per_core,
         )
 
     @staticmethod
