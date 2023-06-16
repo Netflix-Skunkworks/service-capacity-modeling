@@ -316,6 +316,7 @@ class Service(ExcludeUnsetModel):
     annual_cost_per_gib: float = 0
     annual_cost_per_read_io: float = 0
     annual_cost_per_write_io: float = 0
+    annual_cost_per_core: float = 0
 
     # These defaults assume a cloud blob storage like S3
     read_io_latency_ms: FixedInterval = FixedInterval(
@@ -377,6 +378,7 @@ class ServicePricing(ExcludeUnsetModel):
     annual_cost_per_gib: float = 0
     annual_cost_per_read_io: float = 0
     annual_cost_per_write_io: float = 0
+    annual_cost_per_core: float = 0
 
 
 class HardwarePricing(ExcludeUnsetModel):

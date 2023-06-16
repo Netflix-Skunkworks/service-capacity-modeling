@@ -285,7 +285,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
         max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 2048)
         # Cockroach Labs recommends a minimum of 8 vCPUs and strongly recommends no fewer than 4 vCPUs per node.
         min_vcpu_per_instance: int = extra_model_arguments.get("min_vcpu_per_instance", 4)
-        license_fee_per_core: float = extra_model_arguments.get("license_fee_per_core", 0.0)
+        license_fee_per_core: float = context.services["crdb_core_license"].annual_cost_per_core
 
         return _estimate_cockroachdb_cluster_zonal(
             instance=instance,
