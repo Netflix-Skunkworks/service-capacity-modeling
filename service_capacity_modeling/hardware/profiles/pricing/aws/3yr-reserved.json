@@ -99,6 +99,9 @@
       },
       "net.intra.region": {
         "annual_cost_per_gib": 0.02
+      },
+      "crdb_core_license": {
+        "annual_cost_per_core": 0
       }
     },
     "zones_in_region": 3

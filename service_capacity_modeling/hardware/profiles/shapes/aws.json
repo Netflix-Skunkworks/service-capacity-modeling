@@ -831,6 +831,9 @@
     },
     "net.intra.region": {
       "name": "Intra-region (within) transfer costs"
+    },
+    "crdb_core_license": {
+        "name": "CRDB license fee"
     }
   }
 }
