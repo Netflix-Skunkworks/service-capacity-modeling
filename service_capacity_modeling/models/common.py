@@ -291,6 +291,13 @@ def compute_stateful_zone(
             utils.next_n(read_io, n=200),
             utils.next_n(write_io, n=200),
         )
+        if (read_io + write_io) > drive.max_io_per_s:
+            ratio = (read_io + write_io) / drive.max_io_per_s
+            count = max(cluster_size(math.ceil(count * ratio)), min_count)
+            cost = count * instance.annual_cost
+            read_io = utils.next_n(read_io * ratio, n=200)
+            write_io = utils.next_n(write_io * ratio, n=200)
+
         attached_drive = drive.copy()
         attached_drive.size_gib = ebs_gib
         attached_drive.read_io_per_s = int(round(read_io, 2))
@@ -326,9 +333,9 @@ def gp2_gib_for_io(read_ios) -> int:
     return int(max(1, read_ios // 3))
 
 
-def cloud_gib_for_io(drive, read_ios, space_gib) -> int:
+def cloud_gib_for_io(drive, total_ios, space_gib) -> int:
     if drive.name == "gp2":
-        return gp2_gib_for_io(read_ios)
+        return gp2_gib_for_io(total_ios)
     else:
         return space_gib
 

@@ -165,6 +165,7 @@ def _upsert_params(cluster, params):
 
 
 # pylint: disable=too-many-locals
+# pylint: disable=too-many-return-statements
 # flake8: noqa: C901
 def _estimate_cassandra_cluster_zonal(
     instance: Instance,
@@ -174,6 +175,7 @@ def _estimate_cassandra_cluster_zonal(
     zones_per_region: int = 3,
     copies_per_region: int = 3,
     require_local_disks: bool = False,
+    require_attached_disks: bool = False,
     required_cluster_size: Optional[int] = None,
     max_rps_to_disk: int = 500,
     max_local_disk_gib: int = 2048,
@@ -190,8 +192,12 @@ def _estimate_cassandra_cluster_zonal(
     if instance.drive is None and require_local_disks:
         return None
 
-    # Cassandra only deploys on gp2 drives right now
-    if drive.name != "gp2":
+    # if we're not allowed to use local disks, skip ephems
+    if instance.drive is not None and require_attached_disks:
+        return None
+
+    # Cassandra only deploys on gp2 and gp3 drives right now
+    if drive.name not in ("gp2", "gp3"):
         return None
 
     rps = desires.query_pattern.estimated_read_per_second.mid // zones_per_region
@@ -201,11 +207,13 @@ def _estimate_cassandra_cluster_zonal(
     write_bytes_per_sec = (
         write_per_sec * desires.query_pattern.estimated_mean_write_size_bytes.mid
     )
+    read_bytes_per_sec = rps * desires.query_pattern.estimated_mean_read_size_bytes.mid
     # Write IO will be 1 to commitlog + 2 writes (plus 2 reads) in the first
     # hour during compaction.
     # https://aws.amazon.com/ebs/volume-types/ says IOPS are 16k for io2/gp2
     # so for now we're just hardcoding.
     write_io_per_sec = (1 + 4) * max(1, write_bytes_per_sec // 16384)
+    read_io_per_sec = max(rps, read_bytes_per_sec // 16384)
 
     # Based on the disk latency and the read latency SLOs we adjust our
     # working set to keep more or less data in RAM. Faster drives need
@@ -262,7 +270,7 @@ def _estimate_cassandra_cluster_zonal(
         # Take into account the reads per read
         # from the per node dataset using leveled compaction
         required_disk_ios=lambda size, count: (
-            _cass_io_per_read(size) * math.ceil(rps / count),
+            _cass_io_per_read(size) * math.ceil(read_io_per_sec / count),
             write_io_per_sec / count,
         ),
         # C* requires ephemeral disks to be 25% full because compaction
@@ -418,6 +426,10 @@ class NflxCassandraArguments(BaseModel):
         default=False,
         description="If local (ephemeral) drives are required",
     )
+    require_attached_disks: bool = Field(
+        default=False,
+        description="If attached (ebs) drives are required",
+    )
     required_cluster_size: Optional[int] = Field(
         default=None,
         description="Require zonal clusters to be this size (force vertical scaling)",
@@ -464,6 +476,9 @@ class NflxCassandraCapacityModel(CapacityModel):
         require_local_disks: bool = extra_model_arguments.get(
             "require_local_disks", False
         )
+        require_attached_disks: bool = extra_model_arguments.get(
+            "require_attached_disks", False
+        )
         required_cluster_size: Optional[int] = extra_model_arguments.get(
             "required_cluster_size", None
         )
@@ -493,6 +508,7 @@ class NflxCassandraCapacityModel(CapacityModel):
             zones_per_region=context.zones_in_region,
             copies_per_region=copies_per_region,
             require_local_disks=require_local_disks,
+            require_attached_disks=require_attached_disks,
             required_cluster_size=required_cluster_size,
             max_rps_to_disk=max_rps_to_disk,
             max_regional_size=max_regional_size,
