@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from decimal import Decimal
 from enum import Enum
 from functools import lru_cache
@@ -199,6 +200,8 @@ class Drive(ExcludeUnsetModel):
     single_tenant: bool = True
     # If this drive can scale, how large can it scale to
     max_scale_size_gib: int = 0
+    # If this drive can scale IO, how large can it scale to
+    max_scale_io_per_s: int = 0
 
     lifecycle: Lifecycle = Lifecycle.stable
     compatible_families: List[str] = []
@@ -224,6 +227,13 @@ class Drive(ExcludeUnsetModel):
             return self.max_scale_size_gib
         else:
             return self.size_gib
+
+    @property
+    def max_io_per_s(self):
+        if self.max_scale_io_per_s != 0:
+            return self.max_scale_io_per_s
+        else:
+            return sys.maxsize
 
     @property
     def annual_cost(self):

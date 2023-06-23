@@ -75,6 +75,72 @@ def test_capacity_small_fast():
         assert small_result.cluster_params["cassandra.heap.table.percent"] == 0.11
 
 
+def test_ebs_high_reads():
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(100_000),
+                estimated_write_per_second=certain_int(1_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(1_000),
+            ),
+        ),
+        extra_model_arguments={"require_attached_disks": True},
+    )[0]
+    result = cap_plan.candidate_clusters.zonal[0]
+
+    cores = result.count * result.instance.cpu
+    assert 64 <= cores <= 128
+    # Should get gp3
+    assert result.attached_drives[0].name == "gp3"
+    # 1TiB / ~32 nodes
+    assert result.attached_drives[0].read_io_per_s is not None
+    ios = result.attached_drives[0].read_io_per_s * result.count
+    # Each zone is handling ~33k reads per second, so total disk ios should be < 3x that
+    # 3 from each level
+    assert 100_000 < ios < 400_000
+
+
+def test_ebs_high_writes():
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(10_000),
+                estimated_write_per_second=certain_int(100_000),
+                estimated_mean_write_size_bytes=certain_int(1024 * 8),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(10_000),
+            ),
+        ),
+        extra_model_arguments={"require_attached_disks": True},
+    )[0]
+    result = cap_plan.candidate_clusters.zonal[0]
+
+    cores = result.count * result.instance.cpu
+    assert 128 <= cores <= 512
+    # Should get gp3
+    assert result.attached_drives[0].name == "gp3"
+    # 1TiB / ~32 nodes
+    assert result.attached_drives[0].read_io_per_s is not None
+    assert result.attached_drives[0].write_io_per_s is not None
+
+    read_ios = result.attached_drives[0].read_io_per_s * result.count
+    write_ios = result.attached_drives[0].write_io_per_s * result.count
+
+    # 10TiB ~= 4 IO/read -> 3.3k r/zone/s -> 12k /s
+    assert 20_000 < read_ios < 60_000
+    # 33k wps * 8KiB  / 16KiB write IO size = 16.5k / s * 4 for compaction = 64k
+    assert 60_000 < write_ios < 100_000
+
+
 def test_capacity_high_writes():
     cap_plan = planner.plan_certain(
         model_name="org.netflix.cassandra",

@@ -162,7 +162,7 @@ def test_worn_dataset():
     assert lr_cluster.instance.name.startswith(
         "m5."
     ) or lr_cluster.instance.name.startswith("r5.")
-    assert lr_cluster.attached_drives[0].name == "gp2"
+    assert lr_cluster.attached_drives[0].name == "gp3"
     # gp2 should not provision massive drives, prefer to upcolor
     assert lr_cluster.attached_drives[0].size_gib < 9000
     assert lr_cluster.attached_drives[0].size_gib * lr_cluster.count * 3 > 204800
