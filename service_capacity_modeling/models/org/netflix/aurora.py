@@ -321,13 +321,14 @@ class NflxAuroraCapacityModel(CapacityModel):
                 estimated_mean_write_size_bytes=Interval(
                     low=64, mid=512, high=2048, confidence=0.90
                 ),
-                # probably closer to CRDB than Cassandra. Query by PK in MySQL takes
-                # total of ~300 ms end to end
+                # probably closer to CRDB than Cassandra. Query by PK in MySQL
+                # theoretically takes total of ~300 us end to end, but
+                # PostgreSQL is usually slower ...
                 estimated_mean_read_latency_ms=Interval(
-                    low=5, mid=30, high=150, confidence=0.90
+                    low=1, mid=4, high=100, confidence=0.90
                 ),
                 estimated_mean_write_latency_ms=Interval(
-                    low=5, mid=30, high=150, confidence=0.90
+                    low=1, mid=6, high=200, confidence=0.90
                 ),
                 # Single row fetch by PK in MySQL takes total of ~300 ms end to end
                 read_latency_slo_ms=FixedInterval(
@@ -347,9 +348,10 @@ class NflxAuroraCapacityModel(CapacityModel):
                     confidence=0.90,
                 ),
             ),
+            # Assume that the working set is between 20% by default
             data_shape=DataShape(
                 estimated_working_set_percent=Interval(
-                    low=0.05, mid=0.50, high=0.70, confidence=0.8
+                    low=0.05, mid=0.10, high=0.20, confidence=0.8
                 )
             ),
         )
