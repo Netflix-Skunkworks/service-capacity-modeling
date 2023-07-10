@@ -9,7 +9,7 @@ setuptools.setup(
     description="Contains utilities for modeling database capacity on a cloud",
     packages=setuptools.find_packages(exclude=("tests*", "notebooks*")),
     install_requires=[
-        "pydantic",
+        "pydantic<2.0",
         "scipy",
         "numpy",
         'importlib_resources; python_version < "3.7"',
