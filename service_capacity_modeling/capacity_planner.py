@@ -26,7 +26,6 @@ from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import interval
-from service_capacity_modeling.interface import interval_percentile
 from service_capacity_modeling.interface import Lifecycle
 from service_capacity_modeling.interface import PlanExplanation
 from service_capacity_modeling.interface import Platform
@@ -39,6 +38,7 @@ from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.org import netflix
 from service_capacity_modeling.models.utils import reduce_by_family
 from service_capacity_modeling.stats import dist_for_interval
+from service_capacity_modeling.stats import interval_percentile
 
 logger = logging.getLogger(__name__)
 
@@ -124,37 +124,40 @@ def model_desires_percentiles(
     for field in sorted(query_pattern.__fields__):
         d = getattr(query_pattern, field)
         if isinstance(d, Interval):
-            query_pattern_means[field] = certain_float(d.mid)
-            if d.confidence <= 0.99:
-                samples = dist_for_interval(d).rvs(1028)
-                query_pattern_simulation[field] = interval_percentile(
-                    samples, percentiles
-                )
-                continue
-        query_pattern_simulation[field] = [d] * len(percentiles)
-        query_pattern_means[field] = d
+            query_pattern_simulation[field] = interval_percentile(d, percentiles)
+            if d.can_simulate:
+                query_pattern_means[field] = certain_float(d.mid)
+            else:
+                query_pattern_means[field] = d
+        else:
+            query_pattern_simulation[field] = [d] * len(percentiles)
+            query_pattern_means[field] = d
 
     data_shape_simulation = {}
     data_shape_means = {}
     for field in sorted(data_shape.__fields__):
         d = getattr(data_shape, field)
         if isinstance(d, Interval):
-            data_shape_means[field] = certain_float(d.mid)
-            if d.confidence <= 0.99:
-                samples = dist_for_interval(d).rvs(1028)
-                data_shape_simulation[field] = interval_percentile(samples, percentiles)
-                continue
-        data_shape_simulation[field] = [d] * len(percentiles)
-        data_shape_means[field] = d
+            data_shape_simulation[field] = interval_percentile(d, percentiles)
+            if d.can_simulate:
+                data_shape_means[field] = certain_float(d.mid)
+            else:
+                data_shape_means[field] = d
+        else:
+            data_shape_simulation[field] = [d] * len(percentiles)
+            data_shape_means[field] = d
 
     results = []
     for i in range(len(percentiles)):
-        query_pattern = QueryPattern(
-            **{
-                f: query_pattern_simulation[f][i]
-                for f in sorted(query_pattern.__fields__)
-            }
-        )
+        try:
+            query_pattern = QueryPattern(
+                **{
+                    f: query_pattern_simulation[f][i]
+                    for f in sorted(query_pattern.__fields__)
+                }
+            )
+        except Exception as exp:
+            raise exp
         data_shape = DataShape(
             **{f: data_shape_simulation[f][i] for f in sorted(data_shape.__fields__)}
         )

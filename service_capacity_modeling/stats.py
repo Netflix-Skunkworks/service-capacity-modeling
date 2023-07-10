@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Sequence
 from typing import Tuple
 
 import numpy as np
@@ -10,6 +11,7 @@ from scipy.stats import beta as beta_dist
 from scipy.stats import gamma as gamma_dist
 from scipy.stats import rv_continuous
 
+from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import IntervalModel
 
@@ -66,7 +68,7 @@ def _gamma_dist_from_interval(
     result = root(f, 2)
     shape = result.x[0]
 
-    dist = gamma_dist(shape, loc=minimum, scale=(mean / shape))
+    dist = gamma_dist(shape, loc=minimum, scale=mean / shape)
     dist.random_state = np.random.default_rng(seed=seed)
     return (shape, dist)
 
@@ -159,3 +161,14 @@ def dist_for_interval(interval: Interval, seed: int = 0xCAFE) -> rv_continuous:
     else:
         result = beta_for_interval(interval=interval, seed=seed)
     return result
+
+
+def interval_percentile(
+    interval: Interval, percentiles: Sequence[int]
+) -> Sequence[Interval]:
+    if interval.can_simulate:
+        samples = dist_for_interval(interval).rvs(1028)
+        p = np.percentile(samples, percentiles)
+        return [certain_float(i) for i in p]
+    else:
+        return [interval] * len(percentiles)

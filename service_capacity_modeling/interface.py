@@ -155,13 +155,6 @@ def interval(samples: Sequence[float], low_p: int = 5, high_p: int = 95) -> Inte
     )
 
 
-def interval_percentile(
-    samples: Sequence[float], percentiles: Sequence[int]
-) -> Sequence[Interval]:
-    p = np.percentile(samples, percentiles)
-    return [certain_float(i) for i in p]
-
-
 ###############################################################################
 #              Models (structs) for how we describe hardware                  #
 ###############################################################################
@@ -555,11 +548,11 @@ class DataShape(ExcludeUnsetModel):
 
     # How much fixed memory must be provisioned per instance for the
     # application (e.g. for process heap memory)
-    reserved_instance_app_mem_gib: int = 2
+    reserved_instance_app_mem_gib: float = 2
 
     # How much fixed memory must be provisioned per instance for the
     # system (e.g. for kernel and other system processes)
-    reserved_instance_system_mem_gib: int = 1
+    reserved_instance_system_mem_gib: float = 1
 
     # How durable does this dataset need to be. We want to provision
     # sufficient replication and backups of data to achieve the target
