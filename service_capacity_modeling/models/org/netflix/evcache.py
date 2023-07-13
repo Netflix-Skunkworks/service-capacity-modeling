@@ -45,10 +45,34 @@ class Replication(str, Enum):
     evicts = "evicts"
 
 
+def calculate_read_cpu_time_evcache_ms(read_size_bytes: float) -> float:
+    # Fitted a curve based on some data that we crunched from couple of
+    # read heavy clusters
+    # In memory
+    #  250 bit - 10 micros
+    # 1520 bit - 41 micros
+    # 8250 bit - 66 micros
+    # On disk
+    # 24   KiB - 133 micros
+    # 40   KiB - 158 top of our curve
+    # Fit a logistic curve, requiring it to go through first
+    # point
+    read_latency_ms = \
+        979.4009 + (-0.06853492 - 979.4009)/math.pow((1 + math.pow(read_size_bytes/13061.23, 0.180864)), 0.0002819491)
+    return max(read_latency_ms, 0.005)
+
+def calculate_spread_cost(cluster_size: int, max_cost=100000, min_cost=0.0) -> float:
+    if cluster_size > 10:
+        return min_cost
+    if cluster_size < 2:
+        return max_cost
+    return min_cost + (max_cost - cluster_size * (max_cost - min_cost) / 30.0)
+
+
 def _estimate_evcache_requirement(
     instance: Instance,
     desires: CapacityDesires,
-    working_set: float,
+    working_set: Optional[float],
     copies_per_region: int,
     zones_per_region: int = 3,
 ) -> Tuple[CapacityRequirement, Tuple[str, ...]]:
@@ -57,20 +81,25 @@ def _estimate_evcache_requirement(
     The input desires should be the **regional** desire, and this function will
     return the zonal capacity requirement
     """
-    # EVCache can run at full CPU utilization
+    # EVCache needs to have headroom for region failover
+
     needed_cores = sqrt_staffed_cores(desires)
+
+    # For tier 0, we double the number of cores to account for caution
+    if desires.service_tier == 0:
+        needed_cores = needed_cores * 2
 
     # (Arun): Keep 20% of available bandwidth for cache warmer
     needed_network_mbps = simple_network_mbps(desires) * 1.25
 
     needed_disk = math.ceil(
-        desires.data_shape.estimated_state_size_gib.mid * copies_per_region,
+        desires.data_shape.estimated_state_size_gib.mid,
     )
 
     regrets: Tuple[str, ...] = ("spend", "mem")
     # (Arun): As of 2021 we are using ephemerals exclusively and do not
     # use cloud drives
-    if instance.drive is None:
+    if working_set is None or desires.data_shape.estimated_state_size_gib.mid < 110.0:
         # We can't currently store data on cloud drives, but we can put the
         # dataset into memory!
         needed_memory = float(needed_disk)
@@ -81,13 +110,9 @@ def _estimate_evcache_requirement(
         needed_memory = float(working_set) * float(needed_disk)
         regrets = ("spend", "disk", "mem")
 
-    # Now convert to per zone
-    needed_cores = max(1, needed_cores // zones_per_region)
-    if needed_disk > 0:
-        needed_disk = max(1, needed_disk // zones_per_region)
-    else:
-        needed_disk = needed_disk // zones_per_region
-    needed_memory = max(1, int(needed_memory // zones_per_region))
+    # For EVCache, writes go to all zones
+    # Regional reads can also go to any one zone due to app's zone affinity
+    needed_cores = max(1, needed_cores)
     logger.debug(
         "Need (cpu, mem, disk, working) = (%s, %s, %s, %f)",
         needed_cores,
@@ -146,16 +171,20 @@ def _estimate_evcache_cluster_zonal(
     # working set to keep more or less data in RAM. Faster drives need
     # less fronting RAM.
     ws_drive = instance.drive or drive
-    working_set = working_set_from_drive_and_slo(
-        drive_read_latency_dist=dist_for_interval(ws_drive.read_io_latency_ms),
-        read_slo_latency_dist=dist_for_interval(
-            desires.query_pattern.read_latency_slo_ms
-        ),
-        estimated_working_set=desires.data_shape.estimated_working_set_percent,
-        # Caches have very tight latency SLOs, so we target a high
-        # percentile of the drive latency distribution for WS calculation
-        target_percentile=0.99,
-    ).mid
+
+    if ws_drive:
+        working_set = working_set_from_drive_and_slo(
+            drive_read_latency_dist=dist_for_interval(ws_drive.read_io_latency_ms),
+            read_slo_latency_dist=dist_for_interval(
+                desires.query_pattern.read_latency_slo_ms
+            ),
+            estimated_working_set=desires.data_shape.estimated_working_set_percent,
+            # Caches have very tight latency SLOs, so we target a high
+            # percentile of the drive latency distribution for WS calculation
+            target_percentile=0.99,
+        ).mid
+    else:
+        working_set = None
 
     requirement, regrets = _estimate_evcache_requirement(
         instance=instance,
@@ -182,7 +211,6 @@ def _estimate_evcache_cluster_zonal(
         return base_mem + variable_os
 
     requirement.context["osmem"] = reserve_memory(instance.ram_gib)
-
     # EVCache clusters aim to be at least 2 nodes per zone to start
     # out with for tier 0
     min_count = 0
@@ -208,7 +236,6 @@ def _estimate_evcache_cluster_zonal(
         reserve_memory=lambda x: base_mem,
         core_reference_ghz=requirement.core_reference_ghz,
     )
-
     # Communicate to the actual provision that if we want reduced RF
     params = {"evcache.copies": copies_per_region}
     _upsert_params(cluster, params)
@@ -239,9 +266,11 @@ def _estimate_evcache_cluster_zonal(
         )
 
     ec2_cost = zones_per_region * cluster.annual_cost
+    spread_cost = calculate_spread_cost(cluster.count)
 
     # Account for the clusters and replication costs
-    evcache_costs = {"evcache.zonal-clusters": ec2_cost}
+    evcache_costs = {"evcache.zonal-clusters": ec2_cost, "evcache.spread.cost": spread_cost}
+
     for s in services:
         evcache_costs[f"{s.service_type}"] = s.annual_cost
 
@@ -354,6 +383,19 @@ class NflxEVCacheCapacityModel(CapacityModel):
                     f"User asked for {key}={value}"
                 )
 
+        estimated_read_size: Interval = Interval(
+            **user_desires.query_pattern.dict(exclude_unset=True).get(
+                "estimated_mean_read_size_bytes",
+                dict(low=16, mid=1024, high=65536, confidence=0.95),
+            )
+        )
+        estimated_read_latency_ms: Interval = Interval(
+            low=calculate_read_cpu_time_evcache_ms(estimated_read_size.low),
+            mid=calculate_read_cpu_time_evcache_ms(estimated_read_size.mid),
+            high=calculate_read_cpu_time_evcache_ms(estimated_read_size.high),
+            confidence=estimated_read_size.confidence,
+        )
+
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(
@@ -367,20 +409,16 @@ class NflxEVCacheCapacityModel(CapacityModel):
                             target_consistency=AccessConsistency.never
                         ),
                     ),
-                    estimated_mean_read_size_bytes=Interval(
-                        low=128, mid=1024, high=65536, confidence=0.95
-                    ),
+                    estimated_mean_read_size_bytes=estimated_read_size,
                     estimated_mean_write_size_bytes=Interval(
                         low=64, mid=512, high=1024, confidence=0.95
                     ),
-                    # memcache point queries usually take just around 100us
-                    # of on CPU time for reads and writes. Memcache is very
-                    # fast
-                    estimated_mean_read_latency_ms=Interval(
-                        low=0.01, mid=0.1, high=0.2, confidence=0.98
-                    ),
+                    # evcache read latency is sensitive to payload size
+                    # so this is computed above
+                    estimated_mean_read_latency_ms=estimated_read_latency_ms,
+                    # evcache bulk puts usually take slightly longer
                     estimated_mean_write_latency_ms=Interval(
-                        low=0.01, mid=0.1, high=0.2, confidence=0.98
+                        low=0.01, mid=0.01, high=0.01, confidence=0.98
                     ),
                     # Assume point queries, "1 millisecond SLO"
                     read_latency_slo_ms=FixedInterval(
@@ -406,7 +444,7 @@ class NflxEVCacheCapacityModel(CapacityModel):
                         low=10, mid=100, high=600, confidence=0.98
                     ),
                     # (Arun): The management sidecar takes 512 MiB
-                    reserved_instance_app_mem_gib=0.5,
+                    reserved_instance_app_mem_gib=1,
                     # account for the memcached connection memory
                     # and system requirements.
                     # (Arun) We currently use 1 GiB for connection memory
@@ -415,7 +453,6 @@ class NflxEVCacheCapacityModel(CapacityModel):
             )
         else:
             return CapacityDesires(
-                # (FIXME): Need to pair with memcache folks on the exact values
                 query_pattern=QueryPattern(
                     access_pattern=AccessPattern.throughput,
                     access_consistency=GlobalConsistency(
@@ -427,19 +464,16 @@ class NflxEVCacheCapacityModel(CapacityModel):
                             target_consistency=AccessConsistency.never
                         ),
                     ),
-                    estimated_mean_read_size_bytes=Interval(
-                        low=128, mid=1024, high=65536, confidence=0.95
-                    ),
+                    estimated_mean_read_size_bytes=estimated_read_size,
                     estimated_mean_write_size_bytes=Interval(
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),
-                    # evcache bulk reads usually take slightly longer
-                    estimated_mean_read_latency_ms=Interval(
-                        low=0.01, mid=0.15, high=0.3, confidence=0.98
-                    ),
+                    # evcache read latency is sensitive to payload size
+                    # so this is computed above
+                    estimated_mean_read_latency_ms=estimated_read_latency_ms,
                     # evcache bulk puts usually take slightly longer
                     estimated_mean_write_latency_ms=Interval(
-                        low=0.01, mid=0.15, high=0.3, confidence=0.98
+                        low=0.01, mid=0.01, high=0.01, confidence=0.98
                     ),
                     # Assume they're multi-getting -> slow reads
                     read_latency_slo_ms=FixedInterval(
@@ -466,7 +500,7 @@ class NflxEVCacheCapacityModel(CapacityModel):
                         low=10, mid=100, high=1000, confidence=0.98
                     ),
                     # (Arun): The management sidecar takes 512 MiB
-                    reserved_instance_app_mem_gib=0.5,
+                    reserved_instance_app_mem_gib=1,
                     # account for the memcached connection memory
                     # and system requirements.
                     # (Arun) We currently use 1 GiB base for connection memory

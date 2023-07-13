@@ -57,7 +57,23 @@ def _sqrt_staffed_cores(rps: float, latency_s: float, qos: float) -> int:
 
 
 def sqrt_staffed_cores(desires: CapacityDesires) -> int:
-    """Computes cores given a sqrt staffing model"""
+    """Computes cores given a sqrt staffing model
+
+    Little's Law: Concurrency = Average Rate * Average Latency
+    For example: 0.1 average concurrency = 100 / second * 1 millisecond
+
+    However, if you provision for average, when statistically unlikely traffic
+    spikes happen, you will queue, creating _latency_.
+
+    Square root staffing says to avoid that latency instead of provisioning
+    average number of cores, you provision
+
+    Cores = (Rate * Latency) + (QoS * sqrt(Rate * Latency))
+    Cores = (Required cores) + (Safety margin)
+
+    Pick higher QoS to minimize the probability of queueing. In our case we do it
+    based on tier.
+    """
     qos = _QOS(desires.service_tier)
     read_rps, read_lat = (
         desires.query_pattern.estimated_read_per_second.mid,

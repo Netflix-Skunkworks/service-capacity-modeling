@@ -283,10 +283,10 @@ def test_kv_plus_evcache_rps_exceeding_250k():
             assert zlr_ev.instance.family[0] in ("r", "m", "i")
 
             # Validate EVCache cost for 300k RPS + 300k WPS
-            assert least_regret_clusters.annual_costs["evcache.zonal-clusters"] < 10000
+            assert least_regret_clusters.annual_costs["evcache.zonal-clusters"] < 30000
 
             # Costs for KV + C* + EVCache clusters, including networking for C*
-            assert len(least_regret_clusters.annual_costs.keys()) == 6
+            assert len(least_regret_clusters.annual_costs.keys()) == 7
 
 
 def test_kv_plus_evcache_rps_exceeding_100k_and_sufficient_read_write_ratio():
@@ -386,10 +386,10 @@ def test_kv_plus_evcache_rps_exceeding_100k_and_sufficient_read_write_ratio():
             assert zlr_ev.instance.family[0] in ("r", "m", "i")
 
             # Validate EVCache cost for 300k RPS + 300k WPS
-            assert least_regret_clusters.annual_costs["evcache.zonal-clusters"] < 10000
+            assert least_regret_clusters.annual_costs["evcache.zonal-clusters"] < 30000
 
             # Costs for KV + C* + EVCache clusters, including networking for C*
-            assert len(least_regret_clusters.annual_costs.keys()) == 6
+            assert len(least_regret_clusters.annual_costs.keys()) == 7
 
 
 def test_kv_rps_exceeding_100k_but_insufficient_read_write_ratio():
