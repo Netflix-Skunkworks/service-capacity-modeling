@@ -19,6 +19,8 @@ from pydantic import Field
 
 
 GIB_IN_BYTES = 1024 * 1024 * 1024
+MIB_IN_BYTES = 1024 * 1024
+MEGABIT_IN_BYTES = (1000 * 1000) / 8
 
 
 class ExcludeUnsetModel(BaseModel):
@@ -207,6 +209,10 @@ class Drive(ExcludeUnsetModel):
     max_scale_io_per_s: int = 0
     # How large is an "IO" against this device
     block_size_kib: int = 4
+    # When sequential how much IO is grouped into a single "IO"
+    # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-io-characteristics.html
+    # Some cloud drives can group sequential ops together and DBs take advantage
+    group_size_kib: int = 4
 
     lifecycle: Lifecycle = Lifecycle.stable
     compatible_families: List[str] = []
@@ -225,6 +231,14 @@ class Drive(ExcludeUnsetModel):
     write_io_latency_ms: FixedInterval = FixedInterval(
         low=0.6, mid=2, high=3, confidence=0.9
     )
+
+    @property
+    def rand_io_size_kib(self) -> int:
+        return self.block_size_kib
+
+    @property
+    def seq_io_size_kib(self) -> int:
+        return max(self.block_size_kib, self.group_size_kib)
 
     @property
     def max_size_gib(self):

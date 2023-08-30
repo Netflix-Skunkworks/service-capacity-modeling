@@ -24,15 +24,15 @@ from service_capacity_modeling.interface import GIB_IN_BYTES
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
+from service_capacity_modeling.interface import MEGABIT_IN_BYTES
+from service_capacity_modeling.interface import MIB_IN_BYTES
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
-from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.org.netflix.iso_date_math import iso_to_seconds
-from service_capacity_modeling.models.utils import next_n
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,7 @@ class ClusterType(str, Enum):
 def _estimate_kafka_requirement(
     desires: CapacityDesires,
     copies_per_region: int,
+    hot_retention_seconds: float,
     zones_per_region: int = 3,
 ) -> Tuple[CapacityRequirement, Tuple[str, ...]]:
     """Estimate the capacity required for one zone given a regional desire
@@ -55,11 +56,11 @@ def _estimate_kafka_requirement(
     normalized_to_mib = desires.copy(deep=True)
     read_mib_per_second = (
         normalized_to_mib.query_pattern.estimated_mean_read_size_bytes.mid
-        / (1024 * 1024)
+        / MIB_IN_BYTES
     )
     write_mib_per_second = (
         normalized_to_mib.query_pattern.estimated_mean_write_size_bytes.mid
-        / (1024 * 1024)
+        / MIB_IN_BYTES
     )
 
     # 1 concurrent reader, cpu time is per MiB read
@@ -76,19 +77,34 @@ def _estimate_kafka_requirement(
     needed_cores = sqrt_staffed_cores(normalized_to_mib)
 
     # (Nick): Keep 40% of available bandwidth for node recovery
-    needed_network_mbps = simple_network_mbps(desires) * 1.40
+    # (Joey): For kafka BW = BW_write + BW_reads
+    #   let X = input write BW
+    #   BW_in = X * RF
+    #   BW_out = X * (consumers) + X * (RF - 1)
+    bw_in = (
+        (write_mib_per_second * MIB_IN_BYTES) * copies_per_region
+    ) / MEGABIT_IN_BYTES
+    bw_out = (
+        (
+            (read_mib_per_second * MIB_IN_BYTES)
+            + ((write_mib_per_second * MIB_IN_BYTES) * (copies_per_region - 1))
+        )
+    ) / MEGABIT_IN_BYTES
+    #   BW = (in + out) because duplex then 40% headroom.
+    needed_network_mbps = max(bw_in, bw_out) * 1.40
 
     needed_disk = math.ceil(
         desires.data_shape.estimated_state_size_gib.mid * copies_per_region,
     )
 
-    # TODO: Should we hold more than 10% of data in memory?
-    needed_memory = needed_disk * 0.10
+    # Keep the last N seconds hot in cache
+    needed_memory = (write_mib_per_second * hot_retention_seconds) // 1024
 
     # Now convert to per zone
     needed_cores = max(1, needed_cores // zones_per_region)
     needed_disk = max(1, needed_disk // zones_per_region)
     needed_memory = max(1, int(needed_memory // zones_per_region))
+    needed_network_mbps = max(1, int(needed_network_mbps // zones_per_region))
     logger.debug(
         "Need (cpu, mem, disk) = (%s, %s, %s)",
         needed_cores,
@@ -105,7 +121,9 @@ def _estimate_kafka_requirement(
             disk_gib=certain_float(needed_disk),
             network_mbps=certain_float(needed_network_mbps),
             context={
-                "working_set": 0.10,
+                "bw_in_mbps": bw_in,
+                "bw_out_mbps": bw_out,
+                "hot_retention_seconds": hot_retention_seconds,
                 "replication_factor": copies_per_region,
             },
         ),
@@ -120,20 +138,22 @@ def _upsert_params(cluster, params):
         cluster.cluster_params = params
 
 
-def _kafka_read_io(rps, block_size_kib, size_gib) -> float:
-    # Get enough disk read IO capacity for all reads to hit disk
-    # In practice we should have cache reducing this
-    read_ios = rps
+def _kafka_read_io(rps, io_size_kib, size_gib, recovery_seconds: int) -> float:
+    # Get enough disk read IO capacity for some reads
+    # In practice we have cache reducing this by 99% or more
+    read_ios = rps * 0.05
     # Recover the node in 60 minutes, to do that we need
     size_kib = size_gib * (1024 * 1024)
-    recovery_ios = max(1, size_kib / block_size_kib)
-    return read_ios + recovery_ios
+    recovery_ios = max(1, size_kib / io_size_kib) / recovery_seconds
+    # Leave 50% headroom for read IOs since generally we will hit cache
+    return (read_ios + int(round(recovery_ios))) * 1.5
 
 
 def _estimate_kafka_cluster_zonal(
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,
+    hot_retention_seconds,
     zones_per_region: int = 3,
     copies_per_region: int = 2,
     max_regional_size: int = 150,
@@ -157,6 +177,7 @@ def _estimate_kafka_cluster_zonal(
         desires=desires,
         zones_per_region=zones_per_region,
         copies_per_region=copies_per_region,
+        hot_retention_seconds=hot_retention_seconds,
     )
 
     # Account for sidecars and base system memory
@@ -170,19 +191,25 @@ def _estimate_kafka_cluster_zonal(
     if desires.service_tier < 2:
         min_count = 2
 
-    # Kafka read io / second is
+    # Kafka read io / second is zonal
     normalized_to_mib = desires.copy(deep=True)
-    read_mib_per_second: int = int(
-        normalized_to_mib.query_pattern.estimated_mean_read_size_bytes.mid
-    ) // (1024 * 1024)
-    write_mib_per_second: int = int(
-        normalized_to_mib.query_pattern.estimated_mean_write_size_bytes.mid
-    ) // (1024 * 1024)
+    read_mib_per_second: int = (
+        int(normalized_to_mib.query_pattern.estimated_mean_read_size_bytes.mid)
+        // MIB_IN_BYTES
+        // zones_per_region
+    )
+    write_mib_per_second: int = (
+        int(normalized_to_mib.query_pattern.estimated_mean_write_size_bytes.mid)
+        // MIB_IN_BYTES
+        // zones_per_region
+    )
 
-    read_ios_per_second = max(1, (read_mib_per_second * 1024) // drive.block_size_kib)
-    write_ios_per_second = max(1, (write_mib_per_second * 1024) // drive.block_size_kib)
+    # All Kafka IOs are sequential, so they can use the group size
+    read_ios_per_second = max(1, (read_mib_per_second * 1024) // drive.seq_io_size_kib)
+    write_ios_per_second = max(
+        1, (write_mib_per_second * 1024) // drive.seq_io_size_kib
+    )
 
-    # FIXME(Joey) PICK UP FROM HERE.
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
@@ -196,18 +223,23 @@ def _estimate_kafka_cluster_zonal(
         required_disk_ios=lambda size, count: (
             _kafka_read_io(
                 rps=read_ios_per_second / count,
-                block_size_kib=drive.block_size_kib,
+                # Kafka does sequential IO
+                io_size_kib=drive.seq_io_size_kib,
                 size_gib=size,
+                # Enough IO to recover a node in 60 minutes
+                recovery_seconds=60 * 60,
             ),
-            copies_per_region * (write_ios_per_second / count),
+            # Leave 100% IO headroom for writes
+            copies_per_region * (write_ios_per_second / count) * 2,
         ),
         # Kafka can run up to 60% full on disk, let's stay safe at 40%
         required_disk_space=lambda x: x * 2.5,
         max_local_disk_gib=max_local_disk_gib,
-        cluster_size=lambda x: next_n(x, zones_per_region),
+        cluster_size=lambda x: x,
         min_count=max(min_count, 1),
         # Sidecars and Variable OS Memory
-        reserve_memory=lambda x: base_mem,
+        # Kafka currently uses 8GiB fixed, might want to change to min(30, x // 2)
+        reserve_memory=lambda instance_mem_gib: base_mem + 8,
         core_reference_ghz=requirement.core_reference_ghz,
     )
 
@@ -262,13 +294,23 @@ class NflxKafkaArguments(BaseModel):
     retention: str = Field(
         default="PT8H", description="How long to retain data in this cluster."
     )
+    hot_retention: str = Field(
+        default="PT10M",
+        description=(
+            "How long to retain data in page cache for consumers to skip IO. "
+            "Typically consumers lag under 10s, but ensure up to 10M can be handled"
+        ),
+    )
     max_regional_size: int = Field(
         default=150,
         description="What is the maximum size of a cluster in this region",
     )
     max_local_disk_gib: int = Field(
         default=5120,
-        description="The maximum amount of data we store per machine",
+        description=(
+            "The maximum amount of data we store per node. Used to limit "
+            "recovery duration on failure."
+        ),
     )
     min_instance_memory_gib: int = Field(
         default=12,
@@ -305,6 +347,9 @@ class NflxKafkaCapacityModel(CapacityModel):
         min_instance_memory_gib: int = extra_model_arguments.get(
             "min_instance_memory_gib", 12
         )
+        hot_retention_seconds: float = iso_to_seconds(
+            extra_model_arguments.get("hot_retention", "PT10M")
+        )
 
         return _estimate_kafka_cluster_zonal(
             instance=instance,
@@ -315,6 +360,7 @@ class NflxKafkaCapacityModel(CapacityModel):
             max_regional_size=max_regional_size,
             max_local_disk_gib=max_local_disk_gib,
             min_instance_memory_gib=min_instance_memory_gib,
+            hot_retention_seconds=hot_retention_seconds,
         )
 
     @staticmethod
@@ -346,7 +392,7 @@ class NflxKafkaCapacityModel(CapacityModel):
         retention = extra_model_arguments.get("retention", "PT8H")
         retention_secs = iso_to_seconds(retention)
 
-        # write throughput * retention= usage
+        # write throughput * retention = usage
         state_gib = (write_bytes.mid * retention_secs) / GIB_IN_BYTES
 
         return CapacityDesires(
@@ -366,13 +412,14 @@ class NflxKafkaCapacityModel(CapacityModel):
                 # 42 MiB / second in 3 CPU seconds = 14 MiB / CPU second
                 # This = 1000 / 14 = 71 millisecond / MiB
                 # To read 1 MiB costs 71 millisecond of CPU time
+                # Later tuned down based on training data
                 estimated_mean_read_latency_ms=Interval(
-                    low=50, mid=70, high=100, confidence=0.98
+                    low=20, mid=40, high=75, confidence=0.98
                 ),
                 # Wild-Ass-Guess that writes are slightly cheaper
                 # Because no disks/context switching??
                 estimated_mean_write_latency_ms=Interval(
-                    low=20, mid=50, high=50, confidence=0.98
+                    low=20, mid=30, high=75, confidence=0.98
                 ),
             ),
             data_shape=DataShape(
