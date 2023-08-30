@@ -191,7 +191,8 @@ def _allow_instance(
     # of all lifecycles filter based on that
     if allowed_names:
         if instance.name not in allowed_names:
-            return False
+            if instance.family not in allowed_names:
+                return False
     # Otherwise consider lifecycle (default) and platform
     else:
         if instance.lifecycle not in allowed_lifecycles:
@@ -330,8 +331,8 @@ class CapacityPlanner:
         region: str,
         desires: CapacityDesires,
         lifecycles: Optional[Sequence[Lifecycle]] = None,
-        instance_families: Optional[List[str]] = None,
-        drives: Optional[List[str]] = None,
+        instance_families: Optional[Sequence[str]] = None,
+        drives: Optional[Sequence[str]] = None,
         num_results: Optional[int] = None,
         num_regions: int = 3,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
@@ -436,7 +437,9 @@ class CapacityPlanner:
                     plans.append(plan)
 
         # lowest cost first
-        plans.sort(key=lambda plan: (plan.rank, plan.candidate_clusters.total_annual_cost))
+        plans.sort(
+            key=lambda plan: (plan.rank, plan.candidate_clusters.total_annual_cost)
+        )
 
         return reduce_by_family(plans)[:num_results]
 
@@ -564,6 +567,7 @@ class CapacityPlanner:
                 desires=percentile_inputs[index],
                 extra_model_arguments=extra_model_arguments,
                 num_regions=num_regions,
+                instance_families=instance_families,
             )
 
         result = UncertainCapacityPlan(
@@ -575,6 +579,7 @@ class CapacityPlanner:
                 desires=mean_desires,
                 extra_model_arguments=extra_model_arguments,
                 num_regions=num_regions,
+                instance_families=instance_families,
             ),
             percentiles=percentile_plans,
             explanation=PlanExplanation(

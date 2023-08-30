@@ -137,8 +137,8 @@ def test_ebs_high_writes():
 
     # 10TiB ~= 4 IO/read -> 3.3k r/zone/s -> 12k /s
     assert 20_000 < read_ios < 60_000
-    # 33k wps * 8KiB  / 16KiB write IO size = 16.5k / s * 4 for compaction = 64k
-    assert 60_000 < write_ios < 100_000
+    # 33k wps * 8KiB  / 256KiB write IO size = 16.5k / s * 4 for compaction = 6.4k
+    assert 4_000 < write_ios < 7_000
 
 
 def test_capacity_high_writes():
