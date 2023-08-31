@@ -436,7 +436,7 @@ class CapacityPlanner:
                     plans.append(plan)
 
         # lowest cost first
-        plans.sort(key=lambda plan: plan.candidate_clusters.total_annual_cost)
+        plans.sort(key=lambda plan: (plan.rank, plan.candidate_clusters.total_annual_cost))
 
         return reduce_by_family(plans)[:num_results]
 
