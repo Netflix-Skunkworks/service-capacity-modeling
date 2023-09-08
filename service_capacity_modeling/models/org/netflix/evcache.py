@@ -97,9 +97,17 @@ def _estimate_evcache_requirement(
     )
 
     regrets: Tuple[str, ...] = ("spend", "mem")
+    state_size = desires.data_shape.estimated_state_size_gib
+    item_count = desires.data_shape.estimated_state_item_count
+    payload_greater_than_classic = False
+    if state_size is not None and item_count is not None:
+        payload_size = (state_size.mid * 1024.0 * 1024.0 * 1024.0) / (item_count.mid)
+        if payload_size > 200.0:
+            payload_greater_than_classic = True
+
     # (Arun): As of 2021 we are using ephemerals exclusively and do not
     # use cloud drives
-    if working_set is None or desires.data_shape.estimated_state_size_gib.mid < 110.0:
+    if working_set is None or (desires.data_shape.estimated_state_size_gib.mid < 110.0 and payload_greater_than_classic):
         # We can't currently store data on cloud drives, but we can put the
         # dataset into memory!
         needed_memory = float(needed_disk)
