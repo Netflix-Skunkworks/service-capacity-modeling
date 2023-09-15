@@ -848,7 +848,19 @@
       "name": "Intra-region (within) transfer costs"
     },
     "crdb_core_license": {
-        "name": "CRDB license fee"
+      "name": "CRDB license fee"
+    },
+    "dynamo.standard": {
+      "name": "dynamo-standard"
+    },
+    "dynamo.standard.global": {
+      "name": "dynamo-standard-global"
+    },
+    "dynamo.backup.continuous": {
+      "name": "dynamo-backup-continuous"
+    },
+    "dynamo.transfer": {
+      "name": "dynamo-transfer-first120tb"
     }
   }
 }

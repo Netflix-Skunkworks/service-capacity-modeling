@@ -218,6 +218,16 @@ class CapacityModel:
         return {"type": "object"}
 
     @staticmethod
+    def run_hardware_simulation() -> bool:
+        """Optional to skip hardware simulation
+
+        Some models, managed services, do not
+        require simulating through hardware (instances, drives).
+
+        """
+        return True
+
+    @staticmethod
     def compose_with(
         user_desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
