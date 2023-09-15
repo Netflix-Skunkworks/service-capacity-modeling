@@ -285,6 +285,10 @@ class Drive(ExcludeUnsetModel):
 
         return size * self.annual_cost_per_gib + r_cost + w_cost
 
+    @staticmethod
+    def get_managed_drive() -> Drive:
+        return Drive(name="managed")
+
 
 class Platform(str, Enum):
     """Represents the platform of the hardware
@@ -330,6 +334,12 @@ class Instance(ExcludeUnsetModel):
     def size(self):
         return self.name.rsplit(self.family_separator, 1)[1]
 
+    @staticmethod
+    def get_managed_instance() -> Instance:
+        return Instance(
+            name="managed.0", cpu=0, cpu_ghz=0, ram_gib=0, net_mbps=0, drive=None
+        )
+
 
 class Service(ExcludeUnsetModel):
     """Represents a cloud service, such as a blob store (S3) or
@@ -341,7 +351,7 @@ class Service(ExcludeUnsetModel):
     name: str
     size_gib: int = 0
 
-    annual_cost_per_gib: float = 0
+    annual_cost_per_gib: List[Tuple[float, float]] = []
     annual_cost_per_read_io: float = 0
     annual_cost_per_write_io: float = 0
     annual_cost_per_core: float = 0
@@ -403,7 +413,7 @@ class DrivePricing(ExcludeUnsetModel):
 
 
 class ServicePricing(ExcludeUnsetModel):
-    annual_cost_per_gib: float = 0
+    annual_cost_per_gib: List[Tuple[float, float]] = []
     annual_cost_per_read_io: float = 0
     annual_cost_per_write_io: float = 0
     annual_cost_per_core: float = 0

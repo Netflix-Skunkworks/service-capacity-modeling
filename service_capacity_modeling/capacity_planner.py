@@ -413,28 +413,39 @@ class CapacityPlanner:
             allowed_drives.update(hardware.drives.keys())
 
         plans = []
-        for instance in hardware.instances.values():
-            if not _allow_instance(
-                instance, instance_families, lifecycles, allowed_platforms
-            ):
-                continue
-
-            if per_instance_mem > instance.ram_gib:
-                continue
-
-            for drive in hardware.drives.values():
-                if not _allow_drive(drive, drives, lifecycles, allowed_drives):
+        if model.run_hardware_simulation():
+            for instance in hardware.instances.values():
+                if not _allow_instance(
+                    instance, instance_families, lifecycles, allowed_platforms
+                ):
                     continue
 
-                plan = model.capacity_plan(
-                    instance=instance,
-                    drive=drive,
-                    context=context,
-                    desires=desires,
-                    extra_model_arguments=extra_model_arguments,
-                )
-                if plan is not None:
-                    plans.append(plan)
+                if per_instance_mem > instance.ram_gib:
+                    continue
+
+                for drive in hardware.drives.values():
+                    if not _allow_drive(drive, drives, lifecycles, allowed_drives):
+                        continue
+
+                    plan = model.capacity_plan(
+                        instance=instance,
+                        drive=drive,
+                        context=context,
+                        desires=desires,
+                        extra_model_arguments=extra_model_arguments,
+                    )
+                    if plan is not None:
+                        plans.append(plan)
+        else:
+            plan = model.capacity_plan(
+                instance=Instance.get_managed_instance(),
+                drive=Drive.get_managed_drive(),
+                context=context,
+                desires=desires,
+                extra_model_arguments=extra_model_arguments,
+            )
+            if plan is not None:
+                plans.append(plan)
 
         # lowest cost first
         plans.sort(
@@ -556,8 +567,16 @@ class CapacityPlanner:
 
         final_requirement = Requirements(zonal=final_zonal, regional=final_regional)
 
+        desires_defaults_merged = (
+            desires.merge_with(
+                self._models[model_name].default_desires(desires, extra_model_arguments)
+            )
+            if model_name != "org.netflix.counter"
+            else desires
+        )
+
         percentile_inputs, mean_desires = model_desires_percentiles(
-            desires=desires, percentiles=sorted(percentiles)
+            desires=desires_defaults_merged, percentiles=sorted(percentiles)
         )
         percentile_plans = {}
         for index, percentile in enumerate(percentiles):

@@ -1,6 +1,8 @@
 from .aurora import nflx_aurora_capacity_model
 from .cassandra import nflx_cassandra_capacity_model
+from .counter import nflx_counter_capacity_model
 from .crdb import nflx_cockroachdb_capacity_model
+from .ddb import nflx_ddb_capacity_model
 from .elasticsearch import nflx_elasticsearch_capacity_model
 from .elasticsearch import nflx_elasticsearch_data_capacity_model
 from .elasticsearch import nflx_elasticsearch_master_capacity_model
@@ -11,7 +13,6 @@ from .postgres import nflx_postgres_capacity_model
 from .rds import nflx_rds_capacity_model
 from .stateless_java import nflx_java_app_capacity_model
 from .time_series import nflx_time_series_capacity_model
-from .counter import nflx_counter_capacity_model
 from .zookeeper import nflx_zookeeper_capacity_model
 from .kafka import nflx_kafka_capacity_model
 
@@ -34,4 +35,5 @@ def models():
         "org.netflix.aurora": nflx_aurora_capacity_model,
         "org.netflix.postgres": nflx_postgres_capacity_model,
         "org.netflix.kafka": nflx_kafka_capacity_model,
+        "org.netflix.ddb": nflx_ddb_capacity_model,
     }
