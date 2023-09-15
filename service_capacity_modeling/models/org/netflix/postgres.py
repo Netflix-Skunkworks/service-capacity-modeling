@@ -32,7 +32,7 @@ class NflxPostgresCapacityModel(CapacityModel):
         if desires.service_tier == 0:
             return None
 
-        require_multi_region: bool = extra_model_arguments.get("require_multi_region", False)
+        require_multi_region: bool = context.num_regions > 1
         plan = None
         if Platform.aurora_postgres in instance.platforms and not require_multi_region:
             plan = nflx_aurora_capacity_model.capacity_plan(
