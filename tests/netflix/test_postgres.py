@@ -67,6 +67,7 @@ def test_tier_0_not_supported():
         model_name="org.netflix.postgres",
         region="us-east-1",
         desires=tier_0,
+        num_regions=1,
     )
     # Aurora can't support tier 0 service
     assert len(cap_plan) == 0
@@ -77,6 +78,7 @@ def test_small_footprint():
         model_name="org.netflix.postgres",
         region="us-east-1",
         desires=small_footprint,
+        num_regions=1,
     )
     assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.large"
 
@@ -95,7 +97,7 @@ def test_small_footprint_multi_region():
         model_name="org.netflix.postgres",
         region="us-east-1",
         desires=small_footprint,
-        extra_model_arguments={"require_multi_region": True}
+        num_regions=3,
     )
     assert cap_plan[0].candidate_clusters.zonal[0].instance.name == "m5d.xlarge"
 
@@ -105,16 +107,13 @@ def test_small_footprint_multi_region():
         < 4000
     )
 
-    planner.plan(model_name="org.netflix.postgres", region="us-east-1", desires=small_footprint,
-                 extra_model_arguments={"require_multi_region": False})
-
 
 def test_small_footprint_plan_uncertain():
     cap_plan = planner.plan(
         model_name="org.netflix.postgres",
         region="us-east-1",
         desires=small_footprint,
-        extra_model_arguments={"require_multi_region": False},
+        num_regions=1,
         simulations=256
     )
     plan_a = cap_plan.least_regret[0]
@@ -133,6 +132,7 @@ def test_large_footprint():
         model_name="org.netflix.postgres",
         region="us-east-1",
         desires=large_footprint,
+        num_regions=1,
     )
     # Aurora cannot handle the scale, so pick crdb
     assert cap_plan[0].candidate_clusters.zonal[0].instance.name == "i3.xlarge"
@@ -150,5 +150,6 @@ def test_tier_3():
         model_name="org.netflix.postgres",
         region="us-east-1",
         desires=tier_3,
+        num_regions=1,
     )
     assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.2xlarge"
