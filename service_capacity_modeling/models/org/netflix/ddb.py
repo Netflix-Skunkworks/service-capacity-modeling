@@ -58,11 +58,9 @@ class NflxDynamoDBArguments(BaseModel):
 
 
 class _ReadPlan(BaseModel):
-    read_capacity_units: int = (
-        Field(
+    read_capacity_units: int = Field(
             default=0,
             description="read capacity units needed to support the requested reads",
-        ),
     )
     total_annual_read_cost: float = Field(
         default=0,
@@ -71,18 +69,14 @@ class _ReadPlan(BaseModel):
 
 
 class _WritePlan(BaseModel):
-    write_capacity_units: int = (
-        Field(
+    write_capacity_units: int = Field(
             default=0,
             description="write capacity units needed to support the requested writes",
-        ),
     )
-    replicated_write_capacity_units: int = (
-        Field(
+    replicated_write_capacity_units: int = Field(
             default=0,
             description="write capacity units needed to "
             "support the requested writes for global tables",
-        ),
     )
     total_annual_write_cost: float = Field(
         default=0,
@@ -91,11 +85,9 @@ class _WritePlan(BaseModel):
 
 
 class _DataStoragePlan(BaseModel):
-    total_data_storage_gib: float = (
-        Field(
+    total_data_storage_gib: float = Field(
             default=0,
             description="total amount of data stored in gib",
-        ),
     )
     total_annual_data_storage_cost: float = Field(
         default=0,
@@ -104,11 +96,9 @@ class _DataStoragePlan(BaseModel):
 
 
 class _DataBackupPlan(BaseModel):
-    total_backup_data_storage_gib: float = (
-        Field(
+    total_backup_data_storage_gib: float = Field(
             default=0,
             description="total amount of data stored for backup in gib",
-        ),
     )
     total_annual_backup_cost: float = Field(
         default=0,
@@ -117,12 +107,10 @@ class _DataBackupPlan(BaseModel):
 
 
 class _DataTransferPlan(BaseModel):
-    total_data_transfer_gib: float = (
-        Field(
+    total_data_transfer_gib: float = Field(
             default=0,
             description="amount of data transferred, "
             "included the global table cross region replication",
-        ),
     )
     total_annual_data_transfer_cost: float = Field(
         default=0,
@@ -336,7 +324,7 @@ def _plan_data_transfer(
     )
     _annual_data_written = annual_data_written_gib
     transfer_costs = _get_dynamo_transfer(context)
-    annual_transfer_cost_to_another_region = 0
+    annual_transfer_cost_to_another_region = 0.0
     for transfer_cost in transfer_costs:
         if not _annual_data_written > 0:
             break
