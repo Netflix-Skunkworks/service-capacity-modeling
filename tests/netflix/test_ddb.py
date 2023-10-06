@@ -420,7 +420,7 @@ def test_target_annual_cost():
             "estimated": 4380000,
             "auto_scale": {
                 "min": 1,
-                "max": 558797076.92,
+                "max": 558797077,
                 "target_utilization_percentage": 0.2,
             },
         },
@@ -428,7 +428,7 @@ def test_target_annual_cost():
             "estimated": 8760000,
             "auto_scale": {
                 "min": 1,
-                "max": 33400758.97,
+                "max": 33400759,
                 "target_utilization_percentage": 0.2,
             },
         },

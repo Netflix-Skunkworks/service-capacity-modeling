@@ -2,7 +2,7 @@
 import functools
 import logging
 from hashlib import blake2b
-from typing import Any
+from typing import Any, cast
 from typing import Callable
 from typing import Dict
 from typing import Generator
@@ -382,9 +382,10 @@ class CapacityPlanner:
                 )
             )
 
-        mean_plan = [
-            functools.reduce(merge_plan, composed) for composed in zip(*mean_plans)
-        ]
+        mean_plan = cast(
+            Sequence[CapacityPlan],
+            [functools.reduce(merge_plan, composed) for composed in zip(*mean_plans)],
+        )
         percentile_plans = {}
         for index, percentile in enumerate(sorted_percentiles):
             percentile_plan = []
@@ -404,10 +405,13 @@ class CapacityPlanner:
                         drives=drives,
                     )
                 )
-            percentile_plans[percentile] = [
-                functools.reduce(merge_plan, composed)
-                for composed in zip(*percentile_plan)
-            ]
+            percentile_plans[percentile] = cast(
+                Sequence[CapacityPlan],
+                [
+                    functools.reduce(merge_plan, composed)
+                    for composed in zip(*percentile_plan)
+                ],
+            )
 
         return mean_plan, percentile_plans
 
