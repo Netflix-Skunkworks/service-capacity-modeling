@@ -5,7 +5,7 @@ import sys
 from decimal import Decimal
 from enum import Enum
 from functools import lru_cache
-from typing import Any
+from typing import Any, Union
 from typing import cast
 from typing import Dict
 from typing import List
@@ -351,7 +351,7 @@ class Service(ExcludeUnsetModel):
     name: str
     size_gib: int = 0
 
-    annual_cost_per_gib: List[Tuple[float, float]] = []
+    annual_cost_per_gib: Union[float, List[Tuple[float, float]]] = 0
     annual_cost_per_read_io: float = 0
     annual_cost_per_write_io: float = 0
     annual_cost_per_core: float = 0
@@ -363,6 +363,26 @@ class Service(ExcludeUnsetModel):
     write_io_latency_ms: FixedInterval = FixedInterval(
         low=1, mid=10, high=50, confidence=0.9
     )
+
+    def annual_cost_gib(self, data_gib: float = 0):
+        if isinstance(self.annual_cost_per_gib, float):
+            return self.annual_cost_per_gib * data_gib
+        else:
+            _annual_data = data_gib
+            transfer_costs = self.annual_cost_per_gib
+            annual_cost = 0.0
+            for transfer_cost in transfer_costs:
+                if not _annual_data > 0:
+                    break
+                if transfer_cost[0] > 0:
+                    annual_cost += (
+                        min(_annual_data, transfer_cost[0]) * transfer_cost[1]
+                    )
+                    _annual_data -= transfer_cost[0]
+                else:
+                    # final remaining data transfer cost
+                    annual_cost += _annual_data * transfer_cost[1]
+        return annual_cost
 
 
 class RegionContext(ExcludeUnsetModel):
@@ -413,7 +433,7 @@ class DrivePricing(ExcludeUnsetModel):
 
 
 class ServicePricing(ExcludeUnsetModel):
-    annual_cost_per_gib: List[Tuple[float, float]] = []
+    annual_cost_per_gib: Union[float, List[Tuple[float, float]]] = 0
     annual_cost_per_read_io: float = 0
     annual_cost_per_write_io: float = 0
     annual_cost_per_core: float = 0

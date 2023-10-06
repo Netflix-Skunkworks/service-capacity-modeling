@@ -1,9 +1,7 @@
 import math
 from typing import Any
 from typing import Dict
-from typing import List
 from typing import Optional
-from typing import Tuple
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -29,14 +27,15 @@ from service_capacity_modeling.interface import Service
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 
+_TIER_TARGET_UTILIZATION_MAPPING = {
+    0: 0.20,
+    1: 0.40,
+    2: 0.60,
+    3: 0.80,
+}
+
 
 class NflxDynamoDBArguments(BaseModel):
-    number_of_regions: int = Field(
-        default=1,
-        description="How many regions the dynamoDB table needs to be created. "
-        "This determines if we should use wcu's "
-        "or rwcu's and to correctly estimate the transfer costs",
-    )
     transactional_write_percent: float = Field(
         default=0,
         description="Coordinated writes, if multiple items in single write "
@@ -49,18 +48,21 @@ class NflxDynamoDBArguments(BaseModel):
         "single read then all-or-nothing guarantee for read. "
         "Default is zero",
     )
-    estimated_mean_item_size_bytes: int = Field(
+    target_max_annual_cost: float = Field(
         default=0,
-        description="Estimated avg item size. If not supplies, "
-        "then estimated_mean_write_size_bytes from desires will "
-        "be used",
+        description="Target to determine max capacity units for auto-scale. "
+        "Model does best effort to predict the capacity units but "
+        "does not guarantee that actual costs will be less than "
+        "what is specified here. Base costs based on provided requirements "
+        "itself can exceed the target, if base costs are lower then "
+        "actual costs can be 2x-3x of target",
     )
 
 
 class _ReadPlan(BaseModel):
     read_capacity_units: int = Field(
-            default=0,
-            description="read capacity units needed to support the requested reads",
+        default=0,
+        description="read capacity units needed to support the requested reads",
     )
     total_annual_read_cost: float = Field(
         default=0,
@@ -70,13 +72,13 @@ class _ReadPlan(BaseModel):
 
 class _WritePlan(BaseModel):
     write_capacity_units: int = Field(
-            default=0,
-            description="write capacity units needed to support the requested writes",
+        default=0,
+        description="write capacity units needed to support the requested writes",
     )
     replicated_write_capacity_units: int = Field(
-            default=0,
-            description="write capacity units needed to "
-            "support the requested writes for global tables",
+        default=0,
+        description="write capacity units needed to "
+        "support the requested writes for global tables",
     )
     total_annual_write_cost: float = Field(
         default=0,
@@ -86,8 +88,8 @@ class _WritePlan(BaseModel):
 
 class _DataStoragePlan(BaseModel):
     total_data_storage_gib: float = Field(
-            default=0,
-            description="total amount of data stored in gib",
+        default=0,
+        description="total amount of data stored in gib",
     )
     total_annual_data_storage_cost: float = Field(
         default=0,
@@ -97,8 +99,8 @@ class _DataStoragePlan(BaseModel):
 
 class _DataBackupPlan(BaseModel):
     total_backup_data_storage_gib: float = Field(
-            default=0,
-            description="total amount of data stored for backup in gib",
+        default=0,
+        description="total amount of data stored for backup in gib",
     )
     total_annual_backup_cost: float = Field(
         default=0,
@@ -108,9 +110,9 @@ class _DataBackupPlan(BaseModel):
 
 class _DataTransferPlan(BaseModel):
     total_data_transfer_gib: float = Field(
-            default=0,
-            description="amount of data transferred, "
-            "included the global table cross region replication",
+        default=0,
+        description="amount of data transferred, "
+        "included the global table cross region replication",
     )
     total_annual_data_transfer_cost: float = Field(
         default=0,
@@ -118,23 +120,91 @@ class _DataTransferPlan(BaseModel):
     )
 
 
-def _mean_item_size_bytes(
+def _get_read_consistency_percentages(
     desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
-) -> float:
-    mean_item_size = extra_model_arguments.get("estimated_mean_item_size_bytes", 0)
-    if mean_item_size == 0:
-        mean_item_size = desires.query_pattern.estimated_mean_write_size_bytes.mid
+) -> Dict[str, float]:
+    # either all the required attributes are supplied in extra_model_arguments
+    # or is derived based on the access consistency
+    eventual_read_percent = extra_model_arguments.get("eventual_read_percent", 0.0)
+    assert eventual_read_percent >= 0.0
+    transactional_read_percent = extra_model_arguments.get(
+        "transactional_read_percent", 0.0
+    )
+    assert transactional_read_percent >= 0.0
+    strong_read_percent = extra_model_arguments.get("strong_read_percent", 0.0)
+    assert strong_read_percent >= 0.0
+    total_percent = (
+        eventual_read_percent + transactional_read_percent + strong_read_percent
+    )
+    if total_percent == 0:
+        access_consistency = desires.query_pattern.access_consistency.same_region
+        if access_consistency == AccessConsistency.serializable:
+            transactional_read_percent = 1.0
+            eventual_read_percent = 0.0
+            strong_read_percent = 0.0
+        elif (
+            access_consistency == AccessConsistency.read_your_writes
+            or access_consistency == AccessConsistency.linearizable
+        ):
+            transactional_read_percent = 0.0
+            eventual_read_percent = 0.0
+            strong_read_percent = 1.0
+        else:
+            transactional_read_percent = 0.0
+            eventual_read_percent = 1.0
+            strong_read_percent = 0.0
+    total_percent = (
+        eventual_read_percent + transactional_read_percent + strong_read_percent
+    )
+    assert (
+        total_percent == 1
+    ), "eventual_read_percent, transactional_read_percent, strong_read_percent should sum to 1"
+    return {
+        "transactional_read_percent": transactional_read_percent,
+        "eventual_read_percent": eventual_read_percent,
+        "strong_read_percent": strong_read_percent,
+    }
+
+
+def _get_write_consistency_percentages(
+    desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+) -> Dict[str, float]:
+    # either all the required attributes are supplied in extra_model_arguments
+    # or is derived based on the access consistency
+    transactional_write_percent: float = extra_model_arguments.get(
+        "transactional_write_percent", 0
+    )
+    assert transactional_write_percent >= 0.0
+    non_transactional_write_percent: float = extra_model_arguments.get(
+        "non_transactional_write_percent", 0
+    )
+    assert non_transactional_write_percent >= 0.0
+    total_percent = transactional_write_percent + non_transactional_write_percent
+    if total_percent == 0:
+        access_consistency = desires.query_pattern.access_consistency.same_region
+        if access_consistency == AccessConsistency.serializable:
+            transactional_write_percent = 1.0
+            non_transactional_write_percent = 0.0
+        else:
+            transactional_write_percent = 0.0
+            non_transactional_write_percent = 1.0
+    total_percent = transactional_write_percent + non_transactional_write_percent
+    assert (
+        total_percent == 1
+    ), "transactional_write_percent, non_transactional_write_percent should sum to 1"
+    return {
+        "transactional_write_percent": transactional_write_percent,
+        "non_transactional_write_percent": non_transactional_write_percent,
+    }
+
+
+def _mean_item_size_bytes(desires: CapacityDesires) -> float:
+    mean_item_size = desires.query_pattern.estimated_mean_write_size_bytes.mid
     return mean_item_size
 
 
-def _get_num_regions(extra_model_arguments: Dict[str, Any]) -> int:
-    return extra_model_arguments.get("number_of_regions", 1)
-
-
-def _get_dynamo_standard(
-    context: RegionContext, extra_model_arguments: Dict[str, Any]
-) -> Service:
-    number_of_regions = _get_num_regions(extra_model_arguments)
+def _get_dynamo_standard(context: RegionContext) -> Service:
+    number_of_regions = context.num_regions
     dynamo_service = (
         context.services.get("dynamo.standard.global", None)
         if number_of_regions > 1
@@ -154,13 +224,11 @@ def _get_dynamo_backup(context: RegionContext) -> Service:
 
 def _get_dynamo_transfer(
     context: RegionContext,
-) -> List[Tuple[float, float]]:
+) -> Service:
     transfer_costs = context.services.get("dynamo.transfer", None)
     if not transfer_costs:
-        raise ValueError(
-            "DynamoDB Transfer cost is not available in context"
-        )
-    return transfer_costs.annual_cost_per_gib
+        raise ValueError("DynamoDB Transfer cost is not available in context")
+    return transfer_costs
 
 
 def _plan_writes(
@@ -168,22 +236,24 @@ def _plan_writes(
     desires: CapacityDesires,
     extra_model_arguments: Dict[str, Any],
 ) -> _WritePlan:
+    mean_item_size = _mean_item_size_bytes(desires)
+
     # For items up to 1 KB in size,
     # one WCU can perform one standard write request per second
-
-    mean_item_size = _mean_item_size_bytes(desires, extra_model_arguments)
-
     rounded_wcus_per_item = math.ceil(max(1.0, mean_item_size / 1024))
 
-    transactional_write_percent: float = extra_model_arguments.get(
-        "transactional_write_percent", 0
+    write_percentages = _get_write_consistency_percentages(
+        desires, extra_model_arguments
     )
-    assert transactional_write_percent >= 0.0
+
+    transactional_write_percent = write_percentages["transactional_write_percent"]
     baseline_wcus_non_transactional = (
         desires.query_pattern.estimated_write_per_second.mid
         * (1 - transactional_write_percent)
         * rounded_wcus_per_item
     )
+
+    # Transactional write requests require two WCUs
     baseline_wcus_transactional = (
         desires.query_pattern.estimated_write_per_second.mid
         * transactional_write_percent
@@ -195,10 +265,12 @@ def _plan_writes(
         baseline_wcus_non_transactional + baseline_wcus_transactional
     )
 
-    # 8760 hours in a year
+    # 8760 hours in a year (365 * 24)
     total_baseline_wcus_hours = 8760 * total_baseline_wcus
-    number_of_regions = _get_num_regions(extra_model_arguments)
-    dynamo_service_standard = _get_dynamo_standard(context, extra_model_arguments)
+    number_of_regions = context.num_regions
+
+    # pick the right pricing based on context
+    dynamo_service_standard = _get_dynamo_standard(context)
 
     # for global replication each region will additionally consume rWCUs
     total_annual_cost_wcu = round(
@@ -227,38 +299,27 @@ def _plan_reads(
     desires: CapacityDesires,
     extra_model_arguments: Dict[str, Any],
 ) -> _ReadPlan:
-    eventual_consistency_percent = extra_model_arguments.get(
-        "eventual_read_percent", 1.0
-    )
-    assert eventual_consistency_percent >= 0.0
-    transactional_read_percent = extra_model_arguments.get(
-        "transactional_read_percent", 0.0
-    )
-    assert transactional_read_percent >= 0.0
-    if (
-        desires.query_pattern.access_consistency.same_region.target_consistency
-        == AccessConsistency.read_your_writes
-    ):
-        eventual_consistency_percent = 0.0
-    strong_consistency_percent = (
-        1 - eventual_consistency_percent - transactional_read_percent
-    )
-    assert strong_consistency_percent >= 0.0
-    mean_item_size = _mean_item_size_bytes(desires, extra_model_arguments)
+    read_percentages = _get_read_consistency_percentages(desires, extra_model_arguments)
+    transactional_read_percent = read_percentages["transactional_read_percent"]
+    eventual_read_percent = read_percentages["eventual_read_percent"]
+    strong_read_percent = read_percentages["strong_read_percent"]
+    mean_item_size = _mean_item_size_bytes(desires)
+
+    # items up to 4 KB in size
     rounded_rcus_per_item = math.ceil(max(1.0, mean_item_size / (4 * 1024)))
     estimated_read_per_second = desires.query_pattern.estimated_read_per_second.mid
+
+    # one RCU can perform two eventually consistent read
     baseline_rcus_eventually_consistent = (
-        estimated_read_per_second
-        * eventual_consistency_percent
-        * 0.5
-        * rounded_rcus_per_item
+        estimated_read_per_second * eventual_read_percent * 0.5 * rounded_rcus_per_item
     )
+
+    # one RCU can perform one strongly consistent read
     baseline_rcus_strong_consistent = (
-        estimated_read_per_second
-        * strong_consistency_percent
-        * 1
-        * rounded_rcus_per_item
+        estimated_read_per_second * strong_read_percent * 1 * rounded_rcus_per_item
     )
+
+    # two RCUs can perform one transactional read
     baseline_rcus_transact = (
         estimated_read_per_second
         * transactional_read_percent
@@ -272,9 +333,9 @@ def _plan_reads(
         + baseline_rcus_transact
     )
 
-    # 8760 hours in a year
+    # 8760 hours in a year (365 * 24)
     total_baseline_rcus_hours = 8760 * total_baseline_rcus
-    dynamo_service_standard = _get_dynamo_standard(context, extra_model_arguments)
+    dynamo_service_standard = _get_dynamo_standard(context)
     total_annual_cost_rcu_hour = round(
         (total_baseline_rcus_hours * dynamo_service_standard.annual_cost_per_read_io), 2
     )
@@ -287,13 +348,13 @@ def _plan_reads(
 def _plan_storage(
     context: RegionContext,
     desires: CapacityDesires,
-    extra_model_arguments: Dict[str, Any],
 ) -> _DataStoragePlan:
-    dynamo_service_standard = _get_dynamo_standard(context, extra_model_arguments)
+    dynamo_service_standard = _get_dynamo_standard(context)
     annual_storage_cost = round(
         (
-            math.ceil(desires.data_shape.estimated_state_size_gib.mid)
-            * dynamo_service_standard.annual_cost_per_gib[0][1]
+            dynamo_service_standard.annual_cost_gib(
+                math.ceil(desires.data_shape.estimated_state_size_gib.mid)
+            )
         ),
         2,
     )
@@ -308,36 +369,24 @@ def _plan_storage(
 def _plan_data_transfer(
     context: RegionContext,
     desires: CapacityDesires,
-    extra_model_arguments: Dict[str, Any],
 ) -> _DataTransferPlan:
-    number_of_regions = _get_num_regions(extra_model_arguments)
+    number_of_regions = context.num_regions
     if not number_of_regions > 1:
         return _DataTransferPlan(
             total_data_transfer_gib=0, total_annual_data_transfer_cost=0
         )
-    mean_item_size_bytes = _mean_item_size_bytes(desires, extra_model_arguments)
+    mean_item_size_bytes = _mean_item_size_bytes(desires)
     writes_per_second = desires.query_pattern.estimated_write_per_second.mid
-    # 31,536,000 seconds in a year
+    # 31,536,000 seconds in a year (365 * 24 * 60 * 60)
+    # 1024 * 1024 * 1024 = 1Gib
     annual_data_written_gib = round(
         ((31536000 / (1024 * 1024 * 1024)) * writes_per_second * mean_item_size_bytes),
         2,
     )
-    _annual_data_written = annual_data_written_gib
     transfer_costs = _get_dynamo_transfer(context)
-    annual_transfer_cost_to_another_region = 0.0
-    for transfer_cost in transfer_costs:
-        if not _annual_data_written > 0:
-            break
-        if transfer_cost[0] > 0:
-            annual_transfer_cost_to_another_region += (
-                min(_annual_data_written, transfer_cost[0]) * transfer_cost[1]
-            )
-            _annual_data_written -= transfer_cost[0]
-        else:
-            # final remaining data transfer cost
-            annual_transfer_cost_to_another_region += (
-                _annual_data_written * transfer_cost[1]
-            )
+    annual_transfer_cost_to_another_region = transfer_costs.annual_cost_gib(
+        annual_data_written_gib
+    )
     annual_transfer_cost = round(
         annual_transfer_cost_to_another_region * (number_of_regions - 1), 2
     )
@@ -350,13 +399,11 @@ def _plan_data_transfer(
 def _plan_backup(
     context: RegionContext,
     desires: CapacityDesires,
-    extra_model_arguments: Dict[str, Any],
 ) -> _DataBackupPlan:
-    number_of_regions = _get_num_regions(extra_model_arguments)
+    number_of_regions = context.num_regions
     dynamo_backup_continuous = _get_dynamo_backup(context)
-    annual_pitr_cost = (
+    annual_pitr_cost = dynamo_backup_continuous.annual_cost_gib(
         math.ceil(desires.data_shape.estimated_state_size_gib.mid)
-        * dynamo_backup_continuous.annual_cost_per_gib[0][1]
     )
     # normalizing the cost as pitr is not charged per region
     annual_pitr_cost_normalized = round((annual_pitr_cost / number_of_regions), 2)
@@ -377,21 +424,65 @@ class NflxDynamoDBCapacityModel(CapacityModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
+        # refer https://aws.amazon.com/dynamodb/pricing/provisioned/
         write_plan = _plan_writes(context, desires, extra_model_arguments)
         read_plan = _plan_reads(context, desires, extra_model_arguments)
-        storage_plan = _plan_storage(context, desires, extra_model_arguments)
-        backup_plan = _plan_backup(context, desires, extra_model_arguments)
-        data_transfer_plan = _plan_data_transfer(
-            context, desires, extra_model_arguments
+        storage_plan = _plan_storage(context, desires)
+        backup_plan = _plan_backup(context, desires)
+        data_transfer_plan = _plan_data_transfer(context, desires)
+        target_max_annual_cost: float = extra_model_arguments.get(
+            "target_max_annual_cost", 0
         )
+        target_utilization_percentage = 0.80
+        if desires.service_tier in _TIER_TARGET_UTILIZATION_MAPPING:
+            target_utilization_percentage = _TIER_TARGET_UTILIZATION_MAPPING[
+                desires.service_tier
+            ]
+
         requirement_context = {
             "read_capacity_units": read_plan.read_capacity_units,
             "write_capacity_units": write_plan.write_capacity_units,
             "data_transfer_gib": data_transfer_plan.total_data_transfer_gib,
+            "target_utilization_percentage": target_utilization_percentage,
         }
         requirement_context[
             "replicated_write_capacity_units"
         ] = write_plan.replicated_write_capacity_units
+
+        dynamo_costs = {
+            "dynamo.regional-writes": write_plan.total_annual_write_cost,
+            "dynamo.regional-reads": read_plan.total_annual_read_cost,
+            "dynamo.regional-storage": storage_plan.total_annual_data_storage_cost,
+        }
+
+        dynamo_costs[
+            "dynamo.regional-transfer"
+        ] = data_transfer_plan.total_annual_data_transfer_cost
+
+        dynamo_costs["dynamo.data-backup"] = backup_plan.total_annual_backup_cost
+
+        total_annual_costs = round(sum(dynamo_costs.values()), 2)
+        total_write_capacity_units = (
+            write_plan.write_capacity_units + write_plan.replicated_write_capacity_units
+        )
+        max_read_capacity_units = max(1, read_plan.read_capacity_units)
+        max_write_capacity_units = max(1, total_write_capacity_units)
+
+        if target_max_annual_cost > 0:
+            requirement_context["target_max_annual_cost"] = target_max_annual_cost
+            annual_balance_target = target_max_annual_cost - total_annual_costs
+            if annual_balance_target > 0:
+                max_read_capacity_units += round(
+                    (annual_balance_target / max(1, read_plan.total_annual_read_cost))
+                    * read_plan.read_capacity_units,
+                    2,
+                )
+                max_write_capacity_units += round(
+                    (annual_balance_target / max(1, write_plan.total_annual_write_cost))
+                    * total_write_capacity_units,
+                    2,
+                )
+
         requirement = CapacityRequirement(
             requirement_type="dynamo-regional",
             core_reference_ghz=0,
@@ -409,11 +500,25 @@ class NflxDynamoDBCapacityModel(CapacityModel):
                     + data_transfer_plan.total_annual_data_transfer_cost
                 ),
                 service_params={
-                    "read_capacity_units": read_plan.read_capacity_units,
-                    "write_capacity_units": (
-                        write_plan.write_capacity_units
-                        + write_plan.replicated_write_capacity_units
-                    ),
+                    "read_capacity_units": {
+                        "estimated": read_plan.read_capacity_units,
+                        "auto_scale": {
+                            "min": 1,
+                            "max": max_read_capacity_units,
+                            "target_utilization_percentage": target_utilization_percentage,
+                        },
+                    },
+                    "write_capacity_units": {
+                        "estimated": (
+                            write_plan.write_capacity_units
+                            + write_plan.replicated_write_capacity_units
+                        ),
+                        "auto_scale": {
+                            "min": 1,
+                            "max": max_write_capacity_units,
+                            "target_utilization_percentage": target_utilization_percentage,
+                        },
+                    },
                 },
             ),
             ServiceCapacity(
@@ -421,17 +526,6 @@ class NflxDynamoDBCapacityModel(CapacityModel):
                 annual_cost=backup_plan.total_annual_backup_cost,
             ),
         ]
-        dynamo_costs = {
-            "dynamo.regional-writes": write_plan.total_annual_write_cost,
-            "dynamo.regional-reads": read_plan.total_annual_read_cost,
-            "dynamo.regional-storage": storage_plan.total_annual_data_storage_cost,
-        }
-
-        dynamo_costs[
-            "dynamo.regional-transfer"
-        ] = data_transfer_plan.total_annual_data_transfer_cost
-
-        dynamo_costs["dynamo.data-backup"] = backup_plan.total_annual_backup_cost
 
         clusters = Clusters(
             annual_costs=dynamo_costs,
@@ -462,6 +556,8 @@ class NflxDynamoDBCapacityModel(CapacityModel):
         acceptable_consistency = {
             "same_region": {
                 None,
+                AccessConsistency.serializable,
+                AccessConsistency.linearizable,
                 AccessConsistency.best_effort,
                 AccessConsistency.eventual,
                 AccessConsistency.read_your_writes,
@@ -469,6 +565,8 @@ class NflxDynamoDBCapacityModel(CapacityModel):
             },
             "cross_region": {
                 None,
+                # https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/globaltables_HowItWorks.html#V2globaltables_HowItWorks.CommonTasks
+                AccessConsistency.linearizable_stale,
                 AccessConsistency.best_effort,
                 AccessConsistency.eventual,
                 AccessConsistency.never,

@@ -35,5 +35,5 @@ def models():
         "org.netflix.aurora": nflx_aurora_capacity_model,
         "org.netflix.postgres": nflx_postgres_capacity_model,
         "org.netflix.kafka": nflx_kafka_capacity_model,
-        "org.netflix.ddb": nflx_ddb_capacity_model,
+        "org.netflix.dynamodb": nflx_ddb_capacity_model,
     }
