@@ -325,6 +325,92 @@ class CapacityPlanner:
     def hardware_shapes(self) -> HardwareShapes:
         return self._shapes
 
+    def _plan_percentiles(
+        self,
+        model_name: str,
+        percentiles: Tuple[int, ...],
+        region: str,
+        desires: CapacityDesires,
+        lifecycles: Optional[Sequence[Lifecycle]] = None,
+        instance_families: Optional[Sequence[str]] = None,
+        drives: Optional[Sequence[str]] = None,
+        num_results: Optional[int] = None,
+        num_regions: int = 3,
+        extra_model_arguments: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Sequence[CapacityPlan], Dict[int, Sequence[CapacityPlan]]]:
+        if model_name not in self._models:
+            raise ValueError(
+                f"model_name={model_name} does not exist. "
+                f"Try {sorted(list(self._models.keys()))}"
+            )
+
+        extra_model_arguments = extra_model_arguments or {}
+        lifecycles = lifecycles or self._default_lifecycles
+
+        model_mean_desires: Dict[str, CapacityDesires] = {}
+        model_percentile_desires: List[Dict[str, CapacityDesires]] = []
+        sorted_percentiles = sorted(percentiles)
+        for percentile in sorted_percentiles:
+            model_percentile_desires.append({})
+        for sub_model, sub_desires in self._sub_models(
+            model_name=model_name,
+            desires=desires,
+            extra_model_arguments=extra_model_arguments,
+        ):
+            percentile_inputs, mean_desires = model_desires_percentiles(
+                desires=sub_desires, percentiles=sorted_percentiles
+            )
+            model_mean_desires[sub_model] = mean_desires
+            index = 0
+            for percentile_input in percentile_inputs:
+                model_percentile_desires[index][sub_model] = percentile_input
+                index = index + 1
+
+        mean_plans = []
+        for mean_sub_model, mean_sub_desire in model_mean_desires.items():
+            mean_plans.append(
+                self._plan_certain(
+                    model_name=mean_sub_model,
+                    region=region,
+                    desires=mean_sub_desire,
+                    num_results=num_results,
+                    num_regions=num_regions,
+                    extra_model_arguments=extra_model_arguments,
+                    lifecycles=lifecycles,
+                    instance_families=instance_families,
+                    drives=drives,
+                )
+            )
+
+        mean_plan = [
+            functools.reduce(merge_plan, composed) for composed in zip(*mean_plans)
+        ]
+        percentile_plans = {}
+        for index, percentile in enumerate(sorted_percentiles):
+            percentile_plan = []
+            for percentile_sub_model, percentile_sub_desire in model_percentile_desires[
+                index
+            ].items():
+                percentile_plan.append(
+                    self._plan_certain(
+                        model_name=percentile_sub_model,
+                        region=region,
+                        desires=percentile_sub_desire,
+                        num_results=num_results,
+                        num_regions=num_regions,
+                        extra_model_arguments=extra_model_arguments,
+                        lifecycles=lifecycles,
+                        instance_families=instance_families,
+                        drives=drives,
+                    )
+                )
+            percentile_plans[percentile] = [
+                functools.reduce(merge_plan, composed)
+                for composed in zip(*percentile_plan)
+            ]
+
+        return mean_plan, percentile_plans
+
     def plan_certain(
         self,
         model_name: str,
@@ -567,39 +653,20 @@ class CapacityPlanner:
 
         final_requirement = Requirements(zonal=final_zonal, regional=final_regional)
 
-        desires_defaults_merged = (
-            desires.merge_with(
-                self._models[model_name].default_desires(desires, extra_model_arguments)
-            )
-            if model_name != "org.netflix.counter"
-            else desires
+        mean_plan, percentile_plans = self._plan_percentiles(
+            model_name=model_name,
+            percentiles=percentiles,
+            region=region,
+            desires=desires,
+            extra_model_arguments=extra_model_arguments,
+            num_regions=num_regions,
+            instance_families=instance_families,
         )
-
-        percentile_inputs, mean_desires = model_desires_percentiles(
-            desires=desires_defaults_merged, percentiles=sorted(percentiles)
-        )
-        percentile_plans = {}
-        for index, percentile in enumerate(percentiles):
-            percentile_plans[percentile] = self.plan_certain(
-                model_name=model_name,
-                region=region,
-                desires=percentile_inputs[index],
-                extra_model_arguments=extra_model_arguments,
-                num_regions=num_regions,
-                instance_families=instance_families,
-            )
 
         result = UncertainCapacityPlan(
             requirements=final_requirement,
             least_regret=least_regret,
-            mean=self.plan_certain(
-                model_name=model_name,
-                region=region,
-                desires=mean_desires,
-                extra_model_arguments=extra_model_arguments,
-                num_regions=num_regions,
-                instance_families=instance_families,
-            ),
+            mean=mean_plan,
             percentiles=percentile_plans,
             explanation=PlanExplanation(
                 regret_params=regret_params,

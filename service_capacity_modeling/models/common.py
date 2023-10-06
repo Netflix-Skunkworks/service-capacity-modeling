@@ -129,11 +129,10 @@ def network_services(
     # inter region. This is the number of regions minus 1
     inter_txfer = context.services.get("net.inter.region", None)
     if inter_txfer:
-        price_per_gib = inter_txfer.annual_cost_per_gib[0][1]
         result.append(
             ServiceCapacity(
                 service_type=f"{service_type}.net.inter.region",
-                annual_cost=(price_per_gib * txfer_gib * num_regions),
+                annual_cost=(inter_txfer.annual_cost_gib(txfer_gib) * num_regions),
                 service_params={"txfer_gib": txfer_gib, "num_regions": num_regions},
             )
         )
@@ -141,12 +140,13 @@ def network_services(
     # Same zone is free, but we pay for replication from our zone to others
     intra_txfer = context.services.get("net.intra.region", None)
     if intra_txfer:
-        price_per_gib = intra_txfer.annual_cost_per_gib[0][1]
         result.append(
             ServiceCapacity(
                 service_type=f"{service_type}.net.intra.region",
                 annual_cost=(
-                    price_per_gib * txfer_gib * num_zones * context.num_regions
+                    intra_txfer.annual_cost_gib(txfer_gib)
+                    * num_zones
+                    * context.num_regions
                 ),
                 service_params={
                     "txfer_gib": txfer_gib,

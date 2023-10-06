@@ -331,7 +331,7 @@ def _estimate_cassandra_cluster_zonal(
             cap_services = [
                 ServiceCapacity(
                     service_type=f"cassandra.backup.{blob.name}",
-                    annual_cost=blob.annual_cost_per_gib[0][1] * requirement.disk_gib.mid,
+                    annual_cost=blob.annual_cost_gib(requirement.disk_gib.mid),
                     service_params={
                         "nines_required": (
                             1 - 1.0 / desires.data_shape.durability_slo_order.mid
