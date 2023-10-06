@@ -472,15 +472,16 @@ class NflxDynamoDBCapacityModel(CapacityModel):
             requirement_context["target_max_annual_cost"] = target_max_annual_cost
             annual_balance_target = target_max_annual_cost - total_annual_costs
             if annual_balance_target > 0:
-                max_read_capacity_units += round(
-                    (annual_balance_target / max(1, read_plan.total_annual_read_cost))
+                max_read_capacity_units += math.ceil(
+                    (annual_balance_target / max(1.0, read_plan.total_annual_read_cost))
                     * read_plan.read_capacity_units,
-                    2,
                 )
-                max_write_capacity_units += round(
-                    (annual_balance_target / max(1, write_plan.total_annual_write_cost))
+                max_write_capacity_units += math.ceil(
+                    (
+                        annual_balance_target
+                        / max(1.0, write_plan.total_annual_write_cost)
+                    )
                     * total_write_capacity_units,
-                    2,
                 )
 
         requirement = CapacityRequirement(
