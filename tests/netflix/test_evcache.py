@@ -296,3 +296,40 @@ def test_evcache_ondisk_disk_usage():
                     candidate.candidate_clusters.zonal[0].count
 
         assert total_ram > inmemory_qps.data_shape.estimated_state_size_gib.mid
+
+def test_evcache_ondisk_disk_usage():
+    high_disk_usage_rps = CapacityDesires(
+        service_tier=0,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=Interval(
+                low=284, mid=7110000, high=7110000 * 1.2, confidence=1.0
+            ),
+            estimated_write_per_second=Interval(
+                low=0, mid=2620000, high=2620000 * 1.2, confidence=1.0
+            ),
+            estimated_mean_write_size_bytes=Interval(
+                low=12000, mid=12000, high=12000 * 1.2, confidence=1.0
+            ),
+            estimated_mean_read_size_bytes=Interval(
+                low=16000, mid=16000, high=16000 * 1.2, confidence=1.0
+            ),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(low=2306867, mid=2306867, high=2306867, confidence=1.0),
+            estimated_state_item_count=Interval(
+                low=132000000000, mid=132000000000, high=132000000000 * 1.2, confidence=1.0
+            ),
+        ),
+    )
+
+    plan = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=high_disk_usage_rps,
+    )
+
+    for candidate in plan:
+        total_disk = candidate.candidate_clusters.zonal[0].instance.drive.size_gib * \
+                    candidate.candidate_clusters.zonal[0].count
+
+        assert total_disk > high_disk_usage_rps.data_shape.estimated_state_size_gib.mid
