@@ -87,7 +87,7 @@ def _estimate_elasticsearch_requirement(
         * copies_per_region,
     )
 
-    # Rough estimate of how many instances we would need just for the the CPU
+    # Rough estimate of how many instances we would need just for the CPU
     # Note that this is a lower bound, we might end up with more.
     needed_cores = math.ceil(
         max(1, needed_cores // (instance.cpu_ghz / desires.core_reference_ghz))
@@ -201,13 +201,11 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         )
 
         # Netflix Elasticsearch doesn't like to deploy on really small instances
-        if instance.cpu < 2 or instance.ram_gib < 14:
+        if instance.cpu < 2 or instance.ram_gib < 24:
             return None
 
-        # (FIXME): Need elasticsearch input
-        # Right now Elasticsearch doesn't deploy to cloud drives, just adding this
-        # here and leaving the capability to handle cloud drives for the future
-        if instance.drive is None and drive.name not in ("io2", "gp3"):
+        # Right now Elasticsearch doesn't deploy to cloud drives
+        if instance.drive is None:
             return None
 
         zones_in_region = context.zones_in_region
@@ -257,7 +255,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
 
         # Write IO will be 1 to translog + 5 read+writes in the first hour
         # during segment merges. Drives don't differentiate writes from reads
-        # for the most part so we just account for the merge reads here
+        # for the most part, so we just account for the merge reads here
         # as writes.
         # https://aws.amazon.com/ebs/volume-types/ says IOPS are 16k for
         # io2/gp2 so for now we're just hardcoding.
@@ -278,12 +276,12 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             ),
             # Elasticsearch requires ephemeral disks to be % full because tiered
             # merging can make progress as long as there is some headroom
-            required_disk_space=lambda x: x * 1.4,
+            required_disk_space=lambda x: x * 1.33,
             max_local_disk_gib=max_local_disk_gib,
             # elasticsearch clusters can autobalance via shard placement
             cluster_size=lambda x: x,
             min_count=1,
-            # Sidecars/System takes away memory from elasticsearch
+            # Sidecars/System takes away memory from Elasticsearch
             # Elasticsearch uses half of available system max of 32 for compressed
             # oops
             reserve_memory=lambda x: base_mem + max(32, x / 2),
@@ -331,19 +329,11 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
                 needed_disk_gib=int(search_requirement.disk_gib.mid),
                 needed_memory_gib=int(search_requirement.mem_gib.mid),
                 needed_network_mbps=search_requirement.network_mbps.mid,
-                # FIXME: do search nodes need disk io? are they even
-                # having disk?
-                required_disk_ios=lambda size_gib, count: (
-                    _es_io_per_read(size_gib) * math.ceil(search_rps / count)
-                ),
-                # Elasticsearch requires ephemeral disks to be % full because tiered
-                # merging can make progress as long as there is some headroom
-                required_disk_space=lambda x: x * 1.4,
                 max_local_disk_gib=0,
-                # elasticsearch clusters can autobalance via shard placement
+                # Elasticsearch clusters can autobalance via shard placement
                 cluster_size=lambda x: x,
                 min_count=1,
-                # Sidecars/System takes away memory from elasticsearch
+                # Sidecars/System takes away memory from Elasticsearch
                 # Elasticsearch uses half of available system max of 32 for compressed
                 # oops
                 reserve_memory=lambda x: base_mem + max(32, x / 2),
