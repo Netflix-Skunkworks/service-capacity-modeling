@@ -162,7 +162,7 @@ def _estimate_evcache_cluster_zonal(
     zones_per_region: int = 3,
     copies_per_region: int = 3,
     max_local_disk_gib: int = 2048,
-    max_regional_size: int = 999,
+    max_regional_size: int = 10000,
     min_instance_memory_gib: int = 12,
     cross_region_replication: Replication = Replication.none,
 ) -> Optional[CapacityPlan]:
@@ -173,6 +173,9 @@ def _estimate_evcache_cluster_zonal(
 
     # EVCache doesn't like to deploy to instances with < 7 GiB of ram
     if instance.ram_gib < min_instance_memory_gib:
+        return None
+
+    if instance.drive is None:
         return None
 
     # Based on the disk latency and the read latency SLOs we adjust our
@@ -234,8 +237,6 @@ def _estimate_evcache_cluster_zonal(
         needed_network_mbps=requirement.network_mbps.mid,
         # EVCache doesn't use cloud drives to store data, we will have
         # accounted for the data going on drives or memory via working set
-        required_disk_ios=lambda x, y: (0, 0),
-        required_disk_space=lambda x: 0,
         max_local_disk_gib=max_local_disk_gib,
         # EVCache clusters should be balanced per zone
         cluster_size=lambda x: next_n(x, zones_per_region),
@@ -305,7 +306,7 @@ class NflxEVCacheArguments(BaseModel):
         " this will be deduced from tier",
     )
     max_regional_size: int = Field(
-        default=999,
+        default=10000,
         description="What is the maximum size of a cluster in this region",
     )
     max_local_disk_gib: int = Field(
@@ -341,7 +342,7 @@ class NflxEVCacheCapacityModel(CapacityModel):
         copies_per_region: int = extra_model_arguments.get(
             "copies_per_region", default_copies
         )
-        max_regional_size: int = extra_model_arguments.get("max_regional_size", 999)
+        max_regional_size: int = extra_model_arguments.get("max_regional_size", 10000)
         # Very large nodes are hard to cache warm
         max_local_disk_gib: int = extra_model_arguments.get(
             "max_local_disk_gib", 1024 * 6
