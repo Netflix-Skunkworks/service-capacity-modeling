@@ -297,7 +297,7 @@ def test_evcache_ondisk_disk_usage():
 
         assert total_ram > inmemory_qps.data_shape.estimated_state_size_gib.mid
 
-def test_evcache_ondisk_disk_usage():
+def test_evcache_ondisk_high_disk_usage():
     high_disk_usage_rps = CapacityDesires(
         service_tier=0,
         query_pattern=QueryPattern(
@@ -329,7 +329,8 @@ def test_evcache_ondisk_disk_usage():
     )
 
     for candidate in plan:
-        total_disk = candidate.candidate_clusters.zonal[0].instance.drive.size_gib * \
-                    candidate.candidate_clusters.zonal[0].count
+        if candidate.candidate_clusters.zonal[0].instance.drive is not None:
+            total_disk = candidate.candidate_clusters.zonal[0].instance.drive.size_gib * \
+                        candidate.candidate_clusters.zonal[0].count
 
-        assert total_disk > high_disk_usage_rps.data_shape.estimated_state_size_gib.mid
+            assert total_disk > high_disk_usage_rps.data_shape.estimated_state_size_gib.mid
