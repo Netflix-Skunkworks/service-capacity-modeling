@@ -101,7 +101,11 @@ def _estimate_evcache_requirement(
     item_count = desires.data_shape.estimated_state_item_count
     payload_greater_than_classic = False
     if state_size is not None and item_count is not None:
-        payload_size = (state_size.mid * 1024.0 * 1024.0 * 1024.0) / (item_count.mid)
+        if item_count.mid != 0:
+            payload_size = (state_size.mid * 1024.0 * 1024.0 * 1024.0) / (item_count.mid)
+        else:
+            payload_size = 0.0
+
         if payload_size > 200.0:
             payload_greater_than_classic = True
 
