@@ -334,3 +334,41 @@ def test_evcache_ondisk_high_disk_usage():
                         candidate.candidate_clusters.zonal[0].count
 
             assert total_disk > high_disk_usage_rps.data_shape.estimated_state_size_gib.mid
+
+def test_evcache_zero_item_count():
+    zero_item_count_rps = CapacityDesires(
+        service_tier=0,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=Interval(
+                low=1, mid=1, high=1 * 1.2, confidence=1.0
+            ),
+            estimated_write_per_second=Interval(
+                low=1, mid=1, high=1 * 1.2, confidence=1.0
+            ),
+            estimated_mean_write_size_bytes=Interval(
+                low=1, mid=1, high=1 * 1, confidence=1.0
+            ),
+            estimated_mean_read_size_bytes=Interval(
+                low=1, mid=1, high=1 * 1, confidence=1.0
+            ),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(low=0, mid=0, high=0, confidence=1.0),
+            estimated_state_item_count=Interval(
+                low=0, mid=0, high=0, confidence=1.0
+            ),
+        ),
+    )
+
+    plan = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=zero_item_count_rps,
+    )
+
+    for candidate in plan:
+        if candidate.candidate_clusters.zonal[0].instance.drive is not None:
+            total_ram = candidate.candidate_clusters.zonal[0].instance.drive.size_gib * \
+                        candidate.candidate_clusters.zonal[0].count
+
+            assert total_ram > zero_item_count_rps.data_shape.estimated_state_size_gib.mid
