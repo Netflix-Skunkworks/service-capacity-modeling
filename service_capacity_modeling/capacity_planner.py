@@ -368,8 +368,7 @@ class CapacityPlanner:
 
         mean_plans = []
         for mean_sub_model, mean_sub_desire in model_mean_desires.items():
-            mean_plans.append(
-                self._plan_certain(
+            mean_sub_plan = self._plan_certain(
                     model_name=mean_sub_model,
                     region=region,
                     desires=mean_sub_desire,
@@ -380,7 +379,8 @@ class CapacityPlanner:
                     instance_families=instance_families,
                     drives=drives,
                 )
-            )
+            if mean_sub_plan:
+                mean_plans.append(mean_sub_plan)
 
         mean_plan = cast(
             Sequence[CapacityPlan],
@@ -392,8 +392,7 @@ class CapacityPlanner:
             for percentile_sub_model, percentile_sub_desire in model_percentile_desires[
                 index
             ].items():
-                percentile_plan.append(
-                    self._plan_certain(
+                percentile_sub_plan = self._plan_certain(
                         model_name=percentile_sub_model,
                         region=region,
                         desires=percentile_sub_desire,
@@ -404,7 +403,9 @@ class CapacityPlanner:
                         instance_families=instance_families,
                         drives=drives,
                     )
-                )
+                if percentile_sub_plan:
+                    percentile_plan.append(percentile_sub_plan)
+
             percentile_plans[percentile] = cast(
                 Sequence[CapacityPlan],
                 [
@@ -443,8 +444,7 @@ class CapacityPlanner:
             desires=desires,
             extra_model_arguments=extra_model_arguments,
         ):
-            results.append(
-                self._plan_certain(
+            sub_plan = self._plan_certain(
                     model_name=sub_model,
                     region=region,
                     desires=sub_desires,
@@ -455,7 +455,8 @@ class CapacityPlanner:
                     instance_families=instance_families,
                     drives=drives,
                 )
-            )
+            if sub_plan:
+                results.append(sub_plan)
 
         return [functools.reduce(merge_plan, composed) for composed in zip(*results)]
 

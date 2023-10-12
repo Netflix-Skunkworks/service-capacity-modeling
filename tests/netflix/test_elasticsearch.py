@@ -39,7 +39,7 @@ def test_es_increasing_qps_simple():
         for zonal in cap_plan.least_regret[0].candidate_clusters.zonal:
             zonal_result[zonal.cluster_type].append(zonal_summary(zonal))
 
-    expected_families = set(["r", "m", "i"])
+    expected_families = {"r", "m", "i"}
     for cluster_type in list(zonal_result.keys()):
         zonal_by_increasing_qps = zonal_result[cluster_type]
 
@@ -60,6 +60,72 @@ def test_es_increasing_qps_simple():
         assert (
             disk[0] <= disk[-1]
         ), f"disk for {cluster_type} going down as QPS went up?"
+
+
+def test_es_simple_mean_percentiles():
+    simple = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=Interval(
+                low=100, mid=1000, high=10_000, confidence=0.98
+            ),
+            estimated_write_per_second=Interval(
+                low=100, mid=1000, high=10_000, confidence=0.98
+            ),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(
+                low=20, mid=200, high=2000, confidence=0.98
+            ),
+        ),
+    )
+
+    cap_plan = planner.plan(
+        model_name="org.netflix.elasticsearch",
+        region="us-east-1",
+        desires=simple,
+        simulations=256,
+    )
+
+    assert len(cap_plan.mean) > 0, "mean is empty"
+    assert (
+        all(mean_plan for mean_plan in cap_plan.mean)
+    ), "One or more mean plans are empty"
+
+    assert len(cap_plan.percentiles) > 0, "percentiles are empty"
+    assert (
+        all(percentile_plan for percentile_plan in cap_plan.percentiles.values())
+    ), "One or more percentile plans are empty"
+
+
+def test_es_simple_certain():
+    simple = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=Interval(
+                low=100, mid=1000, high=10_000, confidence=0.98
+            ),
+            estimated_write_per_second=Interval(
+                low=100, mid=1000, high=10_000, confidence=0.98
+            ),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(
+                low=20, mid=200, high=2000, confidence=0.98
+            ),
+        ),
+    )
+
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.elasticsearch",
+        region="us-east-1",
+        desires=simple,
+    )
+
+    assert len(cap_plan) > 0, "Resulting cap_plan is empty"
+    assert (
+        all(plan for plan in cap_plan)
+    ), "One or more plans is empty"
 
 
 def zonal_summary(zlr):
