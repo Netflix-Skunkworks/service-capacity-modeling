@@ -575,6 +575,14 @@ class CapacityPlanner:
         if len(allowed_drives) == 0:
             allowed_drives.update(hardware.drives.keys())
 
+        # Get current instance object if exists
+        if desires.current_clusters:
+            for zonal_cluster_capacity in desires.current_clusters.zonal:
+                zonal_cluster_capacity.cluster_instance = hardware.instances[zonal_cluster_capacity.cluster_instance_name]
+            for regional_cluster_capacity in desires.current_clusters.regional:
+                regional_cluster_capacity.cluster_instance = hardware.instances[regional_cluster_capacity.cluster_instance_name]
+
+        plans = []
         if model.run_hardware_simulation():
             for instance in hardware.instances.values():
                 if not _allow_instance(

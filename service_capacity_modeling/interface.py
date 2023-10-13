@@ -18,7 +18,6 @@ import numpy as np
 from pydantic import BaseModel
 from pydantic import Field
 
-
 GIB_IN_BYTES = 1024 * 1024 * 1024
 MIB_IN_BYTES = 1024 * 1024
 MEGABIT_IN_BYTES = (1000 * 1000) / 8
@@ -377,7 +376,7 @@ class Service(ExcludeUnsetModel):
                     break
                 if transfer_cost[0] > 0:
                     annual_cost += (
-                        min(_annual_data, transfer_cost[0]) * transfer_cost[1]
+                            min(_annual_data, transfer_cost[0]) * transfer_cost[1]
                     )
                     _annual_data -= transfer_cost[0]
                 else:
@@ -621,6 +620,29 @@ class DataShape(ExcludeUnsetModel):
     )
 
 
+class CurrentClusterCapacity(ExcludeUnsetModel):
+    cluster_instance_name: str
+    cluster_instance: Optional[Instance] = None
+    cluster_instance_count: Interval
+    cpu_utilization: Interval
+
+
+# For services that are provisioned by zone (e.g. Cassandra, EVCache)
+class CurrentZoneClusterCapacity(CurrentClusterCapacity):
+    pass
+
+
+# For services that are provisioned regionally (e.g. Java services, RDS, etc ..)
+class CurrentRegionClusterCapacity(CurrentClusterCapacity):
+    pass
+
+
+class CurrentClusters(ExcludeUnsetModel):
+    zonal: Sequence[CurrentZoneClusterCapacity] = []
+    regional: Sequence[CurrentRegionClusterCapacity] = []
+    services: Sequence[ServiceCapacity] = []
+
+
 class CapacityDesires(ExcludeUnsetModel):
     # How critical is this cluster, impacts how much "extra" we provision
     # 0 = Critical to the product            (Product does not function)
@@ -634,6 +656,9 @@ class CapacityDesires(ExcludeUnsetModel):
 
     # What will the state look like
     data_shape: DataShape = DataShape()
+
+    # What is the current microarchitectural/system configuration of the system
+    current_clusters: Optional[CurrentClusters] = None
 
     # When users are providing latency estimates, what is the typical
     # instance core frequency we are comparing to. Databases use i3s a lot
@@ -733,7 +758,7 @@ class Requirements(ExcludeUnsetModel):
     # pylint: disable=unused-argument
     @staticmethod
     def regret(
-        name: str, optimal_plan: "CapacityPlan", proposed_plan: "CapacityPlan"
+            name: str, optimal_plan: "CapacityPlan", proposed_plan: "CapacityPlan"
     ) -> float:
         return 0.0
 

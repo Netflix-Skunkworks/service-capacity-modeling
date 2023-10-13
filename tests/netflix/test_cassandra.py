@@ -1,5 +1,5 @@
 from service_capacity_modeling.capacity_planner import planner
-from service_capacity_modeling.interface import AccessConsistency
+from service_capacity_modeling.interface import AccessConsistency, CurrentClusterCapacity, CurrentClusters
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
@@ -8,7 +8,8 @@ from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import QueryPattern
-
+from service_capacity_modeling.interface import Interval
+from service_capacity_modeling.interface import AccessPattern
 
 small_but_high_qps = CapacityDesires(
     service_tier=1,
@@ -66,9 +67,9 @@ def test_capacity_small_fast():
         # with lots of ebs_gp2 to handle the read IOs
         if small_result.attached_drives:
             assert (
-                small_result.count
-                * sum(d.size_gib for d in small_result.attached_drives)
-                > 1000
+                    small_result.count
+                    * sum(d.size_gib for d in small_result.attached_drives)
+                    > 1000
             )
 
         assert small_result.cluster_params["cassandra.heap.write.percent"] == 0.25
@@ -156,12 +157,12 @@ def test_capacity_high_writes():
     assert 30 <= num_cpus <= 128
     if high_writes_result.attached_drives:
         assert (
-            high_writes_result.count * high_writes_result.attached_drives[0].size_gib
-            >= 400
+                high_writes_result.count * high_writes_result.attached_drives[0].size_gib
+                >= 400
         )
     elif high_writes_result.instance.drive is not None:
         assert (
-            high_writes_result.count * high_writes_result.instance.drive.size_gib >= 400
+                high_writes_result.count * high_writes_result.instance.drive.size_gib >= 400
         )
     else:
         raise AssertionError("Should have drives")
@@ -194,9 +195,9 @@ def test_high_write_throughput():
 
     assert high_writes_result.attached_drives[0].size_gib >= 400
     assert (
-        300_000
-        > high_writes_result.count * high_writes_result.attached_drives[0].size_gib
-        >= 100_000
+            300_000
+            > high_writes_result.count * high_writes_result.attached_drives[0].size_gib
+            >= 100_000
     )
 
     cluster_cost = cap_plan.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
@@ -225,7 +226,7 @@ def test_capacity_large_footprint():
     assert large_footprint_result.cluster_params["cassandra.heap.write.percent"] == 0.25
     assert large_footprint_result.cluster_params["cassandra.heap.table.percent"] == 0.11
     assert (
-        large_footprint_result.cluster_params["cassandra.compaction.min_threshold"] == 4
+            large_footprint_result.cluster_params["cassandra.compaction.min_threshold"] == 4
     )
 
 
@@ -269,7 +270,7 @@ def test_reduced_durability():
     )[0]
 
     assert cheap_plan.candidate_clusters.total_annual_cost < (
-        0.7 * float(expensive_plan.candidate_clusters.total_annual_cost)
+            0.7 * float(expensive_plan.candidate_clusters.total_annual_cost)
     )
     # The reduced durability and consistency requirement let's us
     # use less compute
@@ -279,25 +280,77 @@ def test_reduced_durability():
     # Due to high writes both should have high heap write buffering
     for plan in (expensive_plan, cheap_plan):
         assert (
-            plan.candidate_clusters.zonal[0].cluster_params[
-                "cassandra.heap.write.percent"
-            ]
-            == 0.5
+                plan.candidate_clusters.zonal[0].cluster_params[
+                    "cassandra.heap.write.percent"
+                ]
+                == 0.5
         )
         assert (
-            plan.candidate_clusters.zonal[0].cluster_params[
-                "cassandra.heap.table.percent"
-            ]
-            == 0.2
+                plan.candidate_clusters.zonal[0].cluster_params[
+                    "cassandra.heap.table.percent"
+                ]
+                == 0.2
         )
         assert (
-            plan.candidate_clusters.zonal[0].cluster_params[
-                "cassandra.compaction.min_threshold"
-            ]
-            == 8
+                plan.candidate_clusters.zonal[0].cluster_params[
+                    "cassandra.compaction.min_threshold"
+                ]
+                == 8
         )
 
     assert (
-        cheap_plan.candidate_clusters.zonal[0].cluster_params["cassandra.keyspace.rf"]
-        == 2
+            cheap_plan.candidate_clusters.zonal[0].cluster_params["cassandra.keyspace.rf"]
+            == 2
     )
+
+
+def test_plan_certain():
+    """
+    Use cpu utilization to determine instance types directly as supposed to extrapolating it from the Data Shape
+    """
+    cluster_capacity = CurrentClusterCapacity(
+        cluster_instance_name="i4i.8xlarge",
+        cluster_instance_count=Interval(low=8, mid=8, high=8, confidence=1),
+        cpu_utilization=Interval(
+            low=10.12, mid=13.2, high=14.194801291058118, confidence=1
+        ),
+    )
+
+    worn_desire = CapacityDesires(
+        service_tier=1,
+        current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+        query_pattern=QueryPattern(
+            access_pattern=AccessPattern(
+                AccessPattern.latency
+            ),
+            estimated_read_per_second=Interval(
+                low=234248, mid=351854, high=485906, confidence=0.98
+            ),
+            estimated_write_per_second=Interval(
+                low=19841, mid=31198, high=37307, confidence=0.98
+            ),
+        ),
+        # We think we're going to have around 200 TiB of data
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(
+                low=2006.083, mid=2252.5, high=2480.41, confidence=0.98
+            ),
+            estimated_compression_ratio=Interval(
+                low=1, mid=1, high=1, confidence=1
+            ),
+        ),
+    )
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        num_results=3,
+        num_regions=4,
+        desires=worn_desire,
+        extra_model_arguments={
+            "required_cluster_size": 8,
+        },
+    )
+
+    lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
+    assert lr_clusters.count == 8
+    assert lr_clusters.instance.cpu == 16
