@@ -18,7 +18,6 @@ import numpy as np
 from pydantic import BaseModel
 from pydantic import Field
 
-
 GIB_IN_BYTES = 1024 * 1024 * 1024
 MIB_IN_BYTES = 1024 * 1024
 MEGABIT_IN_BYTES = (1000 * 1000) / 8
@@ -621,6 +620,13 @@ class DataShape(ExcludeUnsetModel):
     )
 
 
+class CurrentClusterCapacity(ExcludeUnsetModel):
+    cluster_instance_name: str
+    cluster_instance: Optional[Instance]
+    cluster_instance_count: Interval
+    cpu_utilization: Interval
+
+
 class CapacityDesires(ExcludeUnsetModel):
     # How critical is this cluster, impacts how much "extra" we provision
     # 0 = Critical to the product            (Product does not function)
@@ -634,6 +640,9 @@ class CapacityDesires(ExcludeUnsetModel):
 
     # What will the state look like
     data_shape: DataShape = DataShape()
+
+    # What is the current microarchitectural/system configuration of the system
+    current_cluster_capacity: Optional[CurrentClusterCapacity]
 
     # When users are providing latency estimates, what is the typical
     # instance core frequency we are comparing to. Databases use i3s a lot

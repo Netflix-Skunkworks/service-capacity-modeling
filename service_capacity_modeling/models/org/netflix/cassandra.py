@@ -68,6 +68,7 @@ def _estimate_cassandra_requirement(
     working_set: float,
     reads_per_second: float,
     max_rps_to_disk: int,
+    required_cluster_size: Optional[int] = None,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
 ) -> CapacityRequirement:
@@ -77,7 +78,18 @@ def _estimate_cassandra_requirement(
     return the zonal capacity requirement
     """
     # Keep half of the cores free for background work (compaction, backup, repair)
-    needed_cores = sqrt_staffed_cores(desires) * 2
+    if (
+        desires.current_cluster_capacity is not None
+        and desires.current_cluster_capacity.cluster_instance is not None
+        and required_cluster_size is not None
+    ):
+        needed_cores = (
+            desires.current_cluster_capacity.cluster_instance.cpu
+            * required_cluster_size
+            * zones_per_region
+        ) * (desires.current_cluster_capacity.cpu_utilization.high / 20)
+    else:
+        needed_cores = sqrt_staffed_cores(desires) * 2
     # Keep half of the bandwidth available for backup
     needed_network_mbps = simple_network_mbps(desires) * 2
 
@@ -183,7 +195,6 @@ def _estimate_cassandra_cluster_zonal(
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
 ) -> Optional[CapacityPlan]:
-
     # Netflix Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 2 or instance.ram_gib < 14:
         return None
@@ -238,6 +249,7 @@ def _estimate_cassandra_cluster_zonal(
         working_set=working_set,
         reads_per_second=rps,
         max_rps_to_disk=max_rps_to_disk,
+        required_cluster_size=required_cluster_size,
         zones_per_region=zones_per_region,
         copies_per_region=copies_per_region,
     )

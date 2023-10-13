@@ -523,10 +523,21 @@ class CapacityPlanner:
     ) -> Sequence[CapacityPlan]:
         extra_model_arguments = extra_model_arguments or {}
         model = self._models[model_name]
+        lifecycles = lifecycles or self._default_lifecycles
+        instance_families = instance_families or []
+        drives = drives or []
+
+        hardware = self._shapes.region(region)
+
+        # Get current instance object if exists
+        if desires.current_cluster_capacity:
+            desires.current_cluster_capacity.cluster_instance = hardware.instances[
+                desires.current_cluster_capacity.cluster_instance_name
+            ]
 
         plans = []
         for instance, drive, context in self.generate_scenarios(
-            model, region, desires, num_regions, lifecycles, instance_families, drives
+            model, hardware, desires, num_regions, lifecycles, instance_families, drives
         ):
             plan = model.capacity_plan(
                 instance=instance,
@@ -545,13 +556,15 @@ class CapacityPlanner:
         return reduce_by_family(plans)[:num_results]
 
     def generate_scenarios(
-        self, model, region, desires, num_regions, lifecycles, instance_families, drives
+        self,
+        model,
+        hardware,
+        desires,
+        num_regions,
+        lifecycles,
+        instance_families,
+        drives,
     ):
-        lifecycles = lifecycles or self._default_lifecycles
-        instance_families = instance_families or []
-        drives = drives or []
-
-        hardware = self._shapes.region(region)
 
         context = RegionContext(
             zones_in_region=hardware.zones_in_region,
