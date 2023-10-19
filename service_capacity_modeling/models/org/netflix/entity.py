@@ -59,6 +59,33 @@ class NflxEntityCapacityModel(CapacityModel):
     def compose_with(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
+        def _modify_crdb_desires(
+            user_desires: CapacityDesires,
+        ) -> CapacityDesires:
+            relaxed = user_desires.copy(deep=True)
+            item_count = relaxed.data_shape.estimated_state_item_count
+            # based on the nts cluster where the version store is 10x the prime store
+            if item_count is None:
+                # assume 10 KB items
+                if (
+                    user_desires.query_pattern.estimated_mean_write_size_bytes
+                    is not None
+                ):
+                    item_size_gib = (
+                        user_desires.query_pattern.estimated_mean_write_size_bytes.mid
+                        / 1024**3
+                    )
+                else:
+                    item_size_gib = 10 / 1024**2
+                item_count = user_desires.data_shape.estimated_state_size_gib.scale(
+                    1 / item_size_gib
+                )
+            # assume 512 B to track the id/version of each item
+            relaxed.data_shape.estimated_state_size_gib = item_count.scale(
+                512 / 1024**3
+            )
+            return relaxed
+
         def _modify_elasticsearch_desires(
             user_desires: CapacityDesires,
         ) -> CapacityDesires:
@@ -69,7 +96,8 @@ class NflxEntityCapacityModel(CapacityModel):
             return relaxed
 
         return (
-            ("org.netflix.cassandra", lambda x: x),
+            ("org.netflix.cockroachdb", _modify_crdb_desires),
+            ("org.netflix.key-value", lambda x: x),
             ("org.netflix.elasticsearch", _modify_elasticsearch_desires),
         )
 
