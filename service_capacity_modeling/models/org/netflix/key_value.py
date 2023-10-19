@@ -60,7 +60,9 @@ class NflxKeyValueCapacityModel(CapacityModel):
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
         query_pattern = user_desires.query_pattern
-        target_consistency = query_pattern.access_consistency.same_region.target_consistency
+        target_consistency = (
+            query_pattern.access_consistency.same_region.target_consistency
+        )
         rps_interval = query_pattern.estimated_read_per_second
         rps: float = rps_interval.mid
         wps: float = query_pattern.estimated_write_per_second.mid
@@ -68,28 +70,45 @@ class NflxKeyValueCapacityModel(CapacityModel):
 
         # Parameterizing this in case we want to configure it to something else later.
         # The read/write ratio should be relatively high to make EVCache effective.
-        evcache_rw_ratio_threshold: float = extra_model_arguments.get("kv_evcache_read_write_ratio_threshold", 0.9)
-        use_evcache = target_consistency in (AccessConsistency.eventual, AccessConsistency.best_effort) and \
-            (rps > 250_000 or (rps > 100_000 and read_write_ratio > evcache_rw_ratio_threshold))
+        evcache_rw_ratio_threshold: float = extra_model_arguments.get(
+            "kv_evcache_read_write_ratio_threshold", 0.9
+        )
+        use_evcache = target_consistency in (
+            AccessConsistency.eventual,
+            AccessConsistency.best_effort,
+        ) and (
+            rps > 250_000
+            or (rps > 100_000 and read_write_ratio > evcache_rw_ratio_threshold)
+        )
 
         if use_evcache:
+
             def _modify_cassandra_desires(
                 desires: CapacityDesires,
             ) -> CapacityDesires:
                 relaxed = desires.copy(deep=True)
 
-                # This is an initial best guess. Parameterizing in case we want to configure it in the future.
-                estimated_kv_cache_hit_rate: float = extra_model_arguments.get("estimated_kv_cache_hit_rate", 0.8)
+                # This is an initial best guess. Parameterizing in case we want to
+                # configure it in the future.
+                estimated_kv_cache_hit_rate: float = extra_model_arguments.get(
+                    "estimated_kv_cache_hit_rate", 0.8
+                )
 
-                # Scale down the Cassandra estimated rps since those reads will be serviced by EVCache.
-                relaxed.query_pattern.estimated_read_per_second = rps_interval.scale(1 - estimated_kv_cache_hit_rate)
+                # Scale down the Cassandra estimated rps since those reads will be
+                # serviced by EVCache.
+                relaxed.query_pattern.estimated_read_per_second = rps_interval.scale(
+                    1 - estimated_kv_cache_hit_rate
+                )
                 return relaxed
 
             def _modify_evcache_desires(
                 desires: CapacityDesires,
             ) -> CapacityDesires:
                 relaxed = desires.copy(deep=True)
-                relaxed.query_pattern.access_consistency.same_region.target_consistency = AccessConsistency.best_effort
+                access_consistency = relaxed.query_pattern.access_consistency
+                access_consistency.same_region.target_consistency = (
+                    AccessConsistency.best_effort
+                )
                 return relaxed
 
             return (
@@ -97,7 +116,7 @@ class NflxKeyValueCapacityModel(CapacityModel):
                 ("org.netflix.evcache", _modify_evcache_desires),
             )
         else:
-            return ("org.netflix.cassandra", lambda x: x),
+            return (("org.netflix.cassandra", lambda x: x),)
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments):

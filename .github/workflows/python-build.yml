@@ -20,3 +20,5 @@ jobs:
       run: pip install tox
     - name: Run Tox (pydantic v1)
       run: tox -e py
+    - name: Run Tox (full pre-commit check)
+      run: tox -e pre-commit

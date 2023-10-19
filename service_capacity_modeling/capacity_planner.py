@@ -2,8 +2,9 @@
 import functools
 import logging
 from hashlib import blake2b
-from typing import Any, cast
+from typing import Any
 from typing import Callable
+from typing import cast
 from typing import Dict
 from typing import Generator
 from typing import List
@@ -348,10 +349,11 @@ class CapacityPlanner:
         lifecycles = lifecycles or self._default_lifecycles
 
         model_mean_desires: Dict[str, CapacityDesires] = {}
-        model_percentile_desires: List[Dict[str, CapacityDesires]] = []
         sorted_percentiles = sorted(percentiles)
-        for percentile in sorted_percentiles:
+        model_percentile_desires: List[Dict[str, CapacityDesires]] = []
+        for _ in sorted_percentiles:
             model_percentile_desires.append({})
+
         for sub_model, sub_desires in self._sub_models(
             model_name=model_name,
             desires=desires,
@@ -366,26 +368,42 @@ class CapacityPlanner:
                 model_percentile_desires[index][sub_model] = percentile_input
                 index = index + 1
 
-        mean_plans = []
-        for mean_sub_model, mean_sub_desire in model_mean_desires.items():
-            mean_sub_plan = self._plan_certain(
-                    model_name=mean_sub_model,
-                    region=region,
-                    desires=mean_sub_desire,
-                    num_results=num_results,
-                    num_regions=num_regions,
-                    extra_model_arguments=extra_model_arguments,
-                    lifecycles=lifecycles,
-                    instance_families=instance_families,
-                    drives=drives,
-                )
-            if mean_sub_plan:
-                mean_plans.append(mean_sub_plan)
-
-        mean_plan = cast(
-            Sequence[CapacityPlan],
-            [functools.reduce(merge_plan, composed) for composed in zip(*mean_plans)],
+        mean_plan = self._mean_plan(
+            drives,
+            extra_model_arguments,
+            instance_families,
+            lifecycles,
+            num_regions,
+            num_results,
+            region,
+            model_mean_desires,
         )
+        percentile_plans = self._group_plans_by_percentile(
+            drives,
+            extra_model_arguments,
+            instance_families,
+            lifecycles,
+            num_regions,
+            num_results,
+            region,
+            model_percentile_desires,
+            sorted_percentiles,
+        )
+
+        return mean_plan, percentile_plans
+
+    def _group_plans_by_percentile(
+        self,
+        drives,
+        extra_model_arguments,
+        instance_families,
+        lifecycles,
+        num_regions,
+        num_results,
+        region,
+        model_percentile_desires,
+        sorted_percentiles,
+    ):
         percentile_plans = {}
         for index, percentile in enumerate(sorted_percentiles):
             percentile_plan = []
@@ -393,16 +411,16 @@ class CapacityPlanner:
                 index
             ].items():
                 percentile_sub_plan = self._plan_certain(
-                        model_name=percentile_sub_model,
-                        region=region,
-                        desires=percentile_sub_desire,
-                        num_results=num_results,
-                        num_regions=num_regions,
-                        extra_model_arguments=extra_model_arguments,
-                        lifecycles=lifecycles,
-                        instance_families=instance_families,
-                        drives=drives,
-                    )
+                    model_name=percentile_sub_model,
+                    region=region,
+                    desires=percentile_sub_desire,
+                    num_results=num_results,
+                    num_regions=num_regions,
+                    extra_model_arguments=extra_model_arguments,
+                    lifecycles=lifecycles,
+                    instance_families=instance_families,
+                    drives=drives,
+                )
                 if percentile_sub_plan:
                     percentile_plan.append(percentile_sub_plan)
 
@@ -413,8 +431,39 @@ class CapacityPlanner:
                     for composed in zip(*percentile_plan)
                 ],
             )
+        return percentile_plans
 
-        return mean_plan, percentile_plans
+    def _mean_plan(
+        self,
+        drives,
+        extra_model_arguments,
+        instance_families,
+        lifecycles,
+        num_regions,
+        num_results,
+        region,
+        model_mean_desires,
+    ):
+        mean_plans = []
+        for mean_sub_model, mean_sub_desire in model_mean_desires.items():
+            mean_sub_plan = self._plan_certain(
+                model_name=mean_sub_model,
+                region=region,
+                desires=mean_sub_desire,
+                num_results=num_results,
+                num_regions=num_regions,
+                extra_model_arguments=extra_model_arguments,
+                lifecycles=lifecycles,
+                instance_families=instance_families,
+                drives=drives,
+            )
+            if mean_sub_plan:
+                mean_plans.append(mean_sub_plan)
+        mean_plan = cast(
+            Sequence[CapacityPlan],
+            [functools.reduce(merge_plan, composed) for composed in zip(*mean_plans)],
+        )
+        return mean_plan
 
     def plan_certain(
         self,
@@ -445,16 +494,16 @@ class CapacityPlanner:
             extra_model_arguments=extra_model_arguments,
         ):
             sub_plan = self._plan_certain(
-                    model_name=sub_model,
-                    region=region,
-                    desires=sub_desires,
-                    num_results=num_results,
-                    num_regions=num_regions,
-                    extra_model_arguments=extra_model_arguments,
-                    lifecycles=lifecycles,
-                    instance_families=instance_families,
-                    drives=drives,
-                )
+                model_name=sub_model,
+                region=region,
+                desires=sub_desires,
+                num_results=num_results,
+                num_regions=num_regions,
+                extra_model_arguments=extra_model_arguments,
+                lifecycles=lifecycles,
+                instance_families=instance_families,
+                drives=drives,
+            )
             if sub_plan:
                 results.append(sub_plan)
 
@@ -473,12 +522,36 @@ class CapacityPlanner:
         extra_model_arguments: Optional[Dict[str, Any]] = None,
     ) -> Sequence[CapacityPlan]:
         extra_model_arguments = extra_model_arguments or {}
+        model = self._models[model_name]
+
+        plans = []
+        for instance, drive, context in self.generate_scenarios(
+            model, region, desires, num_regions, lifecycles, instance_families, drives
+        ):
+            plan = model.capacity_plan(
+                instance=instance,
+                drive=drive,
+                context=context,
+                desires=desires,
+                extra_model_arguments=extra_model_arguments,
+            )
+            if plan is not None:
+                plans.append(plan)
+
+        # lowest cost first
+        plans.sort(key=lambda p: (p.rank, p.candidate_clusters.total_annual_cost))
+
+        num_results = num_results or self._default_num_results
+        return reduce_by_family(plans)[:num_results]
+
+    def generate_scenarios(
+        self, model, region, desires, num_regions, lifecycles, instance_families, drives
+    ):
         lifecycles = lifecycles or self._default_lifecycles
         instance_families = instance_families or []
         drives = drives or []
 
         hardware = self._shapes.region(region)
-        num_results = num_results or self._default_num_results
 
         context = RegionContext(
             zones_in_region=hardware.zones_in_region,
@@ -492,7 +565,6 @@ class CapacityPlanner:
             desires.data_shape.reserved_instance_app_mem_gib
             + desires.data_shape.reserved_instance_system_mem_gib
         )
-        model = self._models[model_name]
         allowed_platforms: Set[Platform] = set(model.allowed_platforms())
         allowed_drives: Set[str] = set(drives or [])
         for drive_name in model.allowed_cloud_drives():
@@ -503,7 +575,6 @@ class CapacityPlanner:
         if len(allowed_drives) == 0:
             allowed_drives.update(hardware.drives.keys())
 
-        plans = []
         if model.run_hardware_simulation():
             for instance in hardware.instances.values():
                 if not _allow_instance(
@@ -518,32 +589,11 @@ class CapacityPlanner:
                     if not _allow_drive(drive, drives, lifecycles, allowed_drives):
                         continue
 
-                    plan = model.capacity_plan(
-                        instance=instance,
-                        drive=drive,
-                        context=context,
-                        desires=desires,
-                        extra_model_arguments=extra_model_arguments,
-                    )
-                    if plan is not None:
-                        plans.append(plan)
+                    yield instance, drive, context
         else:
-            plan = model.capacity_plan(
-                instance=Instance.get_managed_instance(),
-                drive=Drive.get_managed_drive(),
-                context=context,
-                desires=desires,
-                extra_model_arguments=extra_model_arguments,
-            )
-            if plan is not None:
-                plans.append(plan)
-
-        # lowest cost first
-        plans.sort(
-            key=lambda plan: (plan.rank, plan.candidate_clusters.total_annual_cost)
-        )
-
-        return reduce_by_family(plans)[:num_results]
+            instance = Instance.get_managed_instance()
+            drive = Drive.get_managed_drive()
+            yield instance, drive, context
 
     # pylint: disable-msg=too-many-locals
     def plan(

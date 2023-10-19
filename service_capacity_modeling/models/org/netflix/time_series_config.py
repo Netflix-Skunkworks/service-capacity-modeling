@@ -6,8 +6,8 @@ from typing import Dict
 from service_capacity_modeling.models.org.netflix.iso_date_math import (
     _iso_to_proto_duration,
 )
-from service_capacity_modeling.models.org.netflix.iso_date_math import iso_to_seconds
 from service_capacity_modeling.models.org.netflix.iso_date_math import _iso_to_timedelta
+from service_capacity_modeling.models.org.netflix.iso_date_math import iso_to_seconds
 
 DURATION_1H = timedelta(hours=1)
 DURATION_4H = timedelta(hours=4)

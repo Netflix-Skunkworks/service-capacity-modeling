@@ -3,7 +3,9 @@ from typing import Dict
 from typing import Optional
 from typing import Tuple
 
-from service_capacity_modeling.interface import AccessConsistency, Platform
+from .aurora import nflx_aurora_capacity_model
+from .crdb import nflx_cockroachdb_capacity_model
+from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
@@ -14,10 +16,10 @@ from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
+from service_capacity_modeling.interface import Platform
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models import CapacityModel
-from . import nflx_aurora_capacity_model, nflx_cockroachdb_capacity_model
 
 
 class NflxPostgresCapacityModel(CapacityModel):
@@ -46,7 +48,9 @@ class NflxPostgresCapacityModel(CapacityModel):
         if plan is not None:
             return plan
 
-        if set(nflx_cockroachdb_capacity_model.allowed_platforms()).intersection(instance.platforms):
+        if set(nflx_cockroachdb_capacity_model.allowed_platforms()).intersection(
+            instance.platforms
+        ):
             plan = nflx_cockroachdb_capacity_model.capacity_plan(
                 instance=instance,
                 drive=drive,
@@ -55,7 +59,8 @@ class NflxPostgresCapacityModel(CapacityModel):
                 extra_model_arguments=extra_model_arguments,
             )
         if plan is not None:
-            # We want to lower the rank so this plan will only be chosen when no other workaround
+            # We want to lower the rank so this plan will only be chosen when no other
+            # workaround
             plan.rank = 1
 
         return plan
@@ -88,14 +93,12 @@ class NflxPostgresCapacityModel(CapacityModel):
                 estimated_mean_write_size_bytes=Interval(
                     low=64, mid=512, high=2048, confidence=0.90
                 ),
-
                 estimated_mean_read_latency_ms=Interval(
                     low=1, mid=4, high=100, confidence=0.90
                 ),
                 estimated_mean_write_latency_ms=Interval(
                     low=1, mid=6, high=200, confidence=0.90
                 ),
-
                 read_latency_slo_ms=FixedInterval(
                     minimum_value=1,
                     maximum_value=100,

@@ -88,13 +88,13 @@ def test_es_simple_mean_percentiles():
     )
 
     assert len(cap_plan.mean) > 0, "mean is empty"
-    assert (
-        all(mean_plan for mean_plan in cap_plan.mean)
+    assert all(
+        mean_plan for mean_plan in cap_plan.mean
     ), "One or more mean plans are empty"
 
     assert len(cap_plan.percentiles) > 0, "percentiles are empty"
-    assert (
-        all(percentile_plan for percentile_plan in cap_plan.percentiles.values())
+    assert all(
+        percentile_plan for percentile_plan in cap_plan.percentiles.values()
     ), "One or more percentile plans are empty"
 
 
@@ -123,9 +123,7 @@ def test_es_simple_certain():
     )
 
     assert len(cap_plan) > 0, "Resulting cap_plan is empty"
-    assert (
-        all(plan for plan in cap_plan)
-    ), "One or more plans is empty"
+    assert all(plan for plan in cap_plan), "One or more plans is empty"
 
 
 def zonal_summary(zlr):

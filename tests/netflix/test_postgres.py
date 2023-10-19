@@ -1,10 +1,10 @@
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
-from service_capacity_modeling.interface import certain_float
-from service_capacity_modeling.interface import certain_int
 
 tier_0 = CapacityDesires(
     service_tier=0,
@@ -101,11 +101,7 @@ def test_small_footprint_multi_region():
     )
     assert cap_plan[0].candidate_clusters.zonal[0].instance.name == "m5d.xlarge"
 
-    assert (
-        2000
-        < cap_plan[0].candidate_clusters.total_annual_cost
-        < 4000
-    )
+    assert 2000 < cap_plan[0].candidate_clusters.total_annual_cost < 4000
 
 
 def test_small_footprint_plan_uncertain():
@@ -114,17 +110,13 @@ def test_small_footprint_plan_uncertain():
         region="us-east-1",
         desires=small_footprint,
         num_regions=1,
-        simulations=256
+        simulations=256,
     )
     plan_a = cap_plan.least_regret[0]
 
     assert plan_a.candidate_clusters.regional[0].instance.name == "db.r5.large"
 
-    assert (
-        2000
-        < plan_a.candidate_clusters.total_annual_cost
-        < 4000
-    )
+    assert 2000 < plan_a.candidate_clusters.total_annual_cost < 4000
 
 
 def test_large_footprint():
@@ -138,11 +130,7 @@ def test_large_footprint():
     assert cap_plan[0].candidate_clusters.zonal[0].instance.name == "i3.xlarge"
     assert cap_plan[0].candidate_clusters.zonal[0].count == 41
 
-    assert (
-        100_000
-        < cap_plan[0].candidate_clusters.total_annual_cost
-        < 150_000
-    )
+    assert 100_000 < cap_plan[0].candidate_clusters.total_annual_cost < 150_000
 
 
 def test_tier_3():

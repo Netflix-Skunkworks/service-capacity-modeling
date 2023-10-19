@@ -5,13 +5,14 @@ import sys
 from decimal import Decimal
 from enum import Enum
 from functools import lru_cache
-from typing import Any, Union
+from typing import Any
 from typing import cast
 from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
+from typing import Union
 
 import numpy as np
 from pydantic import BaseModel
@@ -369,10 +370,10 @@ class Service(ExcludeUnsetModel):
             return self.annual_cost_per_gib * data_gib
         else:
             _annual_data = data_gib
-            transfer_costs = self.annual_cost_per_gib
+            transfer_costs = list(self.annual_cost_per_gib)
             annual_cost = 0.0
             for transfer_cost in transfer_costs:
-                if not _annual_data > 0:
+                if _annual_data <= 0:
                     break
                 if transfer_cost[0] > 0:
                     annual_cost += (
