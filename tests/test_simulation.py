@@ -113,7 +113,7 @@ def test_simulate_interval_beta():
         (alpha, beta, root), d = _beta_dist_from_interval(interval)
         # Check that the delta/uniform function has roughly equal values
         # since deltas and uniforms should just spread over the interval
-        if interval.mid == 100 or interval.mid == 1000:
+        if interval.mid in (100, 1000):
             assert abs(alpha - beta) < 0.01
         assert root.success
         assert soln[0] < alpha < soln[1]
