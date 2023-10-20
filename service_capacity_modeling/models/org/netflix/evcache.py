@@ -88,7 +88,7 @@ def _estimate_evcache_requirement(
     # For tier 0, we double the number of cores to account for caution
     if desires.service_tier == 0:
         needed_cores = needed_cores * 2
-
+ 
     # (Arun): Keep 20% of available bandwidth for cache warmer
     needed_network_mbps = simple_network_mbps(desires) * 1.25
 
@@ -100,14 +100,15 @@ def _estimate_evcache_requirement(
     state_size = desires.data_shape.estimated_state_size_gib
     item_count = desires.data_shape.estimated_state_item_count
     payload_greater_than_classic = False
-    if state_size is not None and item_count is not None:
-        if item_count.mid != 0:
-            payload_size = (state_size.mid * 1024.0 * 1024.0 * 1024.0) / (item_count.mid)
-        else:
-            payload_size = 0.0
-
+    if state_size is not None and item_count is not None and item_count.mid != 0:
+        payload_size = (state_size.mid * 1024.0 * 1024.0 * 1024.0) / (item_count.mid)
         if payload_size > 200.0:
             payload_greater_than_classic = True
+    else:
+        if desires.query_pattern.estimated_mean_read_size_bytes.mid > 200.0:
+            payload_greater_than_classic = True
+
+
 
     # (Arun): As of 2021 we are using ephemerals exclusively and do not
     # use cloud drives
@@ -399,7 +400,10 @@ class NflxEVCacheCapacityModel(CapacityModel):
         estimated_read_size: Interval = Interval(
             **user_desires.query_pattern.dict(exclude_unset=True).get(
                 "estimated_mean_read_size_bytes",
-                dict(low=16, mid=1024, high=65536, confidence=0.95),
+                user_desires.query_pattern.dict(exclude_unset=True).get(
+                    "estimated_mean_write_size_bytes",
+                    dict(low=16, mid=1024, high=65536, confidence=0.95)
+                ),
             )
         )
         estimated_read_latency_ms: Interval = Interval(
