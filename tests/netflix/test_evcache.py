@@ -60,11 +60,14 @@ def test_evcache_inmemory_low_latency_reads_cpu():
     )
 
     for candidate in plan:
-        total_cpu_power = candidate.candidate_clusters.zonal[0].count * \
-                          candidate.candidate_clusters.zonal[0].instance.cpu * \
-                          candidate.candidate_clusters.zonal[0].instance.cpu_ghz
+        total_cpu_power = (
+            candidate.candidate_clusters.zonal[0].count
+            * candidate.candidate_clusters.zonal[0].instance.cpu
+            * candidate.candidate_clusters.zonal[0].instance.cpu_ghz
+        )
 
         assert total_cpu_power > 1100
+
 
 def test_evcache_inmemory_medium_latency_reads_cpu():
     inmemory_cluster_medium_latency_reads_qps = CapacityDesires(
@@ -92,15 +95,17 @@ def test_evcache_inmemory_medium_latency_reads_cpu():
     )
 
     plan = planner.plan_certain(
-       model_name="org.netflix.evcache",
-       region="us-east-1",
-       desires=inmemory_cluster_medium_latency_reads_qps,
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=inmemory_cluster_medium_latency_reads_qps,
     )
 
     for candidate in plan:
-        total_cpu_power = candidate.candidate_clusters.zonal[0].count * \
-                          candidate.candidate_clusters.zonal[0].instance.cpu * \
-                          candidate.candidate_clusters.zonal[0].instance.cpu_ghz
+        total_cpu_power = (
+            candidate.candidate_clusters.zonal[0].count
+            * candidate.candidate_clusters.zonal[0].instance.cpu
+            * candidate.candidate_clusters.zonal[0].instance.cpu_ghz
+        )
 
         assert total_cpu_power > 400
 
@@ -123,7 +128,9 @@ def test_evcache_inmemory_high_latency_reads_cpu():
             ),
         ),
         data_shape=DataShape(
-            estimated_state_size_gib=Interval(low=1662, mid=1662, high=1662, confidence=1.0),
+            estimated_state_size_gib=Interval(
+                low=1662, mid=1662, high=1662, confidence=1.0
+            ),
             estimated_state_item_count=Interval(
                 low=750000000, mid=750000000, high=750000000 * 1.2, confidence=1.0
             ),
@@ -131,15 +138,17 @@ def test_evcache_inmemory_high_latency_reads_cpu():
     )
 
     plan = planner.plan_certain(
-       model_name="org.netflix.evcache",
-       region="us-east-1",
-       desires=inmemory_cluster_high_latency_reads_qps,
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=inmemory_cluster_high_latency_reads_qps,
     )
 
     for candidate in plan:
-        total_cpu_power = candidate.candidate_clusters.zonal[0].count * \
-                          candidate.candidate_clusters.zonal[0].instance.cpu * \
-                          candidate.candidate_clusters.zonal[0].instance.cpu_ghz
+        total_cpu_power = (
+            candidate.candidate_clusters.zonal[0].count
+            * candidate.candidate_clusters.zonal[0].instance.cpu
+            * candidate.candidate_clusters.zonal[0].instance.cpu_ghz
+        )
 
         assert total_cpu_power > 100
 
@@ -162,23 +171,30 @@ def test_evcache_ondisk_low_latency_reads_cpu():
             ),
         ),
         data_shape=DataShape(
-            estimated_state_size_gib=Interval(low=2306867, mid=2306867, high=2306867, confidence=1.0),
+            estimated_state_size_gib=Interval(
+                low=2306867, mid=2306867, high=2306867, confidence=1.0
+            ),
             estimated_state_item_count=Interval(
-                low=132000000000, mid=132000000000, high=132000000000 * 1.2, confidence=1.0
+                low=132000000000,
+                mid=132000000000,
+                high=132000000000 * 1.2,
+                confidence=1.0,
             ),
         ),
     )
 
     plan = planner.plan_certain(
-       model_name="org.netflix.evcache",
-       region="us-east-1",
-       desires=ondisk_cluster_low_latency_reads_qps,
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=ondisk_cluster_low_latency_reads_qps,
     )
 
     for candidate in plan:
-        total_cpu_power = candidate.candidate_clusters.zonal[0].count * \
-                          candidate.candidate_clusters.zonal[0].instance.cpu * \
-                          candidate.candidate_clusters.zonal[0].instance.cpu_ghz
+        total_cpu_power = (
+            candidate.candidate_clusters.zonal[0].count
+            * candidate.candidate_clusters.zonal[0].instance.cpu
+            * candidate.candidate_clusters.zonal[0].instance.cpu_ghz
+        )
 
         assert total_cpu_power > 8000
 
@@ -201,7 +217,9 @@ def test_evcache_ondisk_high_latency_reads_cpu():
             ),
         ),
         data_shape=DataShape(
-            estimated_state_size_gib=Interval(low=281000, mid=281000, high=281000, confidence=1.0),
+            estimated_state_size_gib=Interval(
+                low=281000, mid=281000, high=281000, confidence=1.0
+            ),
             estimated_state_item_count=Interval(
                 low=8518318523, mid=8518318523, high=8518318523 * 1.2, confidence=1.0
             ),
@@ -209,21 +227,23 @@ def test_evcache_ondisk_high_latency_reads_cpu():
     )
 
     plan = planner.plan_certain(
-       model_name="org.netflix.evcache",
-       region="us-east-1",
-       desires=ondisk_cluster_high_latency_reads_qps,
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=ondisk_cluster_high_latency_reads_qps,
     )
 
     for candidate in plan:
-        total_cpu_power = candidate.candidate_clusters.zonal[0].count * \
-                          candidate.candidate_clusters.zonal[0].instance.cpu * \
-                          candidate.candidate_clusters.zonal[0].instance.cpu_ghz
+        total_cpu_power = (
+            candidate.candidate_clusters.zonal[0].count
+            * candidate.candidate_clusters.zonal[0].instance.cpu
+            * candidate.candidate_clusters.zonal[0].instance.cpu_ghz
+        )
 
         assert total_cpu_power > 800
 
 
 def test_evcache_inmemory_ram_usage():
-    inmemory_qps= CapacityDesires(
+    inmemory_qps = CapacityDesires(
         service_tier=1,
         query_pattern=QueryPattern(
             estimated_read_per_second=Interval(
@@ -254,14 +274,16 @@ def test_evcache_inmemory_ram_usage():
     )
 
     for candidate in plan:
-        total_ram = candidate.candidate_clusters.zonal[0].instance.ram_gib * \
-                    candidate.candidate_clusters.zonal[0].count
+        total_ram = (
+            candidate.candidate_clusters.zonal[0].instance.ram_gib
+            * candidate.candidate_clusters.zonal[0].count
+        )
 
         assert total_ram > inmemory_qps.data_shape.estimated_state_size_gib.mid
 
 
 def test_evcache_ondisk_disk_usage():
-    inmemory_qps= CapacityDesires(
+    inmemory_qps = CapacityDesires(
         service_tier=1,
         query_pattern=QueryPattern(
             estimated_read_per_second=Interval(
@@ -292,10 +314,13 @@ def test_evcache_ondisk_disk_usage():
     )
 
     for candidate in plan:
-        total_ram = candidate.candidate_clusters.zonal[0].instance.ram_gib * \
-                    candidate.candidate_clusters.zonal[0].count
+        total_ram = (
+            candidate.candidate_clusters.zonal[0].instance.ram_gib
+            * candidate.candidate_clusters.zonal[0].count
+        )
 
         assert total_ram > inmemory_qps.data_shape.estimated_state_size_gib.mid
+
 
 def test_evcache_ondisk_high_disk_usage():
     high_disk_usage_rps = CapacityDesires(
@@ -315,9 +340,14 @@ def test_evcache_ondisk_high_disk_usage():
             ),
         ),
         data_shape=DataShape(
-            estimated_state_size_gib=Interval(low=2306867, mid=2306867, high=2306867, confidence=1.0),
+            estimated_state_size_gib=Interval(
+                low=2306867, mid=2306867, high=2306867, confidence=1.0
+            ),
             estimated_state_item_count=Interval(
-                low=132000000000, mid=132000000000, high=132000000000 * 1.2, confidence=1.0
+                low=132000000000,
+                mid=132000000000,
+                high=132000000000 * 1.2,
+                confidence=1.0,
             ),
         ),
     )
@@ -330,10 +360,15 @@ def test_evcache_ondisk_high_disk_usage():
 
     for candidate in plan:
         if candidate.candidate_clusters.zonal[0].instance.drive is not None:
-            total_disk = candidate.candidate_clusters.zonal[0].instance.drive.size_gib * \
-                        candidate.candidate_clusters.zonal[0].count
+            total_disk = (
+                candidate.candidate_clusters.zonal[0].instance.drive.size_gib
+                * candidate.candidate_clusters.zonal[0].count
+            )
 
-            assert total_disk > high_disk_usage_rps.data_shape.estimated_state_size_gib.mid
+            assert (
+                total_disk > high_disk_usage_rps.data_shape.estimated_state_size_gib.mid
+            )
+
 
 def test_evcache_zero_item_count():
     zero_item_count_rps = CapacityDesires(
@@ -354,9 +389,7 @@ def test_evcache_zero_item_count():
         ),
         data_shape=DataShape(
             estimated_state_size_gib=Interval(low=0, mid=0, high=0, confidence=1.0),
-            estimated_state_item_count=Interval(
-                low=0, mid=0, high=0, confidence=1.0
-            ),
+            estimated_state_item_count=Interval(low=0, mid=0, high=0, confidence=1.0),
         ),
     )
 
@@ -368,7 +401,11 @@ def test_evcache_zero_item_count():
 
     for candidate in plan:
         if candidate.candidate_clusters.zonal[0].instance.drive is not None:
-            total_ram = candidate.candidate_clusters.zonal[0].instance.drive.size_gib * \
-                        candidate.candidate_clusters.zonal[0].count
+            total_ram = (
+                candidate.candidate_clusters.zonal[0].instance.drive.size_gib
+                * candidate.candidate_clusters.zonal[0].count
+            )
 
-            assert total_ram > zero_item_count_rps.data_shape.estimated_state_size_gib.mid
+            assert (
+                total_ram > zero_item_count_rps.data_shape.estimated_state_size_gib.mid
+            )

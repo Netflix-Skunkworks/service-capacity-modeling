@@ -6,11 +6,12 @@ from typing import Optional
 from pydantic import BaseModel
 from pydantic import Field
 
-from service_capacity_modeling.interface import AccessConsistency, certain_float
+from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
+from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
@@ -142,9 +143,9 @@ def _get_read_consistency_percentages(
             transactional_read_percent = 1.0
             eventual_read_percent = 0.0
             strong_read_percent = 0.0
-        elif (
-            access_consistency == AccessConsistency.read_your_writes
-            or access_consistency == AccessConsistency.linearizable
+        elif access_consistency in (
+            AccessConsistency.read_your_writes,
+            AccessConsistency.linearizable,
         ):
             transactional_read_percent = 0.0
             eventual_read_percent = 0.0
@@ -156,9 +157,10 @@ def _get_read_consistency_percentages(
     total_percent = (
         eventual_read_percent + transactional_read_percent + strong_read_percent
     )
-    assert (
-        total_percent == 1
-    ), "eventual_read_percent, transactional_read_percent, strong_read_percent should sum to 1"
+    assert total_percent == 1, (
+        "eventual_read_percent, transactional_read_percent, strong_read_percent"
+        " should sum to 1"
+    )
     return {
         "transactional_read_percent": transactional_read_percent,
         "eventual_read_percent": eventual_read_percent,
@@ -433,9 +435,9 @@ class NflxDynamoDBCapacityModel(CapacityModel):
         target_max_annual_cost: float = extra_model_arguments.get(
             "target_max_annual_cost", 0
         )
-        target_utilization_percentage = 0.80
+        target_util_percentage = 0.80
         if desires.service_tier in _TIER_TARGET_UTILIZATION_MAPPING:
-            target_utilization_percentage = _TIER_TARGET_UTILIZATION_MAPPING[
+            target_util_percentage = _TIER_TARGET_UTILIZATION_MAPPING[
                 desires.service_tier
             ]
 
@@ -443,7 +445,7 @@ class NflxDynamoDBCapacityModel(CapacityModel):
             "read_capacity_units": read_plan.read_capacity_units,
             "write_capacity_units": write_plan.write_capacity_units,
             "data_transfer_gib": data_transfer_plan.total_data_transfer_gib,
-            "target_utilization_percentage": target_utilization_percentage,
+            "target_utilization_percentage": target_util_percentage,
         }
         requirement_context[
             "replicated_write_capacity_units"
@@ -506,7 +508,7 @@ class NflxDynamoDBCapacityModel(CapacityModel):
                         "auto_scale": {
                             "min": 1,
                             "max": max_read_capacity_units,
-                            "target_utilization_percentage": target_utilization_percentage,
+                            "target_utilization_percentage": target_util_percentage,
                         },
                     },
                     "write_capacity_units": {
@@ -517,7 +519,7 @@ class NflxDynamoDBCapacityModel(CapacityModel):
                         "auto_scale": {
                             "min": 1,
                             "max": max_write_capacity_units,
-                            "target_utilization_percentage": target_utilization_percentage,
+                            "target_utilization_percentage": target_util_percentage,
                         },
                     },
                 },

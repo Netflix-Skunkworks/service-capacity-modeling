@@ -57,9 +57,11 @@ def calculate_read_cpu_time_evcache_ms(read_size_bytes: float) -> float:
     # 40   KiB - 158 top of our curve
     # Fit a logistic curve, requiring it to go through first
     # point
-    read_latency_ms = \
-        979.4009 + (-0.06853492 - 979.4009)/math.pow((1 + math.pow(read_size_bytes/13061.23, 0.180864)), 0.0002819491)
+    read_latency_ms = 979.4009 + (-0.06853492 - 979.4009) / math.pow(
+        (1 + math.pow(read_size_bytes / 13061.23, 0.180864)), 0.0002819491
+    )
     return max(read_latency_ms, 0.005)
+
 
 def calculate_spread_cost(cluster_size: int, max_cost=100000, min_cost=0.0) -> float:
     if cluster_size > 10:
@@ -70,11 +72,9 @@ def calculate_spread_cost(cluster_size: int, max_cost=100000, min_cost=0.0) -> f
 
 
 def _estimate_evcache_requirement(
-    instance: Instance,
     desires: CapacityDesires,
     working_set: Optional[float],
     copies_per_region: int,
-    zones_per_region: int = 3,
 ) -> Tuple[CapacityRequirement, Tuple[str, ...]]:
     """Estimate the capacity required for one zone given a regional desire
 
@@ -88,7 +88,7 @@ def _estimate_evcache_requirement(
     # For tier 0, we double the number of cores to account for caution
     if desires.service_tier == 0:
         needed_cores = needed_cores * 2
- 
+
     # (Arun): Keep 20% of available bandwidth for cache warmer
     needed_network_mbps = simple_network_mbps(desires) * 1.25
 
@@ -108,11 +108,12 @@ def _estimate_evcache_requirement(
         if desires.query_pattern.estimated_mean_read_size_bytes.mid > 200.0:
             payload_greater_than_classic = True
 
-
-
     # (Arun): As of 2021 we are using ephemerals exclusively and do not
     # use cloud drives
-    if working_set is None or (desires.data_shape.estimated_state_size_gib.mid < 110.0 and payload_greater_than_classic):
+    if working_set is None or (
+        desires.data_shape.estimated_state_size_gib.mid < 110.0
+        and payload_greater_than_classic
+    ):
         # We can't currently store data on cloud drives, but we can put the
         # dataset into memory!
         needed_memory = float(needed_disk)
@@ -159,7 +160,7 @@ def _upsert_params(cluster, params):
 
 
 # pylint: disable=too-many-locals
-def _estimate_evcache_cluster_zonal(
+def _estimate_evcache_cluster_zonal(  # noqa: C901
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,
@@ -203,10 +204,8 @@ def _estimate_evcache_cluster_zonal(
         working_set = None
 
     requirement, regrets = _estimate_evcache_requirement(
-        instance=instance,
         desires=desires,
         working_set=working_set,
-        zones_per_region=zones_per_region,
         copies_per_region=copies_per_region,
     )
 
@@ -283,7 +282,10 @@ def _estimate_evcache_cluster_zonal(
     spread_cost = calculate_spread_cost(cluster.count)
 
     # Account for the clusters and replication costs
-    evcache_costs = {"evcache.zonal-clusters": ec2_cost, "evcache.spread.cost": spread_cost}
+    evcache_costs = {
+        "evcache.zonal-clusters": ec2_cost,
+        "evcache.spread.cost": spread_cost,
+    }
 
     for s in services:
         evcache_costs[f"{s.service_type}"] = s.annual_cost
@@ -402,7 +404,7 @@ class NflxEVCacheCapacityModel(CapacityModel):
                 "estimated_mean_read_size_bytes",
                 user_desires.query_pattern.dict(exclude_unset=True).get(
                     "estimated_mean_write_size_bytes",
-                    dict(low=16, mid=1024, high=65536, confidence=0.95)
+                    {"low": 16, "mid": 1024, "high": 65536, "confidence": 0.95},
                 ),
             )
         )

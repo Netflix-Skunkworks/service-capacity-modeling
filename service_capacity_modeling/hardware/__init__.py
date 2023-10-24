@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+# pylint: disable=cyclic-import
+# in HardwareShapes.hardware it imports from hardware.profiles dynamically
 import json
 import logging
 import os
@@ -56,9 +57,7 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
             priced_services[
                 svc
             ].annual_cost_per_write_io = svc_price.annual_cost_per_write_io
-            priced_services[
-                svc
-            ].annual_cost_per_core = svc_price.annual_cost_per_core
+            priced_services[svc].annual_cost_per_core = svc_price.annual_cost_per_core
 
         regions[region] = Hardware(
             instances=priced_instances,
@@ -75,10 +74,10 @@ def load_hardware_from_disk(
     shape_path=os.environ.get("HARDWARE_SHAPES"),
 ) -> GlobalHardware:
     if price_path is not None and shape_path is not None:
-        with open(price_path) as pfd:
+        with open(price_path, encoding="utf-8") as pfd:
             pricing = load_pricing(json.load(pfd))
 
-        with open(shape_path) as sfd:
+        with open(shape_path, encoding="utf-8") as sfd:
             hardware = load_hardware(json.load(sfd))
 
         return price_hardware(hardware=hardware, pricing=pricing)

@@ -11,8 +11,9 @@ from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
-from service_capacity_modeling.models.common import merge_plan, sqrt_staffed_cores
+from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.common import network_services
+from service_capacity_modeling.models.common import sqrt_staffed_cores
 
 
 def test_merge_plan():
@@ -189,4 +190,3 @@ def test_different_tier_qos():
         cores = sqrt_staffed_cores(desires)
         assert cores >= prev_cores
         prev_cores = cores
-

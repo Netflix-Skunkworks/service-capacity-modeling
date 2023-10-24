@@ -2,7 +2,6 @@ from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import Optional
-from typing import Sequence
 from typing import Tuple
 
 from .stateless_java import nflx_java_app_capacity_model

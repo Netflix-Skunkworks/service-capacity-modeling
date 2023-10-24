@@ -1,34 +1,33 @@
 repos:
- -  repo: https://github.com/python/black
+  - repo: https://github.com/python/black
     rev: 22.3.0
     hooks:
-    - id: black
- -  repo: https://github.com/pre-commit/pre-commit-hooks
+      - id: black
+  - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v2.4.0
     hooks:
-    - id: check-yaml
-    - id: check-json
-    - id: trailing-whitespace
-    - id: flake8
-    - id: check-merge-conflict
-    - id: detect-private-key
-    - id: end-of-file-fixer
-    - id: mixed-line-ending
-      args:
-        - --fix
-        - lf
- -  repo: https://github.com/asottile/reorder_python_imports
+      - id: check-yaml
+      - id: check-json
+      - id: trailing-whitespace
+      - id: flake8
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args:
+          - --fix
+          - lf
+  - repo: https://github.com/asottile/reorder_python_imports
     rev: v1.9.0
     hooks:
-    - id: reorder-python-imports
- -  repo: local
+      - id: reorder-python-imports
+  - repo: local
     hooks:
-    - id: pylint
-      name: pylint
-      entry: .tox/py39/bin/pylint
-      require_serial: true
-      language: system
-      types: [python]
-      verbose: true
-
+      - id: pylint
+        name: pylint
+        entry: .tox/pre-commit/bin/pylint
+        require_serial: true
+        language: system
+        types: [python]
+        verbose: true
 fail_fast: true
