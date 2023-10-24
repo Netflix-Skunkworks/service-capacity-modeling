@@ -156,17 +156,29 @@ def _estimate_kafka_cluster_zonal(
     hot_retention_seconds,
     zones_per_region: int = 3,
     copies_per_region: int = 2,
+    require_local_disks: bool = False,
+    require_attached_disks: bool = False,
+    required_zone_size: Optional[int] = None,
     max_regional_size: int = 150,
     max_local_disk_gib: int = 1024 * 5,
+    min_instance_cpu: int = 2,
     min_instance_memory_gib: int = 12,
 ) -> Optional[CapacityPlan]:
 
     # Kafka doesn't like to deploy on single CPU instances
-    if instance.cpu < 2:
+    if instance.cpu < min_instance_cpu:
         return None
 
     # Kafka doesn't like to deploy to instances with < 7 GiB of ram
     if instance.ram_gib < min_instance_memory_gib:
+        return None
+
+    # if we're not allowed to use attached disks, skip EBS only types
+    if instance.drive is None and require_local_disks:
+        return None
+
+    # if we're not allowed to use local disks, skip ephems
+    if instance.drive is not None and require_attached_disks:
         return None
 
     # Kafka only deploys on gp3 drives right now
@@ -247,6 +259,11 @@ def _estimate_kafka_cluster_zonal(
     params = {"kafka.copies": copies_per_region}
     _upsert_params(cluster, params)
 
+    # Sometimes we don't want to modify cluster topology, so only allow
+    # topologies that match the desired zone size
+    if required_zone_size is not None and cluster.count != required_zone_size:
+        return None
+
     # Kafka clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as
     #   * Security group limits. Since you must have < 500 rules if you're
@@ -301,6 +318,18 @@ class NflxKafkaArguments(BaseModel):
             "Typically consumers lag under 10s, but ensure up to 10M can be handled"
         ),
     )
+    require_local_disks: bool = Field(
+        default=False,
+        description="If local (ephemeral) drives are required",
+    )
+    require_attached_disks: bool = Field(
+        default=False,
+        description="If attached (ebs) drives are required",
+    )
+    required_zonal_size: Optional[int] = Field(
+        default=None,
+        description="Require zonal clusters to be this size (force vertical scaling)",
+    )
     max_regional_size: int = Field(
         default=150,
         description="What is the maximum size of a cluster in this region",
@@ -311,6 +340,10 @@ class NflxKafkaArguments(BaseModel):
             "The maximum amount of data we store per node. Used to limit "
             "recovery duration on failure."
         ),
+    )
+    min_instance_cpu: int = Field(
+        default=2,
+        description="The minimum number of instance CPU to allow",
     )
     min_instance_memory_gib: int = Field(
         default=12,
@@ -344,11 +377,23 @@ class NflxKafkaCapacityModel(CapacityModel):
         max_local_disk_gib: int = extra_model_arguments.get(
             "max_local_disk_gib", 1024 * 5
         )
+        min_instance_cpu: int = extra_model_arguments.get(
+            "min_instance_cpu", 2
+        )
         min_instance_memory_gib: int = extra_model_arguments.get(
             "min_instance_memory_gib", 12
         )
         hot_retention_seconds: float = iso_to_seconds(
             extra_model_arguments.get("hot_retention", "PT10M")
+        )
+        require_local_disks: bool = extra_model_arguments.get(
+            "require_local_disks", False
+        )
+        require_attached_disks: bool = extra_model_arguments.get(
+            "require_attached_disks", False
+        )
+        required_zone_size: Optional[int] = extra_model_arguments.get(
+            "required_zone_size", None
         )
 
         return _estimate_kafka_cluster_zonal(
@@ -357,8 +402,12 @@ class NflxKafkaCapacityModel(CapacityModel):
             desires=desires,
             zones_per_region=context.zones_in_region,
             copies_per_region=copies_per_region,
+            require_local_disks=require_local_disks,
+            require_attached_disks=require_attached_disks,
+            required_zone_size=required_zone_size,
             max_regional_size=max_regional_size,
             max_local_disk_gib=max_local_disk_gib,
+            min_instance_cpu=min_instance_cpu,
             min_instance_memory_gib=min_instance_memory_gib,
             hot_retention_seconds=hot_retention_seconds,
         )

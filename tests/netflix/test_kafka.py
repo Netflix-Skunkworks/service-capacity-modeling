@@ -208,3 +208,67 @@ def test_kafka_high_throughput_ebs():
             assert clstr.attached_drives[0].name == "gp3"
             disk = clstr.attached_drives[0].size_gib * clstr.count
             assert expected_disk[0] < disk < expected_disk[1] * 2.5
+
+def test_kafka_model_constraints():
+    # 2.8 GiB / second
+    throughput = 2.8 * 1024 * 1024 * 1024
+    desires = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            # 2 consumers
+            estimated_read_per_second=Interval(low=1, mid=2, high=2, confidence=0.98),
+            # 1 producer
+            estimated_write_per_second=Interval(low=1, mid=1, high=1, confidence=0.98),
+            # Write throughput of 100 MiB/s
+            estimated_mean_write_size_bytes=Interval(
+                low=throughput, mid=throughput, high=throughput * 2, confidence=0.98
+            ),
+        ),
+    )
+
+    required_zone_size = 10
+    min_instance_cpu = 16
+    # Force to attached drives
+    require_attached_disks = True
+    plan = planner.plan(
+        model_name="org.netflix.kafka",
+        region="us-east-1",
+        desires=desires,
+        extra_model_arguments={
+            "cluster_type": "ha",
+            "retention": "PT3H",
+            "require_attached_disks": require_attached_disks,
+            "min_instance_cpu": min_instance_cpu,
+            "required_zone_size": required_zone_size
+        },
+        num_results=3,
+    )
+    expected_min_zonal_cpu = required_zone_size * min_instance_cpu
+
+    for lr in plan.least_regret:
+        for z in range(3):
+            clstr = lr.candidate_clusters.zonal[z]
+            assert clstr.instance.drive is None
+            assert (clstr.instance.cpu * clstr.count) >= expected_min_zonal_cpu
+
+    # force to local disks
+    plan = planner.plan(
+        model_name="org.netflix.kafka",
+        region="us-east-1",
+        desires=desires,
+        extra_model_arguments={
+            "cluster_type": "ha",
+            "retention": "PT3H",
+            "require_local_disks": True,
+            "min_instance_cpu": min_instance_cpu,
+            "required_zone_size": required_zone_size
+        },
+        num_results=3,
+    )
+    expected_min_zonal_cpu = required_zone_size * min_instance_cpu
+
+    for lr in plan.least_regret:
+        for z in range(3):
+            clstr = lr.candidate_clusters.zonal[z]
+            assert clstr.instance.drive is not None
+            assert (clstr.instance.cpu * clstr.count) >= expected_min_zonal_cpu
