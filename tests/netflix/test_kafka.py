@@ -247,10 +247,9 @@ def test_kafka_model_constraints():
 
     for lr in plan.least_regret:
         for z in range(3):
-            assert lr.requirements.zonal[z].cpu_cores.low >= expected_min_zonal_cpu
             clstr = lr.candidate_clusters.zonal[z]
             assert clstr.instance.drive is None
-
+            assert (clstr.instance.cpu * clstr.count) >= expected_min_zonal_cpu
 
     # force to local disks
     plan = planner.plan(
@@ -270,6 +269,6 @@ def test_kafka_model_constraints():
 
     for lr in plan.least_regret:
         for z in range(3):
-            assert lr.requirements.zonal[z].cpu_cores.low >= expected_min_zonal_cpu
             clstr = lr.candidate_clusters.zonal[z]
             assert clstr.instance.drive is not None
+            assert (clstr.instance.cpu * clstr.count) >= expected_min_zonal_cpu
