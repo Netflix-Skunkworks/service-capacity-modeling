@@ -1,4 +1,3 @@
-
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import DataShape
@@ -42,14 +41,14 @@ def test_uncertain_planning():
     lr_cluster = lr.candidate_clusters.zonal[0]
     assert 8 <= lr_cluster.count * lr_cluster.instance.cpu <= 64
     assert (
-            5_000 <= lr.candidate_clusters.annual_costs["cassandra.zonal-clusters"] < 45_000
+        5_000 <= lr.candidate_clusters.annual_costs["cassandra.zonal-clusters"] < 45_000
     )
 
     sr = mid_plan.least_regret[1]
     sr_cluster = sr.candidate_clusters.zonal[0]
     assert 8 <= sr_cluster.count * sr_cluster.instance.cpu <= 64
     assert (
-            5_000 <= sr.candidate_clusters.annual_costs["cassandra.zonal-clusters"] < 45_000
+        5_000 <= sr.candidate_clusters.annual_costs["cassandra.zonal-clusters"] < 45_000
     )
 
     tiny_plan = planner.plan(
@@ -61,7 +60,7 @@ def test_uncertain_planning():
     lr_cluster = lr.candidate_clusters.zonal[0]
     assert 2 <= lr_cluster.count * lr_cluster.instance.cpu < 16
     assert (
-            1_000 < lr.candidate_clusters.annual_costs["cassandra.zonal-clusters"] < 6_000
+        1_000 < lr.candidate_clusters.annual_costs["cassandra.zonal-clusters"] < 6_000
     )
 
 
@@ -155,9 +154,9 @@ def test_worn_dataset():
     lr_cluster = lr.candidate_clusters.zonal[0]
     assert 128 <= lr_cluster.count * lr_cluster.instance.cpu <= 512
     assert (
-            250_000
-            <= lr.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
-            < 1_000_000
+        250_000
+        <= lr.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
+        < 1_000_000
     )
     assert lr_cluster.instance.name.startswith(
         "m5."
@@ -193,9 +192,9 @@ def test_very_small_has_disk():
         lr_cluster = lr.candidate_clusters.zonal[0]
         assert 2 <= lr_cluster.count * lr_cluster.instance.cpu < 16
         assert (
-                1_000
-                < lr.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
-                < 6_000
+            1_000
+            < lr.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
+            < 6_000
         )
         if lr_cluster.instance.drive is None:
             assert sum(dr.size_gib for dr in lr_cluster.attached_drives) > 10

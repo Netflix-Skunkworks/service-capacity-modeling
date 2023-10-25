@@ -376,7 +376,7 @@ class Service(ExcludeUnsetModel):
                     break
                 if transfer_cost[0] > 0:
                     annual_cost += (
-                            min(_annual_data, transfer_cost[0]) * transfer_cost[1]
+                        min(_annual_data, transfer_cost[0]) * transfer_cost[1]
                     )
                     _annual_data -= transfer_cost[0]
                 else:
@@ -758,7 +758,7 @@ class Requirements(ExcludeUnsetModel):
     # pylint: disable=unused-argument
     @staticmethod
     def regret(
-            name: str, optimal_plan: "CapacityPlan", proposed_plan: "CapacityPlan"
+        name: str, optimal_plan: "CapacityPlan", proposed_plan: "CapacityPlan"
     ) -> float:
         return 0.0
 
