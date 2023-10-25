@@ -209,6 +209,7 @@ def test_kafka_high_throughput_ebs():
             disk = clstr.attached_drives[0].size_gib * clstr.count
             assert expected_disk[0] < disk < expected_disk[1] * 2.5
 
+
 def test_kafka_model_constraints():
     # 2.8 GiB / second
     throughput = 2.8 * 1024 * 1024 * 1024
@@ -239,7 +240,7 @@ def test_kafka_model_constraints():
             "retention": "PT3H",
             "require_attached_disks": require_attached_disks,
             "min_instance_cpu": min_instance_cpu,
-            "required_zone_size": required_zone_size
+            "required_zone_size": required_zone_size,
         },
         num_results=3,
     )
@@ -261,7 +262,7 @@ def test_kafka_model_constraints():
             "retention": "PT3H",
             "require_local_disks": True,
             "min_instance_cpu": min_instance_cpu,
-            "required_zone_size": required_zone_size
+            "required_zone_size": required_zone_size,
         },
         num_results=3,
     )
