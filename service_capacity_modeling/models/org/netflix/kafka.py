@@ -149,6 +149,37 @@ def _kafka_read_io(rps, io_size_kib, size_gib, recovery_seconds: int) -> float:
     return (read_ios + int(round(recovery_ios))) * 1.5
 
 
+def _kafka_minimum_requirements_check(
+    instance: Instance,
+    drive: Drive,
+    min_instance_cpu: int,
+    min_instance_memory_gib: int,
+    require_local_disks: bool = False,
+    require_attached_disks: bool = False,
+) -> bool:
+    # Kafka doesn't like to deploy on single CPU instances
+    if instance.cpu < min_instance_cpu:
+        return True
+
+    # Kafka doesn't like to deploy to instances with < 7 GiB of ram
+    if instance.ram_gib < min_instance_memory_gib:
+        return True
+
+    # if we're not allowed to use attached disks, skip EBS only types
+    if instance.drive is None and require_local_disks:
+        return True
+
+    # if we're not allowed to use local disks, skip ephems
+    if instance.drive is not None and require_attached_disks:
+        return True
+
+    # Kafka only deploys on gp3 drives right now
+    if instance.drive is None and drive.name != "gp3":
+        return True
+
+    return False
+
+
 def _estimate_kafka_cluster_zonal(
     instance: Instance,
     drive: Drive,
@@ -164,25 +195,14 @@ def _estimate_kafka_cluster_zonal(
     min_instance_cpu: int = 2,
     min_instance_memory_gib: int = 12,
 ) -> Optional[CapacityPlan]:
-
-    # Kafka doesn't like to deploy on single CPU instances
-    if instance.cpu < min_instance_cpu:
-        return None
-
-    # Kafka doesn't like to deploy to instances with < 7 GiB of ram
-    if instance.ram_gib < min_instance_memory_gib:
-        return None
-
-    # if we're not allowed to use attached disks, skip EBS only types
-    if instance.drive is None and require_local_disks:
-        return None
-
-    # if we're not allowed to use local disks, skip ephems
-    if instance.drive is not None and require_attached_disks:
-        return None
-
-    # Kafka only deploys on gp3 drives right now
-    if instance.drive is None and drive.name != "gp3":
+    if _kafka_minimum_requirements_check(
+        instance,
+        drive,
+        min_instance_cpu,
+        min_instance_memory_gib,
+        require_local_disks,
+        require_attached_disks,
+    ):
         return None
 
     requirement, regrets = _estimate_kafka_requirement(
@@ -256,8 +276,7 @@ def _estimate_kafka_cluster_zonal(
     )
 
     # Communicate to the actual provision that if we want reduced RF
-    params = {"kafka.copies": copies_per_region}
-    _upsert_params(cluster, params)
+    _upsert_params(cluster, {"kafka.copies": copies_per_region})
 
     # Sometimes we don't want to modify cluster topology, so only allow
     # topologies that match the desired zone size
@@ -275,10 +294,8 @@ def _estimate_kafka_cluster_zonal(
     if cluster.count > (max_regional_size // zones_per_region):
         return None
 
-    ec2_cost = zones_per_region * cluster.annual_cost
-
-    # Account for the clusters and replication costs
-    kafka_costs = {"kafka.zonal-clusters": ec2_cost}
+    # Account for the EC2 clusters and replication co EC2sts
+    kafka_costs = {"kafka.zonal-clusters": zones_per_region * cluster.annual_cost}
 
     cluster.cluster_type = "kafka"
     clusters = Clusters(
@@ -377,9 +394,7 @@ class NflxKafkaCapacityModel(CapacityModel):
         max_local_disk_gib: int = extra_model_arguments.get(
             "max_local_disk_gib", 1024 * 5
         )
-        min_instance_cpu: int = extra_model_arguments.get(
-            "min_instance_cpu", 2
-        )
+        min_instance_cpu: int = extra_model_arguments.get("min_instance_cpu", 2)
         min_instance_memory_gib: int = extra_model_arguments.get(
             "min_instance_memory_gib", 12
         )
