@@ -149,6 +149,8 @@ def _kafka_read_io(rps, io_size_kib, size_gib, recovery_seconds: int) -> float:
     return (read_ios + int(round(recovery_ios))) * 1.5
 
 
+# pylint: disable=too-many-locals
+# pylint: disable=too-many-return-statements
 def _estimate_kafka_cluster_zonal(
     instance: Instance,
     drive: Drive,
@@ -165,12 +167,8 @@ def _estimate_kafka_cluster_zonal(
     min_instance_memory_gib: int = 12,
 ) -> Optional[CapacityPlan]:
 
-    # Kafka doesn't like to deploy on single CPU instances
-    if instance.cpu < min_instance_cpu:
-        return None
-
-    # Kafka doesn't like to deploy to instances with < 7 GiB of ram
-    if instance.ram_gib < min_instance_memory_gib:
+    # Kafka doesn't like to deploy on single CPU instances or with < 12 GiB of ram
+    if instance.cpu < min_instance_cpu or instance.ram_gib < min_instance_memory_gib:
         return None
 
     # if we're not allowed to use attached disks, skip EBS only types
@@ -377,9 +375,7 @@ class NflxKafkaCapacityModel(CapacityModel):
         max_local_disk_gib: int = extra_model_arguments.get(
             "max_local_disk_gib", 1024 * 5
         )
-        min_instance_cpu: int = extra_model_arguments.get(
-            "min_instance_cpu", 2
-        )
+        min_instance_cpu: int = extra_model_arguments.get("min_instance_cpu", 2)
         min_instance_memory_gib: int = extra_model_arguments.get(
             "min_instance_memory_gib", 12
         )
