@@ -129,14 +129,24 @@ def test_es_simple_certain():
         assert plan, "One or more plans is empty"
         assert plan.candidate_clusters, "candidate_clusters is empty"
         assert plan.candidate_clusters.zonal, "candidate_clusters.zonal is empty"
-        assert len(plan.candidate_clusters.zonal) == 9, "len(candidate_clusters.zonal) != 9"
+        assert (
+            len(plan.candidate_clusters.zonal) == 9
+        ), "len(candidate_clusters.zonal) != 9"
 
-        cluster_type_counts = Counter(zone.cluster_type for zone in plan.candidate_clusters.zonal)
+        cluster_type_counts = Counter(
+            zone.cluster_type for zone in plan.candidate_clusters.zonal
+        )
 
         assert len(cluster_type_counts) == 3, "Expecting 3 cluster types"
-        assert cluster_type_counts["elasticsearch-search"] == 3, "Expecting exactly 3 search nodes"
-        assert cluster_type_counts["elasticsearch-master"] == 3, "Expecting exactly 3 master nodes"
-        assert cluster_type_counts["elasticsearch-data"] >= 3, "Expecting at least 3 data nodes"
+        assert (
+            cluster_type_counts["elasticsearch-search"] == 3
+        ), "Expecting exactly 3 search nodes"
+        assert (
+            cluster_type_counts["elasticsearch-master"] == 3
+        ), "Expecting exactly 3 master nodes"
+        assert (
+            cluster_type_counts["elasticsearch-data"] >= 3
+        ), "Expecting at least 3 data nodes"
 
 
 def zonal_summary(zlr):
