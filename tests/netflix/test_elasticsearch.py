@@ -1,3 +1,4 @@
+from collections import Counter
 from collections import defaultdict
 
 from service_capacity_modeling.capacity_planner import planner
@@ -123,13 +124,26 @@ def test_es_simple_certain():
     )
 
     assert len(cap_plan) > 0, "Resulting cap_plan is empty"
-    assert all(plan for plan in cap_plan), "One or more plans is empty"
+
+    for plan in cap_plan:
+        assert plan, "One or more plans is empty"
+        assert plan.candidate_clusters, "candidate_clusters is empty"
+        assert plan.candidate_clusters.zonal, "candidate_clusters.zonal is empty"
+        assert len(plan.candidate_clusters.zonal) == 9, "len(candidate_clusters.zonal) != 9"
+
+        cluster_type_counts = Counter(zone.cluster_type for zone in plan.candidate_clusters.zonal)
+
+        assert len(cluster_type_counts) == 3, "Expecting 3 cluster types"
+        assert cluster_type_counts["elasticsearch-search"] == 3, "Expecting exactly 3 search nodes"
+        assert cluster_type_counts["elasticsearch-master"] == 3, "Expecting exactly 3 master nodes"
+        assert cluster_type_counts["elasticsearch-data"] >= 3, "Expecting at least 3 data nodes"
 
 
 def zonal_summary(zlr):
     zlr_cpu = zlr.count * zlr.instance.cpu
     zlr_cost = zlr.annual_cost
     zlr_family = zlr.instance.family
+    zlr_instance_name = zlr.instance.name
     zlr_drive_gib = sum(dr.size_gib for dr in zlr.attached_drives)
     if zlr.instance.drive is not None:
         zlr_drive_gib += zlr.instance.drive.size_gib
@@ -137,6 +151,7 @@ def zonal_summary(zlr):
 
     return (
         zlr_family,
+        zlr_instance_name,
         zlr.count,
         zlr_cpu,
         zlr_cost,

@@ -6,6 +6,7 @@ from .ddb import nflx_ddb_capacity_model
 from .elasticsearch import nflx_elasticsearch_capacity_model
 from .elasticsearch import nflx_elasticsearch_data_capacity_model
 from .elasticsearch import nflx_elasticsearch_master_capacity_model
+from .elasticsearch import nflx_elasticsearch_search_capacity_model
 from .entity import nflx_entity_capacity_model
 from .evcache import nflx_evcache_capacity_model
 from .kafka import nflx_kafka_capacity_model
@@ -30,6 +31,7 @@ def models():
         "org.netflix.elasticsearch": nflx_elasticsearch_capacity_model,
         "org.netflix.elasticsearch.node": nflx_elasticsearch_data_capacity_model,
         "org.netflix.elasticsearch.master": nflx_elasticsearch_master_capacity_model,
+        "org.netflix.elasticsearch.search": nflx_elasticsearch_search_capacity_model,
         "org.netflix.entity": nflx_entity_capacity_model,
         "org.netflix.cockroachdb": nflx_cockroachdb_capacity_model,
         "org.netflix.aurora": nflx_aurora_capacity_model,
