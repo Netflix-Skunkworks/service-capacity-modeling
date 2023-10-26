@@ -4,7 +4,6 @@ from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 
-
 uncertain_mid = CapacityDesires(
     service_tier=1,
     query_pattern=QueryPattern(

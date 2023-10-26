@@ -68,6 +68,7 @@ def _estimate_cassandra_requirement(
     working_set: float,
     reads_per_second: float,
     max_rps_to_disk: int,
+    required_cluster_size: Optional[int] = None,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
 ) -> CapacityRequirement:
@@ -76,8 +77,28 @@ def _estimate_cassandra_requirement(
     The input desires should be the **regional** desire, and this function will
     return the zonal capacity requirement
     """
-    # Keep half of the cores free for background work (compaction, backup, repair)
-    needed_cores = sqrt_staffed_cores(desires) * 2
+    current_capacity = (
+        None
+        if desires.current_clusters is None
+        else desires.current_clusters.zonal[0]
+        if len(desires.current_clusters.zonal)
+        else desires.current_clusters.regional[0]
+    )
+    # Keep half of the cores free for background work (compaction, backup, repair).
+    # Currently, zones and regions are configured in a homogeneous manner. Hence,
+    # we just take any one of the current cluster configuration
+    if (
+        current_capacity
+        and current_capacity.cluster_instance
+        and required_cluster_size is not None
+    ):
+        needed_cores = (
+            current_capacity.cluster_instance.cpu
+            * required_cluster_size
+            * zones_per_region
+        ) * (current_capacity.cpu_utilization.high / 20)
+    else:
+        needed_cores = sqrt_staffed_cores(desires) * 2
     # Keep half of the bandwidth available for backup
     needed_network_mbps = simple_network_mbps(desires) * 2
 
@@ -183,7 +204,6 @@ def _estimate_cassandra_cluster_zonal(
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
 ) -> Optional[CapacityPlan]:
-
     # Netflix Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 2 or instance.ram_gib < 14:
         return None
@@ -238,6 +258,7 @@ def _estimate_cassandra_cluster_zonal(
         working_set=working_set,
         reads_per_second=rps,
         max_rps_to_disk=max_rps_to_disk,
+        required_cluster_size=required_cluster_size,
         zones_per_region=zones_per_region,
         copies_per_region=copies_per_region,
     )

@@ -24,6 +24,7 @@ from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Hardware
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import interval
@@ -180,6 +181,21 @@ def model_desires_percentiles(
     d.data_shape = mean_ds
 
     return results, d
+
+
+def _set_instance_objects(
+    desires: CapacityDesires,
+    hardware: Hardware,
+):
+    if desires.current_clusters:
+        for zonal_cluster_capacity in desires.current_clusters.zonal:
+            zonal_cluster_capacity.cluster_instance = hardware.instances[
+                zonal_cluster_capacity.cluster_instance_name
+            ]
+        for regional_cluster_capacity in desires.current_clusters.regional:
+            regional_cluster_capacity.cluster_instance = hardware.instances[
+                regional_cluster_capacity.cluster_instance_name
+            ]
 
 
 def _allow_instance(
@@ -574,6 +590,9 @@ class CapacityPlanner:
             allowed_drives.add(drive_name)
         if len(allowed_drives) == 0:
             allowed_drives.update(hardware.drives.keys())
+
+        # Set current instance object if exists
+        _set_instance_objects(desires, hardware)
 
         if model.run_hardware_simulation():
             for instance in hardware.instances.values():
