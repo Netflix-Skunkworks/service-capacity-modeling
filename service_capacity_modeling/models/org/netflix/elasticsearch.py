@@ -503,7 +503,7 @@ class NflxElasticsearchCapacityModel(CapacityModel):
                         confidence=0.98,
                     ),
                 ),
-                # Most latency sensitive Elasticsearch clusters are in the < 100GiB range
+                # Most latency sensitive Elasticsearch clusters are in the <100GiB range
                 data_shape=DataShape(
                     estimated_state_size_gib=Interval(
                         low=10, mid=100, high=1000, confidence=0.98
