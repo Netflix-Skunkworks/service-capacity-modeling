@@ -92,11 +92,27 @@ def _estimate_cassandra_requirement(
         and current_capacity.cluster_instance
         and required_cluster_size is not None
     ):
-        needed_cores = (
-            current_capacity.cluster_instance.cpu
-            * required_cluster_size
-            * zones_per_region
-        ) * (current_capacity.cpu_utilization.high / 20)
+        needed_cores = int(
+            (
+                current_capacity.cluster_instance.cpu
+                * required_cluster_size
+                * zones_per_region
+            )
+            * (current_capacity.cpu_utilization.high / 20)
+        )
+        # Capcity planning is done with desires.core_reference_ghz cpu as the reference.
+        # Hence we need to normalize our needed_cores calculation with the reference
+        # cpu utilization.
+        needed_cores = math.ceil(
+            max(
+                1,
+                needed_cores
+                // (
+                    desires.core_reference_ghz
+                    / current_capacity.cluster_instance.cpu_ghz
+                ),
+            )
+        )
     else:
         needed_cores = sqrt_staffed_cores(desires) * 2
     # Keep half of the bandwidth available for backup
@@ -108,7 +124,7 @@ def _estimate_cassandra_requirement(
         * copies_per_region,
     )
 
-    # Rough estimate of how many instances we would need just for the the CPU
+    # Rough estimate of how many instances we would need just for the CPU
     # Note that this is a lower bound, we might end up with more.
     needed_cores = math.ceil(
         max(1, needed_cores // (instance.cpu_ghz / desires.core_reference_ghz))
