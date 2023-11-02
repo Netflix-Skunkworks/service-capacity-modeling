@@ -330,7 +330,7 @@
       "ram_gib": 247.76,
       "net_mbps": 18750,
       "drive": {
-        "name": "ephem", "size_gib": 3492,
+        "name": "ephem", "size_gib": 6984,
         "read_io_latency_ms": {
             "minimum_value":0.05,
             "low":0.10, "mid":0.125, "high":0.17,
@@ -347,7 +347,7 @@
       "ram_gib": 495.82,
       "net_mbps": 35000,
       "drive": {
-        "name": "ephem", "size_gib": 3492,
+        "name": "ephem", "size_gib": 13968,
         "read_io_latency_ms": {
             "minimum_value":0.05,
             "low":0.10, "mid":0.125, "high":0.17,
@@ -426,7 +426,7 @@
       "cpu": 24,
       "cpu_ghz": 3.1,
       "ram_gib": 186.62,
-      "net_mbps": 12000,
+      "net_mbps": 24000,
       "drive": {"name": "ephem", "size_gib": 14000,
         "read_io_latency_ms": {"minimum_value":0.07, "low":0.08, "mid":0.12, "high":0.16, "maximum_value":2, "confidence":0.9},
         "read_io_per_s": 500000, "write_io_per_s": 400000,
