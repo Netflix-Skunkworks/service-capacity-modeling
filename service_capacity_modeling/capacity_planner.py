@@ -189,13 +189,25 @@ def _set_instance_objects(
 ):
     if desires.current_clusters:
         for zonal_cluster_capacity in desires.current_clusters.zonal:
-            zonal_cluster_capacity.cluster_instance = hardware.instances[
-                zonal_cluster_capacity.cluster_instance_name
-            ]
+            if zonal_cluster_capacity.cluster_instance_name in hardware.instances:
+                zonal_cluster_capacity.cluster_instance = hardware.instances[
+                    zonal_cluster_capacity.cluster_instance_name
+                ]
+            else:
+                raise ValueError(
+                    f"Model not trained to right size cass clusters that are of "
+                    f"instance types {zonal_cluster_capacity.cluster_instance_name}"
+                )
         for regional_cluster_capacity in desires.current_clusters.regional:
-            regional_cluster_capacity.cluster_instance = hardware.instances[
-                regional_cluster_capacity.cluster_instance_name
-            ]
+            if regional_cluster_capacity.cluster_instance_name in hardware.instances:
+                regional_cluster_capacity.cluster_instance = hardware.instances[
+                    regional_cluster_capacity.cluster_instance_name
+                ]
+            else:
+                raise ValueError(
+                    f"Model not trained to right size cass clusters that are of "
+                    f"instance types {regional_cluster_capacity.cluster_instance_name}"
+                )
 
 
 def _allow_instance(
