@@ -195,8 +195,8 @@ def _set_instance_objects(
                 ]
             else:
                 raise ValueError(
-                    f"Model not trained to right size cass clusters that are of "
-                    f"instance types {zonal_cluster_capacity.cluster_instance_name}"
+                    f"Model not trained to right size clusters that are of instance"
+                    f" types {zonal_cluster_capacity.cluster_instance_name}"
                 )
         for regional_cluster_capacity in desires.current_clusters.regional:
             if regional_cluster_capacity.cluster_instance_name in hardware.instances:
@@ -205,8 +205,8 @@ def _set_instance_objects(
                 ]
             else:
                 raise ValueError(
-                    f"Model not trained to right size cass clusters that are of "
-                    f"instance types {regional_cluster_capacity.cluster_instance_name}"
+                    f"Model not trained to right size clusters that are of instance"
+                    f" types {regional_cluster_capacity.cluster_instance_name}"
                 )
 
 
