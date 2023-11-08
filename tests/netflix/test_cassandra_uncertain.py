@@ -99,7 +99,7 @@ def test_increasing_qps_simple():
         ]
         lr_family = lr.instance.family
         if lr.instance.drive is None:
-            assert sum(dr.size_gib for dr in lr.attached_drives) >= 200
+            assert sum(dr.size_gib for dr in lr.attached_drives) >= 100
         else:
             assert lr.instance.drive.size_gib >= 100
 

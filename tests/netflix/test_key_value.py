@@ -51,7 +51,7 @@ def test_kv_increasing_qps_simple():
         zlr_cost = cap_plan.least_regret[0].candidate_clusters.total_annual_cost
         zlr_family = zlr.instance.family
         if zlr.instance.drive is None:
-            assert sum(dr.size_gib for dr in zlr.attached_drives) >= 200
+            assert sum(dr.size_gib for dr in zlr.attached_drives) >= 100
         else:
             assert zlr.instance.drive.size_gib >= 100
 
@@ -238,7 +238,7 @@ def test_kv_plus_evcache_rps_exceeding_250k():
             if cluster.cluster_type == "cassandra"
         )
         if zlr_cass.instance.drive is None:
-            assert sum(dr.size_gib for dr in zlr_cass.attached_drives) >= 200
+            assert sum(dr.size_gib for dr in zlr_cass.attached_drives) >= 100
         else:
             assert zlr_cass.instance.drive.size_gib >= 100
 
@@ -341,7 +341,7 @@ def test_kv_plus_evcache_rps_exceeding_100k_and_sufficient_read_write_ratio():
             if cluster.cluster_type == "cassandra"
         )
         if zlr_cass.instance.drive is None:
-            assert sum(dr.size_gib for dr in zlr_cass.attached_drives) >= 200
+            assert sum(dr.size_gib for dr in zlr_cass.attached_drives) >= 100
         else:
             assert zlr_cass.instance.drive.size_gib >= 100
 
@@ -441,7 +441,7 @@ def test_kv_rps_exceeding_100k_but_insufficient_read_write_ratio():
             if cluster.cluster_type == "cassandra"
         )
         if zlr_cass.instance.drive is None:
-            assert sum(dr.size_gib for dr in zlr_cass.attached_drives) >= 200
+            assert sum(dr.size_gib for dr in zlr_cass.attached_drives) >= 100
         else:
             assert zlr_cass.instance.drive.size_gib >= 100
 
@@ -521,7 +521,7 @@ def test_kv_plus_evcache_configured_read_write_ratio_threshold():
             if cluster.cluster_type == "cassandra"
         )
         if zlr_cass.instance.drive is None:
-            assert sum(dr.size_gib for dr in zlr_cass.attached_drives) >= 200
+            assert sum(dr.size_gib for dr in zlr_cass.attached_drives) >= 100
         else:
             assert zlr_cass.instance.drive.size_gib >= 100
 

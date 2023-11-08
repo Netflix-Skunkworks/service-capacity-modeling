@@ -106,7 +106,7 @@ def test_timeseries_increasing_qps_simple():
         zlr_cost = cap_plan.least_regret[0].candidate_clusters.total_annual_cost
         zlr_family = zlr.instance.family
         if zlr.instance.drive is None:
-            assert sum(dr.size_gib for dr in zlr.attached_drives) >= 200
+            assert sum(dr.size_gib for dr in zlr.attached_drives) >= 100
         else:
             assert zlr.instance.drive.size_gib >= 100
 

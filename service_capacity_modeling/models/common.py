@@ -289,8 +289,8 @@ def compute_stateful_zone(
         total_ios = read_io + write_io
         io_gib = cloud_gib_for_io(drive, total_ios, space_gib)
 
-        # Provision EBS in increments of 200 GiB
-        ebs_gib = utils.next_n(max(1, io_gib, space_gib), n=200)
+        # Provision EBS in increments of 100 GiB
+        ebs_gib = utils.next_n(max(1, io_gib, space_gib), n=100)
 
         # When initially provisioniong we don't want to attach more than
         # 1/3 the maximum volume size in one node (preferring more nodes
