@@ -144,11 +144,11 @@ class TimeSeriesConfiguration:
         return DURATION_1Y
 
     @staticmethod
-    def __get_read_interval_seconds(extra_model_arguments: Dict[str, Any]):
+    def __get_read_interval_seconds(extra_model_arguments: Dict[str, Any]) -> int:
         # default read duration of 1D
         read_interval = extra_model_arguments.get("ts.read-interval", "PT24H")
         if read_interval == "unlimited":
-            return DURATION_1Y * 100
+            return int(DURATION_1Y.total_seconds() * 100)
         return iso_to_seconds(read_interval)
 
     @staticmethod
