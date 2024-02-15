@@ -53,6 +53,7 @@ read_desires_large_item = CapacityDesires(
         ),
         estimated_write_per_second=certain_int(0),
         estimated_mean_write_size_bytes=certain_int(5798),
+        estimated_mean_read_size_bytes=certain_int(5798),
     ),
     data_shape=DataShape(
         estimated_state_size_gib=Interval(low=10, mid=100, high=1000, confidence=0.98),
@@ -78,6 +79,7 @@ write_desires_large_item = CapacityDesires(
             low=100, mid=1000, high=10000, confidence=0.98
         ),
         estimated_mean_write_size_bytes=certain_int(5798),
+        estimated_mean_read_size_bytes=certain_int(5798),
     ),
     data_shape=DataShape(
         estimated_state_size_gib=Interval(low=10, mid=100, high=1000, confidence=0.98),
