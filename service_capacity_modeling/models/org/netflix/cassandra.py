@@ -314,7 +314,12 @@ def _estimate_cassandra_cluster_zonal(
         ),
         # C* requires ephemeral disks to be 25% full because compaction
         # and replacement time if we're underscaled.
-        required_disk_space=lambda x: x * 4,
+        required_disk_space=lambda x: x * 2
+        if instance.drive is None
+        or "local" in instance.drive.drive_type.name
+        or required_cluster_size is None
+        or (x / required_cluster_size) < 1000
+        else x + (1000 * required_cluster_size),
         # C* clusters cannot recover data from neighbors quickly so we
         # want to avoid clusters with more than 1 TiB of local state
         max_local_disk_gib=max_local_disk_gib,
