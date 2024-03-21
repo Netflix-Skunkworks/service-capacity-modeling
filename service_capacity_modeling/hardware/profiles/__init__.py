@@ -9,11 +9,12 @@ except ImportError:
 from service_capacity_modeling.hardware import load_hardware_from_disk
 from pathlib import Path
 
-
 current_module = import_module(__name__)
 common_profiles = {}
 
-with pkg_resources.path(current_module, "profiles.txt") as shape_file:
+with pkg_resources.path(  # pylint: disable=deprecated-method
+    current_module, "profiles.txt"
+) as shape_file:
     shapes = Path(shape_file.parent, "shapes")
     for fd in shapes.glob("**/*.json"):
         shape = fd.stem
