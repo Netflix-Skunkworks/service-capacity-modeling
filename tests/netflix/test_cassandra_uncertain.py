@@ -101,7 +101,7 @@ def test_increasing_qps_simple():
         if lr.instance.drive is None:
             assert sum(dr.size_gib for dr in lr.attached_drives) >= 100
         else:
-            assert lr.instance.drive.size_gib >= 60
+            assert lr.instance.drive.size_gib >= 100
 
         result.append(
             (lr_family, lr_cpu, lr_cost, cap_plan.least_regret[0].requirements.zonal[0])
@@ -147,7 +147,6 @@ def test_worn_dataset():
         extra_model_arguments={
             "max_regional_size": 200,
             "copies_per_region": 2,
-            "require_attached_disks": True,
         },
     )
 

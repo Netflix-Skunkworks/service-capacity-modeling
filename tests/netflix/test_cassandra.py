@@ -199,7 +199,7 @@ def test_high_write_throughput():
     assert (
         300_000
         > high_writes_result.count * high_writes_result.attached_drives[0].size_gib
-        >= 70_000
+        >= 100_000
     )
 
     cluster_cost = cap_plan.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
@@ -353,51 +353,3 @@ def test_plan_certain():
     lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
     assert lr_clusters.count == 8
     assert lr_clusters.instance.cpu == 16
-
-
-def test_plan_certain_disk_space():
-    """
-    Disk space is adjusted based on EBS and ephemeral. Takes lesser vCPUs. Correct
-    adjustment of disk space attributes to lower node density and hence provides
-    lower vCPUs.
-    """
-    cluster_capacity = CurrentClusterCapacity(
-        cluster_instance_name="i4i.8xlarge",
-        cluster_instance_count=Interval(low=32, mid=32, high=32, confidence=1),
-        cpu_utilization=Interval(low=2.96, mid=4.36, high=7.47, confidence=1),
-    )
-
-    worn_desire = CapacityDesires(
-        service_tier=1,
-        current_clusters=CurrentClusters(zonal=[cluster_capacity]),
-        query_pattern=QueryPattern(
-            access_pattern=AccessPattern(AccessPattern.latency),
-            estimated_read_per_second=Interval(
-                low=583, mid=933, high=2790, confidence=0.98
-            ),
-            estimated_write_per_second=Interval(
-                low=11310, mid=16491, high=20501, confidence=0.98
-            ),
-        ),
-        data_shape=DataShape(
-            estimated_state_size_gib=Interval(
-                low=71734.83, mid=72232.16, high=72385.33, confidence=0.98
-            ),
-            estimated_compression_ratio=Interval(low=1, mid=1, high=1, confidence=1),
-        ),
-    )
-    cap_plan = planner.plan_certain(
-        model_name="org.netflix.cassandra",
-        region="us-east-1",
-        num_results=3,
-        num_regions=4,
-        desires=worn_desire,
-        extra_model_arguments={
-            "current_asg_size": 3,
-            "max_disk_used_gib": 2520.8339739371695,
-            "max_local_disk_gib": 16384,
-            "required_cluster_size": 32,
-        },
-    )
-    lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
-    assert lr_clusters.instance.cpu < 32

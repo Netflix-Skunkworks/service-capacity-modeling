@@ -53,7 +53,7 @@ def test_kv_increasing_qps_simple():
         if zlr.instance.drive is None:
             assert sum(dr.size_gib for dr in zlr.attached_drives) >= 100
         else:
-            assert zlr.instance.drive.size_gib >= 60
+            assert zlr.instance.drive.size_gib >= 100
 
         zonal_result.append(
             (
