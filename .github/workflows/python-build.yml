@@ -18,7 +18,7 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install Tox and any other packages
       run: pip install tox
-    - name: Run Tox (pydantic v1)
+    - name: Run end-to-end test suite
       run: tox -e py
-    - name: Run Tox (full pre-commit check)
+    - name: Run linters via pre-commit
       run: tox -e pre-commit
