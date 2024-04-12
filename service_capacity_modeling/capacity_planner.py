@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import functools
 import logging
+import math
 from hashlib import blake2b
 from typing import Any
 from typing import Callable
@@ -58,13 +59,13 @@ def simulate_interval(
             signed=False,
         )
 
-        def sim_uncertan(count: int) -> Sequence[Interval]:
+        def sim_uncertain(count: int) -> Sequence[Interval]:
             return [
                 certain_float(s)
                 for s in dist_for_interval(interval, seed=seed).rvs(count)
             ]
 
-        return sim_uncertan
+        return sim_uncertain
 
     else:
 
@@ -593,6 +594,13 @@ class CapacityPlanner:
             desires.data_shape.reserved_instance_app_mem_gib
             + desires.data_shape.reserved_instance_system_mem_gib
         )
+        # Applications often require a minimum amount of true parallelism
+        per_instance_cores = int(
+            math.ceil(
+                desires.query_pattern.estimated_read_parallelism.mid
+                + desires.query_pattern.estimated_write_parallelism.mid
+            )
+        )
         allowed_platforms: Set[Platform] = set(model.allowed_platforms())
         allowed_drives: Set[str] = set(drives or [])
         for drive_name in model.allowed_cloud_drives():
@@ -613,7 +621,11 @@ class CapacityPlanner:
                 ):
                     continue
 
-                if per_instance_mem > instance.ram_gib:
+                # If the instance doesn't have enough vertical resources, pass on it
+                if (
+                    per_instance_mem > instance.ram_gib
+                    or per_instance_cores > instance.cpu
+                ):
                     continue
 
                 for drive in hardware.drives.values():

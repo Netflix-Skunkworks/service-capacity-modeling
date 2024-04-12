@@ -560,6 +560,28 @@ class QueryPattern(ExcludeUnsetModel):
     estimated_mean_read_size_bytes: Interval = certain_int(AVG_ITEM_SIZE_BYTES)
     estimated_mean_write_size_bytes: Interval = certain_int(AVG_ITEM_SIZE_BYTES // 2)
 
+    # For workloads which have bursts of async work, what is the
+    # expected parallelism of those workloads. Note the summation of
+    # read and write parallelism will lower bound the number of cores.
+    estimated_read_parallelism: Interval = Field(
+        certain_int(1),
+        title="Estimated per instance parallelism on read operations",
+        description=(
+            "The estimated amount of parallel work streams on a single "
+            "host. For example a read triggers async callbacks that need "
+            "to be executed truly in parallel (not just concurrent)."
+        ),
+    )
+    estimated_write_parallelism: Interval = Field(
+        certain_int(1),
+        title="Estimated per instance parallelism on write operations",
+        description=(
+            "The estimated amount of parallel work streams on a single "
+            "host. For example a write triggers async fanouts that need "
+            "to be executed truly in parallel (not just concurrent)."
+        ),
+    )
+
     # The latencies at which oncall engineers get involved. We want
     # to provision such that we don't involve oncall
     # Note that these summary statistics will be used to create reasonable

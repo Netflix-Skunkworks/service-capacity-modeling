@@ -1,8 +1,8 @@
 try:
-    import importlib.resources as pkg_resources
+    from importlib import resources
     from importlib import import_module
 except ImportError:
-    import importlib_resources as pkg_resources  # type: ignore[no-redef]
+    import importlib_resources as resources  # type: ignore[no-redef]
 
     import_module = __import__  # type: ignore[assignment]
 
@@ -12,7 +12,7 @@ from pathlib import Path
 current_module = import_module(__name__)
 common_profiles = {}
 
-with pkg_resources.path(  # pylint: disable=deprecated-method
+with resources.path(  # pylint: disable=deprecated-method
     current_module, "profiles.txt"
 ) as shape_file:
     shapes = Path(shape_file.parent, "shapes")
