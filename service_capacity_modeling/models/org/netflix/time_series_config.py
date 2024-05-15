@@ -51,6 +51,7 @@ class TimeSeriesConfiguration:
         self.read_amplification = self.__get_read_amplification(
             self.read_interval_seconds, self.seconds_per_interval, self.buckets_per_id
         )
+        self.search_enabled = bool(extra_model_arguments.get("search.enabled"))
 
     # We force dependent parameters to be passed into these methods
     # instead of using self to make dependencies between them more explicit

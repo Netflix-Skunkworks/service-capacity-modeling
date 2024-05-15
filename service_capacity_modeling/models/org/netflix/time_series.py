@@ -73,7 +73,22 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
             )
             return modified
 
-        return (("org.netflix.cassandra", _modify_cassandra_desires),)
+        def _modify_elasticsearch_desires(
+            user_desires: CapacityDesires,
+        ) -> CapacityDesires:
+            relaxed = user_desires.copy(deep=True)
+            relaxed.query_pattern.access_consistency.same_region.target_consistency = (
+                AccessConsistency.eventual
+            )
+            return relaxed
+
+        if ts_config.search_enabled:
+            return (
+                ("org.netflix.cassandra", _modify_cassandra_desires),
+                ("org.netflix.elasticsearch", _modify_elasticsearch_desires),
+            )
+        else:
+            return (("org.netflix.cassandra", _modify_cassandra_desires),)
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments):
