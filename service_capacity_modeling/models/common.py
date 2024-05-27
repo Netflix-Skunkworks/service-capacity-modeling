@@ -229,7 +229,15 @@ def compute_stateful_zone(
     # Some stateful clusters have preferences on per zone sizing
     cluster_size: Callable[[int], int] = lambda x: x,
     min_count: int = 0,
+    adjusted_disk_io_needed: Optional[float] = 0.0,
+    read_write_ratio: Optional[float] = 0.0
 ) -> ZoneClusterCapacity:
+
+
+    #If only reads, then max burst is X reads/s
+    #If only writes, then max burst is Y writes/s
+
+
     # Normalize the cores of this instance type to the latency reference
     needed_cores = math.ceil(
         max(1, needed_cores // (instance.cpu_ghz / core_reference_ghz))
@@ -269,6 +277,15 @@ def compute_stateful_zone(
     ):
         disk_per_node = min(max_local_disk_gib, instance.drive.size_gib)
         count = max(count, math.ceil(needed_disk_gib / disk_per_node))
+        if adjusted_disk_io_needed != 0.0:
+            instance_read_iops = drive.read_io_per_s
+            instance_write_iops = drive.write_io_per_s
+            instance_adjusted_io = (read_write_ratio * instance_read_iops + \
+                (1.0 - read_write_ratio) * instance_write_iops) * \
+                drive.block_size_kib * 1024
+            if instance_adjusted_io != 0.0:
+                count = max(count, math.ceil(adjusted_disk_io_needed / instance_adjusted_io))
+
 
     count = max(cluster_size(count), min_count)
     cost = count * instance.annual_cost
