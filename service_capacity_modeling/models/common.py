@@ -233,11 +233,6 @@ def compute_stateful_zone(
     read_write_ratio: Optional[float] = 0.0
 ) -> ZoneClusterCapacity:
 
-
-    #If only reads, then max burst is X reads/s
-    #If only writes, then max burst is Y writes/s
-
-
     # Normalize the cores of this instance type to the latency reference
     needed_cores = math.ceil(
         max(1, needed_cores // (instance.cpu_ghz / core_reference_ghz))
@@ -282,7 +277,7 @@ def compute_stateful_zone(
             instance_write_iops = drive.write_io_per_s
             instance_adjusted_io = (read_write_ratio * instance_read_iops + \
                 (1.0 - read_write_ratio) * instance_write_iops) * \
-                drive.block_size_kib * 1024
+                drive.block_size_kib * 1024.0
             if instance_adjusted_io != 0.0:
                 count = max(count, math.ceil(adjusted_disk_io_needed / instance_adjusted_io))
 
