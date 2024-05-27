@@ -232,6 +232,20 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901
     if desires.service_tier < 1:
         min_count = 2
 
+    is_disk_io_constraint: bool = requirement.disk_gib > 0.0
+    adjusted_disk_io_needed = 0.0
+    read_write_ratio = 0.0
+    if is_disk_io_constraint:
+        reads_per_sec = desires.query_pattern.estimated_read_per_second.mid
+        writes_per_sec = desires.query_pattern.estimated_write_per_second.mid
+        read_size = desires.query_pattern.estimated_mean_read_size_bytes.mid
+        write_size = desires.query_pattern.estimated_mean_write_size_bytes.mid
+        read_disk_io_needed = reads_per_sec * read_size
+        write_disk_io_needed = writes_per_sec * write_size
+        adjusted_disk_io_needed = (reads_per_sec * read_disk_io_needed + writes_per_sec * write_disk_io_needed) / \
+            (reads_per_sec + writes_per_sec)
+        read_write_ratio = reads_per_sec / (reads_per_sec + writes_per_sec)
+
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
@@ -248,6 +262,8 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901
         # Sidecars and Variable OS Memory
         reserve_memory=lambda x: base_mem,
         core_reference_ghz=requirement.core_reference_ghz,
+        adjusted_disk_io_needed = adjusted_disk_io_needed,
+        read_write_ratio = read_write_ratio
     )
     # Communicate to the actual provision that if we want reduced RF
     params = {"evcache.copies": copies_per_region}
