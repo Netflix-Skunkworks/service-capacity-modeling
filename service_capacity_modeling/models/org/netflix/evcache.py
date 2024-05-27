@@ -232,7 +232,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901
     if desires.service_tier < 1:
         min_count = 2
 
-    is_disk_io_constraint: bool = requirement.disk_gib > 0.0
+    is_disk_io_constraint: bool = requirement.disk_gib.mid > 0.0
     adjusted_disk_io_needed = 0.0
     read_write_ratio = 0.0
     if is_disk_io_constraint:
