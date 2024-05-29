@@ -242,8 +242,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901
         write_size = desires.query_pattern.estimated_mean_write_size_bytes.mid
         read_disk_io_needed = reads_per_sec * read_size
         write_disk_io_needed = writes_per_sec * write_size
-        adjusted_disk_io_needed = (reads_per_sec * read_disk_io_needed + writes_per_sec * write_disk_io_needed) / \
-            (reads_per_sec + writes_per_sec)
+        adjusted_disk_io_needed = read_disk_io_needed + write_disk_io_needed
         read_write_ratio = reads_per_sec / (reads_per_sec + writes_per_sec)
 
     cluster = compute_stateful_zone(
