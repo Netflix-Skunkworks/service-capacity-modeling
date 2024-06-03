@@ -199,6 +199,7 @@ def compute_stateless_region(
 
 
 # pylint: disable=too-many-locals
+# pylint: disable=too-many-statements
 def compute_stateful_zone(
     instance: Instance,
     drive: Drive,
@@ -230,9 +231,8 @@ def compute_stateful_zone(
     cluster_size: Callable[[int], int] = lambda x: x,
     min_count: int = 0,
     adjusted_disk_io_needed: float = 0.0,
-    read_write_ratio: float = 0.0
+    read_write_ratio: float = 0.0,
 ) -> ZoneClusterCapacity:
-
     # Normalize the cores of this instance type to the latency reference
     needed_cores = math.ceil(
         max(1, needed_cores // (instance.cpu_ghz / core_reference_ghz))
@@ -273,16 +273,30 @@ def compute_stateful_zone(
         disk_per_node = min(max_local_disk_gib, instance.drive.size_gib)
         count = max(count, math.ceil(needed_disk_gib / disk_per_node))
         if adjusted_disk_io_needed != 0.0:
-            instance_read_iops = instance.drive.read_io_per_s if instance.drive.read_io_per_s != None else 0
-            assert (isinstance(instance_read_iops, int))
-            instance_write_iops = instance.drive.write_io_per_s if instance.drive.write_io_per_s != None else 0
-            assert (isinstance(instance_write_iops, int))
-            instance_adjusted_io = (read_write_ratio * float(instance_read_iops) + \
-                (1.0 - read_write_ratio) * float(instance_write_iops)) * \
-                instance.drive.block_size_kib * 1024.0
+            instance_read_iops = (
+                instance.drive.read_io_per_s
+                if instance.drive.read_io_per_s is not None
+                else 0
+            )
+            assert isinstance(instance_read_iops, int)
+            instance_write_iops = (
+                instance.drive.write_io_per_s
+                if instance.drive.write_io_per_s is not None
+                else 0
+            )
+            assert isinstance(instance_write_iops, int)
+            instance_adjusted_io = (
+                (
+                    read_write_ratio * float(instance_read_iops)
+                    + (1.0 - read_write_ratio) * float(instance_write_iops)
+                )
+                * instance.drive.block_size_kib
+                * 1024.0
+            )
             if instance_adjusted_io != 0.0:
-                count = max(count, math.ceil(adjusted_disk_io_needed / instance_adjusted_io))
-
+                count = max(
+                    count, math.ceil(adjusted_disk_io_needed / instance_adjusted_io)
+                )
 
     count = max(cluster_size(count), min_count)
     cost = count * instance.annual_cost

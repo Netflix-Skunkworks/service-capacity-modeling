@@ -243,6 +243,8 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901
         read_disk_io_needed = reads_per_sec * read_size
         write_disk_io_needed = writes_per_sec * write_size
         adjusted_disk_io_needed = read_disk_io_needed + write_disk_io_needed
+        # Giving headroom for cachewarming and region squeeze
+        adjusted_disk_io_needed = 1.4 * adjusted_disk_io_needed
         read_write_ratio = reads_per_sec / (reads_per_sec + writes_per_sec)
 
     cluster = compute_stateful_zone(
@@ -261,8 +263,8 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901
         # Sidecars and Variable OS Memory
         reserve_memory=lambda x: base_mem,
         core_reference_ghz=requirement.core_reference_ghz,
-        adjusted_disk_io_needed = adjusted_disk_io_needed,
-        read_write_ratio = read_write_ratio
+        adjusted_disk_io_needed=adjusted_disk_io_needed,
+        read_write_ratio=read_write_ratio,
     )
     # Communicate to the actual provision that if we want reduced RF
     params = {"evcache.copies": copies_per_region}
