@@ -91,7 +91,7 @@ def _rds_required_disk_ios(disk_size_gib: int, db_type: str, btree_fan_out: int 
     return math.log(pages, btree_fan_out)
 
 
-def _compute_rds_region(
+def _compute_rds_region(  # pylint: disable=too-many-positional-arguments
     instance: Instance,
     drive: Drive,
     needed_cores: int,

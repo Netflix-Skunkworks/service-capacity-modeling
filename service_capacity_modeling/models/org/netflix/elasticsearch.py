@@ -60,7 +60,7 @@ def _es_io_per_read(node_size_gib, segment_size_mb=512):
     return levels
 
 
-def _estimate_elasticsearch_requirement(
+def _estimate_elasticsearch_requirement(  # noqa: E501 pylint: disable=too-many-positional-arguments
     node_type: str,
     instance: Instance,
     desires: CapacityDesires,

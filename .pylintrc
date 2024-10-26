@@ -9,6 +9,8 @@ extension-pkg-whitelist=pydantic.fields
 ignored-argument-names=args|kwargs
 
 disable =
+  # in python 3.8 of expected a valid pylint message and got 'too-many-positional-arguments'
+  unknown-option-value,
   # often useful to be explicit on which returns should return None
   useless-return,
   # gets angry when you declare a module-level logger

@@ -151,7 +151,7 @@ def _kafka_read_io(rps, io_size_kib, size_gib, recovery_seconds: int) -> float:
 
 # pylint: disable=too-many-locals
 # pylint: disable=too-many-return-statements
-def _estimate_kafka_cluster_zonal(
+def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-arguments
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,

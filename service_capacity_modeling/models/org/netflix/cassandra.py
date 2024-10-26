@@ -62,7 +62,7 @@ def _write_buffer_gib_zone(
     return float(write_buffer_gib) / zones_per_region
 
 
-def _estimate_cassandra_requirement(
+def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-arguments
     instance: Instance,
     desires: CapacityDesires,
     working_set: float,
@@ -204,7 +204,7 @@ def _upsert_params(cluster, params):
 # pylint: disable=too-many-locals
 # pylint: disable=too-many-return-statements
 # flake8: noqa: C901
-def _estimate_cassandra_cluster_zonal(
+def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-arguments
     instance: Instance,
     drive: Drive,
     context: RegionContext,

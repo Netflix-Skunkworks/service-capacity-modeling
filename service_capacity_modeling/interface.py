@@ -67,8 +67,8 @@ class Interval(ExcludeUnsetModel):
     maximum_value: Optional[float] = None
 
     class Config:
-        allow_mutation = False
         frozen = True
+        protected_namespaces = ()
 
     @property
     def can_simulate(self):
@@ -267,7 +267,7 @@ class Drive(ExcludeUnsetModel):
         #  (160000.0, 0.384)]
         r_cost, w_cost, offset = 0.0, 0.0, 0.0
         if self.annual_cost_per_read_io:
-            for (end, cost) in self.annual_cost_per_read_io:
+            for end, cost in self.annual_cost_per_read_io:
                 charge_ios = min(r_ios, end) - offset
                 r_cost += charge_ios * cost
                 offset += charge_ios
@@ -276,7 +276,7 @@ class Drive(ExcludeUnsetModel):
 
         offset = 0.0
         if self.annual_cost_per_write_io:
-            for (end, cost) in self.annual_cost_per_write_io:
+            for end, cost in self.annual_cost_per_write_io:
                 charge_ios = min(w_ios, end) - offset
                 w_cost += charge_ios * cost
                 offset += charge_ios

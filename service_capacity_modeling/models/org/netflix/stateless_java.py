@@ -73,7 +73,7 @@ def _estimate_java_app_requirement(
     )
 
 
-def _estimate_java_app_region(
+def _estimate_java_app_region(  # pylint: disable=too-many-positional-arguments
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,
