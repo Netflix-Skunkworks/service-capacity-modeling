@@ -16,6 +16,7 @@ from typing import Union
 
 import numpy as np
 from pydantic import BaseModel
+from pydantic import ConfigDict
 from pydantic import Field
 
 GIB_IN_BYTES = 1024 * 1024 * 1024
@@ -65,10 +66,7 @@ class Interval(ExcludeUnsetModel):
 
     minimum_value: Optional[float] = None
     maximum_value: Optional[float] = None
-
-    class Config:
-        frozen = True
-        protected_namespaces = ()
+    model_config = ConfigDict(frozen=True, protected_namespaces=())
 
     @property
     def can_simulate(self):
@@ -318,7 +316,7 @@ class Instance(ExcludeUnsetModel):
     cpu_ghz: float
     ram_gib: float
     net_mbps: float
-    drive: Optional[Drive]
+    drive: Optional[Drive] = None
     annual_cost: float = 0
     lifecycle: Lifecycle = Lifecycle.stable
     # Typically hardware has a single platform, but sometimes they can act in multiple
