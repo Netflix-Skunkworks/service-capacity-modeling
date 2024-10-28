@@ -16,6 +16,7 @@ from typing import Union
 
 import numpy as np
 from pydantic import BaseModel
+from pydantic import ConfigDict
 from pydantic import Field
 
 GIB_IN_BYTES = 1024 * 1024 * 1024
@@ -65,10 +66,7 @@ class Interval(ExcludeUnsetModel):
 
     minimum_value: Optional[float] = None
     maximum_value: Optional[float] = None
-
-    class Config:
-        allow_mutation = False
-        frozen = True
+    model_config = ConfigDict(frozen=True, protected_namespaces=())
 
     @property
     def can_simulate(self):
@@ -267,7 +265,7 @@ class Drive(ExcludeUnsetModel):
         #  (160000.0, 0.384)]
         r_cost, w_cost, offset = 0.0, 0.0, 0.0
         if self.annual_cost_per_read_io:
-            for (end, cost) in self.annual_cost_per_read_io:
+            for end, cost in self.annual_cost_per_read_io:
                 charge_ios = min(r_ios, end) - offset
                 r_cost += charge_ios * cost
                 offset += charge_ios
@@ -276,7 +274,7 @@ class Drive(ExcludeUnsetModel):
 
         offset = 0.0
         if self.annual_cost_per_write_io:
-            for (end, cost) in self.annual_cost_per_write_io:
+            for end, cost in self.annual_cost_per_write_io:
                 charge_ios = min(w_ios, end) - offset
                 w_cost += charge_ios * cost
                 offset += charge_ios
@@ -318,7 +316,7 @@ class Instance(ExcludeUnsetModel):
     cpu_ghz: float
     ram_gib: float
     net_mbps: float
-    drive: Optional[Drive]
+    drive: Optional[Drive] = None
     annual_cost: float = 0
     lifecycle: Lifecycle = Lifecycle.stable
     # Typically hardware has a single platform, but sometimes they can act in multiple

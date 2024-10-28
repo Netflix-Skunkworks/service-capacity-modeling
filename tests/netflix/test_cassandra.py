@@ -5,8 +5,8 @@ from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Consistency
-from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import CurrentClusters
+from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
@@ -311,7 +311,7 @@ def test_plan_certain():
     Use cpu utilization to determine instance types directly as supposed to
     extrapolating it from the Data Shape
     """
-    cluster_capacity = CurrentClusterCapacity(
+    cluster_capacity = CurrentZoneClusterCapacity(
         cluster_instance_name="i4i.8xlarge",
         cluster_instance_count=Interval(low=8, mid=8, high=8, confidence=1),
         cpu_utilization=Interval(

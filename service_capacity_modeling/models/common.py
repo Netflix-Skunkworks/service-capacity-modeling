@@ -158,7 +158,7 @@ def network_services(
     return result
 
 
-def compute_stateless_region(
+def compute_stateless_region(  # pylint: disable=too-many-positional-arguments
     instance: Instance,
     needed_cores: int,
     needed_memory_gib: float,
@@ -200,7 +200,7 @@ def compute_stateless_region(
 
 # pylint: disable=too-many-locals
 # pylint: disable=too-many-statements
-def compute_stateful_zone(
+def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     instance: Instance,
     drive: Drive,
     needed_cores: int,

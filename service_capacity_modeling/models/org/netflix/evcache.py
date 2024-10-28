@@ -160,7 +160,7 @@ def _upsert_params(cluster, params):
 
 
 # pylint: disable=too-many-locals
-def _estimate_evcache_cluster_zonal(  # noqa: C901
+def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many-positional-arguments
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,

@@ -124,7 +124,7 @@ def _estimate_io_cost(
     return r_cost + w_cost
 
 
-def _compute_aurora_region(
+def _compute_aurora_region(  # pylint: disable=too-many-positional-arguments
     instance: Instance,
     drive: Drive,  # always to be Aurora Storage
     needed_cores: int,

@@ -46,7 +46,7 @@ def _crdb_io_per_read(node_size_gib, sstable_size_mb=1000):
     return levels
 
 
-def _estimate_cockroachdb_requirement(
+def _estimate_cockroachdb_requirement(  # noqa=E501 pylint: disable=too-many-positional-arguments
     instance: Instance,
     desires: CapacityDesires,
     working_set: float,
@@ -129,7 +129,7 @@ def _upsert_params(cluster, params):
 
 
 # pylint: disable=too-many-locals
-def _estimate_cockroachdb_cluster_zonal(
+def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-positional-arguments
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,

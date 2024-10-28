@@ -355,7 +355,7 @@ class CapacityPlanner:
     def hardware_shapes(self) -> HardwareShapes:
         return self._shapes
 
-    def _plan_percentiles(
+    def _plan_percentiles(  # pylint: disable=too-many-positional-arguments
         self,
         model_name: str,
         percentiles: Tuple[int, ...],
@@ -421,7 +421,7 @@ class CapacityPlanner:
 
         return mean_plan, percentile_plans
 
-    def _group_plans_by_percentile(
+    def _group_plans_by_percentile(  # pylint: disable=too-many-positional-arguments
         self,
         drives,
         extra_model_arguments,
@@ -462,7 +462,7 @@ class CapacityPlanner:
             )
         return percentile_plans
 
-    def _mean_plan(
+    def _mean_plan(  # pylint: disable=too-many-positional-arguments
         self,
         drives,
         extra_model_arguments,
@@ -494,7 +494,7 @@ class CapacityPlanner:
         )
         return mean_plan
 
-    def plan_certain(
+    def plan_certain(  # pylint: disable=too-many-positional-arguments
         self,
         model_name: str,
         region: str,
@@ -538,7 +538,7 @@ class CapacityPlanner:
 
         return [functools.reduce(merge_plan, composed) for composed in zip(*results)]
 
-    def _plan_certain(
+    def _plan_certain(  # pylint: disable=too-many-positional-arguments
         self,
         model_name: str,
         region: str,
@@ -573,8 +573,15 @@ class CapacityPlanner:
         num_results = num_results or self._default_num_results
         return reduce_by_family(plans)[:num_results]
 
-    def generate_scenarios(
-        self, model, region, desires, num_regions, lifecycles, instance_families, drives
+    def generate_scenarios(  # pylint: disable=too-many-positional-arguments
+        self,
+        model,
+        region,
+        desires,
+        num_regions,
+        lifecycles,
+        instance_families,
+        drives,
     ):
         lifecycles = lifecycles or self._default_lifecycles
         instance_families = instance_families or []
@@ -638,8 +645,8 @@ class CapacityPlanner:
             drive = Drive.get_managed_drive()
             yield instance, drive, context
 
-    # pylint: disable-msg=too-many-locals
-    def plan(
+    # pylint: disable=too-many-locals
+    def plan(  # pylint: disable=too-many-positional-arguments
         self,
         model_name: str,
         region: str,
