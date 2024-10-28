@@ -200,8 +200,13 @@ def _get_write_consistency_percentages(
     }
 
 
-def _mean_item_size_bytes(desires: CapacityDesires) -> float:
+def _mean_write_item_size_bytes(desires: CapacityDesires) -> float:
     mean_item_size = desires.query_pattern.estimated_mean_write_size_bytes.mid
+    return mean_item_size
+
+
+def _mean_read_item_size_bytes(desires: CapacityDesires) -> float:
+    mean_item_size = desires.query_pattern.estimated_mean_read_size_bytes.mid
     return mean_item_size
 
 
@@ -238,7 +243,7 @@ def _plan_writes(
     desires: CapacityDesires,
     extra_model_arguments: Dict[str, Any],
 ) -> _WritePlan:
-    mean_item_size = _mean_item_size_bytes(desires)
+    mean_item_size = _mean_write_item_size_bytes(desires)
 
     # For items up to 1 KB in size,
     # one WCU can perform one standard write request per second
@@ -305,7 +310,7 @@ def _plan_reads(
     transactional_read_percent = read_percentages["transactional_read_percent"]
     eventual_read_percent = read_percentages["eventual_read_percent"]
     strong_read_percent = read_percentages["strong_read_percent"]
-    mean_item_size = _mean_item_size_bytes(desires)
+    mean_item_size = _mean_read_item_size_bytes(desires)
 
     # items up to 4 KB in size
     rounded_rcus_per_item = math.ceil(max(1.0, mean_item_size / (4 * 1024)))
@@ -377,7 +382,7 @@ def _plan_data_transfer(
         return _DataTransferPlan(
             total_data_transfer_gib=0, total_annual_data_transfer_cost=0
         )
-    mean_item_size_bytes = _mean_item_size_bytes(desires)
+    mean_item_size_bytes = _mean_write_item_size_bytes(desires)
     writes_per_second = desires.query_pattern.estimated_write_per_second.mid
     # 31,536,000 seconds in a year (365 * 24 * 60 * 60)
     # 1024 * 1024 * 1024 = 1Gib
