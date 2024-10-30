@@ -215,13 +215,17 @@ def _estimate_cassandra_cluster_zonal(
     require_attached_disks: bool = False,
     required_cluster_size: Optional[int] = None,
     max_rps_to_disk: int = 500,
-    max_local_disk_gib: int = 2048,
-    max_regional_size: int = 96,
+    max_local_disk_gib: int = 5120,
+    max_regional_size: int = 192,
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
 ) -> Optional[CapacityPlan]:
     # Netflix Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 2 or instance.ram_gib < 14:
+        return None
+
+    # temporarily dont suggest EBS instances
+    if instance.drive is None:
         return None
 
     # if we're not allowed to use gp2, skip EBS only types
@@ -478,11 +482,11 @@ class NflxCassandraArguments(BaseModel):
         description="How many disk IOs should be allowed to hit disk per instance",
     )
     max_regional_size: int = Field(
-        default=96,
+        default=192,
         description="What is the maximum size of a cluster in this region",
     )
     max_local_disk_gib: int = Field(
-        default=2048,
+        default=5120,
         description="The maximum amount of data we store per machine",
     )
     max_write_buffer_percent: float = Field(
@@ -522,8 +526,8 @@ class NflxCassandraCapacityModel(CapacityModel):
             "required_cluster_size", None
         )
         max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 500)
-        max_regional_size: int = extra_model_arguments.get("max_regional_size", 96)
-        max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 2048)
+        max_regional_size: int = extra_model_arguments.get("max_regional_size", 192)
+        max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 5120)
         max_write_buffer_percent: float = min(
             0.5, extra_model_arguments.get("max_write_buffer_percent", 0.25)
         )
