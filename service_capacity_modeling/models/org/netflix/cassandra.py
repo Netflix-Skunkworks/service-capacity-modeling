@@ -224,6 +224,10 @@ def _estimate_cassandra_cluster_zonal(
     if instance.cpu < 2 or instance.ram_gib < 14:
         return None
 
+    #temporarily dont suggest EBS instances
+    if instance.drive is None:
+        return None
+
     # if we're not allowed to use gp2, skip EBS only types
     if instance.drive is None and require_local_disks:
         return None
