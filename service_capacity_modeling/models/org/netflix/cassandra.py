@@ -211,12 +211,12 @@ def _estimate_cassandra_cluster_zonal(
     desires: CapacityDesires,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
-    require_local_disks: bool = False,
+    require_local_disks: bool = True,
     require_attached_disks: bool = False,
     required_cluster_size: Optional[int] = None,
     max_rps_to_disk: int = 500,
-    max_local_disk_gib: int = 2048,
-    max_regional_size: int = 96,
+    max_local_disk_gib: int = 5120,
+    max_regional_size: int = 192,
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
 ) -> Optional[CapacityPlan]:
@@ -462,7 +462,7 @@ class NflxCassandraArguments(BaseModel):
         " this will be deduced from durability and consistency desires",
     )
     require_local_disks: bool = Field(
-        default=False,
+        default=True,
         description="If local (ephemeral) drives are required",
     )
     require_attached_disks: bool = Field(
@@ -478,11 +478,11 @@ class NflxCassandraArguments(BaseModel):
         description="How many disk IOs should be allowed to hit disk per instance",
     )
     max_regional_size: int = Field(
-        default=96,
+        default=192,
         description="What is the maximum size of a cluster in this region",
     )
     max_local_disk_gib: int = Field(
-        default=2048,
+        default=5120,
         description="The maximum amount of data we store per machine",
     )
     max_write_buffer_percent: float = Field(
@@ -513,7 +513,7 @@ class NflxCassandraCapacityModel(CapacityModel):
             desires, extra_model_arguments.get("copies_per_region", None)
         )
         require_local_disks: bool = extra_model_arguments.get(
-            "require_local_disks", False
+            "require_local_disks", True
         )
         require_attached_disks: bool = extra_model_arguments.get(
             "require_attached_disks", False
@@ -522,8 +522,8 @@ class NflxCassandraCapacityModel(CapacityModel):
             "required_cluster_size", None
         )
         max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 500)
-        max_regional_size: int = extra_model_arguments.get("max_regional_size", 96)
-        max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 2048)
+        max_regional_size: int = extra_model_arguments.get("max_regional_size", 192)
+        max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 5120)
         max_write_buffer_percent: float = min(
             0.5, extra_model_arguments.get("max_write_buffer_percent", 0.25)
         )

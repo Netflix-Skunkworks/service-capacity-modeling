@@ -158,6 +158,57 @@ def test_worn_dataset():
         <= lr.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
         < 1_000_000
     )
+    assert not lr_cluster.instance.name.startswith(
+        "m5."
+    ) or lr_cluster.instance.name.startswith("r5.")
+    assert len(lr_cluster.attached_drives) == 0
+    assert lr.candidate_clusters.services[0].annual_cost > 5_000
+
+
+def test_worn_dataset_ebs():
+    """Assert that a write once read never (aka tracing) dataset uses
+    CPU and GP2 cloud drives to max ability. Paying for fast ephmeral storage
+    is silly when we're never reading from it.
+    """
+    worn_desire = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            # Very Very few reads.
+            estimated_read_per_second=Interval(
+                low=1, mid=10, high=100, confidence=0.98
+            ),
+            # We think we're going to have around 1 million writes per second
+            estimated_write_per_second=Interval(
+                low=100_000, mid=1_000_000, high=2_000_000, confidence=0.98
+            ),
+        ),
+        # We think we're going to have around 200 TiB of data
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(
+                low=104800, mid=204800, high=404800, confidence=0.98
+            ),
+        ),
+    )
+    cap_plan = planner.plan(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=worn_desire,
+        extra_model_arguments={
+            "max_regional_size": 200,
+            "copies_per_region": 2,
+            "require_local_disks": False,
+            "require_attached_disks": True,
+        },
+    )
+
+    lr = cap_plan.least_regret[0]
+    lr_cluster = lr.candidate_clusters.zonal[0]
+    assert 128 <= lr_cluster.count * lr_cluster.instance.cpu <= 512
+    assert (
+        250_000
+        <= lr.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
+        < 1_000_000
+    )
     assert lr_cluster.instance.name.startswith(
         "m5."
     ) or lr_cluster.instance.name.startswith("r5.")
