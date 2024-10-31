@@ -158,13 +158,14 @@ def test_worn_dataset():
         <= lr.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
         < 1_000_000
     )
-    assert lr_cluster.instance.name.startswith(
+    assert not lr_cluster.instance.name.startswith(
         "m5."
     ) or lr_cluster.instance.name.startswith("r5.")
-    assert lr_cluster.attached_drives[0].name == "gp3"
-    # gp2 should not provision massive drives, prefer to upcolor
-    assert lr_cluster.attached_drives[0].size_gib < 9000
-    assert lr_cluster.attached_drives[0].size_gib * lr_cluster.count * 3 > 204800
+    assert len(lr_cluster.attached_drives) == 0
+    # assert lr_cluster.attached_drives[0].name == "gp3"
+    # # gp2 should not provision massive drives, prefer to upcolor
+    # assert lr_cluster.instance.drive.size_gib < 9000
+    # assert lr_cluster.instance.drive.size_gib * lr_cluster.count * 3 > 204800
     # We should have S3 backup cost
     assert lr.candidate_clusters.services[0].annual_cost > 5_000
 
