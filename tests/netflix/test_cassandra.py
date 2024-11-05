@@ -92,7 +92,10 @@ def test_ebs_high_reads():
                 estimated_state_size_gib=certain_int(1_000),
             ),
         ),
-        extra_model_arguments={"require_attached_disks": True},
+        extra_model_arguments={
+            "require_attached_disks": True,
+            "require_local_disks": False,
+        },
     )[0]
     result = cap_plan.candidate_clusters.zonal[0]
 
@@ -103,8 +106,8 @@ def test_ebs_high_reads():
     # 1TiB / ~32 nodes
     assert result.attached_drives[0].read_io_per_s is not None
     ios = result.attached_drives[0].read_io_per_s * result.count
-    # Each zone is handling ~33k reads per second, so total disk ios should be < 3x that
-    # 3 from each level
+    # Each zone is handling ~33k reads per second, so total disk ios should be < 3x
+    # that 3 from each level
     assert 100_000 < ios < 400_000
 
 
@@ -123,7 +126,10 @@ def test_ebs_high_writes():
                 estimated_state_size_gib=certain_int(10_000),
             ),
         ),
-        extra_model_arguments={"require_attached_disks": True},
+        extra_model_arguments={
+            "require_attached_disks": True,
+            "require_local_disks": False,
+        },
     )[0]
     result = cap_plan.candidate_clusters.zonal[0]
 
@@ -190,6 +196,41 @@ def test_high_write_throughput():
         region="us-east-1",
         desires=desires,
         extra_model_arguments={"max_regional_size": 96 * 2},
+    )[0]
+    high_writes_result = cap_plan.candidate_clusters.zonal[0]
+    assert high_writes_result.instance.family not in ("m5", "r5")
+    assert high_writes_result.count > 16
+
+    cluster_cost = cap_plan.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
+    assert 125_000 < cluster_cost < 900_000
+
+    # We should require more than 4 tiering in order to meet this requirement
+    assert high_writes_result.cluster_params["cassandra.compaction.min_threshold"] > 4
+
+
+def test_high_write_throughput_ebs():
+    desires = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(1000),
+            estimated_write_per_second=certain_int(1_000_000),
+            # Really large writes
+            estimated_mean_write_size_bytes=certain_int(4096),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=certain_int(100_000),
+        ),
+    )
+
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=desires,
+        extra_model_arguments={
+            "max_regional_size": 96 * 2,
+            "require_local_disks": False,
+            "require_attached_disks": True,
+        },
     )[0]
     high_writes_result = cap_plan.candidate_clusters.zonal[0]
     assert high_writes_result.instance.family in ("m5", "r5")
