@@ -417,9 +417,9 @@ class NflxEVCacheCapacityModel(CapacityModel):
                 )
 
         estimated_read_size: Interval = Interval(
-            **user_desires.query_pattern.dict(exclude_unset=True).get(
+            **user_desires.query_pattern.model_dump().get(
                 "estimated_mean_read_size_bytes",
-                user_desires.query_pattern.dict(exclude_unset=True).get(
+                user_desires.query_pattern.model_dump().get(
                     "estimated_mean_write_size_bytes",
                     {"low": 16, "mid": 1024, "high": 65536, "confidence": 0.95},
                 ),

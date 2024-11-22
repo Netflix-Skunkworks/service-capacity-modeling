@@ -427,7 +427,7 @@ class NflxKafkaCapacityModel(CapacityModel):
         concurrent_readers = max(
             1, int(user_desires.query_pattern.estimated_read_per_second.mid)
         )
-        query_pattern = user_desires.query_pattern.dict(exclude_unset=True)
+        query_pattern = user_desires.query_pattern.model_dump()
         if "estimated_mean_write_size_bytes" in query_pattern:
             write_bytes = Interval(**query_pattern["estimated_mean_write_size_bytes"])
         else:
