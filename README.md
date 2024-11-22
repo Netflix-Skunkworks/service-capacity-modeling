@@ -83,7 +83,7 @@ requirements = cap_plan.requirements
 least_regret = cap_plan.least_regret
 
 # Show the range of requirements for a single zone
-pprint.pprint(requirements.zonal[0].dict(exclude_unset=True))
+pprint.pprint(requirements.zonal[0].model_dump())
 
 # Show our least regretful choices of hardware in least regret order
 # So for example if we can buy the first set of computers we would prefer
@@ -92,7 +92,7 @@ pprint.pprint(requirements.zonal[0].dict(exclude_unset=True))
 for choice in range(3):
     num_clusters = len(least_regret[choice].candidate_clusters.zonal)
     print(f"Our #{choice + 1} choice is {num_clusters} zones of:")
-    pprint.pprint(least_regret[choice].candidate_clusters.zonal[0].dict(exclude_unset=True))
+    pprint.pprint(least_regret[choice].candidate_clusters.zonal[0].model_dump())
 
 ```
 
@@ -102,6 +102,8 @@ use case, but each model (e.g. Cassandra) supplies reasonable defaults.
 For example we can specify a lot more information
 
 ```python
+from service_capacity_modeling.interface import CapacityDesires, QueryPattern, Interval, FixedInterval, DataShape
+
 db_desires = CapacityDesires(
     # This service is important to the business, not critical (tier 0)
     service_tier=1,
@@ -152,6 +154,9 @@ In this example we tweak the QPS up, on CPU time of operations down
 and SLO down. This more closely approximates a caching workload
 
 ```python
+from service_capacity_modeling.interface import CapacityDesires, QueryPattern, Interval, FixedInterval, DataShape
+from service_capacity_modeling.capacity_planner import planner
+
 cache_desires = CapacityDesires(
     service_tier=1,
     query_pattern=QueryPattern(

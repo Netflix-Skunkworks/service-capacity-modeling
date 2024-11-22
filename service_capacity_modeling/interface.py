@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 from decimal import Decimal
 from enum import Enum
@@ -16,6 +15,7 @@ from typing import Union
 
 import numpy as np
 from pydantic import BaseModel
+from pydantic import computed_field
 from pydantic import ConfigDict
 from pydantic import Field
 
@@ -25,15 +25,15 @@ MEGABIT_IN_BYTES = (1000 * 1000) / 8
 
 
 class ExcludeUnsetModel(BaseModel):
-    def dict(self, *args, **kwargs):
+    def model_dump(self, *args, **kwargs):
         if "exclude_unset" not in kwargs:
             kwargs["exclude_unset"] = True
-        return super().dict(*args, **kwargs)
+        return super().model_dump(*args, **kwargs)
 
-    def json(self, *args, **kwargs):
+    def model_dump_json(self, *args, **kwargs):
         if "exclude_unset" not in kwargs:
             kwargs["exclude_unset"] = True
-        return super().json(*args, **kwargs)
+        return super().model_dump_json(*args, **kwargs)
 
 
 ###############################################################################
@@ -198,6 +198,7 @@ class Drive(ExcludeUnsetModel):
     size_gib: int = 0
     read_io_per_s: Optional[int] = None
     write_io_per_s: Optional[int] = None
+    throughput: Optional[int] = None
     # If this drive has single tenant IO capacity, for example a single
     # physical drive versus a virtualised drive
     single_tenant: bool = True
@@ -252,6 +253,7 @@ class Drive(ExcludeUnsetModel):
         else:
             return sys.maxsize
 
+    @computed_field(return_type=float)  # type: ignore
     @property
     def annual_cost(self):
         size = self.size_gib or 0
@@ -687,8 +689,8 @@ class CapacityDesires(ExcludeUnsetModel):
 
     def merge_with(self, defaults: "CapacityDesires") -> "CapacityDesires":
         # Now merge with the models default
-        desires_dict = self.dict(exclude_unset=True)
-        default_dict = defaults.dict(exclude_unset=True)
+        desires_dict = self.model_dump()
+        default_dict = defaults.model_dump()
 
         default_dict.get("query_pattern", {}).update(
             desires_dict.pop("query_pattern", {})
@@ -701,7 +703,7 @@ class CapacityDesires(ExcludeUnsetModel):
         # If user gave state item count but not size or size but not count
         # calculate the missing one from the other
         user_size = (
-            self.dict(exclude_unset=True)
+            self.model_dump()
             .get("data_shape", {})
             .get("estimated_state_size_gib", None)
         )
@@ -790,26 +792,10 @@ class Clusters(ExcludeUnsetModel):
     services: Sequence[ServiceCapacity] = []
 
     # Backwards compatibility for total_annual_cost
+    @computed_field(return_type=float)  # type: ignore
     @property
     def total_annual_cost(self) -> Decimal:
         return cast(Decimal, round(sum(self.annual_costs.values()), 2))
-
-    # TODO(josephl): Once https://github.com/pydantic/pydantic/issues/935
-    # resolves use w.e. that does to make it so total_annual_cost
-    # is present in the JSON. For now we do this hack.
-    def dict(self, *args, **kwargs):
-        attribs = super().dict(*args, **kwargs)
-        attribs["total_annual_cost"] = self.total_annual_cost
-        return attribs
-
-    def json(self, *args, **kwargs):
-        # I can't figure out how to get all of pydantics JSON
-        # serialization goodness (e.g. handling Decimals and nested
-        # models) without just roundtriping ... let's wait for #935
-        pydantic_json = super().json(*args, **kwargs)
-        data = json.loads(pydantic_json)
-        data["total_annual_cost"] = float(round(self.total_annual_cost, 2))
-        return json.dumps(data)
 
 
 class CapacityPlan(ExcludeUnsetModel):
