@@ -34,9 +34,8 @@ class NflxPostgresCapacityModel(CapacityModel):
         if desires.service_tier == 0:
             return None
 
-        require_multi_region: bool = context.num_regions > 1
         plan = None
-        if Platform.aurora_postgres in instance.platforms and not require_multi_region:
+        if Platform.aurora_postgres in instance.platforms:
             plan = nflx_aurora_capacity_model.capacity_plan(
                 instance=instance,
                 drive=drive,
@@ -44,25 +43,6 @@ class NflxPostgresCapacityModel(CapacityModel):
                 desires=desires,
                 extra_model_arguments=extra_model_arguments,
             )
-
-        if plan is not None:
-            return plan
-
-        if set(nflx_cockroachdb_capacity_model.allowed_platforms()).intersection(
-            instance.platforms
-        ):
-            plan = nflx_cockroachdb_capacity_model.capacity_plan(
-                instance=instance,
-                drive=drive,
-                context=context,
-                desires=desires,
-                extra_model_arguments=extra_model_arguments,
-            )
-        if plan is not None:
-            # We want to lower the rank so this plan will only be chosen when no other
-            # workaround
-            plan.rank = 1
-
         return plan
 
     @staticmethod

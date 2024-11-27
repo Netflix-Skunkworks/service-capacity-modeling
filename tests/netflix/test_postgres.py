@@ -99,7 +99,7 @@ def test_small_footprint_multi_region():
         desires=small_footprint,
         num_regions=3,
     )
-    assert cap_plan[0].candidate_clusters.zonal[0].instance.name == "m5d.xlarge"
+    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.large"
 
     assert 2000 < cap_plan[0].candidate_clusters.total_annual_cost < 4000
 
@@ -126,12 +126,8 @@ def test_large_footprint():
         desires=large_footprint,
         num_regions=1,
     )
-    # Aurora cannot handle the scale, so pick crdb
-    assert cap_plan[0].candidate_clusters.zonal[0].instance.name == "i3.xlarge"
-    assert cap_plan[0].candidate_clusters.zonal[0].count == 41
-
-    assert 100_000 < cap_plan[0].candidate_clusters.total_annual_cost < 150_000
-
+    #Aurora cannot handle the scale, so don't recommend anything
+    assert cap_plan == []
 
 def test_tier_3():
     cap_plan = planner.plan_certain(
