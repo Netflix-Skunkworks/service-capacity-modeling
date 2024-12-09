@@ -126,8 +126,9 @@ def test_large_footprint():
         desires=large_footprint,
         num_regions=1,
     )
-    #Aurora cannot handle the scale, so don't recommend anything
+    # Aurora cannot handle the scale, so don't recommend anything
     assert cap_plan == []
+
 
 def test_tier_3():
     cap_plan = planner.plan_certain(

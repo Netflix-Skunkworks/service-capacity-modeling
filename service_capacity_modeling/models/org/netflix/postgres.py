@@ -4,7 +4,6 @@ from typing import Optional
 from typing import Tuple
 
 from .aurora import nflx_aurora_capacity_model
-from .crdb import nflx_cockroachdb_capacity_model
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
