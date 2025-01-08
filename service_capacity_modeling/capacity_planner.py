@@ -826,6 +826,10 @@ class CapacityPlanner:
 
             yield sub_model, sub_desires
 
+    def get_instances(self, region: str):
+        hardware = self._shapes.region(region)
+        return hardware.instances
+
 
 planner = CapacityPlanner()
 planner.register_group(netflix.models)
