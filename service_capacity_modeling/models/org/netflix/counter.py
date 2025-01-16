@@ -86,7 +86,7 @@ class NflxCounterCapacityModel(CapacityModel):
 
     @staticmethod
     def extra_model_arguments_schema() -> Dict[str, Any]:
-        return NflxCounterArguments.schema()
+        return NflxCounterArguments.model_json_schema()
 
     @staticmethod
     def compose_with(
@@ -98,7 +98,7 @@ class NflxCounterCapacityModel(CapacityModel):
             def _modify_cassandra_desires(
                 user_desires: CapacityDesires,
             ) -> CapacityDesires:
-                modified = user_desires.copy(deep=True)
+                modified = user_desires.model_copy(deep=True)
 
                 # counts per second
                 cps = user_desires.query_pattern.estimated_write_per_second

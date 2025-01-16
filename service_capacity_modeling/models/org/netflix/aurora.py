@@ -164,7 +164,7 @@ def _compute_aurora_region(  # pylint: disable=too-many-positional-arguments
 
     # calculate storage cost
     attached_drives = []
-    attached_drive = drive.copy()
+    attached_drive = drive.model_copy()
     attached_drive.size_gib = max(
         1, required_disk_space(needed_disk_gib)
     )  # todo: Figure out the IO vs disk
@@ -295,7 +295,7 @@ class NflxAuroraCapacityModel(CapacityModel):
 
     @staticmethod
     def extra_model_arguments_schema() -> Dict[str, Any]:
-        return NflxAuroraArguments.schema()
+        return NflxAuroraArguments.model_json_schema()
 
     @staticmethod
     def allowed_platforms() -> Tuple[Platform, ...]:

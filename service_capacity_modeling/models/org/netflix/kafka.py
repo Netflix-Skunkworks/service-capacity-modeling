@@ -53,7 +53,7 @@ def _estimate_kafka_requirement(
     The input desires should be the **regional** desire, and this function will
     return the zonal capacity requirement
     """
-    normalized_to_mib = desires.copy(deep=True)
+    normalized_to_mib = desires.model_copy(deep=True)
     read_mib_per_second = (
         normalized_to_mib.query_pattern.estimated_mean_read_size_bytes.mid
         / MIB_IN_BYTES
@@ -202,7 +202,7 @@ def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-argume
         min_count = 2
 
     # Kafka read io / second is zonal
-    normalized_to_mib = desires.copy(deep=True)
+    normalized_to_mib = desires.model_copy(deep=True)
     read_mib_per_second: int = (
         int(normalized_to_mib.query_pattern.estimated_mean_read_size_bytes.mid)
         // MIB_IN_BYTES
@@ -414,7 +414,7 @@ class NflxKafkaCapacityModel(CapacityModel):
 
     @staticmethod
     def extra_model_arguments_schema() -> Dict[str, Any]:
-        return NflxKafkaArguments.schema()
+        return NflxKafkaArguments.model_json_schema()
 
     @staticmethod
     def allowed_cloud_drives() -> Tuple[Optional[str], ...]:

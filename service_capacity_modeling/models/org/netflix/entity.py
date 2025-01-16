@@ -62,7 +62,7 @@ class NflxEntityCapacityModel(CapacityModel):
         def _modify_crdb_desires(
             user_desires: CapacityDesires,
         ) -> CapacityDesires:
-            relaxed = user_desires.copy(deep=True)
+            relaxed = user_desires.model_copy(deep=True)
             item_count = relaxed.data_shape.estimated_state_item_count
             # based on the nts cluster where the version store is 10x the prime store
             if item_count is None:
@@ -89,7 +89,7 @@ class NflxEntityCapacityModel(CapacityModel):
         def _modify_elasticsearch_desires(
             user_desires: CapacityDesires,
         ) -> CapacityDesires:
-            relaxed = user_desires.copy(deep=True)
+            relaxed = user_desires.model_copy(deep=True)
             relaxed.query_pattern.access_consistency.same_region.target_consistency = (
                 AccessConsistency.eventual
             )

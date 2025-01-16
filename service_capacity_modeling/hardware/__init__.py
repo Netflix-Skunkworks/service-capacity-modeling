@@ -33,13 +33,13 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
         priced_services: Dict[str, Service] = {}
 
         for instance, iprice in region_pricing.instances.items():
-            priced_instances[instance] = hardware.instances[instance].copy()
+            priced_instances[instance] = hardware.instances[instance].model_copy()
             priced_instances[instance].annual_cost = iprice.annual_cost
             if iprice.lifecycle is not None:
                 priced_instances[instance].lifecycle = iprice.lifecycle
 
         for drive, dprice in region_pricing.drives.items():
-            priced_drives[drive] = hardware.drives[drive].copy()
+            priced_drives[drive] = hardware.drives[drive].model_copy()
             priced_drives[drive].annual_cost_per_gib = dprice.annual_cost_per_gib
             priced_drives[
                 drive
@@ -49,7 +49,7 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
             ].annual_cost_per_write_io = dprice.annual_cost_per_write_io
 
         for svc, svc_price in region_pricing.services.items():
-            priced_services[svc] = hardware.services[svc].copy()
+            priced_services[svc] = hardware.services[svc].model_copy()
             priced_services[svc].annual_cost_per_gib = svc_price.annual_cost_per_gib
             priced_services[
                 svc

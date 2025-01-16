@@ -548,7 +548,7 @@ class NflxDynamoDBCapacityModel(CapacityModel):
 
     @staticmethod
     def extra_model_arguments_schema() -> Dict[str, Any]:
-        return NflxDynamoDBArguments.schema()
+        return NflxDynamoDBArguments.model_json_schema()
 
     @staticmethod
     def run_hardware_simulation() -> bool:

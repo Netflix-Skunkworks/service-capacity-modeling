@@ -65,7 +65,7 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
         ts_config = TimeSeriesConfiguration(extra_model_arguments)
 
         def _modify_cassandra_desires(user_desires: CapacityDesires) -> CapacityDesires:
-            modified = user_desires.copy(deep=True)
+            modified = user_desires.model_copy(deep=True)
             modified.query_pattern.estimated_read_per_second = (
                 modified.query_pattern.estimated_read_per_second.scale(
                     ts_config.read_amplification
@@ -76,7 +76,7 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
         def _modify_elasticsearch_desires(
             user_desires: CapacityDesires,
         ) -> CapacityDesires:
-            relaxed = user_desires.copy(deep=True)
+            relaxed = user_desires.model_copy(deep=True)
             relaxed.query_pattern.access_consistency.same_region.target_consistency = (
                 AccessConsistency.eventual
             )

@@ -147,7 +147,7 @@ class NflxZookeeperCapacityModel(CapacityModel):
 
     @staticmethod
     def extra_model_arguments_schema() -> Dict[str, Any]:
-        return NflxZookeeperArguments.schema()
+        return NflxZookeeperArguments.model_json_schema()
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments):

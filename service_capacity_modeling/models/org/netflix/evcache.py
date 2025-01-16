@@ -287,7 +287,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
             network_services("evcache", context, desires, copies_per_region)
         )
     elif cross_region_replication is Replication.evicts:
-        modified = desires.copy(deep=True)
+        modified = desires.model_copy(deep=True)
         # Assume that DELETES replicating cross region mean 128 bytes
         # of key per evict.
         modified.query_pattern.estimated_mean_write_size_bytes = certain_int(128)
@@ -399,7 +399,7 @@ class NflxEVCacheCapacityModel(CapacityModel):
 
     @staticmethod
     def extra_model_arguments_schema() -> Dict[str, Any]:
-        return NflxEVCacheArguments.schema()
+        return NflxEVCacheArguments.model_json_schema()
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):

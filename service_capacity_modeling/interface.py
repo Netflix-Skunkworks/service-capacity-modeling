@@ -5,7 +5,6 @@ from decimal import Decimal
 from enum import Enum
 from functools import lru_cache
 from typing import Any
-from typing import cast
 from typing import Dict
 from typing import List
 from typing import Optional
@@ -794,8 +793,8 @@ class Clusters(ExcludeUnsetModel):
     # Backwards compatibility for total_annual_cost
     @computed_field(return_type=float)  # type: ignore
     @property
-    def total_annual_cost(self) -> Decimal:
-        return cast(Decimal, round(sum(self.annual_costs.values()), 2))
+    def total_annual_cost(self) -> float:
+        return round(float(sum(self.annual_costs.values())), 2)
 
 
 class CapacityPlan(ExcludeUnsetModel):

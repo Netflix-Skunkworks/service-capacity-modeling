@@ -128,7 +128,7 @@ def _compute_rds_region(  # pylint: disable=too-many-positional-arguments
     space_gib = max(1, required_disk_space(needed_disk_gib))
     io_gib = gp2_gib_for_io(required_disk_ios(needed_disk_gib))
     rds_gib = max(io_gib, space_gib)
-    attached_drive = drive.copy()
+    attached_drive = drive.model_copy()
     attached_drive.size_gib = rds_gib
     attached_drives.append(attached_drive)
     total_annual_cost = instance.annual_cost + attached_drive.annual_cost
@@ -241,7 +241,7 @@ class NflxRDSCapacityModel(CapacityModel):
 
     @staticmethod
     def extra_model_arguments_schema() -> Dict[str, Any]:
-        return NflxRDSArguments.schema()
+        return NflxRDSArguments.model_json_schema()
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments):

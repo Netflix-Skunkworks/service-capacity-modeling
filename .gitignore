@@ -38,3 +38,8 @@ notebooks/.ipynb_checkpoints/
 
 # Profiling
 prof
+
+# Test coverage
+.coverage*
+coverage.xml
+log.txt

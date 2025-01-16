@@ -4,7 +4,7 @@ io2 = shapes.hardware.regions["us-east-1"].drives["io2"]
 
 
 def test_io2_pricing():
-    d = io2.copy()
+    d = io2.model_copy()
     d.size_gib = 100
     d.read_io_per_s = 33000
     assert d.annual_cost == 25662

@@ -157,7 +157,7 @@ def test_network_services():
     )
     hardware = shapes.region("us-east-1")
     region_context = RegionContext(
-        services={n: s.copy(deep=True) for n, s in hardware.services.items()},
+        services={n: s.model_copy(deep=True) for n, s in hardware.services.items()},
         num_regions=4,
         zones_in_region=3,
     )

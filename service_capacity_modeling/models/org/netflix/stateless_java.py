@@ -89,7 +89,7 @@ def _estimate_java_app_region(  # pylint: disable=too-many-positional-arguments
     zones_per_region = context.zones_in_region
     requirement = _estimate_java_app_requirement(desires, failover, jvm_memory_overhead)
 
-    drive = drive.copy()
+    drive = drive.model_copy()
     drive.size_gib = root_disk_gib
     attached_drives = (drive,)
 
@@ -172,7 +172,7 @@ class NflxJavaAppCapacityModel(CapacityModel):
 
     @staticmethod
     def extra_model_arguments_schema() -> Dict[str, Any]:
-        return NflxJavaAppArguments.schema()
+        return NflxJavaAppArguments.model_json_schema()
 
     @staticmethod
     def regret(

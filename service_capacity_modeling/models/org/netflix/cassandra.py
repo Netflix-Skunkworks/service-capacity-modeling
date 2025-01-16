@@ -562,7 +562,7 @@ class NflxCassandraCapacityModel(CapacityModel):
 
     @staticmethod
     def extra_model_arguments_schema() -> Dict[str, Any]:
-        return NflxCassandraArguments.schema()
+        return NflxCassandraArguments.model_json_schema()
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
