@@ -86,7 +86,7 @@ class NflxKeyValueCapacityModel(CapacityModel):
             def _modify_cassandra_desires(
                 desires: CapacityDesires,
             ) -> CapacityDesires:
-                relaxed = desires.copy(deep=True)
+                relaxed = desires.model_copy(deep=True)
 
                 # This is an initial best guess. Parameterizing in case we want to
                 # configure it in the future.
@@ -104,7 +104,7 @@ class NflxKeyValueCapacityModel(CapacityModel):
             def _modify_evcache_desires(
                 desires: CapacityDesires,
             ) -> CapacityDesires:
-                relaxed = desires.copy(deep=True)
+                relaxed = desires.model_copy(deep=True)
                 access_consistency = relaxed.query_pattern.access_consistency
                 access_consistency.same_region.target_consistency = (
                     AccessConsistency.best_effort

@@ -311,7 +311,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
 
     @staticmethod
     def extra_model_arguments_schema() -> Dict[str, Any]:
-        return NflxCockroachDBArguments.schema()
+        return NflxCockroachDBArguments.model_json_schema()
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):

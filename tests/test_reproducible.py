@@ -29,7 +29,7 @@ def test_repeated_plans():
                 model_name="org.netflix.cassandra",
                 region="us-east-1",
                 desires=uncertain_mid,
-            ).json()
+            ).model_dump_json()
         )
 
     a = [hash(x) for x in results]

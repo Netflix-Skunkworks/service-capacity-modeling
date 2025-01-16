@@ -81,11 +81,11 @@ def simulate_interval(
 def model_desires(
     desires: CapacityDesires, num_sims: int = 1000
 ) -> Generator[CapacityDesires, None, None]:
-    query_pattern = desires.query_pattern.copy(deep=True)
-    data_shape = desires.data_shape.copy(deep=True)
+    query_pattern = desires.query_pattern.model_copy(deep=True)
+    data_shape = desires.data_shape.model_copy(deep=True)
 
     query_pattern_simulation = {}
-    for field in sorted(query_pattern.__fields__):
+    for field in sorted(query_pattern.model_fields):
         d = getattr(query_pattern, field)
         if isinstance(d, Interval):
             query_pattern_simulation[field] = simulate_interval(d, field)(num_sims)
@@ -93,7 +93,7 @@ def model_desires(
             query_pattern_simulation[field] = [d] * num_sims
 
     data_shape_simulation = {}
-    for field in sorted(data_shape.__fields__):
+    for field in sorted(data_shape.model_fields):
         d = getattr(data_shape, field)
         if isinstance(d, Interval):
             data_shape_simulation[field] = simulate_interval(d, field)(num_sims)
@@ -104,14 +104,17 @@ def model_desires(
         query_pattern = QueryPattern(
             **{
                 f: query_pattern_simulation[f][sim]
-                for f in sorted(query_pattern.__fields__)
+                for f in sorted(query_pattern.model_fields)
             }
         )
         data_shape = DataShape(
-            **{f: data_shape_simulation[f][sim] for f in sorted(data_shape.__fields__)}
+            **{
+                f: data_shape_simulation[f][sim]
+                for f in sorted(data_shape.model_fields)
+            }
         )
 
-        d = desires.copy(exclude={"query_pattern", "data_shape"})
+        d = desires.model_copy(update={"query_pattern": None, "data_shape": None})
         d.query_pattern = query_pattern
         d.data_shape = data_shape
         yield d
@@ -121,12 +124,12 @@ def model_desires_percentiles(
     desires: CapacityDesires,
     percentiles: Sequence[int] = (5, 25, 50, 75, 95),
 ) -> Tuple[Sequence[CapacityDesires], CapacityDesires]:
-    query_pattern = desires.query_pattern.copy(deep=True)
-    data_shape = desires.data_shape.copy(deep=True)
+    query_pattern = desires.query_pattern.model_copy(deep=True)
+    data_shape = desires.data_shape.model_copy(deep=True)
 
     query_pattern_simulation = {}
     query_pattern_means = {}
-    for field in sorted(query_pattern.__fields__):
+    for field in sorted(query_pattern.model_fields):
         d = getattr(query_pattern, field)
         if isinstance(d, Interval):
             query_pattern_simulation[field] = interval_percentile(d, percentiles)
@@ -140,7 +143,7 @@ def model_desires_percentiles(
 
     data_shape_simulation = {}
     data_shape_means = {}
-    for field in sorted(data_shape.__fields__):
+    for field in sorted(data_shape.model_fields):
         d = getattr(data_shape, field)
         if isinstance(d, Interval):
             data_shape_simulation[field] = interval_percentile(d, percentiles)
@@ -158,26 +161,26 @@ def model_desires_percentiles(
             query_pattern = QueryPattern(
                 **{
                     f: query_pattern_simulation[f][i]
-                    for f in sorted(query_pattern.__fields__)
+                    for f in sorted(query_pattern.model_fields)
                 }
             )
         except Exception as exp:
             raise exp
         data_shape = DataShape(
-            **{f: data_shape_simulation[f][i] for f in sorted(data_shape.__fields__)}
+            **{f: data_shape_simulation[f][i] for f in sorted(data_shape.model_fields)}
         )
-        d = desires.copy(deep=True)
+        d = desires.model_copy(deep=True)
         d.query_pattern = query_pattern
         d.data_shape = data_shape
         results.append(d)
 
     mean_qp = QueryPattern(
-        **{f: query_pattern_means[f] for f in sorted(query_pattern.__fields__)}
+        **{f: query_pattern_means[f] for f in sorted(query_pattern.model_fields)}
     )
     mean_ds = DataShape(
-        **{f: data_shape_means[f] for f in sorted(data_shape.__fields__)}
+        **{f: data_shape_means[f] for f in sorted(data_shape.model_fields)}
     )
-    d = desires.copy(deep=True)
+    d = desires.model_copy(deep=True)
     d.query_pattern = mean_qp
     d.data_shape = mean_ds
 
@@ -293,7 +296,7 @@ def _add_requirement(requirement, accum):
 
     requirements = accum[requirement.requirement_type]
 
-    for field in sorted(requirement.__fields__):
+    for field in sorted(requirement.model_fields):
         d = getattr(requirement, field)
         if isinstance(d, Interval):
             if field not in requirements:
@@ -591,7 +594,7 @@ class CapacityPlanner:
 
         context = RegionContext(
             zones_in_region=hardware.zones_in_region,
-            services={n: s.copy(deep=True) for n, s in hardware.services.items()},
+            services={n: s.model_copy(deep=True) for n, s in hardware.services.items()},
             num_regions=num_regions,
         )
 

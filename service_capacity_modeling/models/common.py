@@ -342,7 +342,7 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
             read_io = utils.next_n(read_io * ratio, n=200)
             write_io = utils.next_n(write_io * ratio, n=200)
 
-        attached_drive = drive.copy()
+        attached_drive = drive.model_copy()
         attached_drive.size_gib = ebs_gib
         attached_drive.read_io_per_s = int(round(read_io, 2))
         attached_drive.write_io_per_s = int(round(write_io, 2))

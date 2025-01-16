@@ -446,7 +446,7 @@ class NflxElasticsearchCapacityModel(CapacityModel):
 
     @staticmethod
     def extra_model_arguments_schema() -> Dict[str, Any]:
-        return NflxElasticsearchArguments.schema()
+        return NflxElasticsearchArguments.model_json_schema()
 
     @staticmethod
     def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):

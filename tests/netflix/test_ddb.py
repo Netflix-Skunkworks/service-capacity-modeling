@@ -178,9 +178,7 @@ def test_plan_reads():
         "dynamo.data-backup": Decimal("240.0"),
     }
     assert plan[0].candidate_clusters.annual_costs == annual_costs
-    assert round(plan[0].candidate_clusters.total_annual_cost, 2) == round(
-        Decimal(1621.86), 2
-    )
+    assert round(plan[0].candidate_clusters.total_annual_cost, 2) == round(1621.86, 2)
 
     # global table
     result = planner.plan_certain(
@@ -214,9 +212,7 @@ def test_plan_reads():
         "dynamo.data-backup": Decimal("80.0"),
     }
     assert plan[0].candidate_clusters.annual_costs == annual_costs
-    assert round(plan[0].candidate_clusters.total_annual_cost, 2) == round(
-        Decimal(1461.86), 2
-    )
+    assert round(plan[0].candidate_clusters.total_annual_cost, 2) == round(1461.86, 2)
 
 
 def test_plan_reads_large_item():
@@ -250,9 +246,7 @@ def test_plan_reads_large_item():
         "dynamo.data-backup": Decimal("80.0"),
     }
     assert plan[0].candidate_clusters.annual_costs == annual_costs
-    assert round(plan[0].candidate_clusters.total_annual_cost, 2) == round(
-        Decimal(2543.72), 2
-    )
+    assert round(plan[0].candidate_clusters.total_annual_cost, 2) == round(2543.72, 2)
 
 
 def test_plan_writes():
@@ -285,9 +279,7 @@ def test_plan_writes():
         "dynamo.data-backup": Decimal("240.0"),
     }
     assert plan[0].candidate_clusters.annual_costs == annual_costs
-    assert round(plan[0].candidate_clusters.total_annual_cost, 2) == round(
-        Decimal(6803.40), 2
-    )
+    assert round(plan[0].candidate_clusters.total_annual_cost, 2) == round(6803.40, 2)
 
     # global table
     result = planner.plan_certain(
@@ -320,9 +312,7 @@ def test_plan_writes():
         "dynamo.data-backup": Decimal("80.0"),
     }
     assert plan[0].candidate_clusters.annual_costs == annual_costs
-    assert round(plan[0].candidate_clusters.total_annual_cost, 2) == round(
-        Decimal(29918.68), 2
-    )
+    assert round(plan[0].candidate_clusters.total_annual_cost, 2) == round(29918.68, 2)
 
 
 def test_plan_writes_large_item():
@@ -355,9 +345,7 @@ def test_plan_writes_large_item():
         "dynamo.data-backup": Decimal("80.0"),
     }
     assert plan[0].candidate_clusters.annual_costs == annual_costs
-    assert round(plan[0].candidate_clusters.total_annual_cost, 2) == round(
-        Decimal(199669.62), 2
-    )
+    assert round(plan[0].candidate_clusters.total_annual_cost, 2) == round(199669.62, 2)
 
 
 def test_utilization_tier():

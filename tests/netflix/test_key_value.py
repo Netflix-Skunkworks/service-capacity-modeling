@@ -111,7 +111,7 @@ def test_kv_increasing_qps_compare_working_sets():
                 estimated_working_set_percent=certain_float(0.10),
             ),
         )
-        large = small.copy(deep=True)
+        large = small.model_copy(deep=True)
         large.data_shape.estimated_working_set_percent = certain_float(0.90)
 
         cap_plan_small = planner.plan(
