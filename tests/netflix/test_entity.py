@@ -43,8 +43,8 @@ def test_entity_increasing_qps_simple():
             + list(cap_plan.least_regret[0].candidate_clusters.zonal)
         }
         assert sorted(types) == [
+            "aurora-cluster",
             "cassandra",
-            "cockroachdb",
             "dgwentity",
             "dgwkv",
             "elasticsearch-data",
@@ -64,11 +64,6 @@ def test_entity_increasing_qps_simple():
         assert entity_plan.instance.family[0] in ("m", "r")
         # We should never be paying for ephemeral drives
         assert entity_plan.instance.drive is None
-        # CRDB disk usage should be num items * 512 bytes/per item ~= 6 GB (rounded up)
-
-        for c in cap_plan.least_regret[0].requirements.zonal:
-            if c.requirement_type == "crdb-zonal":
-                assert c.disk_gib.mid == 6.0
 
     # Should have more capacity as requirement increases
     x = [r[0] for r in entity_results_trend]
@@ -114,8 +109,8 @@ def test_entity_increasing_qps_item_count_unset():
             + list(cap_plan.least_regret[0].candidate_clusters.zonal)
         }
         assert sorted(types) == [
+            "aurora-cluster",
             "cassandra",
-            "cockroachdb",
             "dgwentity",
             "dgwkv",
             "elasticsearch-data",
@@ -135,11 +130,6 @@ def test_entity_increasing_qps_item_count_unset():
         assert entity_plan.instance.family[0] in ("m", "r")
         # We should never be paying for ephemeral drives
         assert entity_plan.instance.drive is None
-        # CRDB disk usage should be num items * 512 bytes/per item ~= 7 GB (rounded up)
-
-        for c in cap_plan.least_regret[0].requirements.zonal:
-            if c.requirement_type == "crdb-zonal":
-                assert c.disk_gib.mid == 7.0
 
     # Should have more capacity as requirement increases
     x = [r[0] for r in entity_results_trend]
