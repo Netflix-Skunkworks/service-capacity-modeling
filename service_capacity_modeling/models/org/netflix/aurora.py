@@ -165,8 +165,8 @@ def _compute_aurora_region(  # pylint: disable=too-many-positional-arguments
     # calculate storage cost
     attached_drives = []
     attached_drive = drive.model_copy()
-    attached_drive.size_gib = max(
-        1, required_disk_space(needed_disk_gib)
+    attached_drive.size_gib = math.ceil(
+        max(1, required_disk_space(needed_disk_gib))
     )  # todo: Figure out the IO vs disk
     attached_drives.append(attached_drive)
 
