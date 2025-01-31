@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import re
 import sys
 from decimal import Decimal
 from enum import Enum
+from fractions import Fraction
 from functools import lru_cache
 from typing import Any
 from typing import Dict
@@ -333,11 +335,45 @@ class Instance(ExcludeUnsetModel):
     def size(self):
         return self.name.rsplit(self.family_separator, 1)[1]
 
+    @property
+    def normalized_size(self) -> Fraction:
+        numeric = re.findall(r"\d+", self.size)
+        if numeric:
+            assert len(numeric) == 1
+            return Fraction(float(numeric[0]))
+        return {
+            "small": Fraction(1, 8),
+            "medium": Fraction(1, 4),
+            "large": Fraction(1, 2),
+            "xlarge": Fraction(1),
+            # Is this always true?
+            "metal": Fraction(48, 1),
+        }[self.size]
+
     @staticmethod
     def get_managed_instance() -> Instance:
         return Instance(
             name="managed.0", cpu=0, cpu_ghz=0, ram_gib=0, net_mbps=0, drive=None
         )
+
+    def merge_with(self, overrides: "Instance") -> "Instance":
+        self_dict = self.model_dump()
+        other_dict = overrides.model_dump(exclude_unset=True)
+
+        for (k, v) in other_dict.items():
+            # TODO we need a deep merge on drive (recursive merge)
+            if k in ("platforms",):
+                # Unique merge platforms
+                merged_platforms = list(self_dict.get("platforms", []))
+                merged_platforms = merged_platforms + [
+                    i
+                    for i in other_dict.get("platforms", [])
+                    if i not in merged_platforms
+                ]
+                self_dict["platforms"] = merged_platforms
+            else:
+                self_dict[k] = v
+        return Instance(**self_dict)
 
 
 class Service(ExcludeUnsetModel):
@@ -413,7 +449,9 @@ class GlobalHardware(ExcludeUnsetModel):
     """Represents all possible hardware shapes in all regions
 
     In EC2 this maps to:
-        region -> region
+        us-east-1 -> Hardware available in us-east-1
+        us-east-2 -> Hardware available in us-east-2
+        ...
     """
 
     # Per region hardware shapes
