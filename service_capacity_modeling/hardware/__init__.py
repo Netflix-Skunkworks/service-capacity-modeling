@@ -83,24 +83,31 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
     return GlobalHardware(regions=regions)
 
 
-def merge_pricing(_pricing1: Dict, pricing2: Dict) -> Dict:
-    pricing1 = _pricing1.copy()
-    for region, region_pricing in pricing2.items():
-        print("region", region)
-
-        if region not in pricing1:
-            pricing1[region] = region_pricing
+def merge_pricing(existing: Dict, override: Dict) -> Dict:
+    merged = existing.copy()
+    for region, override_pricing in override.items():
+        if region not in merged:
+            merged[region] = override_pricing
         else:
-            for instance, iprice in region_pricing["instances"].items():
-                pricing1[region]["instances"][instance] = iprice
+            for instance, instance_data in override_pricing["instances"].items():
+                if merged[region]["instances"].get(instance) is None:
+                    merged[region]["instances"][instance] = instance_data.copy()
+                else:
+                    merged[region]["instances"][instance].update(instance_data)
 
-            for drive, dprice in region_pricing["drives"].items():
-                pricing1[region]["drives"][drive] = dprice
+            for drive, dprice in override_pricing["drives"].items():
+                if merged[region]["drives"].get(drive) is None:
+                    merged[region]["drives"][drive] = dprice.copy()
+                else:
+                    merged[region]["drives"][drive].update(dprice)
 
-            for service, sprice in region_pricing["services"].items():
-                pricing1[region]["services"][service] = sprice
+            for service, sprice in override_pricing["services"].items():
+                if merged[region]["services"].get(service) is None:
+                    merged[region]["services"][service] = sprice.copy()
+                else:
+                    merged[region]["services"][service].update(sprice)
 
-    return pricing1
+    return merged
 
 
 def load_hardware_from_disk(
@@ -123,8 +130,9 @@ def load_hardware_from_disk(
 
     combined_pricing: Dict = {}
 
+    print("Loading pricing from", price_paths, "\n")
     for price_path in price_paths:
-        print("Loading pricing from", price_path)
+        print("Loading pricing from", price_path, "\n")
         with open(price_path, encoding="utf-8") as pfd:
             pricing_data = json.load(pfd)
             combined_pricing = merge_pricing(combined_pricing, pricing_data)

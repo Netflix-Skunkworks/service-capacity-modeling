@@ -2,8 +2,8 @@
   "us-east-1": {
     "instances": {
       "f5.large.deprecated": {"annual_cost": 300.0, "lifecycle": "deprecated"},
-      "m6id.xlarge":   {"annual_cost": 781.66},
       "m6id.4xlarge":  {"annual_cost": 3126.64},
+      "m6id.xlarge":   {"annual_cost": 781.66},
       "db.r5.large":     {"annual_cost": 885.7},
       "db.r5.xlarge":    {"annual_cost": 1771.3},
       "db.r5.2xlarge":   {"annual_cost": 3543},
