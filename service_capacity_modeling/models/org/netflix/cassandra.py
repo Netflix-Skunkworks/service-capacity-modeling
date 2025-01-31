@@ -80,9 +80,11 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     current_capacity = (
         None
         if desires.current_clusters is None
-        else desires.current_clusters.zonal[0]
-        if len(desires.current_clusters.zonal)
-        else desires.current_clusters.regional[0]
+        else (
+            desires.current_clusters.zonal[0]
+            if len(desires.current_clusters.zonal)
+            else desires.current_clusters.regional[0]
+        )
     )
     # Keep half of the cores free for background work (compaction, backup, repair).
     # Currently, zones and regions are configured in a homogeneous manner. Hence,

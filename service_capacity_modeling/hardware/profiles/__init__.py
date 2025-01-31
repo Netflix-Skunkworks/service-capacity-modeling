@@ -6,7 +6,7 @@ except ImportError:
 
     import_module = __import__  # type: ignore[assignment]
 
-from typing import Dict, List, Tuple
+from typing import Dict, List
 from service_capacity_modeling.hardware import load_hardware_from_disk
 from pathlib import Path
 
@@ -15,7 +15,7 @@ common_profiles = {}
 
 
 def group_profile_paths(shapes_path: Path) -> Dict[str, List[Path]]:
-    groups = {}
+    groups: Dict[str, List[Path]] = {}
     for f in sorted(shapes_path.glob("**/*.json")):
         prefix = f.stem.split("_")[0]
         if prefix not in groups:

@@ -3,8 +3,11 @@
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Dict
+from typing import List
 from typing import Optional
+from typing import Union
 
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import GlobalHardware
@@ -34,7 +37,9 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
 
         for instance, iprice in region_pricing.instances.items():
             if instance not in hardware.instances:
-                logger.warning(f"Instance {instance} is not in hardware shapes, skipping")
+                logger.warning(
+                    "Instance %s is not in hardware shapes, skipping", instance
+                )
                 continue
             priced_instances[instance] = hardware.instances[instance].model_copy()
             priced_instances[instance].annual_cost = iprice.annual_cost
@@ -43,7 +48,7 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
 
         for drive, dprice in region_pricing.drives.items():
             if drive not in hardware.drives:
-                logger.warning(f"Drive {drive} is not in hardware shapes, skipping")
+                logger.warning("Drive %s is not in hardware shapes, skipping", drive)
                 continue
             priced_drives[drive] = hardware.drives[drive].model_copy()
             priced_drives[drive].annual_cost_per_gib = dprice.annual_cost_per_gib
@@ -56,7 +61,7 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
 
         for svc, svc_price in region_pricing.services.items():
             if svc not in hardware.services:
-                logger.warning(f"Service {svc} is not in hardware shapes, skipping")
+                logger.warning("Service %s is not in hardware shapes, skipping", svc)
                 continue
             priced_services[svc] = hardware.services[svc].model_copy()
             priced_services[svc].annual_cost_per_gib = svc_price.annual_cost_per_gib
@@ -99,29 +104,37 @@ def merge_pricing(_pricing1: Dict, pricing2: Dict) -> Dict:
 
 
 def load_hardware_from_disk(
-    price_paths=[os.environ.get("PRICE_PATH")],
-    shape_path=os.environ.get("HARDWARE_SHAPES"),
+    price_paths: Union[List[Path], Optional[str]] = os.environ.get("PRICE_PATH"),
+    shape_path: Union[Optional[Path], Optional[str]] = os.environ.get(
+        "HARDWARE_SHAPES"
+    ),
 ) -> GlobalHardware:
-    if price_paths is not None and len(price_paths) > 0 and shape_path is not None:
-        combined_pricing = {}
-
-        for price_path in price_paths:
-            print("Loading pricing from", price_path)
-            with open(price_path, encoding="utf-8") as pfd:
-                pricing_data = json.load(pfd)
-                combined_pricing = merge_pricing(combined_pricing, pricing_data)
-
-        # Convert combined pricing dict to Pricing object
-        print("combined_pricing", combined_pricing)
-        pricing = load_pricing(combined_pricing)
-
-        # Load hardware shapes
-        with open(shape_path, encoding="utf-8") as sfd:
-            hardware = load_hardware(json.load(sfd))
-
-        return price_hardware(hardware=hardware, pricing=pricing)
-    else:
+    if shape_path is None or price_paths is None:
         return GlobalHardware(regions={})
+
+    if isinstance(price_paths, list) and len(price_paths) == 0:
+        return GlobalHardware(regions={})
+
+    if isinstance(price_paths, str):
+        price_paths = [Path(price_paths)]
+
+    if isinstance(shape_path, str):
+        shape_path = Path(shape_path)
+
+    combined_pricing: Dict = {}
+
+    for price_path in price_paths:
+        print("Loading pricing from", price_path)
+        with open(price_path, encoding="utf-8") as pfd:
+            pricing_data = json.load(pfd)
+            combined_pricing = merge_pricing(combined_pricing, pricing_data)
+
+    pricing = load_pricing(combined_pricing)
+
+    with open(shape_path, encoding="utf-8") as sfd:
+        hardware = load_hardware(json.load(sfd))
+
+    return price_hardware(hardware=hardware, pricing=pricing)
 
 
 def load_hardware_from_s3(bucket, path) -> GlobalHardware:
