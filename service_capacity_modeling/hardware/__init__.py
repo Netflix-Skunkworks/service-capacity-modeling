@@ -33,12 +33,18 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
         priced_services: Dict[str, Service] = {}
 
         for instance, iprice in region_pricing.instances.items():
+            if instance not in hardware.instances:
+                logger.warning(f"Instance {instance} is not in hardware shapes, skipping")
+                continue
             priced_instances[instance] = hardware.instances[instance].model_copy()
             priced_instances[instance].annual_cost = iprice.annual_cost
             if iprice.lifecycle is not None:
                 priced_instances[instance].lifecycle = iprice.lifecycle
 
         for drive, dprice in region_pricing.drives.items():
+            if drive not in hardware.drives:
+                logger.warning(f"Drive {drive} is not in hardware shapes, skipping")
+                continue
             priced_drives[drive] = hardware.drives[drive].model_copy()
             priced_drives[drive].annual_cost_per_gib = dprice.annual_cost_per_gib
             priced_drives[
@@ -49,6 +55,9 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
             ].annual_cost_per_write_io = dprice.annual_cost_per_write_io
 
         for svc, svc_price in region_pricing.services.items():
+            if svc not in hardware.services:
+                logger.warning(f"Service {svc} is not in hardware shapes, skipping")
+                continue
             priced_services[svc] = hardware.services[svc].model_copy()
             priced_services[svc].annual_cost_per_gib = svc_price.annual_cost_per_gib
             priced_services[
@@ -69,14 +78,44 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
     return GlobalHardware(regions=regions)
 
 
+def merge_pricing(_pricing1: Dict, pricing2: Dict) -> Dict:
+    pricing1 = _pricing1.copy()
+    for region, region_pricing in pricing2.items():
+        print("region", region)
+
+        if region not in pricing1:
+            pricing1[region] = region_pricing
+        else:
+            for instance, iprice in region_pricing["instances"].items():
+                pricing1[region]["instances"][instance] = iprice
+
+            for drive, dprice in region_pricing["drives"].items():
+                pricing1[region]["drives"][drive] = dprice
+
+            for service, sprice in region_pricing["services"].items():
+                pricing1[region]["services"][service] = sprice
+
+    return pricing1
+
+
 def load_hardware_from_disk(
-    price_path=os.environ.get("PRICE_PATH"),
+    price_paths=[os.environ.get("PRICE_PATH")],
     shape_path=os.environ.get("HARDWARE_SHAPES"),
 ) -> GlobalHardware:
-    if price_path is not None and shape_path is not None:
-        with open(price_path, encoding="utf-8") as pfd:
-            pricing = load_pricing(json.load(pfd))
+    if price_paths is not None and len(price_paths) > 0 and shape_path is not None:
+        combined_pricing = {}
 
+        for price_path in price_paths:
+            print("Loading pricing from", price_path)
+            with open(price_path, encoding="utf-8") as pfd:
+                pricing_data = json.load(pfd)
+                combined_pricing = merge_pricing(combined_pricing, pricing_data)
+
+        # Convert combined pricing dict to Pricing object
+        print("combined_pricing", combined_pricing)
+        pricing = load_pricing(combined_pricing)
+
+        # Load hardware shapes
         with open(shape_path, encoding="utf-8") as sfd:
             hardware = load_hardware(json.load(sfd))
 

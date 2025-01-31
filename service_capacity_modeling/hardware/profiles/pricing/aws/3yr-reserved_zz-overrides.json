@@ -1,0 +1,68 @@
+{
+  "us-east-1": {
+    "instances": {
+      "f5.large.deprecated": {"annual_cost": 300.0, "lifecycle": "deprecated"},
+      "m6id.xlarge":   {"annual_cost": 781.66},
+      "m6id.4xlarge":  {"annual_cost": 3126.64},
+      "db.r5.large":     {"annual_cost": 885.7},
+      "db.r5.xlarge":    {"annual_cost": 1771.3},
+      "db.r5.2xlarge":   {"annual_cost": 3543},
+      "db.r5.4xlarge":   {"annual_cost": 7086},
+      "db.r5.8xlarge":   {"annual_cost": 14171.7},
+      "db.r5.12xlarge":   {"annual_cost": 21258},
+      "db.r5.16xlarge":   {"annual_cost": 28343.3},
+      "db.r5.24xlarge":   {"annual_cost": 42516}
+    },
+    "drives": {
+      "gp2": {"annual_cost_per_gib": 1.2},
+      "io2": {
+        "annual_cost_per_gib": 1.5,
+        "annual_cost_per_read_io": [[32000, 0.78], [64000, 0.552], [160000, 0.384], [256000, 0.384]],
+        "annual_cost_per_write_io": [[32000, 0.78], [64000, 0.552], [160000, 0.384], [256000, 0.384]]
+      },
+      "gp3": {
+        "annual_cost_per_gib": 0.96,
+        "annual_cost_per_read_io": [[3000, 0], [16000, 0.06]],
+        "annual_cost_per_write_io": [[3000, 0], [16000, 0.06]]
+      },
+      "aurora": {
+        "annual_cost_per_gib": 1.2,
+        "annual_cost_per_read_io": [[256000, 6.3072]],
+        "annual_cost_per_write_io": [[256000, 6.3072]]
+      }
+    },
+    "services": {
+      "blob.standard": {
+        "annual_cost_per_gib": 0.252,
+        "annual_cost_per_write_io": "0.000005",
+        "annual_cost_per_read_io": "0.0000004"
+      },
+      "net.inter.region": {
+        "annual_cost_per_gib": 0.02
+      },
+      "net.intra.region": {
+        "annual_cost_per_gib": 0.02
+      },
+      "crdb_core_license": {
+        "annual_cost_per_core": 0
+      },
+      "dynamo.standard": {
+        "annual_cost_per_gib": 3,
+        "annual_cost_per_read_io": 0.00013,
+        "annual_cost_per_write_io": 0.00065
+      },
+      "dynamo.standard.global": {
+        "annual_cost_per_gib": 3,
+        "annual_cost_per_read_io": 0.00013,
+        "annual_cost_per_write_io": 0.000975
+      },
+      "dynamo.backup.continuous": {
+        "annual_cost_per_gib": 2.4
+      },
+      "dynamo.transfer": {
+        "annual_cost_per_gib": [[122880, 0.09], [491520, 0.085], [1228800, 0.07], [-1, 0.05]]
+      }
+    },
+    "zones_in_region": 3
+  }
+}
