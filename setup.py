@@ -23,7 +23,11 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    entry_points={"console_scripts": []},
+    entry_points={
+        "console_scripts": [
+            "auto-shape = service_capacity_modeling.tools.auto_shape:main",
+        ]
+    },
     include_package_data=True,
     package_data={
         "": [

@@ -56,6 +56,22 @@
       "net_mbps": 10000,
       "drive": null
     },
+    "m5.16xlarge": {
+      "name": "m5.16xlarge",
+      "cpu": 64,
+      "cpu_ghz": 3.1,
+      "ram_gib": 256,
+      "net_mbps": 20000,
+      "drive": null
+    },
+    "m5.24xlarge": {
+      "name": "m5.24xlarge",
+      "cpu": 96,
+      "cpu_ghz": 3.1,
+      "ram_gib": 384,
+      "net_mbps": 25000,
+      "drive": null
+    },
     "m6i.large": {
       "name": "m6i.large",
       "cpu": 2,
@@ -585,6 +601,60 @@
         },
         "read_io_per_s": 536666, "write_io_per_s": 268334,
         "block_size_kib": 4, "single_tenant": true
+      }
+    },
+    "r6id.large": {
+      "name": "r6id.large",
+      "cpu": 2,
+      "cpu_ghz": 3.5,
+      "ram_gib": 15.45,
+      "net_mbps": 781.25,
+      "drive": {
+        "name": "ephem",
+        "size_gib": 110,
+        "read_io_latency_ms": {
+            "minimum_value":0.05,
+            "low":0.10, "mid":0.125, "high":0.17,
+            "maximum_value":2.00, "confidence":0.9
+        },
+        "read_io_per_s": 33542, "write_io_per_s": 16771,
+        "block_size_kib": 4, "single_tenant": false
+      }
+    },
+    "r6id.xlarge": {
+      "name": "r6id.xlarge",
+      "cpu": 4,
+      "cpu_ghz": 3.5,
+      "ram_gib": 30.9,
+      "net_mbps": 1562.5,
+      "drive": {
+        "name": "ephem",
+        "size_gib": 220,
+        "read_io_latency_ms": {
+            "minimum_value":0.05,
+            "low":0.10, "mid":0.125, "high":0.17,
+            "maximum_value":2.05, "confidence":0.9
+        },
+        "read_io_per_s": 67083, "write_io_per_s": 33542,
+        "block_size_kib": 4, "single_tenant": false
+      }
+    },
+    "r6id.2xlarge": {
+      "name": "r6id.2xlarge",
+      "cpu": 8,
+      "cpu_ghz": 3.5,
+      "ram_gib": 61.8,
+      "net_mbps": 3125,
+      "drive": {
+        "name": "ephem",
+        "size_gib": 441,
+        "read_io_latency_ms": {
+            "minimum_value":0.05,
+            "low":0.10, "mid":0.125, "high":0.17,
+            "maximum_value":2.05, "confidence":0.9
+        },
+        "read_io_per_s": 134167, "write_io_per_s": 67084,
+        "block_size_kib": 4, "single_tenant": false
       }
     },
     "m5dn.xlarge": {

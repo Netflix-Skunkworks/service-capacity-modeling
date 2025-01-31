@@ -215,11 +215,17 @@ To contribute to this project:
 1. Make your change in a branch. Consider making a new model if you are making
    significant changes and registering it as a different name.
 2. Write a unit test using `pytest` in the `tests` folder.
-3. Ensure your tests pass (or debug them) with:
+3. Ensure your tests pass via `tox` or debug them with:
 ```
 tox -e py38 -- -k test_<your_functionality> --pdb --pdbcls=IPython.terminal.debugger:Pdb
 ```
 
+### PyCharm IDE Setup
+Use one of the test environments for IDE development, e.g. `tox -e py310` and then
+`Add New Interpreter -> Add Local -> Select Existing -> Navigate to (workdir)/.tox/py310`.
+
+### Running CLIs
+Use the `dev` virtual environment via `tox -e dev`. Then execute CLIs via that env.
 
 ## Release
 TODO
