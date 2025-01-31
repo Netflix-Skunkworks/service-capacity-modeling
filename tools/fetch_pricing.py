@@ -99,7 +99,7 @@ def fetch_pricing(region: str):
         "3yr-reserved_ec2.json",
     )
     with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(output, f, indent=2)
+        json.dump(output, f, indent=2, sort_keys=True)
         f.write("\n")
 
     print(f"Pricing data written to {output_file}")
