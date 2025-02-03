@@ -457,6 +457,25 @@ def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
     return 3
 
 
+def _update_desires(desires: CapacityDesires, expected_percent_increase_rps: float,
+                    expected_percent_increase_wps: float) -> CapacityDesires:
+    expected_rps = (desires.query_pattern.estimated_read_per_second.mid +
+                    (expected_percent_increase_rps *
+                     desires.query_pattern.estimated_read_per_second.mid))
+
+    expected_wps = (desires.query_pattern.estimated_write_per_second.mid +
+            (expected_percent_increase_wps *
+             desires.query_pattern.estimated_write_per_second.mid))
+
+    new_rps_interval = desires.query_pattern.estimated_read_per_second.copy(update={'mid': expected_rps})
+    new_wps_interval = desires.query_pattern.estimated_write_per_second.copy(update={'mid': expected_wps})
+    new_query_pattern = desires.query_pattern.copy(
+        update={'estimated_write_per_second': new_wps_interval, 'estimated_read_per_second': new_rps_interval})
+    updated_desires = desires.copy(update={'query_pattern': new_query_pattern})
+
+    return updated_desires
+
+
 class NflxCassandraArguments(BaseModel):
     copies_per_region: int = Field(
         default=3,
@@ -499,6 +518,14 @@ class NflxCassandraArguments(BaseModel):
         "Note that if there are more than 100k writes this will "
         "automatically adjust to 0.2",
     )
+    expected_percent_increase_rps: float = Field(
+        default=0.0,
+        description="By what percent we expect reads per second to increase",
+    )
+    expected_percent_increase_wps: float = Field(
+        default=0.0,
+        description="By what percent we expect writes per second to increase",
+    )
 
 
 class NflxCassandraCapacityModel(CapacityModel):
@@ -532,11 +559,15 @@ class NflxCassandraCapacityModel(CapacityModel):
         max_table_buffer_percent: float = min(
             0.5, extra_model_arguments.get("max_table_buffer_percent", 0.11)
         )
+        expected_percent_increase_rps: float = extra_model_arguments.get("expected_percent_increase_rps", 0.0)
+        expected_percent_increase_wps: float = extra_model_arguments.get("expected_percent_increase_wps", 0.0)
+
+        updated_desires = _update_desires(desires, expected_percent_increase_rps, expected_percent_increase_wps)
 
         # Adjust heap defaults for high write clusters
         if (
-            desires.query_pattern.estimated_write_per_second.mid >= 100_000
-            and desires.data_shape.estimated_state_size_gib.mid >= 100
+            updated_desires.query_pattern.estimated_write_per_second.mid >= 100_000
+            and updated_desires.data_shape.estimated_state_size_gib.mid >= 100
         ):
             max_write_buffer_percent = max(0.5, max_write_buffer_percent)
             max_table_buffer_percent = max(0.2, max_table_buffer_percent)
@@ -545,7 +576,7 @@ class NflxCassandraCapacityModel(CapacityModel):
             instance=instance,
             drive=drive,
             context=context,
-            desires=desires,
+            desires=updated_desires,
             zones_per_region=context.zones_in_region,
             copies_per_region=copies_per_region,
             require_local_disks=require_local_disks,
