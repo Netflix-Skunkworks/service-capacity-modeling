@@ -1,6 +1,8 @@
 import argparse
+import boto3
 import json
 import sys
+import os
 from collections import OrderedDict
 from fractions import Fraction
 from typing import Optional
@@ -8,20 +10,20 @@ from typing import Sequence
 
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import Instance
 
 
 def pull_family(
-    instance_filter: str = "m7a", region: str = "us-east-1"
+    instance_filter: str, xlarge_read_iops: Optional[float]=None, xlarge_write_iops: Optional[float]=None, region: str = "us-east-1"
 ) -> Sequence[Instance]:
     # pylint: disable=unused-argument
-    """TODO: Talk to the AWS API
-
+    """
     This will emulate
 
     aws --region us-east-1 \
       ec2 describe-instance-types \
-      --filters 'Name=instance-type,Values=m7a*'
+      --filters 'Name=instance-type,Values=m7a.*'
 
     And then convert from base 10 for memory and disk to base 2 and generate the
     shape from that.
@@ -29,109 +31,132 @@ def pull_family(
     Returns a list of Instance for hardware. Then we can compose to writing
     json files.
     """
-    return []
+    # Initialize ec2 client
+    ec2_client = boto3.client("ec2", region_name=region)
 
+    paginator = ec2_client.get_paginator("describe_instance_types")
+    filter_params = {
+        "Filters": [
+            {
+                "Name": "instance-type",
+                "Values": [instance_filter]
+            },
+        ],
+    }
 
-def _scale_drive(drive: Optional[Drive], scale: Fraction) -> Optional[Drive]:
-    if drive is None:
-        return None
-    # This is wrong but ... not too wrong
-    single_tenant = False
-    if scale > 4:
-        single_tenant = True
+    hasSSD = False
+    instance_jsons_dict = {}
+    disk_single_tenant_max_size = -1
+    for page in paginator.paginate(**filter_params):
+        for instance_type_json in page["InstanceTypes"]:
+            print(json.dumps(instance_type_json))
+            if "metal" in instance_type_json["InstanceType"]:
+                print("Exclude metal for now...")
+                continue
+            if instance_type_json["InstanceStorageSupported"] is True:
+                if instance_type_json["InstanceStorageInfo"]["Disks"][0]["Type"] == "ssd":
+                    hasSSD = True
+                    if instance_type_json["InstanceStorageInfo"]["Disks"][0]["Count"] == 1:
+                        # The biggest size for count equal 1 help us identify whether it's single tenant drive or not
+                        disk_single_tenant_max_size = max(disk_single_tenant_max_size, instance_type_json["InstanceStorageInfo"]["TotalSizeInGB"])
+                else:
+                    raise Exception("Instance drive is not of type SSD. Please consult for the right read_io_latency.")
 
-    read_iops, write_iops = drive.read_io_per_s, drive.write_io_per_s
-    if read_iops is not None:
-        read_iops = int(round(read_iops * scale))
-    if write_iops is not None:
-        write_iops = int(round(write_iops * scale))
+            instance_jsons_dict[instance_type_json["InstanceType"].split('.')[1]] = instance_type_json
 
-    return Drive(
-        name=drive.name,
-        size_gib=int(drive.size_gib * scale),
-        read_io_latency_ms=drive.read_io_latency_ms,
-        read_io_per_s=read_iops,
-        write_io_per_s=write_iops,
-        block_size_kib=drive.block_size_kib,
-        single_tenant=single_tenant,
+    if "xlarge" not in instance_jsons_dict:
+        raise Exception("No xlarge result returned from AWS api. Please check your input.")
+
+    if hasSSD and (xlarge_read_iops is None or xlarge_write_iops is None):
+        raise Exception("Instance shape has SSD. User should input xlarge_read_iops and xlarge_write_iops.")
+
+    results = []
+    # First build up xlarge instance shape, then we will use it as a reference.
+    xlarge_shape = Instance(
+        name=instance_jsons_dict["xlarge"]["InstanceType"],
+        cpu=instance_jsons_dict["xlarge"]["VCpuInfo"]["DefaultVCpus"],
+        cpu_ghz=instance_jsons_dict["xlarge"]["ProcessorInfo"]["SustainedClockSpeedInGhz"],
+        ram_gib=round(instance_jsons_dict["xlarge"]["MemoryInfo"]["SizeInMiB"] * 10 ** 6 / 2 ** 30, 2),
+        net_mbps=round(instance_jsons_dict["xlarge"]["NetworkInfo"]["NetworkCards"][0]["BaselineBandwidthInGbps"] * 10 ** 3),
+        drive=None if not hasSSD else Drive(
+            name="ephem",
+            size_gib=int(instance_jsons_dict["xlarge"]["InstanceStorageInfo"]["TotalSizeInGB"] * 10 ** 9 / 2 ** 30),
+            read_io_latency_ms=FixedInterval(
+                low=0.1, mid=0.125, high=0.17, confidence=0.9, minimum_value=0.05, maximum_value=2.05
+            ),
+            read_io_per_s=xlarge_read_iops,
+            write_io_per_s=xlarge_write_iops,
+            block_size_kib=4,
+            single_tenant=True if instance_jsons_dict["xlarge"]["InstanceStorageInfo"]["Disks"][0]["Count"] == 1 and instance_jsons_dict["xlarge"]["InstanceStorageInfo"]["TotalSizeInGB"] == disk_single_tenant_max_size else False,
+        )
     )
+    results.append(xlarge_shape)
 
-
-def reshape_family(
-    initial_shape: str, reference_family: str = "m5", region: str = "us-east-1"
-) -> Sequence[Instance]:
-    """Takes a single instance as a template and generates the other shapes
-
-    Useful for filling in details missing from automated pull such as IOPS
-    """
-    shape = shapes.hardware.regions[region].instances[initial_shape]
-    family, normalized_size = shape.family, shape.normalized_size
-
-    normalized_sizes = [
-        i.normalized_size
-        for i in shapes.hardware.regions[region].instances.values()
-        if i.family == reference_family
-    ]
-
-    def name(input_size: Fraction) -> str:
-        if input_size.denominator == 1 and input_size.numerator != 1:
-            size = str(input_size.numerator) + "xlarge"
-        else:
-            size = {
-                Fraction(1, 4): "medium",
-                Fraction(1, 2): "large",
-                Fraction(1, 1): "xlarge",
-            }[input_size]
-        return f"{family}{shape.family_separator}{size}"
-
-    new_shapes = []
-    for new_size in normalized_sizes:
-        if normalized_size == new_size:
+    # Build up the rest
+    for instance_type_scale, instance_type_json in instance_jsons_dict.items():
+        if instance_type_scale == "xlarge":
             continue
-        scale_factor = new_size / normalized_size
-
-        current_shape = shapes.hardware.regions[region].instances.get(name(new_size))
 
         new_shape = Instance(
-            name=name(new_size),
-            cpu=int(shape.cpu * scale_factor),
-            cpu_ghz=shape.cpu_ghz,
-            ram_gib=round(shape.ram_gib * scale_factor, 2),
-            net_mbps=round(shape.net_mbps * scale_factor, 2),
-            drive=_scale_drive(shape.drive, scale_factor),
+            name=instance_type_json["InstanceType"],
+            cpu=instance_type_json["VCpuInfo"]["DefaultVCpus"],
+            cpu_ghz=instance_type_json["ProcessorInfo"]["SustainedClockSpeedInGhz"],
+            ram_gib=round(instance_type_json["MemoryInfo"]["SizeInMiB"] * 10 ** 6 / 2 ** 30, 2),
+            net_mbps=round(instance_type_json["NetworkInfo"]["NetworkCards"][0]["BaselineBandwidthInGbps"] * 10 ** 3),
+            drive=None
         )
-        # When we have layers, reverse this and clean it up
-        merged = new_shape
-        if current_shape is not None:
-            merged = new_shape.merge_with(current_shape)
-        merged_dict = merged.model_dump(exclude_unset=True)
-        if "annual_cost" in merged_dict:
-            del merged_dict["annual_cost"]
-        if "drive" in merged_dict and "annual_cost" in merged_dict["drive"]:
-            del merged_dict["drive"]["annual_cost"]
 
-        new_shapes.append(Instance(**merged_dict))
+        if hasSSD:
+            scale_factor = new_shape.normalized_size / xlarge_shape.normalized_size
+            new_shape.drive = Drive(
+                name="ephem",
+                size_gib=int(instance_jsons_dict["xlarge"]["InstanceStorageInfo"]["TotalSizeInGB"] * 10 ** 9 / 2 ** 30),
+                read_io_latency_ms=FixedInterval(
+                    low=0.1, mid=0.125, high=0.17, confidence=0.9, minimum_value=0.05, maximum_value=2.05
+                ),
+                read_io_per_s=int(round(xlarge_read_iops * scale_factor)),
+                write_io_per_s=int(round(xlarge_write_iops * scale_factor)),
+                block_size_kib=4,
+                single_tenant=True if instance_type_json["InstanceStorageInfo"]["Disks"][0]["Count"] == 1 and instance_type_json["InstanceStorageInfo"]["TotalSizeInGB"] == disk_single_tenant_max_size else False,
+            )
 
-    return sorted(new_shapes, key=lambda i: i.normalized_size)
+        results.append(new_shape)
+    results = sorted(results, key=lambda i: i.normalized_size)
+    # print(results)
+    return results
 
 
 def main(args) -> int:
-    for template in args.template:
-        result = reshape_family(template, args.reference_family, args.region)
-        print("Hardware shapes for aws.json")
-        json_shapes = OrderedDict()
-        for shape in result:
-            model_dict = shape.model_dump(exclude_unset=True)
-            # Hardware shouldn't have costs
-            if "annual_cost" in model_dict:
-                del model_dict["annual_cost"]
-            if "drive" in model_dict and "annual_cost" in model_dict["drive"]:
-                del model_dict["drive"]["annual_cost"]
+    instance_gen = args.template.split(".")[0]
+    result = pull_family(instance_gen + ".*", args.riops, args.wiops, args.region)
+    json_shapes = {}
+    for shape in result:
+        model_dict = shape.model_dump(exclude_unset=True)
+        # Hardware shouldn't have costs
+        if "annual_cost" in model_dict:
+            del model_dict["annual_cost"]
+        if "drive" in model_dict and model_dict["drive"] is not None and "annual_cost" in model_dict["drive"]:
+            del model_dict["drive"]["annual_cost"]
 
-            json_shapes[shape.name] = model_dict
+        json_shapes[shape.name] = model_dict
 
-        print(f"[{template}[aws.json] Hardware Shapes", file=sys.stderr)
-        print(json.dumps(json_shapes, indent=2))
+    print(f"[{instance_gen}[aws.json] Hardware Shapes", file=sys.stderr)
+    print(json.dumps(json_shapes, indent=2))
+
+    # Write to JSON file
+    if args.dry is False:
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        output_file = os.path.join(
+            project_root,
+            "hardware",
+            "profiles",
+            "shapes",
+            f"aws_{instance_gen}.json",
+        )
+        print(f"output json file to {output_file}")
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(json_shapes, f, indent=2)
+            f.write("\n")
 
     return 0
 
@@ -142,16 +167,15 @@ if __name__ == "__main__":
     regions = set()
     for ar in shapes.hardware.regions.keys():
         regions.add(ar)
-        for instance in shapes.hardware.regions[ar].instances.values():
-            instances.add(instance.name)
-            families.add(instance.family)
 
     parser = argparse.ArgumentParser(
-        prog="Project shapes from template",
-        description="Takes one verified shape and projects for rest",
+        prog="Project shapes from instance family filter",
+        description="Input the target instance family filter like m7a.* and projects all the instance shapes in a json file",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("-f", "--reference-family", choices=families, default="m5")
     parser.add_argument("-r", "--region", choices=regions, default="us-east-1")
-    parser.add_argument("template", nargs="+", choices=instances)
+    parser.add_argument("-template", type=str, default="m7a")
+    parser.add_argument("-riops", type=float, default=None)
+    parser.add_argument("-wiops", type=float, default=None)
+    parser.add_argument("-dry", type=bool, default=True)
     sys.exit(main(parser.parse_args()))
