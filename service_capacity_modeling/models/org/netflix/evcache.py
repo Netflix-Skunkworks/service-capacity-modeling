@@ -258,7 +258,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         # accounted for the data going on drives or memory via working set
         max_local_disk_gib=max_local_disk_gib,
         # EVCache clusters should be balanced per zone
-        cluster_size=lambda x: next_n(x, zones_per_region),
+        cluster_size=lambda x: next_n(x, copies_per_region),
         min_count=max(min_count, 0),
         # Sidecars and Variable OS Memory
         reserve_memory=lambda x: base_mem,
@@ -278,7 +278,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     #       smaller clusters so your restarts don't take months.
     #   * NxN network issues. Sometimes smaller clusters of bigger nodes
     #       are better for network propagation
-    if cluster.count > (max_regional_size // zones_per_region):
+    if cluster.count > (max_regional_size // copies_per_region):
         return None
 
     services = []
@@ -295,7 +295,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
             network_services("evcache", context, modified, copies_per_region)
         )
 
-    ec2_cost = zones_per_region * cluster.annual_cost
+    ec2_cost = copies_per_region * cluster.annual_cost
     spread_cost = calculate_spread_cost(cluster.count)
 
     # Account for the clusters and replication costs
@@ -310,14 +310,14 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     cluster.cluster_type = "evcache"
     clusters = Clusters(
         annual_costs=evcache_costs,
-        zonal=[cluster] * zones_per_region,
+        zonal=[cluster] * copies_per_region,
         regional=[],
         services=services,
     )
 
     return CapacityPlan(
         requirements=Requirements(
-            zonal=[requirement] * zones_per_region, regrets=regrets
+            zonal=[requirement] * copies_per_region, regrets=regrets
         ),
         candidate_clusters=clusters,
     )
@@ -361,8 +361,6 @@ class NflxEVCacheCapacityModel(CapacityModel):
     ) -> Optional[CapacityPlan]:
         # (Arun) EVCache defaults to RF=3 for tier 0 and tier 1
         default_copies = 3
-        if desires.service_tier > 1:
-            default_copies = 2
         copies_per_region: int = extra_model_arguments.get(
             "copies_per_region", default_copies
         )
