@@ -71,6 +71,7 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     required_cluster_size: Optional[int] = None,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
+    load_increase_expected: bool = False,
 ) -> CapacityRequirement:
     """Estimate the capacity required for one zone given a regional desire
 
@@ -93,6 +94,7 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
         current_capacity
         and current_capacity.cluster_instance
         and required_cluster_size is not None
+        and load_increase_expected is False
     ):
         needed_cores = int(
             (
@@ -221,6 +223,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     max_regional_size: int = 192,
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
+    load_increase_expected: bool = False,
 ) -> Optional[CapacityPlan]:
     # Netflix Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 2 or instance.ram_gib < 14:
@@ -279,6 +282,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         required_cluster_size=required_cluster_size,
         zones_per_region=zones_per_region,
         copies_per_region=copies_per_region,
+        load_increase_expected=load_increase_expected,
     )
 
     # Cassandra clusters should aim to be at least 2 nodes per zone to start
@@ -457,6 +461,29 @@ def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
     return 3
 
 
+def _update_desires(desires: CapacityDesires, expected_percent_increase_rps: float,
+                    expected_percent_increase_wps: float) -> CapacityDesires:
+    expected_rps = (desires.query_pattern.estimated_read_per_second.mid +
+                    (expected_percent_increase_rps *
+                     desires.query_pattern.estimated_read_per_second.mid))
+
+    expected_wps = (desires.query_pattern.estimated_write_per_second.mid +
+            (expected_percent_increase_wps *
+             desires.query_pattern.estimated_write_per_second.mid))
+
+    new_query_pattern = desires.query_pattern.copy(update={
+        'estimated_write_per_second': desires.query_pattern.estimated_write_per_second.copy(update={'mid': expected_wps}),
+        'estimated_read_per_second': desires.query_pattern.estimated_read_per_second.copy(update={'mid': expected_rps})})
+
+    new_state_size = expected_wps * desires.query_pattern.estimated_mean_write_size_bytes.mid
+
+    new_data_shape = desires.data_shape.copy(update={
+        'estimated_state_size_gib': desires.data_shape.estimated_state_size_gib.copy(update={'mid': new_state_size})})
+    updated_desires = desires.copy(update={'query_pattern': new_query_pattern, 'data_shape': new_data_shape})
+
+    return updated_desires
+
+
 class NflxCassandraArguments(BaseModel):
     copies_per_region: int = Field(
         default=3,
@@ -499,6 +526,14 @@ class NflxCassandraArguments(BaseModel):
         "Note that if there are more than 100k writes this will "
         "automatically adjust to 0.2",
     )
+    expected_percent_increase_rps: float = Field(
+        default=0.0,
+        description="By what percent we expect reads per second to increase",
+    )
+    expected_percent_increase_wps: float = Field(
+        default=0.0,
+        description="By what percent we expect writes per second to increase",
+    )
 
 
 class NflxCassandraCapacityModel(CapacityModel):
@@ -532,11 +567,15 @@ class NflxCassandraCapacityModel(CapacityModel):
         max_table_buffer_percent: float = min(
             0.5, extra_model_arguments.get("max_table_buffer_percent", 0.11)
         )
+        expected_percent_increase_rps: float = extra_model_arguments.get("expected_percent_increase_rps", 0.0)
+        expected_percent_increase_wps: float = extra_model_arguments.get("expected_percent_increase_wps", 0.0)
+
+        updated_desires = _update_desires(desires, expected_percent_increase_rps, expected_percent_increase_wps)
 
         # Adjust heap defaults for high write clusters
         if (
-            desires.query_pattern.estimated_write_per_second.mid >= 100_000
-            and desires.data_shape.estimated_state_size_gib.mid >= 100
+            updated_desires.query_pattern.estimated_write_per_second.mid >= 100_000
+            and updated_desires.data_shape.estimated_state_size_gib.mid >= 100
         ):
             max_write_buffer_percent = max(0.5, max_write_buffer_percent)
             max_table_buffer_percent = max(0.2, max_table_buffer_percent)
@@ -545,7 +584,7 @@ class NflxCassandraCapacityModel(CapacityModel):
             instance=instance,
             drive=drive,
             context=context,
-            desires=desires,
+            desires=updated_desires,
             zones_per_region=context.zones_in_region,
             copies_per_region=copies_per_region,
             require_local_disks=require_local_disks,
@@ -556,6 +595,7 @@ class NflxCassandraCapacityModel(CapacityModel):
             max_local_disk_gib=max_local_disk_gib,
             max_write_buffer_percent=max_write_buffer_percent,
             max_table_buffer_percent=max_table_buffer_percent,
+            load_increase_expected=expected_percent_increase_rps > 0 or expected_percent_increase_wps > 0,
         )
 
     @staticmethod
