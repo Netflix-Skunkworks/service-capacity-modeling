@@ -15,6 +15,7 @@ from .postgres import nflx_postgres_capacity_model
 from .rds import nflx_rds_capacity_model
 from .stateless_java import nflx_java_app_capacity_model
 from .time_series import nflx_time_series_capacity_model
+from .wal import nflx_wal_capacity_model
 from .zookeeper import nflx_zookeeper_capacity_model
 
 
@@ -38,4 +39,5 @@ def models():
         "org.netflix.postgres": nflx_postgres_capacity_model,
         "org.netflix.kafka": nflx_kafka_capacity_model,
         "org.netflix.dynamodb": nflx_ddb_capacity_model,
+        "org.netflix.wal": nflx_wal_capacity_model,
     }
