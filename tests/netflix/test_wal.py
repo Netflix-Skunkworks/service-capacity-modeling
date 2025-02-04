@@ -1,5 +1,3 @@
-from inspect import walktree
-
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import DataShape
@@ -36,7 +34,7 @@ def test_wal_increasing_qps_simple():
             region="us-east-1",
             desires=simple,
             simulations=256,
-            extra_model_arguments={"wal.provisionkvshard": False}
+            extra_model_arguments={"wal.provisionkvshard": False},
         )
 
         # the set of cluster types the planner chose
@@ -97,7 +95,7 @@ def test_wal_increasing_qps_item_count_unset():
             region="us-east-1",
             desires=simple,
             simulations=256,
-            extra_model_arguments={"wal.provisionkvshard": False}
+            extra_model_arguments={"wal.provisionkvshard": False},
         )
 
         # the set of cluster types the planner chose
@@ -158,7 +156,7 @@ def test_wal_increasing_qps_simple_with_kv_shard():
             region="us-east-1",
             desires=simple,
             simulations=256,
-            extra_model_arguments={"wal.provisionkvshard": True}
+            extra_model_arguments={"wal.provisionkvshard": True},
         )
 
         # the set of cluster types the planner chose
@@ -221,7 +219,7 @@ def test_wal_increasing_qps_item_count_unset_with_kv_shard():
             region="us-east-1",
             desires=simple,
             simulations=256,
-            extra_model_arguments={"wal.provisionkvshard": True}
+            extra_model_arguments={"wal.provisionkvshard": True},
         )
 
         # the set of cluster types the planner chose
