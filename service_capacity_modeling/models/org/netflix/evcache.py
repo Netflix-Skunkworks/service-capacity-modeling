@@ -165,7 +165,6 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     drive: Drive,
     desires: CapacityDesires,
     context: RegionContext,
-    zones_per_region: int = 3,
     copies_per_region: int = 3,
     max_local_disk_gib: int = 2048,
     max_regional_size: int = 10000,
@@ -360,7 +359,7 @@ class NflxEVCacheCapacityModel(CapacityModel):
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
         # (Arun) EVCache defaults to RF=3 for tier 0 and tier 1
-        default_copies = 3
+        default_copies = context.zones_in_region
         copies_per_region: int = extra_model_arguments.get(
             "copies_per_region", default_copies
         )
@@ -382,7 +381,6 @@ class NflxEVCacheCapacityModel(CapacityModel):
             instance=instance,
             drive=drive,
             desires=desires,
-            zones_per_region=context.zones_in_region,
             copies_per_region=copies_per_region,
             max_regional_size=max_regional_size,
             max_local_disk_gib=max_local_disk_gib,
