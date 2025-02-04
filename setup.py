@@ -6,7 +6,7 @@ setuptools.setup(
     author_email="josephl@netflix.com",
     versioning="distance",
     setup_requires="setupmeta",
-    description="Contains utilities for modeling database capacity on a cloud",
+    description="Contains utilities for modeling capacity for pluggable workloads",
     packages=setuptools.find_packages(exclude=("tests*", "notebooks*")),
     install_requires=[
         "pydantic>2.0",
