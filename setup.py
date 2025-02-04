@@ -20,12 +20,13 @@ setuptools.setup(
     },
     classifiers=[
         "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: MIT License",
+        "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
     ],
     entry_points={
         "console_scripts": [
             "auto-shape = service_capacity_modeling.tools.auto_shape:main",
+            "fetch-pricing = service_capacity_modeling.tools.fetch_pricing:main",
         ]
     },
     include_package_data=True,

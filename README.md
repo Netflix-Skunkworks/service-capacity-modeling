@@ -6,7 +6,7 @@ A generic toolkit for modeling capacity requirements in the cloud. Pricing
 information included in this repository are public prices.
 
 **NOTE**: Netflix confidential information should never enter this repo. Please
-consider this repository public when making changes to it.
+remember this repository is public when making changes to it.
 
 ## Trying it out
 
@@ -228,4 +228,5 @@ Use one of the test environments for IDE development, e.g. `tox -e py310` and th
 Use the `dev` virtual environment via `tox -e dev`. Then execute CLIs via that env.
 
 ## Release
-TODO
+Tag to release, and Github actions should publish to upstream pypi. The internal Netflix mirrors will then
+pull it down.
