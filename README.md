@@ -230,3 +230,9 @@ Use the `dev` virtual environment via `tox -e dev`. Then execute CLIs via that e
 ## Release
 Tag to release, and Github actions should publish to upstream pypi. The internal Netflix mirrors will then
 pull it down.
+
+For example from latest `main`, bump at least the `minor` to get a new release
+```shell
+git tag v0.4.0
+git push origin HEAD --tags
+```
