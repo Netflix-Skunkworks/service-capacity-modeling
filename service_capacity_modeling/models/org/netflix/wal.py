@@ -82,14 +82,12 @@ class NflxWALCapacityModel(CapacityModel):
                 estimated_mean_write_size_bytes=Interval(
                     low=64, mid=128, high=1024, confidence=0.95
                 ),
-                # KV scan queries can be more expensive
                 estimated_mean_read_latency_ms=Interval(
                     low=0.2, mid=4, high=6, confidence=0.98
                 ),
                 estimated_mean_write_latency_ms=Interval(
                     low=0.2, mid=1, high=2, confidence=0.98
                 ),
-                # Assume they're doing GetItems scans -> slow reads
                 read_latency_slo_ms=FixedInterval(
                     minimum_value=1,
                     maximum_value=100,
@@ -98,7 +96,6 @@ class NflxWALCapacityModel(CapacityModel):
                     high=90,
                     confidence=0.98,
                 ),
-                # Assume they're doing PutRecords (BATCH)
                 write_latency_slo_ms=FixedInterval(
                     minimum_value=1,
                     maximum_value=20,
@@ -108,7 +105,7 @@ class NflxWALCapacityModel(CapacityModel):
                     confidence=0.98,
                 ),
             ),
-            # Most throughput KV clusters are large
+            # Most throughput WAL clusters are large
             data_shape=DataShape(
                 estimated_state_size_gib=Interval(
                     low=100, mid=1000, high=4000, confidence=0.98
