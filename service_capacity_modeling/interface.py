@@ -156,6 +156,23 @@ def interval(samples: Sequence[float], low_p: int = 5, high_p: int = 95) -> Inte
     )
 
 
+def normalized_aws_size(name: str) -> Fraction:
+    """Normalizes an AWS shape to a fractional xlarge unit"""
+    _, size = name.split(".")
+    numeric = re.findall(r"\d+", size)
+    if numeric:
+        assert len(numeric) == 1
+        return Fraction(float(numeric[0]))
+    return {
+        "small": Fraction(1, 8),
+        "medium": Fraction(1, 4),
+        "large": Fraction(1, 2),
+        "xlarge": Fraction(1),
+        # Is this always true?
+        "metal": Fraction(48, 1),
+    }[size]
+
+
 ###############################################################################
 #              Models (structs) for how we describe hardware                  #
 ###############################################################################
@@ -332,21 +349,6 @@ class Instance(ExcludeUnsetModel):
     @property
     def size(self):
         return self.name.rsplit(self.family_separator, 1)[1]
-
-    @property
-    def normalized_size(self) -> Fraction:
-        numeric = re.findall(r"\d+", self.size)
-        if numeric:
-            assert len(numeric) == 1
-            return Fraction(float(numeric[0]))
-        return {
-            "small": Fraction(1, 8),
-            "medium": Fraction(1, 4),
-            "large": Fraction(1, 2),
-            "xlarge": Fraction(1),
-            # Is this always true?
-            "metal": Fraction(48, 1),
-        }[self.size]
 
     @staticmethod
     def get_managed_instance() -> Instance:
