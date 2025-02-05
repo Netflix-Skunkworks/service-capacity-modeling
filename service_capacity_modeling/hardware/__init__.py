@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+from functools import reduce
 from pathlib import Path
 from typing import Dict
 from typing import List
@@ -83,6 +84,42 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
     return GlobalHardware(regions=regions)
 
 
+def merge_hardware(existing: Hardware, override: Hardware) -> Hardware:
+    """Merge two hardware sets, Unlike pricing does _not_ support overrides
+
+    This method takes two shape files and merges instances, drives, services, etc.
+    Unlike pricing this does not override - it will throw exceptions if two files
+    contain the same keys
+    """
+    existing_obj = existing.model_dump()
+    override_obj = override.model_dump()
+
+    merged = {}
+    for key in existing_obj.keys() | override_obj.keys():
+        existing_field = existing_obj.get(key)
+        if existing_field is None and override_obj.get(key) is None:
+            continue
+        if existing_field is None and override_obj.get(key) is not None:
+            merged[key] = override_obj.get(key)
+        elif isinstance(existing_field, Dict):
+            override_field = override_obj.get(key)
+            merged_field = merged.setdefault(key, {})
+
+            existing_keys = existing_field.keys()
+            override_keys = override_obj.get(key, {}).keys()
+            for shape in existing_keys | override_keys:
+                if shape in existing_keys and shape in override_keys:
+                    raise ValueError(
+                        f"Duplicate shape {shape}! "
+                        "Only one file should contain a shape"
+                    )
+                if shape not in existing_keys:
+                    merged_field[shape] = override_field[shape]
+                else:
+                    merged_field[shape] = existing_field[shape]
+    return Hardware(**merged)
+
+
 def merge_pricing(existing: Dict, override: Dict) -> Dict:
     merged = existing.copy()
     for region, override_pricing in override.items():
@@ -112,21 +149,17 @@ def merge_pricing(existing: Dict, override: Dict) -> Dict:
 
 def load_hardware_from_disk(
     price_paths: Union[List[Path], Optional[str]] = os.environ.get("PRICE_PATH"),
-    shape_path: Union[Optional[Path], Optional[str]] = os.environ.get(
-        "HARDWARE_SHAPES"
-    ),
+    shape_paths: Union[List[Path], Optional[str]] = os.environ.get("HARDWARE_SHAPES"),
 ) -> GlobalHardware:
-    if shape_path is None or price_paths is None:
+    if isinstance(shape_paths, list) and len(shape_paths) == 0:
         return GlobalHardware(regions={})
-
     if isinstance(price_paths, list) and len(price_paths) == 0:
         return GlobalHardware(regions={})
 
+    if isinstance(shape_paths, str):
+        shape_paths = [Path(shape_paths)]
     if isinstance(price_paths, str):
         price_paths = [Path(price_paths)]
-
-    if isinstance(shape_path, str):
-        shape_path = Path(shape_path)
 
     combined_pricing: Dict = {}
 
@@ -139,9 +172,12 @@ def load_hardware_from_disk(
 
     pricing = load_pricing(combined_pricing)
 
-    with open(shape_path, encoding="utf-8") as sfd:
-        hardware = load_hardware(json.load(sfd))
+    hw_shapes = [Hardware()]
+    for path in shape_paths:
+        with open(path, encoding="utf-8") as fd:
+            hw_shapes.append(Hardware(**json.load(fd)))
 
+    hardware = reduce(merge_hardware, hw_shapes)
     return price_hardware(hardware=hardware, pricing=pricing)
 
 

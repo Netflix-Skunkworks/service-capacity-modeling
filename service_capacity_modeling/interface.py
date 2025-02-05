@@ -434,11 +434,11 @@ class Hardware(ExcludeUnsetModel):
     # How many zones of compute exist in this region of compute
     zones_in_region: int = 3
     # Per instance shape information e.g. cpu, ram, cpu etc ...
-    instances: Dict[str, Instance]
+    instances: Dict[str, Instance] = {}
     # Per drive type information and cost
-    drives: Dict[str, Drive]
+    drives: Dict[str, Drive] = {}
     # Per service information and cost
-    services: Dict[str, Service]
+    services: Dict[str, Service] = {}
 
 
 class GlobalHardware(ExcludeUnsetModel):
