@@ -38,7 +38,7 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
 
         for instance, iprice in region_pricing.instances.items():
             if instance not in hardware.instances:
-                logger.warning(
+                logger.debug(
                     "Instance %s is not in hardware shapes, skipping", instance
                 )
                 continue
@@ -161,11 +161,16 @@ def load_hardware_from_disk(
     if isinstance(price_paths, str):
         price_paths = [Path(price_paths)]
 
+    if price_paths is None:
+        price_paths = []
+    if shape_paths is None:
+        shape_paths = []
+
     combined_pricing: Dict = {}
 
-    print("Loading pricing from", price_paths, "\n")
+    logger.debug("Loading pricing from: %s", price_paths)
     for price_path in price_paths:
-        print("Loading pricing from", price_path, "\n")
+        logger.debug("Loading pricing from: %s", price_path)
         with open(price_path, encoding="utf-8") as pfd:
             pricing_data = json.load(pfd)
             combined_pricing = merge_pricing(combined_pricing, pricing_data)

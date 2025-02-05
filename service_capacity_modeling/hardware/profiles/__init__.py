@@ -6,10 +6,12 @@ except ImportError:
 
     import_module = __import__  # type: ignore[assignment]
 
+import logging
 from typing import Dict, List
 from service_capacity_modeling.hardware import load_hardware_from_disk
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
 current_module = import_module(__name__)
 common_profiles = {}
 
@@ -30,11 +32,12 @@ with resources.path(  # pylint: disable=deprecated-method
     shapes = Path(shape_file.parent, "shapes")
     for profile in shapes.iterdir():
         shape_profile = profile.stem
-        print(f"Loading shape={shape_profile} from {Path(shapes, profile)}")
-        shape_paths = profile.glob("**/*.json")
-        groups = group_profile_paths(Path(shapes.parent, "pricing", shape_profile))
+        logger.info(f"Loading shape={shape_profile} from {Path(shapes, profile)}")
+        shape_paths = list(profile.glob("**/*.json"))
+        pricing_path = Path(shapes.parent, "pricing", shape_profile)
+        groups = group_profile_paths(pricing_path)
         for pricing_name, pricing_paths in groups.items():
-            print(f"Loading {pricing_name} -> {pricing_paths}")
+            logger.info(f"Loading {pricing_name} from {pricing_path}")
             ghw = load_hardware_from_disk(
                 price_paths=pricing_paths, shape_paths=shape_paths
             )

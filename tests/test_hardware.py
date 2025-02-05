@@ -2,6 +2,7 @@ from fractions import Fraction
 
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import DriveType
+from service_capacity_modeling.interface import normalized_aws_size
 
 
 def test_services():
@@ -64,10 +65,9 @@ def test_normalized_size():
         Fraction(16),
         Fraction(24),
     )
-    hw = shapes.region("us-east-1").instances
     for i, size in enumerate(sizes):
         name = "m5." + size
-        assert hw[name].normalized_size == expected[i]
+        assert normalized_aws_size(name) == expected[i]
 
 
 def test_r6id():
