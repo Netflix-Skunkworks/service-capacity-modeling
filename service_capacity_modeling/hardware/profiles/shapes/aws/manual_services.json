@@ -1,0 +1,30 @@
+{
+  "services": {
+    "blob.standard": {
+      "name": "s3-standard",
+      "read_io_latency_ms": {"low": 1, "mid": 5, "high": 50, "confidence": 0.90},
+      "write_io_latency_ms": {"low": 1, "mid": 10, "high": 50, "confidence": 0.90}
+    },
+    "net.inter.region": {
+      "name": "Inter-region transfer costs"
+    },
+    "net.intra.region": {
+      "name": "Intra-region (within) transfer costs"
+    },
+    "crdb_core_license": {
+      "name": "CRDB license fee"
+    },
+    "dynamo.standard": {
+      "name": "dynamo-standard"
+    },
+    "dynamo.standard.global": {
+      "name": "dynamo-standard-global"
+    },
+    "dynamo.backup.continuous": {
+      "name": "dynamo-backup-continuous"
+    },
+    "dynamo.transfer": {
+      "name": "dynamo-transfer-first120tb"
+    }
+  }
+}

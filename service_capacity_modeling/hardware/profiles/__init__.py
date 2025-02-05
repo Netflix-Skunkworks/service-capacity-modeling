@@ -28,12 +28,14 @@ with resources.path(  # pylint: disable=deprecated-method
     current_module, "profiles.txt"
 ) as shape_file:
     shapes = Path(shape_file.parent, "shapes")
-    for fd in shapes.glob("**/*.json"):
-        shape = fd.stem
-
-        print(f"Loading shape={shape} from {Path(shapes, shape)}")
-        groups = group_profile_paths(Path(shapes.parent, "pricing", shape))
+    for profile in shapes.iterdir():
+        shape_profile = profile.stem
+        print(f"Loading shape={shape_profile} from {Path(shapes, profile)}")
+        shape_paths = profile.glob("**/*.json")
+        groups = group_profile_paths(Path(shapes.parent, "pricing", shape_profile))
         for pricing_name, pricing_paths in groups.items():
             print(f"Loading {pricing_name} -> {pricing_paths}")
-            ghw = load_hardware_from_disk(price_paths=pricing_paths, shape_path=fd)
-            common_profiles[f"{shape}-{pricing_name}"] = ghw
+            ghw = load_hardware_from_disk(
+                price_paths=pricing_paths, shape_paths=shape_paths
+            )
+            common_profiles[f"{shape_profile}-{pricing_name}"] = ghw

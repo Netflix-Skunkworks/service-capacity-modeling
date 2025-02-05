@@ -1,0 +1,45 @@
+{
+  "drives": {
+    "gp2": {
+      "name": "gp2",
+      "read_io_latency_ms": {"low": 0.8, "mid": 1.05, "high": 1.8, "maximum_value": 10, "confidence": 0.90},
+      "write_io_latency_ms": {"low": 1.2, "mid": 2, "high": 4, "maximum_value": 20, "confidence": 0.90},
+      "max_scale_size_gib": 16384,
+      "block_size_kib": 16,
+      "group_size_kib": 256,
+      "max_scale_io_per_s": 16000,
+      "lifecycle": "stable",
+      "drive_type": "attached-ssd"
+    },
+    "io2": {
+      "name": "io2",
+      "read_io_latency_ms": {"low": 0.5, "mid": 0.8, "high": 1.2, "maximum_value": 2, "confidence": 0.90},
+      "write_io_latency_ms": {"low": 0.9, "mid": 1.2, "high": 2, "maximum_value": 4, "confidence": 0.90},
+      "max_scale_size_gib": 16384,
+      "block_size_kib": 16,
+      "group_size_kib": 256,
+      "max_scale_io_per_s": 64000,
+      "lifecycle": "alpha",
+      "drive_type": "attached-ssd"
+    },
+    "gp3": {
+      "name": "gp3",
+      "read_io_latency_ms": {"low": 0.8, "mid": 1.05, "high": 1.8, "maximum_value": 10, "confidence": 0.90},
+      "write_io_latency_ms": {"low": 1.2, "mid": 2, "high": 4, "maximum_value": 20, "confidence": 0.90},
+      "max_scale_size_gib": 16384,
+      "block_size_kib": 16,
+      "group_size_kib": 256,
+      "max_scale_io_per_s": 16000,
+      "lifecycle": "stable",
+      "drive_type": "attached-ssd"
+    },
+    "aurora": {
+      "name": "aurora",
+      "read_io_latency_ms": {"low": 0.8, "mid": 1.05, "high": 1.8, "maximum_value": 10, "confidence": 0.90},
+      "write_io_latency_ms": {"low": 1.2, "mid": 2, "high": 4, "maximum_value": 20, "confidence": 0.90},
+      "max_scale_size_gib": 16384,
+      "block_size_kib": 16,
+      "group_size_kib": 256
+    }
+  }
+}
