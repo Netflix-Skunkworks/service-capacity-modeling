@@ -30,8 +30,8 @@ jobs:
       url: https://pypi.org/p/service-capacity-modeling
     permissions:
       id-token: write
-    # Only release on tags, and require a successful build
-    if: startsWith(github.event.ref, 'refs/tags/v')
+    # Only release on main branch builds, and require a successful build
+    if: github.event.ref == 'refs/heads/main'
     needs: [build]
     steps:
     - uses: actions/checkout@v4
