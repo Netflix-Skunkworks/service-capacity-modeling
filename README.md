@@ -228,11 +228,15 @@ Use one of the test environments for IDE development, e.g. `tox -e py310` and th
 Use the `dev` virtual environment via `tox -e dev`. Then execute CLIs via that env.
 
 ## Release
-Tag to release, and Github actions should publish to upstream pypi. The internal Netflix mirrors will then
-pull it down.
+Any successful `main` build will trigger a release to PyPI, defaulting to a patch bump based on the setupmeta
+[distance algorithm](https://github.com/codrsquad/setupmeta/blob/main/docs/versioning.rst#distance). If
+you are significantly adding to the API please follow the below instructions to bump the base version. Since we
+are still in `0.` we do not do major version bumps.
 
-For example from latest `main`, bump at least the `minor` to get a new release
+### Bumping a minor or major
+From latest `main`, bump at least the `minor` to get a new base version:
 ```shell
 git tag v0.4.0
 git push origin HEAD --tags
 ```
+Now setupmeta will bump the patch from this version, e.g. `0.4.1`.
