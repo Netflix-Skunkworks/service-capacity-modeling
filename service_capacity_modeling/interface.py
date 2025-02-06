@@ -679,7 +679,12 @@ class CurrentClusterCapacity(ExcludeUnsetModel):
     cluster_instance_name: str
     cluster_instance: Optional[Instance] = None
     cluster_instance_count: Interval
+    # The distribution cpu utilization in the cluster.
     cpu_utilization: Interval
+    # The per node distribution of memory used in mib.
+    memory_utilization_mib: Interval
+    # The per node distribution of network used in mbps.
+    network_utilization_mbps: Interval
 
 
 # For services that are provisioned by zone (e.g. Cassandra, EVCache)
