@@ -330,8 +330,39 @@ class Instance(ExcludeUnsetModel):
     """
 
     name: str
-    cpu: int
-    cpu_ghz: float
+    cpu: int = Field(
+        title="CPU threads (vCPUs or effective cores)",
+        description=(
+            "The number of CPU threads this instance has, typically a SMT thread "
+            "but if equal to Instance.cpu_cores, actual cores."
+        ),
+    )
+    cpu_cores: Optional[int] = Field(
+        default=None,
+        title="If known the number of physical cores present on the machine",
+        description=(
+            "Most Instance.cpu are really threads, meaning they are not truly "
+            "parallel. Some Instance.cpu are full fat cores, in which case this "
+            "will be set and be equal to the cpu count. Use the cores getter in code"
+        ),
+    )
+    cpu_ghz: float = Field(
+        title="The clock frequency of these cores",
+        description=(
+            "How fast the base clock of the cores are. We assume only baseline"
+            " all-core sustained turbo for the purpose of capacity planning."
+        ),
+    )
+    cpu_ipc_scale: float = Field(
+        default=1.0,
+        title="Instruction per clock scale: core speed is multiplied by this",
+        description=(
+            "Not all cores or ghz are created equal, and if we want to represent that "
+            "a CPU is more productive per unit frequency, this fractional scaling "
+            "influences core normalization logic. Note that in the longer term we "
+            "expect to replace this with a standard measure of average performance."
+        ),
+    )
     ram_gib: float
     net_mbps: float
     drive: Optional[Drive] = None
@@ -349,6 +380,12 @@ class Instance(ExcludeUnsetModel):
     @property
     def size(self):
         return self.name.rsplit(self.family_separator, 1)[1]
+
+    @property
+    def cores(self):
+        if self.cpu_cores is not None:
+            return self.cpu_cores
+        return self.cpu // 2
 
     @staticmethod
     def get_managed_instance() -> Instance:
@@ -374,6 +411,18 @@ class Instance(ExcludeUnsetModel):
             else:
                 self_dict[k] = v
         return Instance(**self_dict)
+
+
+default_reference_shape = Instance(
+    name="default_reference_shape",
+    cpu=2,
+    # Much of our benchmarking was carried out in the 5th gen, can
+    # adjust this up once we go through and fix all the latency distributions
+    cpu_ghz=2.1,
+    cpu_ipc_scale=1.0,
+    ram_gib=8.0,
+    net_mbps=1000,
+)
 
 
 class Service(ExcludeUnsetModel):

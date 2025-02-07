@@ -13,6 +13,7 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.common import network_services
+from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 
 
@@ -190,3 +191,22 @@ def test_different_tier_qos():
         cores = sqrt_staffed_cores(desires)
         assert cores >= prev_cores
         prev_cores = cores
+
+
+def test_normalize_cores():
+    m5xl = shapes.region("us-east-1").instances["m5.xlarge"]
+    r5xl = shapes.region("us-east-1").instances["r5.xlarge"]
+
+    m6id = shapes.region("us-east-1").instances["m6id.xlarge"]
+    i4ixl = shapes.region("us-east-1").instances["i4i.xlarge"]
+
+    m7axl = shapes.region("us-east-1").instances["m7a.xlarge"]
+
+    # Same generation should be the same
+    assert normalize_cores(16, m5xl, r5xl) == 16
+    assert normalize_cores(16, m6id, i4ixl) == 16
+
+    # New generation should be higher
+    assert 18 <= normalize_cores(16, m5xl, m6id) < 20
+    assert 18 <= normalize_cores(16, m6id, m7axl) < 20
+    assert 24 <= normalize_cores(16, m5xl, m7axl) < 30

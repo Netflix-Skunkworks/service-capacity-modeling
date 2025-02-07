@@ -58,11 +58,9 @@ disable =
   # Not always accurate
   using-constant-test,
   # Hidden imports are often useful for avoiding optional dep imports
-  import-outside-toplevel
-  # fstrings are fiune
-  logging-fstring-interpolation
-  # Imports are fine
-  import-outside-toplevel
+  import-outside-toplevel,
+  # fstrings are fine
+  logging-fstring-interpolation,
 
 [DESIGN]
 max-attributes=12
