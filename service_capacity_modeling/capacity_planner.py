@@ -577,7 +577,7 @@ class CapacityPlanner:
         return reduce_by_family(plans)[:num_results]
 
     # Calculates the minimum cpu, memory, and network requirements based on desires.
-    def _per_instance_requirements(self, desires) -> Tuple[int, float, float]:
+    def _per_instance_requirements(self, desires) -> Tuple[int, float]:
 
         # Applications often set fixed reservations of heap or OS memory
         per_instance_mem = (
@@ -593,8 +593,6 @@ class CapacityPlanner:
             )
         )
 
-        per_instance_net = 0.0
-
         current_capacity = (
             None
             if desires.current_clusters is None
@@ -606,7 +604,7 @@ class CapacityPlanner:
         )
         # Return early if we dont have current_capacity set.
         if current_capacity is None or current_capacity.cluster_instance is None:
-            return (per_instance_cores, per_instance_mem, per_instance_net)
+            return (per_instance_cores, per_instance_mem)
 
         # Calculate CPU requirements based on current capacity
         current_cpu_utilization = current_capacity.cpu_utilization.high / 100.0
@@ -620,13 +618,7 @@ class CapacityPlanner:
         )
         per_instance_mem = max(per_instance_mem, current_memory_utilization_gib)
 
-        # Calculate network requirements based on current capacity
-        current_network_utilization_mbps = (
-            current_capacity.network_utilization_mbps.high
-        )
-        per_instance_net = max(per_instance_net, current_network_utilization_mbps)
-
-        return (per_instance_cores, per_instance_mem, per_instance_net)
+        return (per_instance_cores, per_instance_mem)
 
     def generate_scenarios(  # pylint: disable=too-many-positional-arguments
         self,
@@ -654,7 +646,6 @@ class CapacityPlanner:
         (
             per_instance_cores,
             per_instance_mem,
-            per_instance_net,
         ) = self._per_instance_requirements(desires)
 
         allowed_platforms: Set[Platform] = set(model.allowed_platforms())
@@ -681,7 +672,6 @@ class CapacityPlanner:
                 if (
                     per_instance_mem > instance.ram_gib
                     or per_instance_cores > instance.cpu
-                    or per_instance_net > instance.net_mbps
                 ):
                     continue
 
