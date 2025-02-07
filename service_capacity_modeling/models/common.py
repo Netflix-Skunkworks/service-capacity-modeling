@@ -13,6 +13,7 @@ from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
+from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
@@ -88,6 +89,17 @@ def sqrt_staffed_cores(desires: CapacityDesires) -> int:
     write_cores = _sqrt_staffed_cores(write_rps, write_lat, qos)
 
     return read_cores + write_cores
+
+
+def normalize_cores(
+    core_count: int,
+    target_shape: Instance,
+    reference_shape: Optional[Instance] = default_reference_shape,
+) -> int:
+    """Calculates equivalent cores on a target shape relative to a reference"""
+    target_speed = target_shape.cpu_ghz * target_shape.cpu_ipc_scale
+    reference_speed = reference_shape.cpu_ghz * reference_shape.cpu_ipc_scale
+    return max(1, math.ceil(core_count / (target_speed / reference_speed)))
 
 
 def simple_network_mbps(desires: CapacityDesires) -> int:
@@ -235,7 +247,11 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
 ) -> ZoneClusterCapacity:
     # Normalize the cores of this instance type to the latency reference
     needed_cores = math.ceil(
-        max(1, needed_cores // (instance.cpu_ghz / core_reference_ghz))
+        max(
+            1,
+            needed_cores
+            // (instance.cpu_ghz * instance.cpu_ipc_scale / core_reference_ghz),
+        )
     )
 
     # Datastores often require disk headroom for e.g. compaction and such

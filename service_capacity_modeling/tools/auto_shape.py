@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import sys
 from fractions import Fraction
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Sequence
 from typing import Tuple
 
 import boto3
+import botocore
 from pydantic import BaseModel
 
 from service_capacity_modeling.hardware import shapes
@@ -19,13 +21,7 @@ from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import normalized_aws_size
 
 
-class IOPerformance(BaseModel):
-    xl_read_iops: float
-    xl_write_iops: float
-    latency: FixedInterval
-    single_tenant_size: int = 0
-
-
+# Default latency curves from FIO testing per generation
 latency_curve_ms: Dict[str, FixedInterval] = {
     "6th-gen-ssd": FixedInterval(
         low=0.1,
@@ -43,15 +39,60 @@ latency_curve_ms: Dict[str, FixedInterval] = {
         minimum_value=0.070,
         maximum_value=2.000,
     ),
+    "ssd": FixedInterval(low=0.08, mid=0.10, high=0.2),
+    "hdd": FixedInterval(low=1, mid=2, high=10),
 }
 
-aws_io_data = {
+# Default xlarge -> (4k random read, write) iops tables
+aws_xlarge_iops = {
+    # General Purpose and Memory Share IOPs
+    "5ad": (59_000, 29_000),
+    "5d": (59_000, 29_000),
+    "5dn": (58_000, 29_000),
+    "6gd": (53_750, 22_500),
+    "6id": (67_083, 33_542),
+    "6idn": (67_083, 33_542),
+    "7gd": (67_083, 33_542),
+    # Compute has smaller IOPs
+    "c5ad": (32_566, 14_211),
+    "c5d": (40_000, 18_000),
+    "c6gd": (53_750, 22_500),
+    "c6id": (67_083, 33_542),
+    "c7gd": (67_083, 33_542),
+    # Storage has more
+    "i3": (206_250, 70_000),
+    "i3en": (85_000, 65_000),
+    "i4g": (62_500, 50_000),
+    "i4i": (100_000, 55_000),
+    "i7ie": (108_333, 86_666),
+    "i8g": (150_000, 82_500),
+}
+
+
+def guess_iops(family: str) -> Optional[Tuple[int, int]]:
+    if family[0] in ("m", "r"):
+        return aws_xlarge_iops.get(family[1:])
+    return aws_xlarge_iops.get(family)
+
+
+aws_io_links = {
     "m": "https://docs.aws.amazon.com/ec2/latest/instancetypes/gp.html#gp_instance-store",
     "c": "https://docs.aws.amazon.com/ec2/latest/instancetypes/co.html#co_instance-store",
-    "r": "https://docs.aws.amazon.com/ec2/latest/instancetypes/mo.html#co_instance-store",
+    "r": "https://docs.aws.amazon.com/ec2/latest/instancetypes/mo.html#mo_instance-store",
     "i": "https://docs.aws.amazon.com/ec2/latest/instancetypes/so.html#so_instance-store",
 }
 aws_instance_link = "https://docs.aws.amazon.com/ec2/latest/instancetypes/ec2-instance-type-specifications.html"
+
+
+class CPUPerformance(BaseModel):
+    ipc_scale_factor: Optional[float] = None
+
+
+class IOPerformance(BaseModel):
+    xl_read_iops: float
+    xl_write_iops: float
+    latency: FixedInterval
+    single_tenant_size: int = 0
 
 
 def _gb_to_gib(inp: float) -> int:
@@ -82,15 +123,17 @@ def _drive(
 
 
 def pull_family(
-    instance_filter: str,
-    region: str = "us-east-1",
+    ec2_client,
+    family: str,
+    cpu_perf: Optional[CPUPerformance] = None,
     io_perf: Optional[IOPerformance] = None,
     debug: bool = False,
 ) -> Sequence[Instance]:
-    # pylint: disable=unused-argument
     # flake8: noqa: C901
     """
-    This will emulate
+    Pull Instance shapes from AWS APIs.
+
+    Emulates something like the following
 
     aws --region us-east-1 \
       ec2 describe-instance-types \
@@ -102,13 +145,15 @@ def pull_family(
     Returns a list of Instance for hardware. Then we can compose to writing
     json files.
     """
-    # Initialize ec2 client
-    ec2_client = boto3.client("ec2", region_name=region)
-
     request = ec2_client.get_paginator("describe_instance_types")
     payload = {
         "Filters": [
-            {"Name": "instance-type", "Values": [instance_filter]},
+            {
+                "Name": "instance-type",
+                "Values": [
+                    family + ".*",
+                ],
+            },
         ],
     }
 
@@ -123,7 +168,7 @@ def pull_family(
         for instance_type_json in instance_page["InstanceTypes"]:
             debug_log(json.dumps(instance_type_json))
             if "metal" in instance_type_json["InstanceType"]:
-                debug_log("Exclude metal for now...")
+                debug_log("Excluding metal for now.")
                 continue
 
             if instance_type_json["InstanceStorageSupported"] is True:
@@ -143,8 +188,7 @@ def pull_family(
             or io_perf.xl_read_iops is None
             or io_perf.xl_write_iops is None
         ):
-            family = instance_filter.split(".")[0]
-            link = aws_io_data.get(family[0], aws_instance_link)
+            link = aws_io_links.get(family[0], aws_instance_link)
             print(
                 "Instance shape has ephemeral storage. You must pass --xl-iops with "
                 "data either from fio benchmarking or from AWS's page for the "
@@ -175,10 +219,20 @@ def pull_family(
             print(name)
 
         drive = _drive(disk_type, io_perf, scale=normalized_size, data=data)
+        if cpu_perf is not None and cpu_perf.ipc_scale_factor is not None:
+            cpu_ipc_scale_factor = cpu_perf.ipc_scale_factor
+        else:
+            if data["VCpuInfo"].get("DefaultThreadsPerCore", 2) == 1:
+                cpu_ipc_scale_factor = 1.5
+            else:
+                cpu_ipc_scale_factor = 1.0
+
         new_shape = Instance(
             name=data["InstanceType"],
             cpu=data["VCpuInfo"]["DefaultVCpus"],
+            cpu_cores=data["VCpuInfo"]["DefaultCores"],
             cpu_ghz=data["ProcessorInfo"]["SustainedClockSpeedInGhz"],
+            cpu_ipc_scale=cpu_ipc_scale_factor,
             ram_gib=round(data["MemoryInfo"]["SizeInMiB"] * 10**6 / 2.0**30, 2),
             net_mbps=round(
                 data["NetworkInfo"]["NetworkCards"][0]["BaselineBandwidthInGbps"]
@@ -196,6 +250,7 @@ def parse_iops(inp: str) -> Optional[Tuple[int, int]]:
     """Parses strings like 100,000/50,000 to (100000, 50000)"""
     if inp is None:
         return None
+
     # AWS often gives like 117,000 / 57,000
     if inp.count("/") == 1:
         left, right = inp.split("/")
@@ -209,25 +264,90 @@ def parse_iops(inp: str) -> Optional[Tuple[int, int]]:
         )
 
 
-def parse_io_curve(inp: str) -> FixedInterval:
+def _parse_family(family: str) -> Tuple[str, int, str]:
+    series = family[0]
+    num = re.findall(r"\d+", family)
+    assert len(num) == 1
+    gen = int(num[0])
+
+    vendor = "intel"
+    if family[-1] == "a":
+        vendor = "amd"
+    if family[-1] == "g":
+        vendor = "graviton"
+
+    return series, gen, vendor
+
+
+def parse_io_curve(inp: str, family: str) -> FixedInterval:
+    series, gen, _ = _parse_family(family)
+
+    if series in ("i", "d") and gen < 7:
+        # i4i is actually 6th gen
+        # i3/i3en/d3 is actually 5th gen
+        # AWS fixed this after 7th gen
+        gen += 2
+
+    if f"{gen}th-gen-{inp}" in latency_curve_ms:
+        return latency_curve_ms[f"{gen}th-gen-{inp}"]
+
     return latency_curve_ms[inp]
 
 
-def main(args) -> int:
-    iops = args.xl_iops
+def deduce_io_perf(
+    family: str, curve: str, iops: Optional[Tuple[int, int]]
+) -> Optional[IOPerformance]:
     if iops is None:
-        io_perf = None
+        guess = guess_iops(family)
+        if guess is None:
+            return None
+        else:
+            return IOPerformance(
+                latency=parse_io_curve(curve, family),
+                xl_read_iops=guess[0],
+                xl_write_iops=guess[1],
+            )
     else:
-        io_perf = IOPerformance(
-            latency=parse_io_curve(args.io_latency_curve),
-            xl_read_iops=args.xl_iops[0],
-            xl_write_iops=args.xl_iops[1],
+        return IOPerformance(
+            latency=parse_io_curve(curve, family),
+            xl_read_iops=iops[0],
+            xl_write_iops=iops[1],
         )
 
+
+def deduce_cpu_perf(
+    family: str, ipc_scale_factor: Optional[float] = None
+) -> Optional[CPUPerformance]:
+    if ipc_scale_factor is not None:
+        return CPUPerformance(
+            ipc_scale_factor=ipc_scale_factor,
+        )
+    else:
+        _, gen, vendor = _parse_family(family)
+        if vendor == "intel" and gen == 7:
+            # The 7th generation intel machines have a lower base clock
+            # But in real world workloads are around 15% faster. So
+            # (1.15 * 3.5) / 3.2 = 1.25
+            return CPUPerformance(ipc_scale_factor=1.25)
+    return CPUPerformance()
+
+
+def main(args) -> int:
     for family in args.families:
+        io_perf = deduce_io_perf(
+            family=family, curve=args.io_latency_curve, iops=args.xl_iops
+        )
+
+        cpu_perf = deduce_cpu_perf(
+            family=family,
+            ipc_scale_factor=args.cpu_ipc_scale,
+        )
+
+        ec2_client = boto3.client("ec2", region_name=args.region)
         family_shapes = pull_family(
-            instance_filter=family + ".*",
-            region=args.region,
+            ec2_client=ec2_client,
+            family=family,
+            cpu_perf=cpu_perf,
             io_perf=io_perf,
             debug=args.debug,
         )
@@ -246,7 +366,7 @@ def main(args) -> int:
 
             json_shapes["instances"][shape.name] = model_dict
 
-        print(f"[{family}[aws.json] Hardware Shapes", file=sys.stderr)
+        print(f"[{family}] Hardware Shapes", file=sys.stderr)
         print(json.dumps(json_shapes, indent=2))
 
         # Write to JSON file if requested
@@ -271,14 +391,14 @@ if __name__ == "__main__":
 
     try:
         client = boto3.client("ec2", region_name="us-east-1")
-    except:
+        result = client.describe_instance_type_offerings()
+    except botocore.exceptions.ClientError:
         print(
             "Unable to connect to EC2. Do you have AWS credentials refreshed?",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    result = client.describe_instance_type_offerings()
     offerings = result["InstanceTypeOfferings"]
     for offering in offerings:
         families.add(offering["InstanceType"].rsplit(".", 1)[0])
@@ -295,17 +415,31 @@ if __name__ == "__main__":
         help=(
             "The xlarge size's iops expressed as <rand 4k reads>/<write>. "
             "For example '100,000 / 50,000'. To find this information use AWS's "
-            f"spec: {aws_instance_link} OR use fio to benchmark"
+            f"spec: {aws_instance_link} OR use fio to benchmark. Deduced from family "
+            " if we can"
         ),
     )
     parser.add_argument(
-        "--io-latency-curve", default="6th-gen-ssd", choices=latency_curve_ms.keys()
+        "--io-latency-curve", default="ssd", choices=latency_curve_ms.keys()
+    )
+    parser.add_argument(
+        "--cpu-ipc-scale",
+        type=float,
+        help=(
+            "If the clock frequency is not a good measure of performance, scale it by "
+            "this much. Note that by default this will be 1, unless the cores are all "
+            "full cores (not threads) in which case it will be 1.5 by default."
+        ),
     )
     parser.add_argument("--region", choices=regions, default="us-east-1")
     parser.add_argument(
         "--output-path",
         type=Path,
-        help="Output file path to copy the result to. If not given only stdout will occur",
+        help=(
+            "Output file path to copy the result to. If not given only stdout will"
+            "occur. If running from the repo use: "
+            "service_capacity_modeling/hardware/profiles/shapes/aws/"
+        ),
     )
     parser.add_argument("--debug", action="store_true", help="Show verbose output")
 
