@@ -7,7 +7,6 @@ from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import CurrentRegionClusterCapacity
-from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Lifecycle
 from service_capacity_modeling.interface import Platform
 
@@ -133,13 +132,6 @@ def test_generate_scenarios_current_resources():
     desires.current_clusters.regional = [
         CurrentRegionClusterCapacity(
             cluster_instance_name="m5.12xlarge",
-            cluster_instance=Instance(
-                name="m5.12xlarge",
-                cpu=48,
-                cpu_ghz=3.1,
-                ram_gib=192,
-                net_mbps=10000,
-            ),
             cluster_instance_count=certain_int(5),
             cpu_utilization=certain_float(16.0),
             memory_utilization_mib=certain_float(32 * 1024),

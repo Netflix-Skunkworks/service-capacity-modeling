@@ -642,12 +642,6 @@ class CapacityPlanner:
             num_regions=num_regions,
         )
 
-        # We should not even bother with shapes that don't meet the minimums
-        (
-            per_instance_cores,
-            per_instance_mem,
-        ) = self._per_instance_requirements(desires)
-
         allowed_platforms: Set[Platform] = set(model.allowed_platforms())
         allowed_drives: Set[str] = set(drives or [])
         for drive_name in model.allowed_cloud_drives():
@@ -660,6 +654,12 @@ class CapacityPlanner:
 
         # Set current instance object if exists
         _set_instance_objects(desires, hardware)
+
+        # We should not even bother with shapes that don't meet the minimums
+        (
+            per_instance_cores,
+            per_instance_mem,
+        ) = self._per_instance_requirements(desires)
 
         if model.run_hardware_simulation():
             for instance in hardware.instances.values():
