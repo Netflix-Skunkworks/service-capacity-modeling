@@ -1,10 +1,11 @@
-
 from typing import Optional
+
 from service_capacity_modeling.hardware import shapes
 
-__all__ = ['get_simple_instance_headroom_target']
+__all__ = ["get_simple_instance_headroom_target"]
 
 FULL_CORE_INSTANCE_FAMILIES = ["c7a", "m7a", "r7a"]
+
 
 def _family_from_instance_type(instance_type: str) -> str:
     return instance_type.split(".")[0]
@@ -22,9 +23,9 @@ def _headroom_approx(cores, is_ht):
     # This accounts for the reduced effectiveness of virtual cores
     if is_ht:
         cores = cores * HT_PENALTY
-    
+
     # Calculate required headroom using magic formula:
-    return 0.712 / (cores ** 0.448)
+    return 0.712 / (cores**0.448)
 
 
 def _is_instance_type_hyperthreads(instance_type: str) -> bool:
@@ -34,24 +35,24 @@ def _is_instance_type_hyperthreads(instance_type: str) -> bool:
 
 def get_simple_instance_headroom_target(instance_type: str) -> Optional[float]:
     """Determine an approximate headroom target for an instance given its
-        instance type.
+    instance type.
 
-        The headroom target should be the percentage of CPU that should be
-        reserved for headroom to ensure sensible performance profile.
-        
-        This could be 1-utilization_target, however we leave the ultimate
-        utilization_target to the caller, since, we do not know how much
-        operational headroom they want to leave (ie: success buffer).
+    The headroom target should be the percentage of CPU that should be
+    reserved for headroom to ensure sensible performance profile.
 
-        For example, a response here of "headroom = 15%", means caller could
-        decide with a success_buffer=1 to use a utilization_target of 85%.
-        For success_buffer>1, they should target below 85% utilization.
+    This could be 1-utilization_target, however we leave the ultimate
+    utilization_target to the caller, since, we do not know how much
+    operational headroom they want to leave (ie: success buffer).
 
-        This is only suitable for "single-thread-like" workloads, which
-        fortunately many stateless services are.
+    For example, a response here of "headroom = 15%", means caller could
+    decide with a success_buffer=1 to use a utilization_target of 85%.
+    For success_buffer>1, they should target below 85% utilization.
 
-        For implementation see /notebooks/headroom-estimator.ipynb
-        """
+    This is only suitable for "single-thread-like" workloads, which
+    fortunately many stateless services are.
+
+    For implementation see /notebooks/headroom-estimator.ipynb
+    """
 
     try:
         is_ht = _is_instance_type_hyperthreads(instance_type)
