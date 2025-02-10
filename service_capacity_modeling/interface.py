@@ -225,10 +225,8 @@ class Drive(ExcludeUnsetModel):
 
     # These defaults are assuming a cloud SSD like a gp2 volume
     # If you disagree please change them in your hardware description
-    read_io_latency_ms: FixedInterval = FixedInterval(
-        low=0.8, mid=1, high=2, confidence=0.9
-    )
-    write_io_latency_ms: FixedInterval = FixedInterval(
+    read_io_latency_ms: Interval = FixedInterval(low=0.8, mid=1, high=2, confidence=0.9)
+    write_io_latency_ms: Interval = FixedInterval(
         low=0.6, mid=2, high=3, confidence=0.9
     )
 
@@ -392,10 +390,8 @@ class Service(ExcludeUnsetModel):
     annual_cost_per_core: float = 0
 
     # These defaults assume a cloud blob storage like S3
-    read_io_latency_ms: FixedInterval = FixedInterval(
-        low=1, mid=5, high=50, confidence=0.9
-    )
-    write_io_latency_ms: FixedInterval = FixedInterval(
+    read_io_latency_ms: Interval = FixedInterval(low=1, mid=5, high=50, confidence=0.9)
+    write_io_latency_ms: Interval = FixedInterval(
         low=1, mid=10, high=50, confidence=0.9
     )
 
@@ -551,7 +547,7 @@ class Consistency(ExcludeUnsetModel):
             " consistency models: https://jepsen.io/consistency"
         ),
     )
-    staleness_slo_sec: FixedInterval = Field(
+    staleness_slo_sec: Interval = Field(
         FixedInterval(low=0, mid=10, high=60),
         title="When stale reads are permitted what is the staleness requirement",
         description=(
@@ -623,10 +619,10 @@ class QueryPattern(ExcludeUnsetModel):
     # to provision such that we don't involve oncall
     # Note that these summary statistics will be used to create reasonable
     # distribution approximations of these operations (yielding p25, p99, etc)
-    read_latency_slo_ms: FixedInterval = FixedInterval(
+    read_latency_slo_ms: Interval = FixedInterval(
         low=0.4, mid=4, high=10, confidence=0.98
     )
-    write_latency_slo_ms: FixedInterval = FixedInterval(
+    write_latency_slo_ms: Interval = FixedInterval(
         low=0.4, mid=4, high=10, confidence=0.98
     )
 
@@ -674,7 +670,7 @@ class DataShape(ExcludeUnsetModel):
     # This is measured in orders of magnitude. So
     #   1000   = 1 - (1/1000) = 0.999
     #   10000  = 1 - (1/10000) = 0.9999
-    durability_slo_order: FixedInterval = FixedInterval(
+    durability_slo_order: Interval = FixedInterval(
         low=1000, mid=10000, high=100000, confidence=0.98
     )
 
