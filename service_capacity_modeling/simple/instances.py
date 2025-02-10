@@ -64,7 +64,6 @@ def get_simple_instance_headroom_target(instance: Instance) -> Optional[float]:
 def get_simple_instance_headroom_target_for_name(instance_type: str) -> Optional[float]:
     try:
         instance = shapes.hardware.regions["us-east-1"].instances[instance_type]
-        print("instance was : ", instance)
         return get_simple_instance_headroom_target(instance)
     except (KeyError, AttributeError):
         return None
