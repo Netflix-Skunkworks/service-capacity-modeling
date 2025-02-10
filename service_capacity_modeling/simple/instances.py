@@ -1,6 +1,7 @@
 from typing import Optional
 
 from service_capacity_modeling.hardware import shapes
+from service_capacity_modeling.interface import Instance
 
 FULL_CORE_INSTANCE_FAMILIES = ["c7a", "m7a", "r7a"]
 
@@ -9,7 +10,7 @@ def _family_from_instance_type(instance_type: str) -> str:
     return instance_type.split(".")[0]
 
 
-def _headroom_approx(cores, is_ht):
+def _headroom_approx(cores: int, is_ht: bool) -> float:
     """For implementation see /notebooks/headroom-estimator.ipynb"""
 
     # Hyperthreading performance penalty
@@ -19,11 +20,12 @@ def _headroom_approx(cores, is_ht):
 
     # Adjust effective cores if hyperthreading is enabled
     # This accounts for the reduced effectiveness of virtual cores
+    cores_f = float(cores)
     if is_ht:
-        cores = cores * HT_PENALTY
+        cores_f = cores_f * HT_PENALTY
 
     # Calculate required headroom using magic formula:
-    return 0.712 / (cores**0.448)
+    return 0.712 / (cores_f**0.448)
 
 
 def _is_instance_type_hyperthreads(instance_type: str) -> bool:
@@ -31,7 +33,7 @@ def _is_instance_type_hyperthreads(instance_type: str) -> bool:
     return instance_family not in FULL_CORE_INSTANCE_FAMILIES
 
 
-def get_simple_instance_headroom_target(instance_type: str) -> Optional[float]:
+def get_simple_instance_headroom_target(instance: Instance) -> Optional[float]:
     """Determine an approximate headroom target for an instance given its
     instance type.
 
@@ -51,10 +53,18 @@ def get_simple_instance_headroom_target(instance_type: str) -> Optional[float]:
 
     For implementation see /notebooks/headroom-estimator.ipynb
     """
-
     try:
-        is_ht = _is_instance_type_hyperthreads(instance_type)
-        core_count = shapes.hardware.regions["us-east-1"].instances[instance_type].cpu
+        is_ht = _is_instance_type_hyperthreads(instance.name)
+        core_count = instance.cpu
         return _headroom_approx(core_count, is_ht)
+    except (KeyError, AttributeError):
+        return None
+
+
+def get_simple_instance_headroom_target_for_name(instance_type: str) -> Optional[float]:
+    try:
+        instance = shapes.hardware.regions["us-east-1"].instances[instance_type]
+        print("instance was : ", instance)
+        return get_simple_instance_headroom_target(instance)
     except (KeyError, AttributeError):
         return None
