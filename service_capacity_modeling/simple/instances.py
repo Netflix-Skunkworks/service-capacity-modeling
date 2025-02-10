@@ -2,8 +2,6 @@ from typing import Optional
 
 from service_capacity_modeling.hardware import shapes
 
-__all__ = ["get_simple_instance_headroom_target"]
-
 FULL_CORE_INSTANCE_FAMILIES = ["c7a", "m7a", "r7a"]
 
 
