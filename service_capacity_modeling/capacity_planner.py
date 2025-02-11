@@ -576,6 +576,42 @@ class CapacityPlanner:
         num_results = num_results or self._default_num_results
         return reduce_by_family(plans)[:num_results]
 
+    # Calculates the minimum cpu, memory, and network requirements based on desires.
+    def _per_instance_requirements(self, desires) -> Tuple[int, float]:
+
+        # Applications often set fixed reservations of heap or OS memory
+        per_instance_mem = (
+            desires.data_shape.reserved_instance_app_mem_gib
+            + desires.data_shape.reserved_instance_system_mem_gib
+        )
+
+        # Applications often require a minimum amount of true parallelism
+        per_instance_cores = int(
+            math.ceil(
+                desires.query_pattern.estimated_read_parallelism.mid
+                + desires.query_pattern.estimated_write_parallelism.mid
+            )
+        )
+
+        current_capacity = (
+            None
+            if desires.current_clusters is None
+            else (
+                desires.current_clusters.zonal[0]
+                if len(desires.current_clusters.zonal)
+                else desires.current_clusters.regional[0]
+            )
+        )
+        # Return early if we dont have current_capacity set.
+        if current_capacity is None or current_capacity.cluster_instance is None:
+            return (per_instance_cores, per_instance_mem)
+
+        # Calculate memory requirements based on current capacity
+        current_memory_utilization_gib = current_capacity.memory_utilization_gib.high
+        per_instance_mem = max(per_instance_mem, current_memory_utilization_gib)
+
+        return (per_instance_cores, per_instance_mem)
+
     def generate_scenarios(  # pylint: disable=too-many-positional-arguments
         self,
         model,
@@ -598,19 +634,6 @@ class CapacityPlanner:
             num_regions=num_regions,
         )
 
-        # Applications often set fixed reservations of heap or OS memory, we
-        # should not even bother with shapes that don't meet the minimums
-        per_instance_mem = (
-            desires.data_shape.reserved_instance_app_mem_gib
-            + desires.data_shape.reserved_instance_system_mem_gib
-        )
-        # Applications often require a minimum amount of true parallelism
-        per_instance_cores = int(
-            math.ceil(
-                desires.query_pattern.estimated_read_parallelism.mid
-                + desires.query_pattern.estimated_write_parallelism.mid
-            )
-        )
         allowed_platforms: Set[Platform] = set(model.allowed_platforms())
         allowed_drives: Set[str] = set(drives or [])
         for drive_name in model.allowed_cloud_drives():
@@ -623,6 +646,12 @@ class CapacityPlanner:
 
         # Set current instance object if exists
         _set_instance_objects(desires, hardware)
+
+        # We should not even bother with shapes that don't meet the minimums
+        (
+            per_instance_cores,
+            per_instance_mem,
+        ) = self._per_instance_requirements(desires)
 
         if model.run_hardware_simulation():
             for instance in hardware.instances.values():
