@@ -361,7 +361,7 @@ def test_plan_certain():
         cpu_utilization=Interval(
             low=10.12, mid=13.2, high=14.194801291058118, confidence=1
         ),
-        memory_utilization_mib=certain_float(32.0),
+        memory_utilization_gib=certain_float(32.0),
         network_utilization_mbps=certain_float(128.0),
     )
 

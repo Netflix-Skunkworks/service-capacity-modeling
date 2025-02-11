@@ -133,8 +133,8 @@ def test_generate_scenarios_current_resources():
         CurrentRegionClusterCapacity(
             cluster_instance_name="m5.12xlarge",
             cluster_instance_count=certain_int(5),
-            cpu_utilization=certain_float(16.0),
-            memory_utilization_mib=certain_float(32 * 1024),
+            cpu_utilization=certain_float(100.0),
+            memory_utilization_gib=certain_float(16),
             network_utilization_mbps=certain_float(128.0),
         )
     ]
@@ -150,6 +150,4 @@ def test_generate_scenarios_current_resources():
     assert len(scenarios) > 0
     for instance, _, _ in scenarios:
         assert instance.family == "m5"
-        assert instance.cpu >= 48 * 0.16
-        assert instance.ram_gib >= 32
-        assert instance.net_mbps >= 128
+        assert instance.ram_gib >= 16

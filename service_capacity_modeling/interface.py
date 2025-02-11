@@ -681,8 +681,8 @@ class CurrentClusterCapacity(ExcludeUnsetModel):
     cluster_instance_count: Interval
     # The distribution cpu utilization in the cluster.
     cpu_utilization: Interval
-    # The per node distribution of memory used in mib.
-    memory_utilization_mib: Interval
+    # The per node distribution of memory used in gib.
+    memory_utilization_gib: Interval
     # The per node distribution of network used in mbps.
     network_utilization_mbps: Interval
 

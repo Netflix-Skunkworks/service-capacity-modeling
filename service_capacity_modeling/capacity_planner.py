@@ -606,16 +606,8 @@ class CapacityPlanner:
         if current_capacity is None or current_capacity.cluster_instance is None:
             return (per_instance_cores, per_instance_mem)
 
-        # Calculate CPU requirements based on current capacity
-        current_cpu_utilization = current_capacity.cpu_utilization.high / 100.0
-        current_instance_cpus = current_capacity.cluster_instance.cpu
-        required_cores = math.ceil(current_cpu_utilization * current_instance_cpus)
-        per_instance_cores = max(per_instance_cores, required_cores)
-
         # Calculate memory requirements based on current capacity
-        current_memory_utilization_gib = (
-            current_capacity.memory_utilization_mib.high / 1024
-        )
+        current_memory_utilization_gib = current_capacity.memory_utilization_gib.high
         per_instance_mem = max(per_instance_mem, current_memory_utilization_gib)
 
         return (per_instance_cores, per_instance_mem)
