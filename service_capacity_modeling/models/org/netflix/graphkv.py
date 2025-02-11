@@ -63,15 +63,18 @@ class NflxGraphKVCapacityModel(CapacityModel):
             relaxed = user_desires.model_copy(deep=True)
 
             # TODO: introduce a custom config file for graphkv
-            default_amplification = 10
+            # forward edge, reverse edge, properties
+            avg_write_amplification = 3
+            average_node_fanout = 10
+            average_edge_mappings = 5
             relaxed.query_pattern.estimated_read_per_second = (
                 user_desires.query_pattern.estimated_read_per_second.scale(
-                    default_amplification
+                    average_node_fanout * average_edge_mappings
                 )
             )
             relaxed.query_pattern.estimated_write_per_second = (
                 user_desires.query_pattern.estimated_write_per_second.scale(
-                    default_amplification
+                    avg_write_amplification
                 )
             )
 
