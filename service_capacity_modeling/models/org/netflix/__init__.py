@@ -9,6 +9,7 @@ from .elasticsearch import nflx_elasticsearch_master_capacity_model
 from .elasticsearch import nflx_elasticsearch_search_capacity_model
 from .entity import nflx_entity_capacity_model
 from .evcache import nflx_evcache_capacity_model
+from .graphkv import nflx_graphkv_capacity_model
 from .kafka import nflx_kafka_capacity_model
 from .key_value import nflx_key_value_capacity_model
 from .postgres import nflx_postgres_capacity_model
@@ -40,4 +41,5 @@ def models():
         "org.netflix.kafka": nflx_kafka_capacity_model,
         "org.netflix.dynamodb": nflx_ddb_capacity_model,
         "org.netflix.wal": nflx_wal_capacity_model,
+        "org.netflix.graphkv": nflx_graphkv_capacity_model,
     }
