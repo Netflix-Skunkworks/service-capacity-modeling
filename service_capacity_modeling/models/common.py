@@ -54,7 +54,7 @@ def _QOS(tier: int) -> float:
 def _sqrt_staffed_cores(rps: float, latency_s: float, qos: float) -> int:
     # Square root staffing
     # s = a + Q*sqrt(a)
-    return int(math.ceil((rps * latency_s) + qos * math.sqrt(rps * latency_s)))
+    return math.ceil((rps * latency_s) + qos * math.sqrt(rps * latency_s))
 
 
 def sqrt_staffed_cores(desires: CapacityDesires) -> int:
@@ -85,18 +85,32 @@ def sqrt_staffed_cores(desires: CapacityDesires) -> int:
         desires.query_pattern.estimated_mean_write_latency_ms.mid / 1000.0,
     )
 
-    read_cores = _sqrt_staffed_cores(read_rps, read_lat, qos)
-    write_cores = _sqrt_staffed_cores(write_rps, write_lat, qos)
+    total_rate = read_rps + write_rps
+    weighted_latency = (read_rps / total_rate) * read_lat + (
+        write_rps / total_rate
+    ) * write_lat
+    # The alternative is to staff each workload separately, but that over
+    # provisions cores as f(x) + f(y) > f(x+y) (sqrt staffing isn't linear)
+    # read_cores = _sqrt_staffed_cores(read_rps, read_lat, qos)
+    # write_cores = _sqrt_staffed_cores(write_rps, write_lat, qos)
 
-    return read_cores + write_cores
+    return _sqrt_staffed_cores(total_rate, weighted_latency, qos)
 
 
 def normalize_cores(
-    core_count: int,
+    core_count: float,
     target_shape: Instance,
-    reference_shape: Optional[Instance] = default_reference_shape,
+    reference_shape: Optional[Instance] = None,
 ) -> int:
-    """Calculates equivalent cores on a target shape relative to a reference"""
+    """Calculates equivalent cores on a target shape relative to a reference
+
+    Takes into account relative core frequency and IPC factor from the hardware
+    description to give a rough estimate of how many equivalent cores you need
+    in a target_shape to have the core_count number of cores on the reference_shape
+    """
+    if reference_shape is None:
+        reference_shape = default_reference_shape
+
     target_speed = target_shape.cpu_ghz * target_shape.cpu_ipc_scale
     reference_speed = reference_shape.cpu_ghz * reference_shape.cpu_ipc_scale
     return max(1, math.ceil(core_count / (target_speed / reference_speed)))
@@ -175,8 +189,6 @@ def compute_stateless_region(  # pylint: disable=too-many-positional-arguments
     needed_cores: int,
     needed_memory_gib: float,
     needed_network_mbps: float,
-    # Faster CPUs can execute operations faster
-    core_reference_ghz: float,
     num_zones: int = 3,
 ) -> RegionClusterCapacity:
     """Computes a regional cluster of a stateless app
@@ -187,10 +199,6 @@ def compute_stateless_region(  # pylint: disable=too-many-positional-arguments
     """
 
     # Stateless apps basically just use CPU resources and network
-    needed_cores = math.ceil(
-        max(1, needed_cores // (instance.cpu_ghz / core_reference_ghz))
-    )
-
     count = max(2, math.ceil(needed_cores / instance.cpu))
 
     # Now take into account the network bandwidth
@@ -219,8 +227,6 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     needed_disk_gib: float,
     needed_memory_gib: float,
     needed_network_mbps: float,
-    # Faster CPUs can execute operations faster
-    core_reference_ghz: float,
     # Cloud drives may need to scale for IOs, and datastores might need more
     # or less IOs for a given data size as well as space
     # Contract for disk ios is
@@ -245,15 +251,6 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     adjusted_disk_io_needed: float = 0.0,
     read_write_ratio: float = 0.0,
 ) -> ZoneClusterCapacity:
-    # Normalize the cores of this instance type to the latency reference
-    needed_cores = math.ceil(
-        max(
-            1,
-            needed_cores
-            // (instance.cpu_ghz * instance.cpu_ipc_scale / core_reference_ghz),
-        )
-    )
-
     # Datastores often require disk headroom for e.g. compaction and such
     if instance.drive is not None:
         needed_disk_gib = math.ceil(required_disk_space(needed_disk_gib))

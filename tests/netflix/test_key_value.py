@@ -76,7 +76,7 @@ def test_kv_increasing_qps_simple():
     assert all(r[0][0] in ("r", "m", "i") for r in zonal_result)
 
     # We just want ram and cpus for a java app
-    assert all(r[0][0] in ("m", "r") for r in regional_result)
+    assert all(r[0][0] in ("m", "r", "c") for r in regional_result)
 
     # Should have more capacity as requirement increases
     x = [r[1] for r in zonal_result]
@@ -182,7 +182,7 @@ def test_kv_increasing_qps_compare_working_sets():
 
         # We just want ram and cpus for a java app
         assert all(
-            cluster.instance.family[0] in ("m", "r")
+            cluster.instance.family[0] in ("m", "r", "c")
             for cluster in (rlr_small, rlr_large)
         )
 
@@ -255,7 +255,7 @@ def test_kv_plus_evcache_rps_exceeding_250k():
         assert rlr.instance.drive is None
 
         # We just want ram and cpus for a java app
-        assert rlr.instance.family[0] in ("m", "r")
+        assert rlr.instance.family[0] in ("m", "r", "c")
 
         # Check the EVCache cluster
         zlr_evs = [
@@ -358,7 +358,7 @@ def test_kv_plus_evcache_rps_exceeding_100k_and_sufficient_read_write_ratio():
         assert rlr.instance.drive is None
 
         # We just want ram and cpus for a java app
-        assert rlr.instance.family[0] in ("m", "r")
+        assert rlr.instance.family[0] in ("m", "r", "c")
 
         # Check the EVCache cluster
         zlr_evs = [
@@ -457,8 +457,8 @@ def test_kv_rps_exceeding_100k_but_insufficient_read_write_ratio():
         # We should never be paying for ephemeral drives
         assert rlr.instance.drive is None
 
-        # We just want ram and cpus for a java app
-        assert rlr.instance.family[0] in ("m", "r")
+        # We just want ram and cpus for a java app, no drives
+        assert rlr.instance.drive is None
 
         # Validate that there is no EVCache cluster
         assert not any(
@@ -536,9 +536,6 @@ def test_kv_plus_evcache_configured_read_write_ratio_threshold():
 
         # We should never be paying for ephemeral drives
         assert rlr.instance.drive is None
-
-        # We just want ram and cpus for a java app
-        assert rlr.instance.family[0] in ("m", "r")
 
         # Validate that EVCache is included if consistency is valid
         if consistency in (AccessConsistency.eventual, AccessConsistency.best_effort):
@@ -654,9 +651,9 @@ def test_kv_plus_evcache_high_hit_rate():
     assert rlr_eventual.instance.drive is None
     assert rlr_ryw.instance.drive is None
 
-    # We just want ram and cpus for a java app
-    assert rlr_eventual.instance.family[0] in ("m", "r")
-    assert rlr_ryw.instance.family[0] in ("m", "r")
+    # We shouldn't pay for disks
+    assert rlr_eventual.instance.drive is None
+    assert rlr_ryw.instance.drive is None
 
     # For read-your-writes consistency, there should be no EVCache cluster.
     assert not any(
@@ -795,8 +792,8 @@ def test_kv_plus_evcache_low_hit_rate():
     assert rlr_ryw.instance.drive is None
 
     # We just want ram and cpus for a java app
-    assert rlr_eventual.instance.family[0] in ("m", "r")
-    assert rlr_ryw.instance.family[0] in ("m", "r")
+    assert rlr_eventual.instance.drive is None
+    assert rlr_ryw.instance.drive is None
 
     # For read-your-writes consistency, there should be no EVCache cluster.
     assert not any(

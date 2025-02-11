@@ -5,6 +5,7 @@ from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import Clusters
+from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionClusterCapacity
@@ -20,7 +21,7 @@ from service_capacity_modeling.models.common import sqrt_staffed_cores
 def test_merge_plan():
     left_requirement = CapacityRequirement(
         requirement_type="test",
-        core_reference_ghz=2.3,
+        reference_shape=default_reference_shape,
         cpu_cores=Interval(low=10, mid=20, high=30, confidence=0.98),
         mem_gib=Interval(low=20, mid=100, high=200, confidence=0.98),
         network_mbps=Interval(low=1000, mid=2000, high=3000, confidence=0.98),
@@ -28,7 +29,7 @@ def test_merge_plan():
     )
     right_requirement = CapacityRequirement(
         requirement_type="test",
-        core_reference_ghz=2.3,
+        reference_shape=default_reference_shape,
         cpu_cores=Interval(low=10, mid=20, high=30, confidence=0.98),
         mem_gib=Interval(low=20, mid=100, high=200, confidence=0.98),
         network_mbps=Interval(low=1000, mid=2000, high=3000, confidence=0.98),
@@ -208,5 +209,21 @@ def test_normalize_cores():
 
     # New generation should be higher
     assert 18 <= normalize_cores(16, m5xl, m6id) < 20
-    assert 18 <= normalize_cores(16, m6id, m7axl) < 20
-    assert 24 <= normalize_cores(16, m5xl, m7axl) < 30
+    assert 23 <= normalize_cores(16, m6id, m7axl) < 27
+    assert 26 <= normalize_cores(16, m5xl, m7axl) < 30
+
+    # All of these computers are much faster than the reference
+    for shape in (m5xl, r5xl, m6id, i4ixl):
+        assert normalize_cores(16, shape, default_reference_shape) < 13
+
+
+def test_normalize_cores_6_7():
+    """Note this is rather fragile to the exact math of normalize_cores
+
+    If that method changes we'll need to change these assertions
+    """
+    m6ixl = shapes.region("us-east-1").instances["m6i.xlarge"]
+    m7axl = shapes.region("us-east-1").instances["m7a.xlarge"]
+
+    assert 11 == normalize_cores(16, m6ixl, default_reference_shape)
+    assert 7 == normalize_cores(16, m7axl, default_reference_shape)

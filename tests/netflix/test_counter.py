@@ -75,7 +75,7 @@ def test_counter_increasing_qps_simple():
     # We just want ram and cpus for a java app
     regional_families = {r[0] for r in regional_result}
     assert all(
-        family[0] in ("m", "r") for family in regional_families
+        family[0] in ("m", "r", "c") for family in regional_families
     ), f"{regional_families}"
 
     # Should have more capacity as requirement increases

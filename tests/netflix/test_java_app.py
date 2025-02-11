@@ -1,11 +1,18 @@
+import pytest
+
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
-
+from service_capacity_modeling.models.common import normalize_cores
+from tests.util import Approximation
+from tests.util import assert_similar_compute
+from tests.util import PlanVariance
+from tests.util import shape
 
 small_but_high_qps = CapacityDesires(
     service_tier=1,
@@ -34,7 +41,7 @@ large_footprint = CapacityDesires(
 )
 
 
-def test_java_app():
+def test_java_app_large_footprint():
     java_cap_plan = planner.plan_certain(
         model_name="org.netflix.stateless-java",
         region="us-east-1",
@@ -42,18 +49,30 @@ def test_java_app():
     )[0]
     java_result = java_cap_plan.candidate_clusters.regional[0]
     cores = java_result.count * java_result.instance.cpu
-    assert java_result.instance.family.startswith("m")
-    assert 100 <= cores <= 300
 
+    assert 40 < normalize_cores(cores, java_result.instance) < 100
+    assert 15_000 < java_result.annual_cost < 20_000
+
+
+def test_java_app_small_but_high_qps():
     java_cap_plan = planner.plan(
         model_name="org.netflix.stateless-java",
         region="us-east-1",
         desires=small_but_high_qps,
     ).least_regret[0]
     java_result = java_cap_plan.candidate_clusters.regional[0]
+
     cores = java_result.count * java_result.instance.cpu
-    assert java_result.instance.family.startswith("m")
-    assert 100 <= cores <= 300
+    assert_similar_compute(
+        expected_shape=shape("m6i.xlarge"),
+        expected_count=50,
+        actual_shape=java_result.instance,
+        actual_count=java_result.count,
+        # Don't care about memory
+        allowed_variance=PlanVariance(cost=Approximation(abs=15_000)),
+    )
+    assert 40 < normalize_cores(cores, java_result.instance) < 100
+    assert 15_000 < java_result.annual_cost < 40_000
 
 
 def test_uncertain_java_app():
@@ -83,8 +102,7 @@ def test_uncertain_java_app():
     java_result = java_least_regret.candidate_clusters.regional[0]
 
     cores = java_result.count * java_result.instance.cpu
-    assert java_result.instance.family.startswith("m")
-    assert 100 <= cores <= 300
+    assert 30 <= normalize_cores(cores, target_shape=java_result.instance) <= 80
 
     # KeyValue regional clusters should match
     kv_cap_plan = planner.plan(
@@ -96,13 +114,12 @@ def test_uncertain_java_app():
     kv_result = kv_least_regret.candidate_clusters.regional[0]
 
     kv_cores = kv_result.count * kv_result.instance.cpu
-    assert java_result.instance.family.startswith("m")
-    assert 0.5 <= float(kv_cores) / cores <= 1.5
+    assert float(kv_cores) / cores == pytest.approx(1.0, rel=0.10)
 
     assert kv_least_regret.candidate_clusters.zonal[0].count > 0
 
 
-def test_java_heap_heavy():
+def test_java_heap_high_traffic_and_ram():
     large_heap = CapacityDesires(
         service_tier=1,
         query_pattern=QueryPattern(
@@ -127,7 +144,15 @@ def test_java_heap_heavy():
     java_result = java_least_regret.candidate_clusters.regional[0]
 
     cores = java_result.count * java_result.instance.cpu
-    assert 20 <= cores <= 100
+    assert (
+        20
+        <= normalize_cores(
+            cores,
+            target_shape=default_reference_shape,
+            reference_shape=java_result.instance,
+        )
+        <= 100
+    )
     assert java_result.instance.ram_gib > 40
 
     # Should bump the heap due to the traffic
@@ -155,7 +180,15 @@ def test_java_heap_heavy():
     java_result = java_least_regret.candidate_clusters.regional[0]
 
     cores = java_result.count * java_result.instance.cpu
-    assert 100 <= cores <= 300
+    assert (
+        150
+        <= normalize_cores(
+            cores,
+            target_shape=default_reference_shape,
+            reference_shape=java_result.instance,
+        )
+        <= 210
+    )
     # 32 KiB payloads * 30k/second is around 1 GiB per second
     # which should require a decent chunk of heap memory
     memory = java_result.count * java_result.instance.ram_gib

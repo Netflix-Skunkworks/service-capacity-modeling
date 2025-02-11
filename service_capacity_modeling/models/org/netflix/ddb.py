@@ -488,7 +488,6 @@ class NflxDynamoDBCapacityModel(CapacityModel):
 
         requirement = CapacityRequirement(
             requirement_type="dynamo-regional",
-            core_reference_ghz=0,
             cpu_cores=certain_int(0),
             disk_gib=certain_float(storage_plan.total_data_storage_gib),
             context=requirement_context,

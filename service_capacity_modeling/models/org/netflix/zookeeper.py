@@ -66,7 +66,7 @@ def _zk_requirement(
 
     return CapacityRequirement(
         requirement_type="zk-zonal",
-        core_reference_ghz=desires.core_reference_ghz,
+        reference_shape=desires.reference_shape,
         cpu_cores=certain_int(needed_cores),
         mem_gib=certain_float(needed_memory),
         disk_gib=certain_float(needed_disk),

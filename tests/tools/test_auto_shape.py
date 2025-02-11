@@ -49,6 +49,7 @@ def test_pull_family_r6id(mock_ec2):
     # number as GB (base 10) gives 61. This is fine.
     assert 61 < shape.ram_gib < 62
     assert shape.net_mbps == 3125
+    assert shape.drive is not None
     assert shape.drive.single_tenant
     assert shape.drive.read_io_per_s == approx(134167, rel=0.01)
 

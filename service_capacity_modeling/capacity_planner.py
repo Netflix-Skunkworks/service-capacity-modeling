@@ -769,7 +769,6 @@ class CapacityPlanner:
         final_regional = []
         for req_type, samples in zonal_requirements.items():
             req = CapacityRequirement(
-                core_reference_ghz=desires.core_reference_ghz,
                 requirement_type=req_type,
                 **{
                     k: interval(samples=[i.mid for i in v], low_p=low_p, high_p=high_p)
@@ -780,7 +779,6 @@ class CapacityPlanner:
         for req_type, samples in regional_requirements.items():
             req = CapacityRequirement(
                 requirement_type=req_type,
-                core_reference_ghz=desires.core_reference_ghz,
                 **{
                     k: interval(samples=[i.mid for i in v], low_p=low_p, high_p=high_p)
                     for k, v in samples.items()

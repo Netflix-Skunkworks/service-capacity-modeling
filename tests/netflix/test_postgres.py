@@ -5,6 +5,8 @@ from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
+from tests.util import assert_similar_compute
+from tests.util import shape
 
 tier_0 = CapacityDesires(
     service_tier=0,
@@ -137,4 +139,7 @@ def test_tier_3():
         desires=tier_3,
         num_regions=1,
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.2xlarge"
+
+    leader = cap_plan[0].candidate_clusters.regional[0].instance
+    expected = shape("db.r5.4xlarge")
+    assert_similar_compute(expected_shape=expected, actual_shape=leader)

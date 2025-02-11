@@ -131,7 +131,7 @@ def test_timeseries_increasing_qps_simple():
     assert all(r[0][0] in ("r", "m", "i") for r in zonal_result)
 
     # We just want ram and cpus for a java app
-    assert all(r[0][0] in ("m", "r") for r in regional_result)
+    assert all(r[0][0] in ("m", "r", "c") for r in regional_result)
 
     # Should have more capacity as requirement increases
     x = [r[1] for r in zonal_result]

@@ -2,6 +2,7 @@ from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.models.common import normalize_cores
 
 
 def test_kafka_basic():
@@ -34,8 +35,8 @@ def test_kafka_basic():
     lr = plan.least_regret[0]
     lr_cluster = lr.candidate_clusters.zonal
 
-    assert lr.candidate_clusters.total_annual_cost < 30_000
-    assert lr_cluster[0].instance.family in ("i3en", "i4i", "r5")
+    assert 8_000 < lr.candidate_clusters.total_annual_cost < 20_000
+    assert lr_cluster[0].instance.family in ("i3en", "i4i", "r5", "r7a")
 
 
 def test_kafka_large_scale():
@@ -108,7 +109,7 @@ def test_kafka_high_throughput():
     expected_cpu = (120, 200)
     expected_ram = (400, 1200)
     expected_net = (20_000 * 1.4, 28_000 * 1.4)
-    expected_disk = (22000, 25400)
+    expected_disk = (24_000, 30_000)
 
     assert expected_cpu[0] < lr_zone_requirements.cpu_cores.mid < expected_cpu[1]
     assert expected_ram[0] < lr_zone_requirements.mem_gib.mid < expected_ram[1]
@@ -129,17 +130,16 @@ def test_kafka_high_throughput():
     )
 
     for lr in plan.least_regret:
-        assert lr.candidate_clusters.total_annual_cost < 200_000
+        print(lr.candidate_clusters.zonal[0])
+        assert 50_000 < lr.candidate_clusters.total_annual_cost < 200_000
         clstr = lr.candidate_clusters.zonal[0]
         if clstr.instance.drive is None:
-            assert clstr.instance.family in ("r5", "m6i")
             assert clstr.attached_drives[0].name == "gp3"
             disk = clstr.attached_drives[0].size_gib * clstr.count
             assert expected_disk[0] < disk < expected_disk[1] * 2.5
         else:
-            assert clstr.instance.family in ("i3en", "i4i")
             disk = clstr.instance.drive.size_gib * clstr.count
-            assert expected_disk[0] < disk
+            assert expected_disk[0] < disk < expected_disk[1] * 5
 
 
 def test_kafka_high_throughput_ebs():
@@ -173,20 +173,30 @@ def test_kafka_high_throughput_ebs():
     )
 
     lr = plan.least_regret[0]
+    lr_zone_cluster = lr.candidate_clusters.zonal[0]
     lr_zone_requirements = lr.requirements.zonal[0]
     # This should be doable with ~136 cpu cores @3.1 = 182 cores,
     # ~1TiB RAM, and 25Gbps networking
     # Note that network reserves 40% headroom for streaming.
-    expected_cpu = (120, 200)
+    expected_cpu = (80, 140)
     expected_ram = (400, 1200)
     expected_net = (20_000 * 1.4, 28_000 * 1.4)
     expected_disk = (22000, 25400)
-    assert expected_cpu[0] < lr_zone_requirements.cpu_cores.mid < expected_cpu[1]
+    req = lr_zone_requirements
+
+    assert (
+        expected_cpu[0]
+        < normalize_cores(
+            req.cpu_cores.mid,
+            target_shape=desires.reference_shape,
+            reference_shape=lr_zone_cluster.instance,
+        )
+        < expected_cpu[1]
+    )
     assert expected_ram[0] < lr_zone_requirements.mem_gib.mid < expected_ram[1]
     assert expected_net[0] < lr_zone_requirements.network_mbps.mid < expected_net[1]
     assert expected_disk[0] < lr_zone_requirements.disk_gib.mid < expected_disk[1]
 
-    lr_zone_cluster = lr.candidate_clusters.zonal[0]
     # 17 r5.2xlarge is this much memory
     expected_memory = 17 * 62
     # subtract out the 8G heaps + system
@@ -204,7 +214,7 @@ def test_kafka_high_throughput_ebs():
         assert lr.candidate_clusters.total_annual_cost < 250_000
         clstr = lr.candidate_clusters.zonal[0]
         if clstr.instance.drive is None:
-            assert clstr.instance.family in ("r5", "r5n", "m5", "m6i")
+            assert clstr.instance.family[0] in ("r", "m")
             assert clstr.attached_drives[0].name == "gp3"
             disk = clstr.attached_drives[0].size_gib * clstr.count
             assert expected_disk[0] < disk < expected_disk[1] * 2.5

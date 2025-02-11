@@ -30,6 +30,7 @@ from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import network_services
+from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
@@ -86,7 +87,6 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
             else desires.current_clusters.regional[0]
         )
     )
-    # Keep half of the cores free for background work (compaction, backup, repair).
     # Currently, zones and regions are configured in a homogeneous manner. Hence,
     # we just take any one of the current cluster configuration
     if (
@@ -102,21 +102,26 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
             )
             * (current_capacity.cpu_utilization.high / 20)
         )
-        # Capcity planning is done with desires.core_reference_ghz cpu as the reference.
-        # Hence we need to normalize our needed_cores calculation with the reference
-        # cpu utilization.
-        needed_cores = math.ceil(
-            max(
-                1,
-                needed_cores
-                // (
-                    desires.core_reference_ghz
-                    / current_capacity.cluster_instance.cpu_ghz
-                ),
-            )
+        # Normalize those cores to the target shape
+        reference_shape = desires.reference_shape
+        needed_cores = normalize_cores(
+            core_count=needed_cores,
+            target_shape=instance,
+            reference_shape=reference_shape,
         )
+        reference_shape = current_capacity.cluster_instance
     else:
+        # We have no existing utilization to go from
+        # Keep half of the cores free for background work (compaction, backup, repair).
+        reference_shape = desires.reference_shape
         needed_cores = sqrt_staffed_cores(desires) * 2
+
+        needed_cores = normalize_cores(
+            core_count=needed_cores,
+            target_shape=instance,
+            reference_shape=reference_shape,
+        )
+
     # Keep half of the bandwidth available for backup
     needed_network_mbps = simple_network_mbps(desires) * 2
 
@@ -128,9 +133,6 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
 
     # Rough estimate of how many instances we would need just for the CPU
     # Note that this is a lower bound, we might end up with more.
-    needed_cores = math.ceil(
-        max(1, needed_cores // (instance.cpu_ghz / desires.core_reference_ghz))
-    )
     rough_count = math.ceil(needed_cores / instance.cpu)
 
     # Generally speaking we want fewer than some number of reads per second
@@ -176,7 +178,7 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
 
     return CapacityRequirement(
         requirement_type="cassandra-zonal",
-        core_reference_ghz=desires.core_reference_ghz,
+        reference_shape=reference_shape,
         cpu_cores=certain_int(needed_cores),
         mem_gib=certain_float(needed_memory),
         disk_gib=certain_float(needed_disk),
@@ -307,7 +309,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         needed_disk_gib=int(requirement.disk_gib.mid),
         needed_memory_gib=int(requirement.mem_gib.mid),
         needed_network_mbps=requirement.network_mbps.mid,
-        core_reference_ghz=requirement.core_reference_ghz,
         # Take into account the reads per read
         # from the per node dataset using leveled compaction
         required_disk_ios=lambda size, count: (
