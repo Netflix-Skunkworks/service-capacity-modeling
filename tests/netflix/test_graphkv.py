@@ -101,7 +101,7 @@ class TestGraphKVIncreasingQPS:
             )
 
             for plan in (graphkv_plan, kv_plan):
-                assert plan.instance.family[0] in ("m", "r")
+                assert plan.instance.family[0] in ("m", "r", "c")
                 assert plan.instance.drive is None
 
         # Verify capacity increases

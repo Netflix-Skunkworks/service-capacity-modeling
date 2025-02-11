@@ -30,6 +30,7 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import network_services
+from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
@@ -72,6 +73,7 @@ def calculate_spread_cost(cluster_size: int, max_cost=100000, min_cost=0.0) -> f
 
 
 def _estimate_evcache_requirement(
+    instance: Instance,
     desires: CapacityDesires,
     working_set: Optional[float],
     copies_per_region: int,
@@ -81,9 +83,11 @@ def _estimate_evcache_requirement(
     The input desires should be the **regional** desire, and this function will
     return the zonal capacity requirement
     """
-    # EVCache needs to have headroom for region failover
-
-    needed_cores = sqrt_staffed_cores(desires)
+    needed_cores = normalize_cores(
+        core_count=sqrt_staffed_cores(desires),
+        target_shape=instance,
+        reference_shape=desires.reference_shape,
+    )
 
     # For tier 0, we double the number of cores to account for caution
     if desires.service_tier == 0:
@@ -138,7 +142,7 @@ def _estimate_evcache_requirement(
     return (
         CapacityRequirement(
             requirement_type="evcache-zonal",
-            core_reference_ghz=desires.core_reference_ghz,
+            reference_shape=desires.reference_shape,
             cpu_cores=certain_int(needed_cores),
             mem_gib=certain_float(needed_memory),
             disk_gib=certain_float(needed_disk),
@@ -203,6 +207,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         working_set = None
 
     requirement, regrets = _estimate_evcache_requirement(
+        instance=instance,
         desires=desires,
         working_set=working_set,
         copies_per_region=copies_per_region,
@@ -261,7 +266,6 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         min_count=max(min_count, 0),
         # Sidecars and Variable OS Memory
         reserve_memory=lambda x: base_mem,
-        core_reference_ghz=requirement.core_reference_ghz,
         adjusted_disk_io_needed=adjusted_disk_io_needed,
         read_write_ratio=read_write_ratio,
     )

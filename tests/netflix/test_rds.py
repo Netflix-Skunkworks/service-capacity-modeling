@@ -7,6 +7,8 @@ from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
+from tests.util import assert_similar_compute
+from tests.util import shape
 
 tier_0 = CapacityDesires(
     service_tier=0,
@@ -93,14 +95,18 @@ def test_small_footprint():
         region="us-east-1",
         desires=small_footprint,
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.xlarge"
+    expected = shape("m5.2xlarge")
+    leader = cap_plan[0].candidate_clusters.regional[0].instance
+    assert_similar_compute(expected_shape=expected, actual_shape=leader)
 
 
 def test_medium_footprint():
     cap_plan = planner.plan_certain(
         model_name="org.netflix.rds", region="us-east-1", desires=mid_footprint
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.8xlarge"
+    expected = shape("r5.8xlarge")
+    leader = cap_plan[0].candidate_clusters.regional[0].instance
+    assert_similar_compute(expected_shape=expected, actual_shape=leader)
 
 
 def test_large_footprint():
@@ -109,7 +115,9 @@ def test_large_footprint():
         region="us-east-1",
         desires=large_footprint,
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "r5.8xlarge"
+    expected = shape("r5.8xlarge")
+    leader = cap_plan[0].candidate_clusters.regional[0].instance
+    assert_similar_compute(expected_shape=expected, actual_shape=leader)
 
 
 def test_tier_3():

@@ -237,6 +237,7 @@ def test_evcache_ondisk_high_latency_reads_cpu():
             candidate.candidate_clusters.zonal[0].count
             * candidate.candidate_clusters.zonal[0].instance.cpu
             * candidate.candidate_clusters.zonal[0].instance.cpu_ghz
+            * candidate.candidate_clusters.zonal[0].instance.cpu_ipc_scale
         )
 
         assert total_cpu_power > 800

@@ -31,6 +31,7 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.org.netflix.iso_date_math import iso_to_seconds
 
@@ -43,6 +44,7 @@ class ClusterType(str, Enum):
 
 
 def _estimate_kafka_requirement(
+    instance: Instance,
     desires: CapacityDesires,
     copies_per_region: int,
     hot_retention_seconds: float,
@@ -74,7 +76,11 @@ def _estimate_kafka_requirement(
         write_mib_per_second
     )
     # TODO: maybe revisit this?
-    needed_cores = sqrt_staffed_cores(normalized_to_mib)
+    needed_cores = normalize_cores(
+        core_count=sqrt_staffed_cores(normalized_to_mib),
+        target_shape=instance,
+        reference_shape=desires.reference_shape,
+    )
 
     # (Nick): Keep 40% of available bandwidth for node recovery
     # (Joey): For kafka BW = BW_write + BW_reads
@@ -115,7 +121,7 @@ def _estimate_kafka_requirement(
     return (
         CapacityRequirement(
             requirement_type="kafka-zonal",
-            core_reference_ghz=desires.core_reference_ghz,
+            reference_shape=desires.reference_shape,
             cpu_cores=certain_int(needed_cores),
             mem_gib=certain_float(needed_memory),
             disk_gib=certain_float(needed_disk),
@@ -184,6 +190,7 @@ def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-argume
         return None
 
     requirement, regrets = _estimate_kafka_requirement(
+        instance=instance,
         desires=desires,
         zones_per_region=zones_per_region,
         copies_per_region=copies_per_region,
@@ -250,7 +257,6 @@ def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-argume
         # Sidecars and Variable OS Memory
         # Kafka currently uses 8GiB fixed, might want to change to min(30, x // 2)
         reserve_memory=lambda instance_mem_gib: base_mem + 8,
-        core_reference_ghz=requirement.core_reference_ghz,
     )
 
     # Communicate to the actual provision that if we want reduced RF

@@ -28,6 +28,7 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
@@ -77,7 +78,11 @@ def _estimate_elasticsearch_requirement(  # noqa: E501 pylint: disable=too-many-
     return the zonal capacity requirement
     """
     # Keep half of the cores free for background work (merging mostly)
-    needed_cores = math.ceil(sqrt_staffed_cores(desires) * 1.5)
+    needed_cores = normalize_cores(
+        core_count=math.ceil(sqrt_staffed_cores(desires) * 1.5),
+        target_shape=instance,
+        reference_shape=desires.reference_shape,
+    )
     # Keep half of the bandwidth available for backup
     needed_network_mbps = simple_network_mbps(desires) * 2
 
@@ -89,9 +94,6 @@ def _estimate_elasticsearch_requirement(  # noqa: E501 pylint: disable=too-many-
 
     # Rough estimate of how many instances we would need just for the CPU
     # Note that this is a lower bound, we might end up with more.
-    needed_cores = math.ceil(
-        max(1, needed_cores // (instance.cpu_ghz / desires.core_reference_ghz))
-    )
     rough_count = math.ceil(needed_cores / instance.cpu)
 
     # Generally speaking we want fewer than some number of reads per second
@@ -123,7 +125,7 @@ def _estimate_elasticsearch_requirement(  # noqa: E501 pylint: disable=too-many-
 
     return CapacityRequirement(
         requirement_type=f"elasticsearch-{node_type}-zonal",
-        core_reference_ghz=desires.core_reference_ghz,
+        reference_shape=desires.reference_shape,
         cpu_cores=certain_int(needed_cores),
         mem_gib=certain_float(needed_memory),
         disk_gib=certain_float(needed_disk),
@@ -281,7 +283,6 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             # Sidecars/System takes away memory from Elasticsearch
             # which uses half of available system max of 32 for compressed oops
             reserve_memory=lambda x: base_mem + max(32, x / 2),
-            core_reference_ghz=data_requirement.core_reference_ghz,
         )
         data_cluster.cluster_type = "elasticsearch-data"
 
@@ -335,7 +336,6 @@ class NflxElasticsearchMasterCapacityModel(CapacityModel):
         zones_in_region = context.zones_in_region
         requirement = CapacityRequirement(
             requirement_type="elasticsearch-master-zonal",
-            core_reference_ghz=desires.core_reference_ghz,
             cpu_cores=certain_int(2),
             mem_gib=certain_int(24),
             context={},
@@ -381,7 +381,6 @@ class NflxElasticsearchSearchCapacityModel(CapacityModel):
         zones_in_region = context.zones_in_region
         requirement = CapacityRequirement(
             requirement_type="elasticsearch-search-zonal",
-            core_reference_ghz=desires.core_reference_ghz,
             cpu_cores=certain_int(2),
             mem_gib=certain_int(24),
             context={},

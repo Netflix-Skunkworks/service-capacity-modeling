@@ -1,5 +1,7 @@
 import json
 
+from ..util import assert_similar_compute
+from ..util import shape
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
@@ -68,8 +70,8 @@ tier_3 = CapacityDesires(
     query_pattern=QueryPattern(
         estimated_read_per_second=certain_int(200),
         estimated_write_per_second=certain_int(100),
-        estimated_mean_read_latency_ms=certain_float(20),
-        estimated_mean_write_latency_ms=certain_float(20),
+        estimated_mean_read_latency_ms=certain_float(10),
+        estimated_mean_write_latency_ms=certain_float(10),
     ),
     data_shape=DataShape(
         estimated_state_size_gib=certain_int(200),
@@ -93,15 +95,17 @@ def test_small_footprint():
         region="us-east-1",
         desires=small_footprint,
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.xlarge"
+    shape = cap_plan[0].candidate_clusters.regional[0].instance
+    assert 4 < shape.cpu < 12
+    assert 10 < shape.ram_gib < 64
 
     # two instance plus storage and io
     assert (
-        3500
+        6000
         < cap_plan[0].candidate_clusters.annual_costs[
             "aurora-cluster.regional-clusters"
         ]
-        < 4500
+        < 8000
     )
 
 
@@ -109,7 +113,10 @@ def test_medium_footprint():
     cap_plan = planner.plan_certain(
         model_name="org.netflix.aurora", region="us-east-1", desires=mid_footprint
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.4xlarge"
+
+    expected = shape("db.r5.4xlarge")
+    leader = cap_plan[0].candidate_clusters.regional[0].instance
+    assert_similar_compute(expected_shape=expected, actual_shape=leader)
 
 
 def test_large_footprint():
@@ -118,7 +125,10 @@ def test_large_footprint():
         region="us-east-1",
         desires=large_footprint,
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.12xlarge"
+
+    expected = shape("db.r5.12xlarge")
+    leader = cap_plan[0].candidate_clusters.regional[0].instance
+    assert_similar_compute(expected_shape=expected, actual_shape=leader)
 
 
 def test_tier_3():
@@ -127,7 +137,10 @@ def test_tier_3():
         region="us-east-1",
         desires=tier_3,
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.2xlarge"
+
+    expected = shape("db.r5.2xlarge")
+    leader = cap_plan[0].candidate_clusters.regional[0].instance
+    assert_similar_compute(expected_shape=expected, actual_shape=leader)
 
 
 def test_cap_plan():
@@ -228,4 +241,7 @@ def test_cap_plan():
         region="us-east-1",
         desires=my_desire,
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.2xlarge"
+
+    expected = shape("db.r5.2xlarge")
+    leader = cap_plan[0].candidate_clusters.regional[0].instance
+    assert_similar_compute(expected_shape=expected, actual_shape=leader)

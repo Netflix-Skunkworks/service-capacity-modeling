@@ -29,6 +29,7 @@ from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 
@@ -51,8 +52,10 @@ def _estimate_aurora_requirement(
     else:
         needed_cores = sqrt_staffed_cores(desires) * 1.1  # Just a guess!
 
-    needed_cores = math.ceil(
-        max(1, needed_cores // (instance.cpu_ghz / desires.core_reference_ghz))
+    needed_cores = normalize_cores(
+        core_count=needed_cores,
+        target_shape=instance,
+        reference_shape=desires.reference_shape,
     )
 
     # 20% head room For replication, backups etc.
@@ -73,7 +76,7 @@ def _estimate_aurora_requirement(
 
     return CapacityRequirement(
         requirement_type="aurora-regional",
-        core_reference_ghz=desires.core_reference_ghz,
+        reference_shape=desires.reference_shape,
         cpu_cores=certain_int(needed_cores),
         mem_gib=certain_float(needed_memory),
         disk_gib=certain_float(needed_disk),
@@ -133,7 +136,6 @@ def _compute_aurora_region(  # pylint: disable=too-many-positional-arguments
     needed_network_mbps: float,
     required_disk_ios,
     required_disk_space,
-    core_reference_ghz: float,
     db_type: str,
     desires: CapacityDesires,
 ) -> Optional[RegionClusterCapacity]:
@@ -146,9 +148,6 @@ def _compute_aurora_region(  # pylint: disable=too-many-positional-arguments
 
     # TODO: This probably needs to be used ...
     _ = required_disk_ios
-    needed_cores = math.ceil(
-        max(1, needed_cores // (instance.cpu_ghz / core_reference_ghz))
-    )
 
     # We can't scale Aurora horizontally by adding more nodes like we can for
     # Cassandra
@@ -232,7 +231,6 @@ def _estimate_aurora_regional(
         required_disk_ios=lambda size_gib: _rds_required_disk_ios(size_gib, db_type)
         * math.ceil(0.1 * rps),
         required_disk_space=lambda x: x * 1.2,  # Unscientific random guess!
-        core_reference_ghz=requirement.core_reference_ghz,
         db_type=db_type,
         desires=desires,
     )
@@ -325,10 +323,10 @@ class NflxAuroraCapacityModel(CapacityModel):
                 # theoretically takes total of ~300 us end to end, but
                 # PostgreSQL is usually slower ...
                 estimated_mean_read_latency_ms=Interval(
-                    low=1, mid=4, high=100, confidence=0.90
+                    low=1, mid=3.5, high=100, confidence=0.90
                 ),
                 estimated_mean_write_latency_ms=Interval(
-                    low=1, mid=6, high=200, confidence=0.90
+                    low=1, mid=5, high=200, confidence=0.90
                 ),
                 # Single row fetch by PK in MySQL takes total of ~300 ms end to end
                 read_latency_slo_ms=FixedInterval(

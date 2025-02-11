@@ -1,5 +1,3 @@
-from unittest import skip
-
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
@@ -152,7 +150,6 @@ def test_ebs_high_writes():
     assert 4_000 < write_ios < 7_000
 
 
-@skip("This test is is sensitive to datafile order, need review")
 def test_capacity_high_writes():
     cap_plan = planner.plan_certain(
         model_name="org.netflix.cassandra",
@@ -236,8 +233,9 @@ def test_high_write_throughput_ebs():
         },
     )[0]
     high_writes_result = cap_plan.candidate_clusters.zonal[0]
-    assert high_writes_result.instance.family in ("m5", "r5")
-    assert high_writes_result.count > 16
+
+    assert high_writes_result.instance.family[0] in ("m", "r")
+    assert high_writes_result.count > 32
 
     assert high_writes_result.attached_drives[0].size_gib >= 400
     assert (

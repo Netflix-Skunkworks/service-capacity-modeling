@@ -38,7 +38,7 @@ def test_cassandra_merge():
     assert merged.query_pattern.estimated_mean_write_latency_ms.mid == 1.0
 
     # Should come from overall defaults
-    assert merged.core_reference_ghz == 2.3
+    assert merged.reference_shape.cpu_ghz == 2.3
 
     # Should come from the default size producing the count
     # 10 GiB / 512 byte items = 20971520 items

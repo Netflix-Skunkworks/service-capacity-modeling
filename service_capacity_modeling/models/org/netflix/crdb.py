@@ -28,6 +28,7 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
@@ -60,8 +61,12 @@ def _estimate_cockroachdb_requirement(  # noqa=E501 pylint: disable=too-many-pos
     The input desires should be the **regional** desire, and this function will
     return the zonal capacity requirement
     """
-    # Keep half of the cores free for background work (compaction, backup, repair)
-    needed_cores = sqrt_staffed_cores(desires) * 2
+    needed_cores = normalize_cores(
+        # Keep half of the cores free for background work (compaction, backup, index)
+        core_count=sqrt_staffed_cores(desires) * 2,
+        target_shape=instance,
+        reference_shape=desires.reference_shape,
+    )
     # Keep half of the bandwidth available for backup
     needed_network_mbps = simple_network_mbps(desires) * 2
 
@@ -73,9 +78,6 @@ def _estimate_cockroachdb_requirement(  # noqa=E501 pylint: disable=too-many-pos
 
     # Rough estimate of how many instances we would need just for the the CPU
     # Note that this is a lower bound, we might end up with more.
-    needed_cores = math.ceil(
-        max(1, needed_cores // (instance.cpu_ghz / desires.core_reference_ghz))
-    )
     rough_count = math.ceil(needed_cores / instance.cpu)
 
     # Generally speaking we want fewer than some number of reads per second
@@ -103,7 +105,7 @@ def _estimate_cockroachdb_requirement(  # noqa=E501 pylint: disable=too-many-pos
 
     return CapacityRequirement(
         requirement_type="crdb-zonal",
-        core_reference_ghz=desires.core_reference_ghz,
+        reference_shape=desires.reference_shape,
         cpu_cores=certain_int(needed_cores),
         mem_gib=certain_float(needed_memory),
         disk_gib=certain_float(needed_disk),
@@ -190,7 +192,6 @@ def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-p
         needed_disk_gib=requirement.disk_gib.mid,
         needed_memory_gib=requirement.mem_gib.mid,
         needed_network_mbps=requirement.network_mbps.mid,
-        core_reference_ghz=requirement.core_reference_ghz,
         # Take into account the reads per read
         # from the per node dataset using leveled compaction
         # FIXME: I feel like this can be improved

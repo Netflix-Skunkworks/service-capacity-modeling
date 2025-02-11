@@ -28,6 +28,7 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import gp2_gib_for_io
+from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 
@@ -48,8 +49,10 @@ def _estimate_rds_requirement(
     else:
         needed_cores = sqrt_staffed_cores(desires) * 1.1  # Just a guess!
 
-    needed_cores = math.ceil(
-        max(1, needed_cores // (instance.cpu_ghz / desires.core_reference_ghz))
+    needed_cores = normalize_cores(
+        core_count=needed_cores,
+        target_shape=instance,
+        reference_shape=desires.reference_shape,
     )
 
     # 20% head room For replication, backups etc.
@@ -70,7 +73,7 @@ def _estimate_rds_requirement(
 
     return CapacityRequirement(
         requirement_type="rds-regional",
-        core_reference_ghz=desires.core_reference_ghz,
+        reference_shape=desires.reference_shape,
         cpu_cores=certain_int(needed_cores),
         mem_gib=certain_float(needed_memory),
         disk_gib=certain_float(needed_disk),
@@ -100,7 +103,7 @@ def _compute_rds_region(  # pylint: disable=too-many-positional-arguments
     needed_network_mbps: float,
     required_disk_ios,
     required_disk_space,
-    core_reference_ghz: float,
+    reference_shape: Instance,
 ) -> Optional[RegionClusterCapacity]:
     """Computes a regional cluster of a RDS service
 
@@ -109,8 +112,8 @@ def _compute_rds_region(  # pylint: disable=too-many-positional-arguments
     adding more instances like Cassandra. Count of instance is always 1
     """
 
-    needed_cores = math.ceil(
-        max(1, needed_cores // (instance.cpu_ghz / core_reference_ghz))
+    needed_cores = normalize_cores(
+        core_count=needed_cores, target_shape=instance, reference_shape=reference_shape
     )
 
     # We can't scale RDS horizontally by adding more nodes like we can for Cassandra
@@ -183,7 +186,7 @@ def _estimate_rds_regional(
         required_disk_ios=lambda size_gib: _rds_required_disk_ios(size_gib, db_type)
         * math.ceil(0.1 * rps),
         required_disk_space=lambda x: x * 1.2,  # Unscientific random guess!
-        core_reference_ghz=requirement.core_reference_ghz,
+        reference_shape=desires.reference_shape,
     )
 
     if not cluster:

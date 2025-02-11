@@ -56,7 +56,7 @@ def test_wal_increasing_qps_simple():
         )
         wal_results_trend.append((wal_plan.count * wal_plan.instance.cpu,))
         # We just want ram and cpus for a java app
-        assert wal_plan.instance.family[0] in ("m", "r")
+        assert wal_plan.instance.family[0] in ("m", "r", "c")
         # We should never be paying for ephemeral drives
         assert wal_plan.instance.drive is None
 
@@ -117,7 +117,7 @@ def test_wal_increasing_qps_item_count_unset():
         )
         wal_results_trend.append((wal_plan.count * wal_plan.instance.cpu,))
         # We just want ram and cpus for a java app
-        assert wal_plan.instance.family[0] in ("m", "r")
+        assert wal_plan.instance.family[0] in ("m", "r", "c")
         # We should never be paying for ephemeral drives
         assert wal_plan.instance.drive is None
 
@@ -180,7 +180,7 @@ def test_wal_increasing_qps_simple_with_kv_shard():
         )
         wal_results_trend.append((wal_plan.count * wal_plan.instance.cpu,))
         # We just want ram and cpus for a java app
-        assert wal_plan.instance.family[0] in ("m", "r")
+        assert wal_plan.instance.family[0] in ("m", "r", "c")
         # We should never be paying for ephemeral drives
         assert wal_plan.instance.drive is None
 
@@ -243,7 +243,7 @@ def test_wal_increasing_qps_item_count_unset_with_kv_shard():
         )
         wal_results_trend.append((wal_plan.count * wal_plan.instance.cpu,))
         # We just want ram and cpus for a java app
-        assert wal_plan.instance.family[0] in ("m", "r")
+        assert wal_plan.instance.family[0] in ("m", "r", "c")
         # We should never be paying for ephemeral drives
         assert wal_plan.instance.drive is None
 

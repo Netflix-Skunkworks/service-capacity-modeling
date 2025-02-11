@@ -29,11 +29,13 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateless_region
 from service_capacity_modeling.models.common import network_services
+from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 
 
 def _estimate_java_app_requirement(
+    instance: Instance,
     desires: CapacityDesires,
     failover: bool = True,
     jvm_memory_overhead: float = 1.2,
@@ -45,6 +47,13 @@ def _estimate_java_app_requirement(
         # For failover provision at 40% utilization
         needed_cores = int(math.ceil(needed_cores * (1 / 0.4)))
         needed_network_mbps = int(math.ceil(needed_network_mbps * (1 / 0.4)))
+
+    # Adjust cores to clock frequency differences against measurement
+    needed_cores = normalize_cores(
+        core_count=needed_cores,
+        target_shape=instance,
+        reference_shape=desires.reference_shape,
+    )
 
     # Assume a Java application that can allocate about 1 GiB/s to heap
     # per 2 GiB of heap with some amount of overhead on the network traffic.
@@ -62,7 +71,7 @@ def _estimate_java_app_requirement(
 
     return CapacityRequirement(
         requirement_type="java-app",
-        core_reference_ghz=desires.core_reference_ghz,
+        reference_shape=desires.reference_shape,
         cpu_cores=certain_int(needed_cores),
         mem_gib=certain_float(needed_memory_gib),
         network_mbps=certain_float(needed_network_mbps),
@@ -87,7 +96,9 @@ def _estimate_java_app_region(  # pylint: disable=too-many-positional-arguments
         return None
 
     zones_per_region = context.zones_in_region
-    requirement = _estimate_java_app_requirement(desires, failover, jvm_memory_overhead)
+    requirement = _estimate_java_app_requirement(
+        instance, desires, failover, jvm_memory_overhead
+    )
 
     drive = drive.model_copy()
     drive.size_gib = root_disk_gib
@@ -98,7 +109,6 @@ def _estimate_java_app_region(  # pylint: disable=too-many-positional-arguments
         needed_cores=int(requirement.cpu_cores.mid),
         needed_memory_gib=requirement.mem_gib.mid,
         needed_network_mbps=requirement.network_mbps.mid,
-        core_reference_ghz=requirement.core_reference_ghz,
         num_zones=zones_per_region,
     )
     cluster.cluster_type = "nflx-java-app"

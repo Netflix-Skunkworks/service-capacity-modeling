@@ -415,10 +415,10 @@ class Instance(ExcludeUnsetModel):
 
 default_reference_shape = Instance(
     name="default_reference_shape",
-    cpu=2,
-    # Much of our benchmarking was carried out in the 5th gen, can
+    cpu=4,
+    # Much of our benchmarking was carried out in the 5th gen i2 shape, can
     # adjust this up once we go through and fix all the latency distributions
-    cpu_ghz=2.1,
+    cpu_ghz=2.3,
     cpu_ipc_scale=1.0,
     ram_gib=8.0,
     net_mbps=1000,
@@ -773,10 +773,10 @@ class CapacityDesires(ExcludeUnsetModel):
     # What is the current microarchitectural/system configuration of the system
     current_clusters: Optional[CurrentClusters] = None
 
-    # When users are providing latency estimates, what is the typical
-    # instance core frequency we are comparing to. Databases use i3s a lot
-    # hence this default
-    core_reference_ghz: float = 2.3
+    @property
+    def reference_shape(self) -> Instance:
+        # TODO: this should use the shape from current clusters if it is there
+        return default_reference_shape
 
     def merge_with(self, defaults: "CapacityDesires") -> "CapacityDesires":
         # Now merge with the models default
@@ -816,7 +816,9 @@ class CapacityDesires(ExcludeUnsetModel):
 class CapacityRequirement(ExcludeUnsetModel):
     requirement_type: str
 
-    core_reference_ghz: float
+    # cpu_cores was calculated relative to this reference, mostly for
+    # comparing latency to clock frequency
+    reference_shape: Instance = default_reference_shape
     cpu_cores: Interval
     mem_gib: Interval = certain_int(0)
     network_mbps: Interval = certain_int(0)
