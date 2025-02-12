@@ -680,11 +680,13 @@ class CurrentClusterCapacity(ExcludeUnsetModel):
     cluster_instance: Optional[Instance] = None
     cluster_instance_count: Interval
     # The distribution cpu utilization in the cluster.
-    cpu_utilization: Interval
+    cpu_utilization: Interval = certain_float(0.0)
     # The per node distribution of memory used in gib.
-    memory_utilization_gib: Interval
+    memory_utilization_gib: Interval = certain_float(0.0)
     # The per node distribution of network used in mbps.
-    network_utilization_mbps: Interval
+    network_utilization_mbps: Interval = certain_float(0.0)
+    # The per node distribution of disk used in gib.
+    disk_utilization_gib: Interval = certain_float(0.0)
 
 
 # For services that are provisioned by zone (e.g. Cassandra, EVCache)
