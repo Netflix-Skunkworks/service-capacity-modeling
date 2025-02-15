@@ -1,4 +1,6 @@
 from service_capacity_modeling.capacity_planner import planner
+from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import DataShape
@@ -18,6 +20,7 @@ user_desires = CapacityDesires(
     data_shape=DataShape(
         estimated_state_size_gib=certain_int(10),
     ),
+    buffers=Buffers(desired={"custom": 3.8}),
 )
 
 
@@ -32,10 +35,13 @@ def test_cassandra_merge():
     assert merged.query_pattern.estimated_read_per_second.mid == 100000
     assert merged.query_pattern.estimated_mean_read_size_bytes.low == 10
     assert merged.data_shape.estimated_state_size_gib.mid == 10
+    assert merged.buffers.buffer_for_component("custom").ratio == 3.8
 
-    # Should come from cassandra
+    # Should come from cassandra model
     assert merged.query_pattern.estimated_mean_read_latency_ms.mid == 2.0
     assert merged.query_pattern.estimated_mean_write_latency_ms.mid == 1.0
+    assert merged.buffers.buffer_for_component(BufferComponent.cpu).ratio == 2.0
+    assert merged.buffers.buffer_for_component(BufferComponent.disk).ratio == 4.0
 
     # Should come from overall defaults
     assert merged.reference_shape.cpu_ghz == 2.3

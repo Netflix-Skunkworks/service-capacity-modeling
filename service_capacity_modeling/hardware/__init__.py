@@ -223,5 +223,15 @@ class HardwareShapes:
     def region(self, region: str) -> Hardware:
         return self.hardware.regions[region]
 
+    def instance(self, name: str, region: Optional[str] = None) -> Instance:
+        if region is not None:
+            return self.region(region).instances[name]
+
+        for _, hw in self.hardware.regions.items():
+            if name in hw.instances:
+                return hw.instances[name]
+
+        raise KeyError(f"Unknown instance {name}")
+
 
 shapes: HardwareShapes = HardwareShapes()

@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 from __future__ import annotations
 
 import re
@@ -141,6 +142,11 @@ def certain_int(x: int) -> Interval:
 @lru_cache(2048)
 def certain_float(x: float) -> Interval:
     return Interval(low=x, mid=x, high=x, confidence=1.0)
+
+
+@lru_cache(2048)
+def fixed_float(x: float) -> FixedInterval:
+    return FixedInterval(low=x, mid=x, high=x, confidence=1.0)
 
 
 def interval(samples: Sequence[float], low_p: int = 5, high_p: int = 95) -> Interval:
@@ -756,6 +762,122 @@ class CurrentClusters(ExcludeUnsetModel):
     services: Sequence[ServiceCapacity] = []
 
 
+class BufferComponent(str, Enum):
+    """Represents well known buffer components such as compute and storage
+
+    Note that while these are common and defined here for models to share,
+    models can have w.e. buffers they want, and this type should not enter
+    the Buffers interface itself (should be str).
+    """
+
+    # "Traffic" related buffers, e.g. CPU and Network
+    compute = "compute"
+    # "Dataset" related buffers, e.g. Disk and Memory
+    storage = "storage"
+    # Specific resources
+    cpu = "cpu"
+    network = "network"
+    disk = "disk"
+    # Memory can be used for various buffers
+    memory = "memory"
+    memory_traffic = "memory-traffic"
+    memory_write_cache = "memory-write-cache"
+    memory_read_cache = "memory-read-cache"
+
+
+class Buffer(ExcludeUnsetModel):
+    # The type of buffer, intentionally not BufferComponent to allow
+    # models to define their own.
+    component: str
+    # The value of the buffer expressed as a ratio over "normal" load e.g. 1.5x
+    ratio: float
+    # Set only if the source of the buffer is not the direct component
+    source: Optional[str] = None
+
+
+class Buffers(ExcludeUnsetModel):
+    """Typical buffers (headroom) over the requirements to build into the system
+
+    Note that typically models make these choices, for example if a workload
+    requires 10 CPU cores, but the operator likes to build in 2x buffer for
+    variance (20 cores provisioned), they would express that as:
+        Buffer(
+            desired={
+                "compute": 2.0
+            }
+        )
+
+    There is a series of fallbacks here over common desired buffers:
+        compute -> default
+        cpu -> compute -> default
+        network -> compute -> default
+        disk -> storage -> default
+        memory -> storage -> default
+        memory-traffic -> memory -> default
+        memory-write-cache -> memory -> default
+        memory-read-cache -> memory -> default
+    """
+
+    # The default buffer if a specific buffer isn't known
+    # Models should prefer to document their precise buffers in desired
+    default: float = 1.5
+    # Desired compute, storage, cpu, memory, etc... buffers
+    desired: Dict[str, float] = {}
+    # Derive these buffers from current clusters or model context
+    derived: List[str] = []
+
+    def buffer_for_component(
+        self, component: str, current: Optional[CurrentClusterCapacity] = None
+    ) -> Buffer:
+        # flake8: noqa: C901
+        """Calculates buffer for a given component, handling fallbacks
+
+        Typical usage would be buffer("compute") to get the compute buffer
+        or buffer("storage") to get the storage buffer, but you can ask specific
+        resources like buffer("cpu").
+
+        Returns a tuple of the buffer expressed as a ratio (e.g. 2.0 for 2x buffer)
+        and the source of that buffer, e.g. "compute" if "cpu" was requested but
+        there is not explicit cpu buffer set by the model
+        """
+        buffers = dict(self.desired)
+        if isinstance(component, BufferComponent):
+            component = component.value
+
+        if current is not None:
+            # TODO (jolynch | 2025-02-15) Use current cluster when provided
+            #  If derived is set for the component, we should take buffers
+            #  from the current utilization not from desired. If a cluster is
+            #  happily running at 1.4x buffer the model shouldn't enforce its
+            #  default
+            for _ in self.derived:
+                pass
+
+        if component in buffers:
+            return Buffer(component=component, ratio=buffers[component])
+
+        # Fallbacks
+        def buffer_for(val: str) -> Buffer:
+            if isinstance(val, BufferComponent):
+                val = val.value
+            return Buffer(component=component, source=val, ratio=buffers[val])
+
+        fallbacks = {
+            "cpu": [BufferComponent.compute],
+            "network": [BufferComponent.compute],
+            "memory": [BufferComponent.storage, BufferComponent.cpu],
+            "disk": [BufferComponent.storage],
+        }
+        for fallback in fallbacks.get(component, []):
+            if fallback in buffers:
+                return buffer_for(fallback)
+
+        if component.startswith("memory") and BufferComponent.memory in buffers:
+            return buffer_for(BufferComponent.memory)
+
+        return Buffer(component=component, source="default", ratio=self.default)
+
+
 class CapacityDesires(ExcludeUnsetModel):
     # How critical is this cluster, impacts how much "extra" we provision
     # 0 = Critical to the product            (Product does not function)
@@ -767,11 +889,16 @@ class CapacityDesires(ExcludeUnsetModel):
     # How will the service be queried
     query_pattern: QueryPattern = QueryPattern()
 
-    # What will the state look like
+    # What will the state look like that is being queries
     data_shape: DataShape = DataShape()
 
-    # What is the current microarchitectural/system configuration of the system
+    # What is the current deployment and utilization of the system
     current_clusters: Optional[CurrentClusters] = None
+
+    # What are the desired buffers (headroom) state, mostly injected by models
+    # Note if you pass current_clusters you can express "I need the status quo"
+    # by setting the buffers you want to preserve in buffers.derived
+    buffers: Buffers = Buffers()
 
     @property
     def reference_shape(self) -> Instance:
@@ -787,6 +914,20 @@ class CapacityDesires(ExcludeUnsetModel):
             desires_dict.pop("query_pattern", {})
         )
         default_dict.get("data_shape", {}).update(desires_dict.pop("data_shape", {}))
+
+        # Buffers has deep structure we want to deep merge on
+        if "buffers" not in default_dict:
+            default_dict["buffers"] = {}
+        default_buffers = default_dict["buffers"]
+        desired_buffers = desires_dict.pop("buffers", {})
+        if "default" in desired_buffers:
+            default_buffers["default"] = desired_buffers["default"]
+        for k, v in desired_buffers.get("desired", {}).items():
+            default_buffers["desired"][k] = v
+        for i in desired_buffers.get("derived", []):
+            if i not in default_buffers["derived"]:
+                default_buffers["derived"].append(i)
+
         default_dict.update(desires_dict)
 
         desires = CapacityDesires(**default_dict)
