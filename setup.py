@@ -33,7 +33,7 @@ setuptools.setup(
     package_data={
         "": [
             "hardware/profiles/profiles.txt",
-            "hardware/profiles/shapes/*.json",
+            "hardware/profiles/shapes/**/*.json",
             "hardware/profiles/pricing/**/*.json",
         ]
     },
