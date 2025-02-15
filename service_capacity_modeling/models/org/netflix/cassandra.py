@@ -10,6 +10,8 @@ from pydantic import Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
@@ -113,8 +115,9 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     else:
         # We have no existing utilization to go from
         # Keep half of the cores free for background work (compaction, backup, repair).
+        cpu_buffer = desires.buffers.buffer_for_component("cpu").ratio
         reference_shape = desires.reference_shape
-        needed_cores = sqrt_staffed_cores(desires) * 2
+        needed_cores = math.ceil(sqrt_staffed_cores(desires) * cpu_buffer)
 
         needed_cores = normalize_cores(
             core_count=needed_cores,
@@ -302,6 +305,9 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         buffer_percent=(max_write_buffer_percent * max_table_buffer_percent),
     )
 
+    # Typically 4x buffer
+    disk_buffer = desires.buffers.buffer_for_component(component="disk").ratio
+
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
@@ -317,7 +323,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         ),
         # C* requires ephemeral disks to be 25% full because compaction
         # and replacement time if we're underscaled.
-        required_disk_space=lambda x: x * 4,
+        required_disk_space=lambda x: x * disk_buffer,
         # C* clusters cannot recover data from neighbors quickly so we
         # want to avoid clusters with more than 1 TiB of local state
         max_local_disk_gib=max_local_disk_gib,
@@ -592,6 +598,11 @@ class NflxCassandraCapacityModel(CapacityModel):
         else:
             rf_write_latency = Interval(low=0.4, mid=1, high=2, confidence=0.98)
 
+        default_buffers = Buffers(
+            default=2.0,
+            desired={BufferComponent.compute: 2.0, BufferComponent.storage: 4.0},
+        )
+
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(
@@ -653,6 +664,7 @@ class NflxCassandraCapacityModel(CapacityModel):
                     # but account for the Priam sidecar here
                     reserved_instance_app_mem_gib=4,
                 ),
+                buffers=default_buffers,
             )
         else:
             return CapacityDesires(
@@ -712,6 +724,7 @@ class NflxCassandraCapacityModel(CapacityModel):
                     # but account for the Priam sidecar here
                     reserved_instance_app_mem_gib=4,
                 ),
+                buffers=default_buffers,
             )
 
 

@@ -358,6 +358,9 @@ class CapacityPlanner:
     def hardware_shapes(self) -> HardwareShapes:
         return self._shapes
 
+    def instance(self, name: str, region: Optional[str] = None) -> Instance:
+        return self.hardware_shapes.instance(name, region=region)
+
     def _plan_percentiles(  # pylint: disable=too-many-positional-arguments
         self,
         model_name: str,

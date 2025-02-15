@@ -8,6 +8,8 @@ from typing import Optional
 from typing import Tuple
 
 from service_capacity_modeling.interface import AVG_ITEM_SIZE_BYTES
+from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import certain_float
@@ -114,6 +116,52 @@ def normalize_cores(
     target_speed = target_shape.cpu_ghz * target_shape.cpu_ipc_scale
     reference_speed = reference_shape.cpu_ghz * reference_shape.cpu_ipc_scale
     return max(1, math.ceil(core_count / (target_speed / reference_speed)))
+
+
+def _headroom_approx(threads: int, thread_adj: float = 1.0) -> float:
+    """For implementation see /notebooks/headroom-estimator.ipynb"""
+    # Adjust effective cores if e.g. is enabled
+    # This accounts for the reduced effectiveness of virtual cores
+    threads_f = float(threads) * thread_adj
+
+    # Calculate required headroom using Erlang-C staffing formula with P_Q=30:
+    return 0.712 / (threads_f**0.448)
+
+
+def cpu_headroom_target(instance: Instance, buffers: Optional[Buffers] = None) -> float:
+    """Determine an approximate headroom target for an instance.
+
+    The headroom target should be the percentage of CPU that should be
+    reserved for headroom to ensure sensible performance profile. In other words,
+    we want to avoid queueing and just have service time.
+
+    If buffer is None we leave the ultimate utilization_target to the caller, since
+    we do not know how much operational headroom they want to leave
+    (ie: success buffer). If passed, we will return the headroom for that buffer.
+
+    For example, a response here of "headroom = 15%", means caller could
+    decide with a success_buffer=1 to use a utilization_target of 85%.
+    For success_buffer>1, they should target below 85% utilization.
+
+    This is only suitable for "single-thread-like" workloads, which
+    fortunately many stateless services are.
+
+    For implementation see /notebooks/headroom-estimator.ipynb
+    """
+    adj = 1.0
+    if instance.cores >= instance.cpu:
+        # Non-Hyperthreading performance boost
+        # When hyperthreading is enabled, each cpu is not as effective as a
+        # physical core. We estimate each virtual core to be about 60% as
+        # effective as a physical core, or conversely instances that have all
+        # full-fat cores are valued at 1.66 threads per core
+        adj = 1 / 0.6
+    headroom = _headroom_approx(instance.cpu, thread_adj=adj)
+    if buffers is not None:
+        cpu_ratio = buffers.buffer_for_component(BufferComponent.cpu).ratio
+        return round(1.0 - ((1.0 - headroom) / cpu_ratio), 2)
+    else:
+        return round(headroom, 2)
 
 
 def simple_network_mbps(desires: CapacityDesires) -> int:
