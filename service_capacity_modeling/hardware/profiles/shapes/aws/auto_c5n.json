@@ -1,0 +1,64 @@
+{
+  "instances": {
+    "c5n.large": {
+      "name": "c5n.large",
+      "cpu": 2,
+      "cpu_cores": 1,
+      "cpu_ghz": 3.4,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 5.01,
+      "net_mbps": 3000.0,
+      "drive": null
+    },
+    "c5n.xlarge": {
+      "name": "c5n.xlarge",
+      "cpu": 4,
+      "cpu_cores": 2,
+      "cpu_ghz": 3.4,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 10.01,
+      "net_mbps": 5000.0,
+      "drive": null
+    },
+    "c5n.2xlarge": {
+      "name": "c5n.2xlarge",
+      "cpu": 8,
+      "cpu_cores": 4,
+      "cpu_ghz": 3.4,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 20.03,
+      "net_mbps": 10000.0,
+      "drive": null
+    },
+    "c5n.4xlarge": {
+      "name": "c5n.4xlarge",
+      "cpu": 16,
+      "cpu_cores": 8,
+      "cpu_ghz": 3.4,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 40.05,
+      "net_mbps": 15000.0,
+      "drive": null
+    },
+    "c5n.9xlarge": {
+      "name": "c5n.9xlarge",
+      "cpu": 36,
+      "cpu_cores": 18,
+      "cpu_ghz": 3.4,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 91.55,
+      "net_mbps": 50000.0,
+      "drive": null
+    },
+    "c5n.18xlarge": {
+      "name": "c5n.18xlarge",
+      "cpu": 72,
+      "cpu_cores": 36,
+      "cpu_ghz": 3.4,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 183.11,
+      "net_mbps": 100000.0,
+      "drive": null
+    }
+  }
+}
