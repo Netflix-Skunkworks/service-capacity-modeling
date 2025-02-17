@@ -812,10 +812,10 @@ class Buffers(ExcludeUnsetModel):
         cpu -> compute -> default
         network -> compute -> default
         disk -> storage -> default
-        memory -> storage -> default
-        memory-traffic -> memory -> default
-        memory-write-cache -> memory -> default
-        memory-read-cache -> memory -> default
+        memory -> storage -> compute -> default
+        memory-traffic -> memory -> traffic -> default
+        memory-write-cache -> memory -> traffic -> default
+        memory-read-cache -> memory -> storage -> default
     """
 
     # The default buffer if a specific buffer isn't known
@@ -865,15 +865,15 @@ class Buffers(ExcludeUnsetModel):
         fallbacks = {
             "cpu": [BufferComponent.compute],
             "network": [BufferComponent.compute],
-            "memory": [BufferComponent.storage, BufferComponent.cpu],
+            "memory": [BufferComponent.storage, BufferComponent.compute],
             "disk": [BufferComponent.storage],
+            "memory-traffic": [BufferComponent.memory, BufferComponent.compute],
+            "memory-write-cache": [BufferComponent.memory, BufferComponent.compute],
+            "memory-read-cache": [BufferComponent.memory, BufferComponent.storage],
         }
         for fallback in fallbacks.get(component, []):
             if fallback in buffers:
                 return buffer_for(fallback)
-
-        if component.startswith("memory") and BufferComponent.memory in buffers:
-            return buffer_for(BufferComponent.memory)
 
         return Buffer(component=component, source="default", ratio=self.default)
 
