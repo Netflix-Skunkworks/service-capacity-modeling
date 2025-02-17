@@ -10,6 +10,7 @@ from pydantic import Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
@@ -30,6 +31,7 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
@@ -40,6 +42,8 @@ from service_capacity_modeling.models.utils import next_power_of_2
 from service_capacity_modeling.stats import dist_for_interval
 
 logger = logging.getLogger(__name__)
+
+BACKGROUND_BUFFER = "background"
 
 
 def _write_buffer_gib_zone(
@@ -89,6 +93,12 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
             else desires.current_clusters.regional[0]
         )
     )
+    # Cassandra does various background activity (compaction, repair, backup) which
+    # require up to half a machine's cores and network to safely perform.
+    background_buffer = buffer_for_components(
+        buffers=desires.buffers, components=[BACKGROUND_BUFFER]
+    )
+
     # Currently, zones and regions are configured in a homogeneous manner. Hence,
     # we just take any one of the current cluster configuration
     if (
@@ -114,10 +124,9 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
         reference_shape = current_capacity.cluster_instance
     else:
         # We have no existing utilization to go from
-        # Keep half of the cores free for background work (compaction, backup, repair).
-        cpu_buffer = desires.buffers.buffer_for_component("cpu").ratio
         reference_shape = desires.reference_shape
-        needed_cores = math.ceil(sqrt_staffed_cores(desires) * cpu_buffer)
+        # Keep half of the cores free for background work (compaction, backup, repair).
+        needed_cores = math.ceil(sqrt_staffed_cores(desires) * background_buffer.ratio)
 
         needed_cores = normalize_cores(
             core_count=needed_cores,
@@ -125,8 +134,8 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
             reference_shape=reference_shape,
         )
 
-    # Keep half of the bandwidth available for backup
-    needed_network_mbps = simple_network_mbps(desires) * 2
+    # Keep half of the bandwidth available for backup and repair streaming
+    needed_network_mbps = simple_network_mbps(desires) * background_buffer.ratio
 
     needed_disk = math.ceil(
         (1.0 / desires.data_shape.estimated_compression_ratio.mid)
@@ -305,8 +314,10 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         buffer_percent=(max_write_buffer_percent * max_table_buffer_percent),
     )
 
-    # Typically 4x buffer
-    disk_buffer = desires.buffers.buffer_for_component(component="disk").ratio
+    # Typically 4x buffer except when rightsizing
+    disk_buffer = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.disk]
+    )
 
     cluster = compute_stateful_zone(
         instance=instance,
@@ -323,7 +334,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         ),
         # C* requires ephemeral disks to be 25% full because compaction
         # and replacement time if we're underscaled.
-        required_disk_space=lambda x: x * disk_buffer,
+        required_disk_space=lambda x: x * disk_buffer.ratio,
         # C* clusters cannot recover data from neighbors quickly so we
         # want to avoid clusters with more than 1 TiB of local state
         max_local_disk_gib=max_local_disk_gib,
@@ -598,9 +609,24 @@ class NflxCassandraCapacityModel(CapacityModel):
         else:
             rf_write_latency = Interval(low=0.4, mid=1, high=2, confidence=0.98)
 
-        default_buffers = Buffers(
-            default=2.0,
-            desired={BufferComponent.compute: 2.0, BufferComponent.storage: 4.0},
+        # By supplying these buffers we can deconstruct observed utilization into
+        # load versus buffer.
+        buffers = Buffers(
+            default=Buffer(ratio=1.5),
+            desired={
+                "compute": Buffer(ratio=1.5, components=[BufferComponent.compute]),
+                "storage": Buffer(ratio=4.0, components=[BufferComponent.storage]),
+                # Cassandra reserves headroom in both cpu and network for background
+                # work and tasks
+                "background": Buffer(
+                    ratio=2.0,
+                    components=[
+                        BufferComponent.cpu,
+                        BufferComponent.network,
+                        BACKGROUND_BUFFER,
+                    ],
+                ),
+            },
         )
 
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
@@ -664,7 +690,7 @@ class NflxCassandraCapacityModel(CapacityModel):
                     # but account for the Priam sidecar here
                     reserved_instance_app_mem_gib=4,
                 ),
-                buffers=default_buffers,
+                buffers=buffers,
             )
         else:
             return CapacityDesires(
@@ -724,7 +750,7 @@ class NflxCassandraCapacityModel(CapacityModel):
                     # but account for the Priam sidecar here
                     reserved_instance_app_mem_gib=4,
                 ),
-                buffers=default_buffers,
+                buffers=buffers,
             )
 
 

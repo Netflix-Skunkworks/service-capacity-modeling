@@ -3,11 +3,14 @@ import math
 import random
 from decimal import Decimal
 from typing import Callable
+from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Tuple
 
+from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import AVG_ITEM_SIZE_BYTES
+from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
@@ -15,6 +18,7 @@ from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
+from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Instance
@@ -159,12 +163,76 @@ def cpu_headroom_target(instance: Instance, buffers: Optional[Buffers] = None) -
     cpu_boost = 1.0 if instance.cores < instance.cpu else 1.0 / 0.6
     reserved_headroom = _reserved_headroom(instance.cpu, cpu_boost)
     if buffers is not None:
-        cpu_ratio = buffers.buffer_for_component(BufferComponent.cpu).ratio
+        cpu_ratio = buffer_for_components(
+            buffers=buffers, components=[BufferComponent.cpu]
+        ).ratio
         buffer_adjusted_headroom = (1.0 - reserved_headroom) / cpu_ratio
         effective_headroom = 1.0 - buffer_adjusted_headroom
         return round(effective_headroom, 2)
     else:
         return round(reserved_headroom, 2)
+
+
+# When someone asks for the key, return any buffers that
+# influence the component in the value
+_default_buffer_fallbacks: Dict[str, List[str]] = {
+    BufferComponent.compute: [BufferComponent.cpu],
+    BufferComponent.storage: [BufferComponent.disk],
+    BufferComponent.cpu: [BufferComponent.compute],
+    BufferComponent.network: [BufferComponent.compute],
+    BufferComponent.memory: [BufferComponent.storage],
+    BufferComponent.disk: [BufferComponent.storage],
+}
+
+
+def buffer_for_components(
+    buffers: Buffers,
+    components: List[str],
+    current_capacity: Optional[CurrentClusterCapacity] = None,
+    component_fallbacks: Optional[Dict[str, List[str]]] = None,
+) -> Buffer:
+    """Calculates buffer for a given set of components, handling fallbacks
+
+    Typical usage would be buffer_for_components(buffers, ["cpu"]) to get the
+    cpu buffer or buffer_for_components(buffers, ["disk"]) to get the disk buffer,
+    but you can also do like buffer_for_components(buffers, ["compute"]) which will
+    pull any compute buffers or cpu buffers.
+
+    Returns a Buffer containing:
+        ratio: the composite ratio (e.g. 2.0 for 2x combined buffer)
+        components: the components that ultimately matched after applying
+        source: All the component buffers that made up the composite ratio
+    """
+    if component_fallbacks is None:
+        component_fallbacks = _default_buffer_fallbacks
+
+    unique_components = set(components)
+    for component in components:
+        unique_components = unique_components | set(
+            component_fallbacks.get(component, [])
+        )
+
+    desired = {k: v.model_copy() for k, v in buffers.desired.items()}
+    if current_capacity:
+        if current_capacity.cluster_instance is None:
+            cluster_instance = shapes.instance(current_capacity.cluster_instance_name)
+        else:
+            cluster_instance = current_capacity.cluster_instance
+        # TODO: use cluster instance to reverse compute the buffers
+        _ = cluster_instance
+
+    ratio = 1.0
+    sources = {}
+    for name, buffer in desired.items():
+        if any(i in unique_components for i in buffer.components):
+            sources[name] = buffer
+            ratio *= buffer.ratio
+    if not sources:
+        ratio = buffers.default.ratio
+
+    return Buffer(
+        ratio=ratio, components=sorted(list(unique_components)), sources=sources
+    )
 
 
 def simple_network_mbps(desires: CapacityDesires) -> int:
