@@ -774,112 +774,81 @@ class BufferComponent(str, Enum):
     the Buffers interface itself (should be str).
     """
 
-    # "Traffic" related buffers, e.g. CPU and Network
+    # [Query Pattern] a.k.a. "Traffic" related buffers, e.g. CPU and Network
     compute = "compute"
-    # "Dataset" related buffers, e.g. Disk and Memory
+    # [Data Shape]    a.k.a. "Dataset" related buffers, e.g. Disk and Memory
     storage = "storage"
-    # Specific resources
+
+    # Resource specific component
     cpu = "cpu"
     network = "network"
     disk = "disk"
-    # Memory can be used for various buffers
     memory = "memory"
-    memory_traffic = "memory-traffic"
-    memory_write_cache = "memory-write-cache"
-    memory_read_cache = "memory-read-cache"
+
+
+class BufferIntent(str, Enum):
+    # Most buffers show "desired" buffer, this is the default
+    desired = "desired"
+    # ratio on top of existing buffers to ensure exists. Generally combined
+    # with a different desired buffer to ensure we don't just scale needlessly
+    scale = "scale"
+    # Ignore model preferences, just preserve existing buffers
+    preserve = "preserve"
 
 
 class Buffer(ExcludeUnsetModel):
-    # The type of buffer, intentionally not BufferComponent to allow
-    # models to define their own.
-    component: str
     # The value of the buffer expressed as a ratio over "normal" load e.g. 1.5x
-    ratio: float
-    # Set only if the source of the buffer is not the direct component
-    source: Optional[str] = None
+    ratio: float = 1.0
+    # What is the intent of this buffer directive, almost always is desired
+    intent: BufferIntent = BufferIntent.desired
+    # The components of buffer this influences, almost always is "compute" (IPC success)
+    components: List[str] = [BufferComponent.compute]
+    # If this buffer was made up of other buffers, what contributed
+    sources: Dict[str, Buffer] = {}
 
 
 class Buffers(ExcludeUnsetModel):
     """Typical buffers (headroom) over the requirements to build into the system
 
-    Note that typically models make these choices, for example if a workload
-    requires 10 CPU cores, but the operator likes to build in 2x buffer for
-    variance (20 cores provisioned), they would express that as:
-        Buffer(
-            desired={
-                "compute": 2.0
-            }
-        )
+    Note that typically callers make buffer choices based on business context for
+    example a tier 1 service may request:
 
-    There is a series of fallbacks here over common desired buffers:
-        compute -> default
-        cpu -> compute -> default
-        network -> compute -> default
-        disk -> storage -> default
-        memory -> storage -> default
-        memory-traffic -> memory -> default
-        memory-write-cache -> memory -> default
-        memory-read-cache -> memory -> default
+    Buffers(
+        desired={
+            "compute": Buffer(ratio: 1.5),
+        }
+    )
+
+    And then models layer in their buffers, for example if a workload
+    requires 10 CPU cores, but the operator of that workload  likes to build in
+    2x buffer for background work (20 cores provisioned), they would express that
+    as a model desire default of:
+
+    Buffers(
+        desired={
+            "background": Buffer(ratio: 2.0, components=[BufferComponent.cpu]),
+        }
+    )
+
+    In this case when we query the buffer_for_components(components=["cpu"])
+    we get 2.0 * 1.5 = 3x because the model has reserved 2x for background work
+    and the caller has asked for 1.5x load buffer - we also see both component
+    buffers in the Buffer.source field.
     """
 
     # The default buffer if a specific buffer isn't known
     # Models should prefer to document their precise buffers in desired
-    default: float = 1.5
+    default: Buffer = Buffer(ratio=1.5)
     # Desired compute, storage, cpu, memory, etc... buffers
-    desired: Dict[str, float] = {}
+    desired: Dict[str, Buffer] = {}
     # Derive these buffers from current clusters or model context
-    derived: List[str] = []
-
-    def buffer_for_component(
-        self, component: str, current: Optional[CurrentClusterCapacity] = None
-    ) -> Buffer:
-        # flake8: noqa: C901
-        """Calculates buffer for a given component, handling fallbacks
-
-        Typical usage would be buffer("compute") to get the compute buffer
-        or buffer("storage") to get the storage buffer, but you can ask specific
-        resources like buffer("cpu").
-
-        Returns a tuple of the buffer expressed as a ratio (e.g. 2.0 for 2x buffer)
-        and the source of that buffer, e.g. "compute" if "cpu" was requested but
-        there is not explicit cpu buffer set by the model
-        """
-        buffers = dict(self.desired)
-        if isinstance(component, BufferComponent):
-            component = component.value
-
-        if current is not None:
-            # TODO (jolynch | 2025-02-15) Use current cluster when provided
-            #  If derived is set for the component, we should take buffers
-            #  from the current utilization not from desired. If a cluster is
-            #  happily running at 1.4x buffer the model shouldn't enforce its
-            #  default
-            for _ in self.derived:
-                pass
-
-        if component in buffers:
-            return Buffer(component=component, ratio=buffers[component])
-
-        # Fallbacks
-        def buffer_for(val: str) -> Buffer:
-            if isinstance(val, BufferComponent):
-                val = val.value
-            return Buffer(component=component, source=val, ratio=buffers[val])
-
-        fallbacks = {
-            "cpu": [BufferComponent.compute],
-            "network": [BufferComponent.compute],
-            "memory": [BufferComponent.storage, BufferComponent.cpu],
-            "disk": [BufferComponent.storage],
-        }
-        for fallback in fallbacks.get(component, []):
-            if fallback in buffers:
-                return buffer_for(fallback)
-
-        if component.startswith("memory") and BufferComponent.memory in buffers:
-            return buffer_for(BufferComponent.memory)
-
-        return Buffer(component=component, source="default", ratio=self.default)
+    # Buffer.intent MUST be set on these Buffers to something other than "desired":
+    #   scale    = ratio on top of existing buffers to ensure. Let the "derived"
+    #              buffer multiplied by this ratio "needed". If the "needed" buffer
+    #              is greater than desired, the needed buffer is created. If the
+    #              "needed" buffer is less than desired, the needed buffer is created.
+    #   preserve = ignore desired buffer entirely, just maintain existing buffers
+    derived: Dict[str, Buffer] = {}
 
 
 class CapacityDesires(ExcludeUnsetModel):
