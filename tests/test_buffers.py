@@ -99,6 +99,18 @@ def test_common_buffer_fallbacks():
     )
 
 
+def test_memory_fallbacks():
+    buffers = Buffers(desired={"storage": 3.2, "compute": 3.8})
+    assert buffers.buffer_for_component(BufferComponent.memory) == Buffer(
+        component="memory", ratio=3.2, source="storage"
+    )
+
+    buffers = Buffers(desired={"compute": 3.8})
+    assert buffers.buffer_for_component(BufferComponent.memory) == Buffer(
+        component="memory", ratio=3.8, source="compute"
+    )
+
+
 def test_precise_buffers():
     buffers = Buffers(
         desired={
