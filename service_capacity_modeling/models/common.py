@@ -118,14 +118,14 @@ def normalize_cores(
     return max(1, math.ceil(core_count / (target_speed / reference_speed)))
 
 
-def _headroom_approx(cores: int, cores_boost: float = 1.0) -> float:
+def _headroom_approx(cpu: int, cpu_boost: float = 1.0) -> float:
     """For implementation see /notebooks/headroom-estimator.ipynb"""
     # Adjust effective cores if e.g. is enabled
     # This accounts for the reduced effectiveness of virtual cores
-    effective_cores = float(cores) * cores_boost
+    effective_cpu = float(cpu) * cpu_boost
 
     # Calculate required headroom using Erlang-C staffing formula with P_Q=30:
-    return 0.712 / (effective_cores**0.448)
+    return 0.712 / (effective_cpu**0.448)
 
 
 def cpu_headroom_target(instance: Instance, buffers: Optional[Buffers] = None) -> float:
@@ -151,8 +151,8 @@ def cpu_headroom_target(instance: Instance, buffers: Optional[Buffers] = None) -
 
     # Physical cores(no hyper-threading) provide a performance boost.
     # For headroom, physical cores are weighted at 1.66 compared to 1.0 for virtual cores.
-    cores_boost = 1.0 if instance.cores < instance.cpu else 1.0/0.6
-    headroom = _headroom_approx(instance.cpu, cores_boost)
+    cpu_boost = 1.0 if instance.cores < instance.cpu else 1.0/0.6
+    headroom = _headroom_approx(instance.cpu, cpu_boost)
     if buffers is not None:
         cpu_ratio = buffers.buffer_for_component(BufferComponent.cpu).ratio
         buffer_adjusted_headroom = ((1.0 - headroom) / cpu_ratio)
