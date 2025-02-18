@@ -55,18 +55,18 @@ def test_2xl_headroom_with_buffer():
     #  aggressive with small instances, but maybe that's right ... let's see
     m6i2xl = planner.instance("m6i.2xlarge")
 
-    hdr = cpu_headroom_target(m6i2xl)
-    assert hdr == approx(0.28, rel=0.05)
+    headroom = cpu_headroom_target(m6i2xl)
+    assert headroom == approx(0.28, rel=0.05)
 
     buffer_1_5x = Buffers(desired={BufferComponent.compute: 1.5})
-    hdr_with_1_5x_buffer = cpu_headroom_target(m6i2xl, buffers=buffer_1_5x)
-    assert hdr_with_1_5x_buffer > hdr
-    assert hdr_with_1_5x_buffer == approx(0.52, rel=0.05)
+    headroom_with_1_5x_buffer = cpu_headroom_target(m6i2xl, buffers=buffer_1_5x)
+    assert headroom_with_1_5x_buffer > headroom
+    assert headroom_with_1_5x_buffer == approx(0.52, rel=0.05)
 
     buffer_2_0x = Buffers(desired={BufferComponent.compute: 2})
-    hdr_with_2_0x_buffer = cpu_headroom_target(m6i2xl, buffers=buffer_2_0x)
-    assert hdr_with_2_0x_buffer > hdr_with_1_5x_buffer > hdr
-    assert hdr_with_2_0x_buffer == approx(0.64, rel=0.05)
+    headroom_with_2_0x_buffer = cpu_headroom_target(m6i2xl, buffers=buffer_2_0x)
+    assert headroom_with_2_0x_buffer > headroom_with_1_5x_buffer > headroom
+    assert headroom_with_2_0x_buffer == approx(0.64, rel=0.05)
 
 def test_2xl_headroom_with_buffer_no_hyperthreading():
     buffer_2x = Buffers(desired={BufferComponent.compute: 2})
