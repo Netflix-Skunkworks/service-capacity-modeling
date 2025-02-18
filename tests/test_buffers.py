@@ -27,7 +27,7 @@ def test_larger_instance_needs_less_headroom():
     assert m52xl < m5xl
 
 
-def test_seventh_gen_instance_needs_less_headroom():
+def test_seventh_gen_instance_reflects_non_ht_boost():
     m6i4xl = cpu_headroom_target(planner.instance("m6i.4xlarge"))
     m7a4xl = cpu_headroom_target(planner.instance("m7a.4xlarge"))
     assert m7a4xl < m6i4xl
@@ -68,10 +68,15 @@ def test_2xl_headroom_with_buffer():
     assert hdr_with_2_0x_buffer > hdr_with_1_5x_buffer > hdr
     assert hdr_with_2_0x_buffer == approx(0.64, rel=0.05)
 
-    # Seventh gen cpus are cores not threads, should be able to run with less buffer
-    m7a2xl = planner.instance("m7a.2xlarge")
-    assert cpu_headroom_target(m7a2xl) == approx(0.22, rel=0.05)
-    assert cpu_headroom_target(m7a2xl) < hdr
+def test_2xl_headroom_with_buffer_no_hyperthreading():
+    buffer_2x = Buffers(desired={BufferComponent.compute: 2})
+    m7a_2xl = planner.instance("m7a.2xlarge")
+    effective_headroom = cpu_headroom_target(m7a_2xl, buffers=buffer_2x)
+
+    # Seventh gen cpus are cores not threads, should be able to run with < 2x buffer
+
+    assert cpu_headroom_target(m7a_2xl) == approx(0.22, rel=0.05)
+    assert cpu_headroom_target(m7a_2xl) < effective_headroom
 
 
 def test_default_buffer():

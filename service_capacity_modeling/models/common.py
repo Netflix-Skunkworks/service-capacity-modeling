@@ -118,14 +118,14 @@ def normalize_cores(
     return max(1, math.ceil(core_count / (target_speed / reference_speed)))
 
 
-def _headroom_approx(threads: int, thread_adj: float = 1.0) -> float:
+def _headroom_approx(cores: int, cores_boost: float = 1.0) -> float:
     """For implementation see /notebooks/headroom-estimator.ipynb"""
     # Adjust effective cores if e.g. is enabled
     # This accounts for the reduced effectiveness of virtual cores
-    threads_f = float(threads) * thread_adj
+    effective_cores = float(cores) * cores_boost
 
     # Calculate required headroom using Erlang-C staffing formula with P_Q=30:
-    return 0.712 / (threads_f**0.448)
+    return 0.712 / (effective_cores**0.448)
 
 
 def cpu_headroom_target(instance: Instance, buffers: Optional[Buffers] = None) -> float:
@@ -148,18 +148,16 @@ def cpu_headroom_target(instance: Instance, buffers: Optional[Buffers] = None) -
 
     For implementation see /notebooks/headroom-estimator.ipynb
     """
-    adj = 1.0
-    if instance.cores >= instance.cpu:
-        # Non-Hyperthreading performance boost
-        # When hyperthreading is enabled, each cpu is not as effective as a
-        # physical core. We estimate each virtual core to be about 60% as
-        # effective as a physical core, or conversely instances that have all
-        # full-fat cores are valued at 1.66 threads per core
-        adj = 1 / 0.6
-    headroom = _headroom_approx(instance.cpu, thread_adj=adj)
+
+    # Physical cores(no hyper-threading) provide a performance boost.
+    # For headroom, physical cores are weighted at 1.66 compared to 1.0 for virtual cores.
+    cores_boost = 1.0 if instance.cores < instance.cpu else 1.0/0.6
+    headroom = _headroom_approx(instance.cpu, cores_boost)
     if buffers is not None:
         cpu_ratio = buffers.buffer_for_component(BufferComponent.cpu).ratio
-        return round(1.0 - ((1.0 - headroom) / cpu_ratio), 2)
+        buffer_adjusted_headroom = ((1.0 - headroom) / cpu_ratio)
+        effective_headroom = 1.0 - buffer_adjusted_headroom
+        return round(effective_headroom, 2)
     else:
         return round(headroom, 2)
 
