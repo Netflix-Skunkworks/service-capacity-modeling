@@ -25,9 +25,12 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import utils
+from service_capacity_modeling.models.headroom_strategy import HeadroomStrategy
+from service_capacity_modeling.models.headroom_strategy import (
+    QueuingBasedHeadroomStrategy,
+)
 
 logger = logging.getLogger(__name__)
-
 
 SECONDS_IN_YEAR = 31556926
 
@@ -118,14 +121,16 @@ def normalize_cores(
     return max(1, math.ceil(core_count / (target_speed / reference_speed)))
 
 
-def _headroom_approx(threads: int, thread_adj: float = 1.0) -> float:
-    """For implementation see /notebooks/headroom-estimator.ipynb"""
+def _reserved_headroom(
+    cpu: int, cpu_boost: float = 1.0, strategy: Optional[HeadroomStrategy] = None
+) -> float:
     # Adjust effective cores if e.g. is enabled
     # This accounts for the reduced effectiveness of virtual cores
-    threads_f = float(threads) * thread_adj
+    effective_cpu = float(cpu) * cpu_boost
 
-    # Calculate required headroom using Erlang-C staffing formula with P_Q=30:
-    return 0.712 / (threads_f**0.448)
+    if strategy is None:
+        strategy = QueuingBasedHeadroomStrategy()  # default strategy
+    return strategy.calculate_reserved_headroom(effective_cpu)
 
 
 def cpu_headroom_target(instance: Instance, buffers: Optional[Buffers] = None) -> float:
@@ -148,20 +153,18 @@ def cpu_headroom_target(instance: Instance, buffers: Optional[Buffers] = None) -
 
     For implementation see /notebooks/headroom-estimator.ipynb
     """
-    adj = 1.0
-    if instance.cores >= instance.cpu:
-        # Non-Hyperthreading performance boost
-        # When hyperthreading is enabled, each cpu is not as effective as a
-        # physical core. We estimate each virtual core to be about 60% as
-        # effective as a physical core, or conversely instances that have all
-        # full-fat cores are valued at 1.66 threads per core
-        adj = 1 / 0.6
-    headroom = _headroom_approx(instance.cpu, thread_adj=adj)
+
+    # Physical cores(no hyper-threading) provide a performance boost.
+    # For headroom, physical cores are weighted = 1.66 vs 1.0 for virtual cores.
+    cpu_boost = 1.0 if instance.cores < instance.cpu else 1.0 / 0.6
+    reserved_headroom = _reserved_headroom(instance.cpu, cpu_boost)
     if buffers is not None:
         cpu_ratio = buffers.buffer_for_component(BufferComponent.cpu).ratio
-        return round(1.0 - ((1.0 - headroom) / cpu_ratio), 2)
+        buffer_adjusted_headroom = (1.0 - reserved_headroom) / cpu_ratio
+        effective_headroom = 1.0 - buffer_adjusted_headroom
+        return round(effective_headroom, 2)
     else:
-        return round(headroom, 2)
+        return round(reserved_headroom, 2)
 
 
 def simple_network_mbps(desires: CapacityDesires) -> int:
