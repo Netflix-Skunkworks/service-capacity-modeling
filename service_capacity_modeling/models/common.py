@@ -25,9 +25,12 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import utils
+from service_capacity_modeling.models.headroom_strategy import HeadroomStrategy
+from service_capacity_modeling.models.headroom_strategy import (
+    QueuingBasedHeadroomStrategy,
+)
 
 logger = logging.getLogger(__name__)
-
 
 SECONDS_IN_YEAR = 31556926
 
@@ -118,14 +121,16 @@ def normalize_cores(
     return max(1, math.ceil(core_count / (target_speed / reference_speed)))
 
 
-def _headroom_approx(cpu: int, cpu_boost: float = 1.0) -> float:
-    """For implementation see /notebooks/headroom-estimator.ipynb"""
+def _reserved_headroom(
+    cpu: int, cpu_boost: float = 1.0, strategy: Optional[HeadroomStrategy] = None
+) -> float:
     # Adjust effective cores if e.g. is enabled
     # This accounts for the reduced effectiveness of virtual cores
     effective_cpu = float(cpu) * cpu_boost
 
-    # Calculate required headroom using Erlang-C staffing formula with P_Q=30:
-    return 0.712 / (effective_cpu**0.448)
+    if strategy is None:
+        strategy = QueuingBasedHeadroomStrategy()  # default strategy
+    return strategy.calculate_reserved_headroom(effective_cpu)
 
 
 def cpu_headroom_target(instance: Instance, buffers: Optional[Buffers] = None) -> float:
@@ -150,16 +155,16 @@ def cpu_headroom_target(instance: Instance, buffers: Optional[Buffers] = None) -
     """
 
     # Physical cores(no hyper-threading) provide a performance boost.
-    # For headroom, physical cores are weighted at 1.66 compared to 1.0 for virtual cores.
-    cpu_boost = 1.0 if instance.cores < instance.cpu else 1.0/0.6
-    headroom = _headroom_approx(instance.cpu, cpu_boost)
+    # For headroom, physical cores are weighted = 1.66 vs 1.0 for virtual cores.
+    cpu_boost = 1.0 if instance.cores < instance.cpu else 1.0 / 0.6
+    reserved_headroom = _reserved_headroom(instance.cpu, cpu_boost)
     if buffers is not None:
         cpu_ratio = buffers.buffer_for_component(BufferComponent.cpu).ratio
-        buffer_adjusted_headroom = ((1.0 - headroom) / cpu_ratio)
+        buffer_adjusted_headroom = (1.0 - reserved_headroom) / cpu_ratio
         effective_headroom = 1.0 - buffer_adjusted_headroom
         return round(effective_headroom, 2)
     else:
-        return round(headroom, 2)
+        return round(reserved_headroom, 2)
 
 
 def simple_network_mbps(desires: CapacityDesires) -> int:

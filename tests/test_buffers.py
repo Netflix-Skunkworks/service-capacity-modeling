@@ -68,6 +68,7 @@ def test_2xl_headroom_with_buffer():
     assert headroom_with_2_0x_buffer > headroom_with_1_5x_buffer > headroom
     assert headroom_with_2_0x_buffer == approx(0.64, rel=0.05)
 
+
 def test_2xl_headroom_with_buffer_no_hyperthreading():
     buffer_2x = Buffers(desired={BufferComponent.compute: 2})
     m7a_2xl = planner.instance("m7a.2xlarge")
