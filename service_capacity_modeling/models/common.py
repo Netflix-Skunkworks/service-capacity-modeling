@@ -95,9 +95,11 @@ def sqrt_staffed_cores(desires: CapacityDesires) -> int:
     )
 
     total_rate = read_rps + write_rps
-    weighted_latency = (read_rps / total_rate) * read_lat + (
-        write_rps / total_rate
-    ) * write_lat
+    weighted_latency = (
+        (read_rps / total_rate) * read_lat + (write_rps / total_rate) * write_lat
+        if total_rate > 0
+        else 0
+    )
     # The alternative is to staff each workload separately, but that over
     # provisions cores as f(x) + f(y) > f(x+y) (sqrt staffing isn't linear)
     # read_cores = _sqrt_staffed_cores(read_rps, read_lat, qos)
