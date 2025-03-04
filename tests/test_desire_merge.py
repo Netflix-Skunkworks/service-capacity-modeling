@@ -1,6 +1,7 @@
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import BufferIntent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_int
@@ -25,7 +26,12 @@ user_desires = CapacityDesires(
         desired={
             "custom": Buffer(ratio=3.8, components=["custom"]),
             "custom-cpu": Buffer(ratio=3.0, components=[BufferComponent.cpu]),
-        }
+        },
+        derived={
+            "compute": Buffer(
+                intent=BufferIntent.scale, ratio=2, components=["compute"]
+            )
+        },
     ),
 )
 
@@ -41,6 +47,9 @@ def test_cassandra_merge():
     assert merged.query_pattern.estimated_read_per_second.mid == 100000
     assert merged.query_pattern.estimated_mean_read_size_bytes.low == 10
     assert merged.data_shape.estimated_state_size_gib.mid == 10
+    assert merged.buffers.derived.get("compute") is not None
+    assert merged.buffers.derived["compute"].ratio == 2.0
+    assert merged.buffers.derived["compute"].intent == BufferIntent.scale
 
     # Should come from cassandra model
     assert merged.query_pattern.estimated_mean_read_latency_ms.mid == 2.0

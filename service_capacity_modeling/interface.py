@@ -897,9 +897,10 @@ class CapacityDesires(ExcludeUnsetModel):
             default_buffers["default"] = desired_buffers["default"]
         for k, v in desired_buffers.get("desired", {}).items():
             default_buffers["desired"][k] = v
-        for i in desired_buffers.get("derived", []):
-            if i not in default_buffers["derived"]:
-                default_buffers["derived"].append(i)
+
+        default_buffers.setdefault("derived", {})
+        for k, v in desired_buffers.get("derived", {}).items():
+            default_buffers["derived"][k] = v
 
         default_dict.update(desires_dict)
 
