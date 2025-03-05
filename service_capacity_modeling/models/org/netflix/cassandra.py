@@ -7,8 +7,9 @@ from typing import Optional
 
 from pydantic import BaseModel
 from pydantic import Field
+from scipy.optimize import anderson
 
-from service_capacity_modeling.interface import AccessConsistency
+from service_capacity_modeling.interface import AccessConsistency, BufferIntent
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
@@ -69,6 +70,61 @@ def _write_buffer_gib_zone(
     return float(write_buffer_gib) / zones_per_region
 
 
+def _get_cores_for_new_cluster(desires, buffer, instance) -> (int, Instance):
+    # We have no existing utilization to go from
+    reference_shape = desires.reference_shape
+    # Keep half of the cores free for background work (compaction, backup, repair).
+    needed_cores = math.ceil(sqrt_staffed_cores(desires) * buffer.ratio)
+
+    needed_cores = normalize_cores(
+        core_count=needed_cores,
+        target_shape=instance,
+        reference_shape=reference_shape,
+    )
+    return needed_cores, reference_shape
+
+
+def _get_cores_for_existing_cluster(current_capacity, desires, buffer, instance, required_cluster_size, zones_per_region)-> (int, Instance):
+    # How will I get the instance buffer
+    cpu_after_instance_headroom = 0.8
+    cpu_success_buffer = ( cpu_after_instance_headroom / buffer.ratio) * 100
+    current_cores = current_capacity.cluster_instance.cpu * required_cluster_size * zones_per_region
+
+    if desires.buffers.derived is not None:
+        scale = False
+        for name, bfr in desires.buffers.derived.items():
+            if any(i in ["cpu","compute"] for i in bfr.components) and bfr.intent == BufferIntent.scale:
+                scale = True
+                cpu_scale = max(1, bfr.ratio)
+        #scale if the intent is set to scale else preserve the existing buffer
+        if scale:
+            new_cpu_utilization = current_capacity.cpu_utilization.mid * cpu_scale
+            if new_cpu_utilization > cpu_success_buffer:
+                cores_inc_factor = new_cpu_utilization / cpu_success_buffer
+                return math.ceil(cores_inc_factor * current_cores), current_capacity.cluster_instance
+        else:
+            return current_cores, current_capacity.cluster_instance
+    else:
+        needed_cores = int(
+            (
+                    current_capacity.cluster_instance.cpu
+                    * required_cluster_size
+                    * zones_per_region
+            )
+            * (current_capacity.cpu_utilization.high / cpu_success_buffer)
+        )
+        # Normalize those cores to the target shape
+        #WHY DO WE NEED REFERENCE SHAPE? WHY ARE WE ASSInGING TO CLUSTER.INSATNCE LATER?
+        reference_shape = desires.reference_shape
+        needed_cores = normalize_cores(
+            core_count=needed_cores,
+            target_shape=instance,
+            reference_shape=reference_shape,
+        )
+        reference_shape = current_capacity.cluster_instance
+        return needed_cores, reference_shape
+
+
 def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-arguments
     instance: Instance,
     desires: CapacityDesires,
@@ -93,49 +149,31 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
             else desires.current_clusters.regional[0]
         )
     )
-    # Cassandra does various background activity (compaction, repair, backup) which
-    # require up to half a machine's cores and network to safely perform.
-    background_buffer = buffer_for_components(
-        buffers=desires.buffers, components=[BACKGROUND_BUFFER]
+
+    cpu_buffer = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.cpu]
+    )
+    network_buffer = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.network]
+    )
+    disk_buffer = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.disk]
     )
 
-    # Currently, zones and regions are configured in a homogeneous manner. Hence,
-    # we just take any one of the current cluster configuration
+    # # Currently, zones and regions are configured in a homogeneous manner. Hence,
+    # # we just take any one of the current cluster configuration
     if (
         current_capacity
         and current_capacity.cluster_instance
         and required_cluster_size is not None
     ):
-        needed_cores = int(
-            (
-                current_capacity.cluster_instance.cpu
-                * required_cluster_size
-                * zones_per_region
-            )
-            * (current_capacity.cpu_utilization.high / 20)
-        )
-        # Normalize those cores to the target shape
-        reference_shape = desires.reference_shape
-        needed_cores = normalize_cores(
-            core_count=needed_cores,
-            target_shape=instance,
-            reference_shape=reference_shape,
-        )
-        reference_shape = current_capacity.cluster_instance
+        needed_cores, reference_shape = _get_cores_for_existing_cluster(current_capacity, desires, cpu_buffer, instance, required_cluster_size,
+                                                          zones_per_region)
     else:
-        # We have no existing utilization to go from
-        reference_shape = desires.reference_shape
-        # Keep half of the cores free for background work (compaction, backup, repair).
-        needed_cores = math.ceil(sqrt_staffed_cores(desires) * background_buffer.ratio)
-
-        needed_cores = normalize_cores(
-            core_count=needed_cores,
-            target_shape=instance,
-            reference_shape=reference_shape,
-        )
+        needed_cores, reference_shape = _get_cores_for_new_cluster(desires, cpu_buffer, instance)
 
     # Keep half of the bandwidth available for backup and repair streaming
-    needed_network_mbps = simple_network_mbps(desires) * background_buffer.ratio
+    needed_network_mbps = simple_network_mbps(desires) * network_buffer.ratio
 
     needed_disk = math.ceil(
         (1.0 / desires.data_shape.estimated_compression_ratio.mid)
