@@ -12,6 +12,7 @@ from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import BufferIntent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
@@ -33,6 +34,7 @@ from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import cpu_headroom_target
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -69,6 +71,149 @@ def _write_buffer_gib_zone(
     return float(write_buffer_gib) / zones_per_region
 
 
+def _calculate_needed_cores(
+    current_capacity,
+    reference_shape,
+    instance,
+    required_cluster_size,
+    zones_per_region,
+    cpu_success_buffer,
+):
+    needed_cores = int(
+        (
+            current_capacity.cluster_instance.cpu
+            * required_cluster_size
+            * zones_per_region
+        )
+        * (current_capacity.cpu_utilization.high / cpu_success_buffer)
+    )
+    # Normalize those cores to the target shape
+    needed_cores = normalize_cores(
+        core_count=needed_cores,
+        target_shape=instance,
+        reference_shape=reference_shape,
+    )
+    reference_shape = current_capacity.cluster_instance
+    return needed_cores, reference_shape
+
+
+def _get_cores_for_new_cluster(desires, instance):
+    background_buffer = buffer_for_components(
+        buffers=desires.buffers, components=[BACKGROUND_BUFFER]
+    )
+
+    # We have no existing utilization to go from
+    reference_shape = desires.reference_shape
+    # Keep half of the cores free for background work (compaction, backup, repair).
+    needed_cores = math.ceil(sqrt_staffed_cores(desires) * background_buffer.ratio)
+
+    needed_cores = normalize_cores(
+        core_count=needed_cores,
+        target_shape=instance,
+        reference_shape=reference_shape,
+    )
+    return needed_cores, reference_shape
+
+
+def _get_cores_for_existing_cluster(
+    current_capacity, desires, instance, required_cluster_size, zones_per_region
+):
+    cpu_success_buffer = (1 - cpu_headroom_target(instance, desires.buffers)) * 100
+    current_cores = (
+        current_capacity.cluster_instance.cpu * required_cluster_size * zones_per_region
+    )
+
+    if desires.buffers.derived is None:
+        return _calculate_needed_cores(
+            current_capacity,
+            desires.reference_shape,
+            instance,
+            required_cluster_size,
+            zones_per_region,
+            cpu_success_buffer,
+        )
+
+    scale, preserve = derived_buffer_for_component(
+        desires.buffers.derived, ["cpu", "compute"]
+    )
+    if scale > 0:
+        new_cpu_utilization = current_capacity.cpu_utilization.mid * scale
+        # calculate new cores if new cpu_utilization is greater than the cpu success buffer else return the existing number of cores.
+        if new_cpu_utilization > cpu_success_buffer:
+            cores_inc_factor = new_cpu_utilization / cpu_success_buffer
+            return (
+                math.ceil(cores_inc_factor * current_cores),
+                current_capacity.cluster_instance,
+            )
+        return current_cores, current_capacity.cluster_instance
+    elif preserve:
+        return current_cores, current_capacity.cluster_instance
+    else:
+        return _calculate_needed_cores(
+            current_capacity,
+            desires.reference_shape,
+            instance,
+            required_cluster_size,
+            zones_per_region,
+            cpu_success_buffer,
+        )
+
+
+def _get_disk_for_new_cluster(desires, copies_per_region):
+    return (
+        math.ceil(
+            (1.0 / desires.data_shape.estimated_compression_ratio.mid)
+            * desires.data_shape.estimated_state_size_gib.mid
+            * copies_per_region,
+        ),
+        False,
+    )
+
+
+def _get_disk_for_existing_cluster(current_capacity, desires, zones_per_region):
+    if desires.buffers.derived is None:
+        return current_capacity.disk_utilization_gib.mid * zones_per_region, False
+
+    scale, preserve = derived_buffer_for_component(
+        desires.buffers.derived, ["storage", "disk"]
+    )
+    if scale > 0:
+        return (
+            current_capacity.disk_utilization_gib.mid * scale * zones_per_region,
+            False,
+        )
+
+    return current_capacity.disk_utilization_gib.mid * zones_per_region, preserve
+
+
+def _get_network_for_existing_clusters(current_capacity, desires, buffer):
+    if desires.buffers.derived is None:
+        return current_capacity.network_utilization_mbps.mid * buffer.ratio
+
+    scale, preserve = derived_buffer_for_component(
+        desires.buffers.derived, ["compute", "network"]
+    )
+    if scale > 0:
+        return current_capacity.network_utilization_mbps.mid * scale * buffer.ratio
+    elif preserve:
+        return current_capacity.network_utilization_mbps.mid
+    else:
+        return current_capacity.network_utilization_mbps.mid * buffer.ratio
+
+
+def derived_buffer_for_component(buffer, components):
+    scale = 0
+    preserve = False
+    for bfr in buffer.values():
+        if any(i in components for i in bfr.components):
+            if bfr.intent == BufferIntent.scale:
+                scale = max(scale, bfr.ratio)
+            if bfr.intent == BufferIntent.preserve:
+                preserve = True
+
+    return scale, preserve
+
+
 def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-arguments
     instance: Instance,
     desires: CapacityDesires,
@@ -93,10 +238,9 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
             else desires.current_clusters.regional[0]
         )
     )
-    # Cassandra does various background activity (compaction, repair, backup) which
-    # require up to half a machine's cores and network to safely perform.
-    background_buffer = buffer_for_components(
-        buffers=desires.buffers, components=[BACKGROUND_BUFFER]
+
+    network_buffer = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.network]
     )
 
     # Currently, zones and regions are configured in a homogeneous manner. Hence,
@@ -106,42 +250,23 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
         and current_capacity.cluster_instance
         and required_cluster_size is not None
     ):
-        needed_cores = int(
-            (
-                current_capacity.cluster_instance.cpu
-                * required_cluster_size
-                * zones_per_region
-            )
-            * (current_capacity.cpu_utilization.high / 20)
+        needed_cores, reference_shape = _get_cores_for_existing_cluster(
+            current_capacity, desires, instance, required_cluster_size, zones_per_region
         )
-        # Normalize those cores to the target shape
-        reference_shape = desires.reference_shape
-        needed_cores = normalize_cores(
-            core_count=needed_cores,
-            target_shape=instance,
-            reference_shape=reference_shape,
+        needed_disk, preserve_disk = _get_disk_for_existing_cluster(
+            current_capacity, desires, zones_per_region
         )
-        reference_shape = current_capacity.cluster_instance
+
+        needed_network_mbps = _get_network_for_existing_clusters(
+            current_capacity, desires, network_buffer
+        )
     else:
-        # We have no existing utilization to go from
-        reference_shape = desires.reference_shape
-        # Keep half of the cores free for background work (compaction, backup, repair).
-        needed_cores = math.ceil(sqrt_staffed_cores(desires) * background_buffer.ratio)
-
-        needed_cores = normalize_cores(
-            core_count=needed_cores,
-            target_shape=instance,
-            reference_shape=reference_shape,
+        needed_cores, reference_shape = _get_cores_for_new_cluster(desires, instance)
+        needed_disk, preserve_disk = _get_disk_for_new_cluster(
+            desires, copies_per_region
         )
-
-    # Keep half of the bandwidth available for backup and repair streaming
-    needed_network_mbps = simple_network_mbps(desires) * background_buffer.ratio
-
-    needed_disk = math.ceil(
-        (1.0 / desires.data_shape.estimated_compression_ratio.mid)
-        * desires.data_shape.estimated_state_size_gib.mid
-        * copies_per_region,
-    )
+        # Keep half of the bandwidth available for backup and repair streaming
+        needed_network_mbps = simple_network_mbps(desires) * network_buffer.ratio
 
     # Rough estimate of how many instances we would need just for the CPU
     # Note that this is a lower bound, we might end up with more.
@@ -206,6 +331,7 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
             "read_per_second": reads_per_second,
             "write_buffer_gib": write_buffer_gib,
             "min_threshold": min_threshold,
+            "preserve_disk": preserve_disk,
         },
     )
 
@@ -319,6 +445,18 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         buffers=desires.buffers, components=[BufferComponent.disk]
     )
 
+    if (
+        requirement.context["preserve_disk"]
+        and requirement.reference_shape.drive is not None
+    ):
+        # Return a constant value regardless of the input if preserve is True
+        required_disk_space = (
+            lambda size_gib: requirement.reference_shape.drive.max_size_gib
+            * required_cluster_size
+        )
+    else:
+        required_disk_space = lambda x: x * disk_buffer.ratio
+
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
@@ -334,7 +472,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         ),
         # C* requires ephemeral disks to be 25% full because compaction
         # and replacement time if we're underscaled.
-        required_disk_space=lambda x: x * disk_buffer.ratio,
+        required_disk_space=required_disk_space,
         # C* clusters cannot recover data from neighbors quickly so we
         # want to avoid clusters with more than 1 TiB of local state
         max_local_disk_gib=max_local_disk_gib,
