@@ -1,8 +1,10 @@
 from service_capacity_modeling.capacity_planner import planner
-from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import CapacityDesires, CurrentClusters, CurrentClusterCapacity, Instance, \
+    Buffers, Buffer, BufferIntent
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.models.org.netflix.evcache import (
     calculate_read_cpu_time_evcache_ms,
 )
@@ -67,6 +69,10 @@ def test_evcache_inmemory_low_latency_reads_cpu():
         )
 
         assert total_cpu_power > 1100
+
+
+class BufferComponents:
+    pass
 
 
 def test_evcache_inmemory_medium_latency_reads_cpu():
