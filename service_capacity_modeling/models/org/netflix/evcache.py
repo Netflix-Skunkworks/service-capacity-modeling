@@ -9,7 +9,8 @@ from typing import Tuple
 from pydantic import BaseModel
 from pydantic import Field
 
-from service_capacity_modeling.interface import AccessConsistency, BufferComponent, CurrentClusterCapacity, Buffer
+from service_capacity_modeling.interface import AccessConsistency, BufferComponent, CurrentClusterCapacity, Buffer, \
+    Buffers, CurrentClusters, BufferIntent
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
@@ -71,6 +72,147 @@ def calculate_spread_cost(cluster_size: int, max_cost=100000, min_cost=0.0) -> f
         return max_cost
     return min_cost + (max_cost - cluster_size * (max_cost - min_cost) / 30.0)
 
+def calculate_vitals_for_capacity_planner(desires: CapacityDesires,
+                                        instance: Instance,
+                                        current_memory_gib: float,
+                                        current_disk_gib: float):
+    # First calculate assuming new deployment
+    needed_cores = normalize_cores(
+        core_count=sqrt_staffed_cores(desires),
+        target_shape=instance,
+        reference_shape=desires.reference_shape,
+    )
+
+    needed_network_mbps = simple_network_mbps(desires)
+
+    needed_memory_gib = current_memory_gib
+
+    needed_disk_gib = current_disk_gib
+
+    # Checking if the current setup has been supplied, if so, use buffers to optimize
+    current_cluster = desires.current_clusters
+    if current_cluster is not None:
+        current_cluster_capacity: CurrentClusterCapacity = current_cluster.zonal[0]
+        if current_cluster_capacity is not None:
+            needed_cores = normalize_cores(get_cores_with_buffer(current_cluster_capacity, desires),
+                                           instance, current_cluster_capacity.cluster_instance)
+            needed_network_mbps = get_network_with_buffer_mbps(current_cluster_capacity, desires)
+            needed_memory_gib = get_memory_with_buffer_gib(current_cluster_capacity, desires)
+            needed_disk_gib = get_disk_with_buffer_gib(current_cluster_capacity, desires)
+
+    return needed_cores, needed_network_mbps, needed_memory_gib
+
+
+def get_cores_with_buffer(current_cluster_capacity: CurrentClusterCapacity,
+                          desires: CapacityDesires):
+    current_cpu_utilization = current_cluster_capacity.cpu_utilization.high
+    current_cores = (current_cluster_capacity.cluster_instance.cpu_cores *
+                     current_cluster_capacity.cluster_instance_count)
+
+    # These are the desired buffers
+    cpu_buffer = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.cpu]
+    )
+
+    max_permissible_cpu = 100.0 / cpu_buffer.ratio
+
+    scale_up_intent = False
+    preserve_intent = False
+    cpu_scale_factor = 1.0
+    for name, buffer in desires.buffers.derived.items():
+        if any(i in ['compute', 'cpu'] for i in buffer.components):
+            if buffer.intent == BufferIntent.scale:
+                scale_up_intent = True
+                cpu_scale_factor = max(cpu_scale_factor, buffer.ratio)
+            else:
+                preserve_intent = True
+    if scale_up_intent:
+        current_cpu_utilization *= cpu_scale_factor
+        core_scale_up_factor = math.max(1.0, current_cpu_utilization / max_permissible_cpu)
+        return current_cores * core_scale_up_factor
+    elif preserve_intent:
+        return current_cores
+    else:
+        core_scale_up_factor = math.max(1.0, current_cpu_utilization / max_permissible_cpu)
+        return current_cores * core_scale_up_factor
+
+def get_network_with_buffer_mbps(current_cluster_capacity: CurrentClusterCapacity,
+                          desires: CapacityDesires):
+    current_network_mbps = current_cluster_capacity.network_utilization_mbps.high
+
+    # These are the desired buffers
+    network_buffer = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.network]
+    )
+
+    scale_up_intent = False
+    preserve_intent = False
+    network_scale_factor = 1.0
+    for name, buffer in desires.buffers.derived.items():
+        if any(i in ['network'] for i in buffer.components):
+            if buffer.intent == BufferIntent.scale:
+                scale_up_intent = True
+                cpu_scale_factor = max(network_scale_factor, buffer.ratio)
+            else:
+                preserve_intent = True
+    if scale_up_intent:
+        return current_network_mbps * network_scale_factor
+    elif preserve_intent:
+        return current_network_mbps
+    else:
+        return current_network_mbps * network_buffer.ratio
+
+def get_memory_with_buffer_gib(current_cluster_capacity: CurrentClusterCapacity,
+                          desires: CapacityDesires):
+    needed_memory_gib = current_cluster_capacity.memory_utilization_gib.high
+
+    # These are the desired buffers
+    memory_buffer = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.memory]
+    )
+
+    scale_up_intent = False
+    preserve_intent = False
+    memory_scale_factor = 1.0
+    for name, buffer in desires.buffers.derived.items():
+        if any(i in ['memory'] for i in buffer.components):
+            if buffer.intent == BufferIntent.scale:
+                scale_up_intent = True
+                memory_scale_factor = max(memory_scale_factor, buffer.ratio)
+            else:
+                preserve_intent = True
+    if scale_up_intent:
+        return needed_memory_gib * memory_scale_factor
+    elif preserve_intent:
+        return needed_memory_gib
+    else:
+        return needed_memory_gib * memory_buffer.ratio
+
+def get_disk_with_buffer_gib(current_cluster_capacity: CurrentClusterCapacity,
+                          desires: CapacityDesires):
+    needed_disk_gib = current_cluster_capacity.disk_utilization_gib.high
+
+    # These are the desired buffers
+    disk_buffer = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.disk]
+    )
+
+    scale_up_intent = False
+    preserve_intent = False
+    disk_scale_factor = 1.0
+    for name, buffer in desires.buffers.derived.items():
+        if any(i in ['disk'] for i in buffer.components):
+            if buffer.intent == BufferIntent.scale:
+                scale_up_intent = True
+                disk_scale_factor = max(disk_scale_factor, buffer.ratio)
+            else:
+                preserve_intent = True
+    if scale_up_intent:
+        return needed_disk_gib * disk_scale_factor
+    elif preserve_intent:
+        return needed_disk_gib
+    else:
+        return needed_disk_gib * disk_buffer.ratio
 
 def _estimate_evcache_requirement(
     instance: Instance,
@@ -83,36 +225,9 @@ def _estimate_evcache_requirement(
     The input desires should be the **regional** desire, and this function will
     return the zonal capacity requirement
     """
-    needed_cores = normalize_cores(
-        core_count=sqrt_staffed_cores(desires),
-        target_shape=instance,
-        reference_shape=desires.reference_shape,
-    )
-
-    # Check if the buffers have been passed in
-    desired_input_cpu_buffers = buffer_for_components(buffers=desires.buffers, components=[BufferComponent.cpu])
-    current_utilization: CurrentClusterCapacity = desires.current_clusters
-    derived_cpu_buffer: Buffer = desires.buffers.derived.get("cpu")
-    ideal_max_cpu = 100.0/desired_input_cpu_buffers.ratio if desired_input_cpu_buffers.ratio > 0.0 else 100.0
-    if derived_cpu_buffer.ratio * current_utilization.cpu_utilization.mid > ideal_max_cpu:
-        scaling_factor = derived_cpu_buffer.ratio * current_utilization.cpu_utilization.mid / ideal_max_cpu
-        needed_cores = math.ceil(current_utilization.cluster_instance_count * current_utilization.cluster_instance.cpu_cores *
-                                 scaling_factor)
-
-
-    # For tier 0, we double the number of cores to account for caution
-    if desires.service_tier == 0:
-        needed_cores = needed_cores * 2
-
-    # (Arun): Keep 20% of available bandwidth for cache warmer
-    needed_network_mbps = simple_network_mbps(desires) * 1.25
-
-    needed_disk = math.ceil(
-        desires.data_shape.estimated_state_size_gib.mid,
-    )
-
     regrets: Tuple[str, ...] = ("spend", "mem")
     state_size = desires.data_shape.estimated_state_size_gib
+    needed_memory = state_size.mid
     item_count = desires.data_shape.estimated_state_item_count
     payload_greater_than_classic = False
     if state_size is not None and item_count is not None and item_count.mid != 0:
@@ -131,13 +246,17 @@ def _estimate_evcache_requirement(
     ):
         # We can't currently store data on cloud drives, but we can put the
         # dataset into memory!
-        needed_memory = float(needed_disk)
+        needed_memory = float(needed_memory)
         needed_disk = 0
     else:
         # We can store data on fast ephems (reducing the working set that must
         # be kept in RAM)
-        needed_memory = float(working_set) * float(needed_disk)
+        needed_disk = needed_memory
+        needed_memory = float(working_set) * float(needed_memory)
         regrets = ("spend", "disk", "mem")
+
+    needed_cores, needed_network_mbps, needed_memory, needed_disk  = (
+        calculate_vitals_for_capacity_planner(desires, instance, needed_memory, needed_disk))
 
     # For EVCache, writes go to all zones
     # Regional reads can also go to any one zone due to app's zone affinity
@@ -497,6 +616,15 @@ class NflxEVCacheCapacityModel(CapacityModel):
                     # (Arun) We currently use 1 GiB for connection memory
                     reserved_instance_system_mem_gib=(1 + 2),
                 ),
+                buffers=Buffers(
+                    default=Buffer(ratio=1.5),
+                    desired={
+                        "cpu": Buffer(ratio=1.5 , components=[BufferComponent.cpu]), # ~70%
+                        "storage": Buffer(ratio=1.25, components=[BufferComponent.storage]), # ~80%
+                        "memory": Buffer(ratio=1.11, components=[BufferComponent.memory]), # 90%
+                        "network": Buffer(ratio=1.5, components=[BufferComponent.network]) # ~70%
+                    },
+                )
             )
         else:
             return CapacityDesires(
@@ -553,6 +681,15 @@ class NflxEVCacheCapacityModel(CapacityModel):
                     # (Arun) We currently use 1 GiB base for connection memory
                     reserved_instance_system_mem_gib=(1 + 2),
                 ),
+                buffers=Buffers(
+                    default=Buffer(ratio=1.5),
+                    desired={
+                        "cpu": Buffer(ratio=1.5 , components=[BufferComponent.cpu]), # ~70%
+                        "storage": Buffer(ratio=1.25, components=[BufferComponent.storage]), # ~80%
+                        "memory": Buffer(ratio=1.11, components=[BufferComponent.memory]), # 90%
+                        "network": Buffer(ratio=1.5, components=[BufferComponent.network]) # ~70%
+                    },
+                )
             )
 
 
