@@ -9,7 +9,7 @@ from typing import Tuple
 from pydantic import BaseModel
 from pydantic import Field
 
-from service_capacity_modeling.interface import AccessConsistency
+from service_capacity_modeling.interface import AccessConsistency, BufferComponent, CurrentClusterCapacity, Buffer
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
@@ -28,7 +28,7 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
-from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import compute_stateful_zone, buffer_for_components
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -88,6 +88,17 @@ def _estimate_evcache_requirement(
         target_shape=instance,
         reference_shape=desires.reference_shape,
     )
+
+    # Check if the buffers have been passed in
+    desired_input_cpu_buffers = buffer_for_components(buffers=desires.buffers, components=[BufferComponent.cpu])
+    current_utilization: CurrentClusterCapacity = desires.current_clusters
+    derived_cpu_buffer: Buffer = desires.buffers.derived.get("cpu")
+    ideal_max_cpu = 100.0/desired_input_cpu_buffers.ratio if desired_input_cpu_buffers.ratio > 0.0 else 100.0
+    if derived_cpu_buffer.ratio * current_utilization.cpu_utilization.mid > ideal_max_cpu:
+        scaling_factor = derived_cpu_buffer.ratio * current_utilization.cpu_utilization.mid / ideal_max_cpu
+        needed_cores = math.ceil(current_utilization.cluster_instance_count * current_utilization.cluster_instance.cpu_cores *
+                                 scaling_factor)
+
 
     # For tier 0, we double the number of cores to account for caution
     if desires.service_tier == 0:
