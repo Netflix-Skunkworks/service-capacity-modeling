@@ -185,7 +185,7 @@ def _estimate_rds_regional(
         needed_network_mbps=requirement.network_mbps.mid,
         required_disk_ios=lambda size_gib: _rds_required_disk_ios(size_gib, db_type)
         * math.ceil(0.1 * rps),
-        required_disk_space=lambda x: x * 1.2,  # Unscientific random guess!
+        required_disk_space=lambda x: math.ceil(x * 1.2),  # Unscientific random guess!
         reference_shape=desires.reference_shape,
     )
 
