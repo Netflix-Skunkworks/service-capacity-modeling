@@ -43,12 +43,25 @@ class ClusterType(str, Enum):
     ha = "high-availability"
 
 
+def target_cpu_utilzation(tier: int) -> float:
+    """
+    Returns the target average cluster CPU utilization for a given tier
+    """
+    if tier == 0:
+        return 0.25
+    if tier == 1:
+        return 0.30
+    if tier == 2:
+        return 0.35
+    return 0.40
+
 def _estimate_kafka_requirement(
     instance: Instance,
     desires: CapacityDesires,
     copies_per_region: int,
     hot_retention_seconds: float,
     zones_per_region: int = 3,
+    required_zone_size: Optional[int] = None
 ) -> Tuple[CapacityRequirement, Tuple[str, ...]]:
     """Estimate the capacity required for one zone given a regional desire
 
@@ -75,12 +88,53 @@ def _estimate_kafka_requirement(
     normalized_to_mib.query_pattern.estimated_write_per_second = wps.scale(
         write_mib_per_second
     )
-    # TODO: maybe revisit this?
-    needed_cores = normalize_cores(
-        core_count=sqrt_staffed_cores(normalized_to_mib),
-        target_shape=instance,
-        reference_shape=desires.reference_shape,
+    # use the current cluster capacity if available
+    current_zonal_cluster = (
+        None
+        if desires.current_clusters is None
+        else (
+            desires.current_clusters.zonal[0]
+            if len(desires.current_clusters.zonal)
+            else None
+        )
     )
+
+    if (
+        current_zonal_cluster
+        and current_zonal_cluster.cluster_instance
+        and required_zone_size is not None
+    ):
+        # For now, use the highest average CPU utilization seen on the cluster
+        cpu_utilization = current_zonal_cluster.cpu_utilization.high
+        # Validate with data if we should instead estimate 99th percentile here to get rid of spikes in collected cpu usage data ?
+        # Use the formula: 99th Percentile ≈ Average + (Z-score * SD).
+        # https://en.wikipedia.org/wiki/Normal_curve_equivalent#:~:text=The%2099th%20percentile%20in%20a,49/2.3263%20=%2021.06.
+        # curr_cpu_util = cpu_util.mid + (2.33 * (cpu_util.high - cpu_util.low) / 6)
+        current_utilized_cores = (
+                current_zonal_cluster.cluster_instance.cpu
+                * required_zone_size
+                * zones_per_region
+                * cpu_utilization) / 100
+
+        # compute needed core capacity for cluster so avg cpu utilization for the cluster stays
+        # under threshold for that tier
+        needed_cores = int(current_utilized_cores / target_cpu_utilzation(desires.service_tier))
+        logger.debug("kafka needed cores: %s", needed_cores)
+        # Normalize those cores to the target shape
+        reference_shape = current_zonal_cluster.cluster_instance
+        needed_cores = normalize_cores(
+            core_count=needed_cores,
+            target_shape=instance,
+            reference_shape=reference_shape,
+        )
+        logger.debug("kafka normalized needed cores: %s", needed_cores)
+    else:
+        # We have no existing utilization to go from
+        needed_cores = normalize_cores(
+            core_count=sqrt_staffed_cores(normalized_to_mib),
+            target_shape=instance,
+            reference_shape=desires.reference_shape,
+        )
 
     # (Nick): Keep 40% of available bandwidth for node recovery
     # (Joey): For kafka BW = BW_write + BW_reads
@@ -195,6 +249,7 @@ def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-argume
         zones_per_region=zones_per_region,
         copies_per_region=copies_per_region,
         hot_retention_seconds=hot_retention_seconds,
+        required_zone_size=required_zone_size
     )
 
     # Account for sidecars and base system memory
@@ -253,7 +308,7 @@ def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-argume
         required_disk_space=lambda x: x * 2.5,
         max_local_disk_gib=max_local_disk_gib,
         cluster_size=lambda x: x,
-        min_count=max(min_count, 1),
+        min_count=max(min_count, required_zone_size or 1),
         # Sidecars and Variable OS Memory
         # Kafka currently uses 8GiB fixed, might want to change to min(30, x // 2)
         reserve_memory=lambda instance_mem_gib: base_mem + 8,
@@ -364,9 +419,9 @@ class NflxKafkaCapacityModel(CapacityModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
-        cluster_type: ClusterType = extra_model_arguments.get(
-            "cluster_type", ClusterType.ha
-        )
+        cluster_type: ClusterType = ClusterType(extra_model_arguments.get(
+            "cluster_type", "high-availability"
+        ))
         default_replication = 2
         if cluster_type == ClusterType.strong:
             default_replication = 3
