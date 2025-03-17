@@ -100,7 +100,7 @@ def calculate_vitals_for_capacity_planner(desires: CapacityDesires,
             needed_memory_gib = get_memory_with_buffer_gib(current_cluster_capacity, desires)
             needed_disk_gib = get_disk_with_buffer_gib(current_cluster_capacity, desires)
 
-    return needed_cores, needed_network_mbps, needed_memory_gib
+    return needed_cores, needed_network_mbps, needed_memory_gib, needed_disk_gib
 
 
 def get_cores_with_buffer(current_cluster_capacity: CurrentClusterCapacity,
