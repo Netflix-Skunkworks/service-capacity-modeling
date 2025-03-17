@@ -721,6 +721,8 @@ def get_cores_with_buffer(current_capacity, buffers, instance):
     scale, preserve = derived_buffer_for_component(buffers.derived, ["compute", "cpu"])
 
     if scale > 0:
+        # if the new cpu core is less than the current,
+        # then take no action and return the current cpu cores
         new_cpu_utilization = current_cpu_utilization * scale
         core_scale_up_factor = max(1.0, new_cpu_utilization / cpu_success_buffer)
         return math.ceil(current_cores * core_scale_up_factor)
@@ -732,7 +734,11 @@ def get_cores_with_buffer(current_capacity, buffers, instance):
 
 def get_memory_with_buffer_gib(current_capacity, buffers):
     # compute memory required per zone
-    current_memory_gib = current_capacity.memory_utilization_gib.mid
+    current_memory_utilization = current_capacity.memory_utilization_gib.mid
+    current_ram_allocated = (
+        current_capacity.cluster_instance.ram_gib
+        * current_capacity.cluster_instance_count.mid
+    )
 
     # These are the desired buffers
     memory_buffer = buffer_for_components(
@@ -744,19 +750,25 @@ def get_memory_with_buffer_gib(current_capacity, buffers):
     )
 
     if scale > 0:
-        return current_memory_gib * scale * memory_buffer.ratio
-    elif preserve:
-        return (
-            current_capacity.cluster_instance.ram_gib
-            * current_capacity.cluster_instance_count.mid
+        # if the new required memory is less than the current,
+        # then take no action and return the current ram
+        return max(
+            current_memory_utilization * scale * memory_buffer.ratio,
+            current_ram_allocated,
         )
+    elif preserve:
+        return current_ram_allocated
     else:
-        return current_memory_gib * memory_buffer.ratio
+        return current_memory_utilization * memory_buffer.ratio
 
 
 def get_network_with_buffer_mbps(current_capacity, buffers):
     # compute network required per zone
-    current_network_mbps = current_capacity.network_utilization_mbps.mid
+    current_network_utilization = current_capacity.network_utilization_mbps.mid
+    current_network_allocated = (
+        current_capacity.cluster_instance.net_mbps
+        * current_capacity.cluster_instance_count.mid
+    )
 
     # These are the desired buffers
     network_buffer = buffer_for_components(
@@ -768,16 +780,25 @@ def get_network_with_buffer_mbps(current_capacity, buffers):
     )
 
     if scale > 0:
-        return current_network_mbps * scale * network_buffer.ratio
+        # if the new required network is less than the current,
+        # then take no action and return the current bandwidth
+        return max(
+            current_network_utilization * scale * network_buffer.ratio,
+            current_network_allocated,
+        )
     elif preserve:
-        return current_capacity.cluster_instance.net_mbps
+        return current_network_allocated
     else:
-        return current_network_mbps * network_buffer.ratio
+        return current_network_utilization * network_buffer.ratio
 
 
 def get_disk_with_buffer_gib(current_capacity, buffers):
     # compute disk required per zone
-    needed_disk_gib = current_capacity.disk_utilization_gib.mid
+    current_disk_utilization = current_capacity.disk_utilization_gib.mid
+    current_disk_allocated = (
+        current_capacity.cluster_instance.drive.max_size_gib
+        * current_capacity.cluster_instance_count.mid
+    )
 
     # These are the desired buffers
     disk_buffer = buffer_for_components(
@@ -786,15 +807,16 @@ def get_disk_with_buffer_gib(current_capacity, buffers):
 
     scale, preserve = derived_buffer_for_component(buffers.derived, ["storage", "disk"])
     if scale > 0:
-        return needed_disk_gib * scale * disk_buffer.ratio
+        # if the new required disk is less than the current,
+        # then take no action and return the current disk
+        return max(
+            current_disk_utilization * scale * disk_buffer.ratio, current_disk_allocated
+        )
     elif preserve:
         # preserve the current disk size for the zone
-        return (
-            current_capacity.cluster_instance.drive.max_size_gib
-            * current_capacity.cluster_instance_count.mid
-        )
+        return current_disk_allocated
     else:
-        return needed_disk_gib * disk_buffer.ratio
+        return current_disk_utilization * disk_buffer.ratio
 
 
 def zonal_requirements_from_current(
