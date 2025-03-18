@@ -234,7 +234,7 @@ def test_normalize_cores_6_7():
     m6ixl = shapes.region("us-east-1").instances["m6i.xlarge"]
     m7axl = shapes.region("us-east-1").instances["m7a.xlarge"]
 
-    assert 11 == normalize_cores(16, m6ixl, default_reference_shape)
+    assert 10 == normalize_cores(16, m6ixl, default_reference_shape)
     assert 7 == normalize_cores(16, m7axl, default_reference_shape)
 
 

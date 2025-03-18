@@ -64,8 +64,8 @@ def test_java_app_small_but_high_qps():
 
     cores = java_result.count * java_result.instance.cpu
     assert_similar_compute(
-        expected_shape=shape("m6i.xlarge"),
-        expected_count=50,
+        expected_shape=shape("c7a.xlarge"),
+        expected_count=30,
         actual_shape=java_result.instance,
         actual_count=java_result.count,
         # Don't care about memory
