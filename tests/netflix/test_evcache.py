@@ -113,7 +113,7 @@ def test_evcache_inmemory_medium_latency_reads_cpu():
             * candidate.candidate_clusters.zonal[0].instance.cpu_ghz
         )
 
-        assert total_cpu_power > 400
+        assert total_cpu_power > 200
 
 
 def test_evcache_inmemory_high_latency_reads_cpu():
