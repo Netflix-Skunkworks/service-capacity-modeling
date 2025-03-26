@@ -106,8 +106,9 @@ def calculate_vitals_for_capacity_planner(desires: CapacityDesires,
 def get_cores_with_buffer(current_cluster_capacity: CurrentClusterCapacity,
                           desires: CapacityDesires):
     current_cpu_utilization = current_cluster_capacity.cpu_utilization.high
-    current_cores = (current_cluster_capacity.cluster_instance.cpu_cores *
-                     current_cluster_capacity.cluster_instance_count)
+    current_cores = (current_cluster_capacity.cluster_instance.cpu_cores
+                     if current_cluster_capacity.cluster_instance is not None else 0 *
+                     int(current_cluster_capacity.cluster_instance_count.mid))
 
     # These are the desired buffers
     cpu_buffer = buffer_for_components(
@@ -128,12 +129,12 @@ def get_cores_with_buffer(current_cluster_capacity: CurrentClusterCapacity,
                 preserve_intent = True
     if scale_up_intent:
         current_cpu_utilization *= cpu_scale_factor
-        core_scale_up_factor = math.max(1.0, current_cpu_utilization / max_permissible_cpu)
+        core_scale_up_factor = max(1.0, current_cpu_utilization / max_permissible_cpu)
         return current_cores * core_scale_up_factor
     elif preserve_intent:
         return current_cores
     else:
-        core_scale_up_factor = math.max(1.0, current_cpu_utilization / max_permissible_cpu)
+        core_scale_up_factor = max(1.0, current_cpu_utilization / max_permissible_cpu)
         return current_cores * core_scale_up_factor
 
 def get_network_with_buffer_mbps(current_cluster_capacity: CurrentClusterCapacity,
@@ -247,7 +248,7 @@ def _estimate_evcache_requirement(
         # We can't currently store data on cloud drives, but we can put the
         # dataset into memory!
         needed_memory = float(needed_memory)
-        needed_disk = 0
+        needed_disk = 0.0
     else:
         # We can store data on fast ephems (reducing the working set that must
         # be kept in RAM)
