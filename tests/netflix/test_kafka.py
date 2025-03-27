@@ -1,6 +1,8 @@
 from service_capacity_modeling.capacity_planner import planner
-from service_capacity_modeling.interface import CapacityDesires, CurrentClusters, DataShape, CurrentZoneClusterCapacity, \
-    certain_float
+from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import CurrentClusters
+from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.common import normalize_cores
@@ -289,18 +291,18 @@ def test_kafka_model_constraints():
 
 def test_plan_certain():
     """
-    Use current clusters cpu utilization to determine instance types directly as supposed to
-    extrapolating it from the Data Shape
+    Use current clusters cpu utilization to determine instance types directly as
+    supposed to extrapolating it from the Data Shape
     """
     cluster_capacity = CurrentZoneClusterCapacity(
         cluster_instance_name="r5.2xlarge",
         cluster_instance_count=Interval(low=27, mid=27, high=27, confidence=1),
-        cpu_utilization=Interval(
-            low=11.6, mid=19.29, high=27.57, confidence=1
-        ),
+        cpu_utilization=Interval(low=11.6, mid=19.29, high=27.57, confidence=1),
         memory_utilization_gib=certain_float(32.0),
         network_utilization_mbps=certain_float(128.0),
-        disk_utilization_gib=Interval(low=2006.083, mid=2252.5, high=2480.41, confidence=0.98)
+        disk_utilization_gib=Interval(
+            low=2006.083, mid=2252.5, high=2480.41, confidence=0.98
+        ),
     )
 
     throughput = 2 * 1024 * 1024 * 1024
@@ -315,7 +317,7 @@ def test_plan_certain():
             estimated_mean_write_size_bytes=Interval(
                 low=throughput, mid=throughput, high=throughput * 2, confidence=0.98
             ),
-        )
+        ),
     )
 
     cap_plan = planner.plan_certain(

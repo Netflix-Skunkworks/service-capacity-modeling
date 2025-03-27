@@ -43,7 +43,7 @@ class ClusterType(str, Enum):
     ha = "high-availability"
 
 
-def target_cpu_utilzation(tier: int) -> float:
+def target_cpu_utilization(tier: int) -> float:
     """
     Returns the target average cluster CPU utilization for a given tier
     """
@@ -55,13 +55,14 @@ def target_cpu_utilzation(tier: int) -> float:
         return 0.35
     return 0.40
 
-def _estimate_kafka_requirement(
+
+def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-arguments
     instance: Instance,
     desires: CapacityDesires,
     copies_per_region: int,
     hot_retention_seconds: float,
     zones_per_region: int = 3,
-    required_zone_size: Optional[int] = None
+    required_zone_size: Optional[int] = None,
 ) -> Tuple[CapacityRequirement, Tuple[str, ...]]:
     """Estimate the capacity required for one zone given a regional desire
 
@@ -106,19 +107,23 @@ def _estimate_kafka_requirement(
     ):
         # For now, use the highest average CPU utilization seen on the cluster
         cpu_utilization = current_zonal_cluster.cpu_utilization.high
-        # Validate with data if we should instead estimate 99th percentile here to get rid of spikes in collected cpu usage data ?
+        # Validate with data if we should instead estimate 99th percentile here to get
+        # rid of spikes in collected cpu usage data ?
         # Use the formula: 99th Percentile ≈ Average + (Z-score * SD).
         # https://en.wikipedia.org/wiki/Normal_curve_equivalent#:~:text=The%2099th%20percentile%20in%20a,49/2.3263%20=%2021.06.
         # curr_cpu_util = cpu_util.mid + (2.33 * (cpu_util.high - cpu_util.low) / 6)
         current_utilized_cores = (
-                current_zonal_cluster.cluster_instance.cpu
-                * required_zone_size
-                * zones_per_region
-                * cpu_utilization) / 100
+            current_zonal_cluster.cluster_instance.cpu
+            * required_zone_size
+            * zones_per_region
+            * cpu_utilization
+        ) / 100
 
-        # compute needed core capacity for cluster so avg cpu utilization for the cluster stays
-        # under threshold for that tier
-        needed_cores = int(current_utilized_cores / target_cpu_utilzation(desires.service_tier))
+        # compute needed core capacity for cluster so avg cpu utilization for the
+        # cluster stays under threshold for that tier
+        needed_cores = int(
+            current_utilized_cores / target_cpu_utilization(desires.service_tier)
+        )
         logger.debug("kafka needed cores: %s", needed_cores)
         # Normalize those cores to the target shape
         reference_shape = current_zonal_cluster.cluster_instance
@@ -249,7 +254,7 @@ def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-argume
         zones_per_region=zones_per_region,
         copies_per_region=copies_per_region,
         hot_retention_seconds=hot_retention_seconds,
-        required_zone_size=required_zone_size
+        required_zone_size=required_zone_size,
     )
 
     # Account for sidecars and base system memory
@@ -419,9 +424,9 @@ class NflxKafkaCapacityModel(CapacityModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
-        cluster_type: ClusterType = ClusterType(extra_model_arguments.get(
-            "cluster_type", "high-availability"
-        ))
+        cluster_type: ClusterType = ClusterType(
+            extra_model_arguments.get("cluster_type", "high-availability")
+        )
         default_replication = 2
         if cluster_type == ClusterType.strong:
             default_replication = 3
