@@ -1,10 +1,17 @@
 from decimal import Decimal
 
 from service_capacity_modeling.hardware import shapes
+from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import BufferIntent
+from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
+from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import Clusters
+from service_capacity_modeling.interface import CurrentClusters
+from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
@@ -12,6 +19,8 @@ from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
+from service_capacity_modeling.models.common import get_cores_with_buffer
+from service_capacity_modeling.models.common import get_disk_with_buffer_gib
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
@@ -227,3 +236,99 @@ def test_normalize_cores_6_7():
 
     assert 11 == normalize_cores(16, m6ixl, default_reference_shape)
     assert 7 == normalize_cores(16, m7axl, default_reference_shape)
+
+
+current_cluster = CurrentClusters(
+    zonal=[
+        CurrentZoneClusterCapacity(
+            cluster_instance_name="i4i.2xlarge",
+            cluster_instance=shapes.region("us-east-1").instances["i4i.2xlarge"],
+            cluster_instance_count=Interval(low=8, mid=8, high=8, confidence=1),
+            cpu_utilization=Interval(
+                low=10.12, mid=13.2, high=14.194801291058118, confidence=1
+            ),
+            memory_utilization_gib=certain_float(32.0),
+            network_utilization_mbps=certain_float(128.0),
+            disk_utilization_gib=certain_float(159),
+        )
+    ]
+)
+
+buffers = Buffers(
+    desired={
+        "background": Buffer(
+            ratio=2.0,
+            intent=BufferIntent.desired,
+            components=[BufferComponent.cpu, BufferComponent.network, "background"],
+        ),
+        "compute": Buffer(
+            ratio=1.5, intent=BufferIntent.desired, components=[BufferComponent.compute]
+        ),
+        "storage": Buffer(
+            ratio=4, intent=BufferIntent.desired, components=[BufferComponent.storage]
+        ),
+    }
+)
+
+
+def test_get_cores_with_buffer_scale():
+    buffers_copy = buffers.model_copy(deep=True)
+    buffers_copy.derived = {
+        "compute": Buffer(
+            ratio=4, intent=BufferIntent.scale, components=[BufferComponent.compute]
+        )
+    }
+    i3_2xlarge = shapes.region("us-east-1").instances["i3.2xlarge"]
+    needed_cores = get_cores_with_buffer(
+        current_cluster.zonal[0], buffers_copy, i3_2xlarge
+    )
+    assert needed_cores == 141
+
+
+def test_get_cores_with_buffer_desired():
+    i3_2xlarge = shapes.region("us-east-1").instances["i3.2xlarge"]
+    needed_cores = get_cores_with_buffer(current_cluster.zonal[0], buffers, i3_2xlarge)
+    assert needed_cores == 35
+
+
+def test_get_cores_with_buffer_preserve():
+    buffers_copy = buffers.model_copy(deep=True)
+    buffers_copy.derived = {
+        "compute": Buffer(
+            intent=BufferIntent.preserve, components=[BufferComponent.compute]
+        )
+    }
+    i3_2xlarge = shapes.region("us-east-1").instances["i3.2xlarge"]
+    needed_cores = get_cores_with_buffer(
+        current_cluster.zonal[0], buffers_copy, i3_2xlarge
+    )
+    assert needed_cores == 64
+
+
+def test_get_disk_with_buffer_desired():
+    needed_disk = get_disk_with_buffer_gib(current_cluster.zonal[0], buffers)
+    assert needed_disk == 636
+
+
+def test_get_disk_with_buffer_scale():
+    current_cluster_copy = current_cluster.model_copy(deep=True)
+    current_cluster_copy.zonal[0].disk_utilization_gib = certain_float(1200)
+    buffers_copy = buffers.model_copy(deep=True)
+    buffers_copy.derived = {
+        "storage": Buffer(
+            ratio=8, intent=BufferIntent.scale, components=[BufferComponent.disk]
+        )
+    }
+    needed_disk = get_disk_with_buffer_gib(current_cluster_copy.zonal[0], buffers_copy)
+    assert needed_disk == 38400
+
+
+def test_get_disk_with_buffer_preserve():
+    buffers_copy = buffers.model_copy(deep=True)
+    buffers_copy.derived = {
+        "storage": Buffer(
+            intent=BufferIntent.preserve, components=[BufferComponent.disk]
+        )
+    }
+    needed_disk = get_disk_with_buffer_gib(current_cluster.zonal[0], buffers_copy)
+    assert needed_disk == 13968

@@ -820,14 +820,17 @@ def get_disk_with_buffer_gib(current_capacity, buffers):
 
 
 def zonal_requirements_from_current(
-    current_cluster: CurrentClusters, buffers: Buffers, instance: Instance
+    current_cluster: CurrentClusters,
+    buffers: Buffers,
+    instance: Instance,
+    reference_shape: Instance,
 ) -> CapacityRequirement:
     if current_cluster is not None and current_cluster.zonal[0] is not None:
         current_capacity: CurrentClusterCapacity = current_cluster.zonal[0]
         needed_cores = normalize_cores(
             get_cores_with_buffer(current_capacity, buffers, instance),
             instance,
-            current_capacity.cluster_instance,
+            reference_shape,
         )
         needed_network_mbps = get_network_with_buffer_mbps(current_capacity, buffers)
         needed_memory_gib = get_memory_with_buffer_gib(current_capacity, buffers)
@@ -839,6 +842,7 @@ def zonal_requirements_from_current(
             mem_gib=certain_float(needed_memory_gib),
             disk_gib=certain_float(needed_disk_gib),
             network_mbps=certain_float(needed_network_mbps),
+            reference_shape=current_capacity.cluster_instance,
         )
 
     return None
