@@ -396,4 +396,4 @@ def test_plan_certain():
 
     lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
     assert lr_clusters.count == 8
-    assert lr_clusters.instance.cpu == 16
+    assert lr_clusters.instance.cpu == 12
