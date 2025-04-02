@@ -43,7 +43,7 @@ class ClusterType(str, Enum):
     ha = "high-availability"
 
 
-def target_cpu_utilzation(tier: int) -> float:
+def target_cpu_utilization(tier: int) -> float:
     """
     Returns the target average cluster CPU utilization for a given tier
     """
@@ -118,7 +118,7 @@ def _estimate_kafka_requirement(
 
         # compute needed core capacity for cluster so avg cpu utilization for the cluster stays
         # under threshold for that tier
-        needed_cores = int(current_utilized_cores / target_cpu_utilzation(desires.service_tier))
+        needed_cores = int(current_utilized_cores / target_cpu_utilization(desires.service_tier))
         logger.debug("kafka needed cores: %s", needed_cores)
         # Normalize those cores to the target shape
         reference_shape = current_zonal_cluster.cluster_instance
