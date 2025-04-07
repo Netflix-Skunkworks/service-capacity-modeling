@@ -143,6 +143,22 @@ def test_tier_3():
     assert_similar_compute(expected_shape=expected, actual_shape=leader)
 
 
+def test_cluster_count():
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.aurora",
+        region="us-east-1",
+        desires=tier_3,
+    )
+    assert cap_plan[0].candidate_clusters.regional[0].count == 1
+
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.aurora",
+        region="us-east-1",
+        desires=large_footprint,
+    )
+    assert cap_plan[0].candidate_clusters.regional[0].count == 2
+
+
 def test_cap_plan():
     desire_json = """{
       "deploy_desires": {
