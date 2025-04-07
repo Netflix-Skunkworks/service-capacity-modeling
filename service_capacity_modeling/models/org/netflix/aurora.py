@@ -187,9 +187,16 @@ def _compute_aurora_region(  # pylint: disable=too-many-positional-arguments
         total_annual_cost,
     )
 
+    # TODO (ramsrivatsak): In future we need to leverage read traffic and model the
+    # number of reader instances based on the number of read IOPS.
+    # We add a reader instance if we are deploying a tier 0 and tier 1 service.
+    # Writer instance + Reader instance = 2. For other service tiers the writer instance
+    # is enough.
+    cluster_count = 2 if desires.service_tier <= 1 else 1
+
     return RegionClusterCapacity(
         cluster_type="aurora-cluster",
-        count=1,
+        count=cluster_count,
         instance=instance,
         attached_drives=attached_drives,
         annual_cost=total_annual_cost,
