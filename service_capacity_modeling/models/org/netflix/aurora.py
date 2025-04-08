@@ -192,11 +192,11 @@ def _compute_aurora_region(  # pylint: disable=too-many-positional-arguments
     # We add a reader instance if we are deploying a tier 0 and tier 1 service.
     # Writer instance + Reader instance = 2. For other service tiers the writer instance
     # is enough.
-    cluster_count = 2 if desires.service_tier <= 1 else 1
+    instance_count = 2 if desires.service_tier <= 1 else 1
 
     return RegionClusterCapacity(
         cluster_type="aurora-cluster",
-        count=cluster_count,
+        count=instance_count,
         instance=instance,
         attached_drives=attached_drives,
         annual_cost=total_annual_cost,
