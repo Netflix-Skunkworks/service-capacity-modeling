@@ -1,8 +1,12 @@
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import CurrentClusters
+from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.org.netflix.kafka import ClusterType
 
 
 def test_kafka_basic():
@@ -27,7 +31,7 @@ def test_kafka_basic():
         region="us-east-1",
         desires=desires,
         extra_model_arguments={
-            "cluster_type": "strong",
+            "cluster_type": ClusterType.strong,
             "retention": "PT4H",
         },
     )
@@ -95,7 +99,7 @@ def test_kafka_high_throughput():
         region="us-east-1",
         desires=desires,
         extra_model_arguments={
-            "cluster_type": "ha",
+            "cluster_type": ClusterType.ha,
             "retention": "PT3H",
         },
         num_results=3,
@@ -164,7 +168,7 @@ def test_kafka_high_throughput_ebs():
         region="us-east-1",
         desires=desires,
         extra_model_arguments={
-            "cluster_type": "ha",
+            "cluster_type": ClusterType.ha,
             "retention": "PT3H",
             # Force to attached drives
             "max_local_disk_gib": 500,
@@ -246,7 +250,7 @@ def test_kafka_model_constraints():
         region="us-east-1",
         desires=desires,
         extra_model_arguments={
-            "cluster_type": "ha",
+            "cluster_type": ClusterType.ha,
             "retention": "PT3H",
             "require_attached_disks": require_attached_disks,
             "min_instance_cpu": min_instance_cpu,
@@ -268,7 +272,7 @@ def test_kafka_model_constraints():
         region="us-east-1",
         desires=desires,
         extra_model_arguments={
-            "cluster_type": "ha",
+            "cluster_type": ClusterType.ha,
             "retention": "PT3H",
             "require_local_disks": True,
             "min_instance_cpu": min_instance_cpu,
@@ -283,3 +287,55 @@ def test_kafka_model_constraints():
             clstr = lr.candidate_clusters.zonal[z]
             assert clstr.instance.drive is not None
             assert (clstr.instance.cpu * clstr.count) >= expected_min_zonal_cpu
+
+
+def test_plan_certain():
+    """
+    Use current clusters cpu utilization to determine instance types directly as
+    supposed to extrapolating it from the Data Shape
+    """
+    cluster_capacity = CurrentZoneClusterCapacity(
+        cluster_instance_name="r5.2xlarge",
+        cluster_instance_count=Interval(low=27, mid=27, high=27, confidence=1),
+        cpu_utilization=Interval(low=11.6, mid=19.29, high=27.57, confidence=1),
+        memory_utilization_gib=certain_float(32.0),
+        network_utilization_mbps=certain_float(128.0),
+        disk_utilization_gib=Interval(
+            low=2006.083, mid=2252.5, high=2480.41, confidence=0.98
+        ),
+    )
+
+    throughput = 2 * 1024 * 1024 * 1024
+    desires = CapacityDesires(
+        service_tier=1,
+        current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+        query_pattern=QueryPattern(
+            # 2 consumers
+            estimated_read_per_second=Interval(low=1, mid=2, high=2, confidence=0.98),
+            # 1 producer
+            estimated_write_per_second=Interval(low=1, mid=1, high=1, confidence=0.98),
+            estimated_mean_write_size_bytes=Interval(
+                low=throughput, mid=throughput, high=throughput * 2, confidence=0.98
+            ),
+        ),
+    )
+
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.kafka",
+        region="us-east-1",
+        num_results=3,
+        num_regions=4,
+        desires=desires,
+        extra_model_arguments={
+            "cluster_type": ClusterType.ha,
+            "retention": "PT8H",
+            "require_attached_disks": True,
+            "required_zone_size": cluster_capacity.cluster_instance_count.mid,
+        },
+    )
+
+    assert len(cap_plan) >= 1
+    lr_clusters = cap_plan[0].candidate_clusters.zonal
+    assert len(lr_clusters) >= 1
+    print(lr_clusters[0].instance.name)
+    assert lr_clusters[0].count == cluster_capacity.cluster_instance_count.high
