@@ -144,9 +144,7 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     disk_buffer = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     )
-
     reference_shape = desires.reference_shape
-
     current_capacity = (
         None
         if desires.current_clusters is None
@@ -156,6 +154,8 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
             else desires.current_clusters.regional[0]
         )
     )
+
+    # If the cluster is already provisioned
     if current_capacity and desires.current_clusters is not None:
         capacity_requirement = zonal_requirements_from_current(
             desires.current_clusters, desires.buffers, instance, reference_shape
@@ -166,6 +166,7 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
         )
         disk_used_gib = current_capacity.disk_utilization_gib.mid * (disk_scale or 1)
     else:
+        # If the cluster is not yet provisioned
         capacity_requirement = _zonal_requirement_for_new_cluster(
             desires, instance, copies_per_region, zones_per_region
         )
@@ -175,6 +176,7 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     needed_disk = capacity_requirement.disk_gib.mid
     needed_network_mbps = capacity_requirement.network_mbps.mid
 
+    # it can be 0 for cases where disk utilization is not passed as a part of current cluster capacity
     if needed_disk == 0:
         needed_disk = max(
             1, _get_disk_from_desires(desires, copies_per_region) // zones_per_region
@@ -184,15 +186,18 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
 
     # Rough estimate of how many instances we would need just for the CPU
     # Note that this is a lower bound, we might end up with more.
-    rough_count = math.ceil((needed_cores * zones_per_region) / instance.cpu)
+    estimated_cores_per_region = math.ceil(
+        (needed_cores * zones_per_region) / instance.cpu
+    )
     # Generally speaking we want fewer than some number of reads per second
     # hitting disk per instance. If we don't have many reads we don't need to
     # hold much data in memory.
-    instance_rps = max(1, reads_per_second // rough_count)
+    instance_rps = max(1, reads_per_second // estimated_cores_per_region)
     disk_rps = instance_rps * _cass_io_per_read(
-        max(1, (disk_used_gib * zones_per_region) // rough_count)
+        max(1, (disk_used_gib * zones_per_region) // estimated_cores_per_region)
     )
     rps_working_set = min(1.0, disk_rps / max_rps_to_disk)
+
     # If disk RPS will be smaller than our target because there are no
     # reads, we don't need to hold as much data in memory.
     # For c*, we can skip memory buffer and can just keep using the heap and write buffer calc
@@ -200,7 +205,6 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     needed_memory = min(working_set, rps_working_set) * disk_used_gib * zones_per_region
     # Now convert to per zone
     needed_memory = max(1, int(needed_memory // zones_per_region))
-
     logger.debug(
         "Need (cpu, mem, disk, working) = (%s, %s, %s, %f)",
         needed_cores,
