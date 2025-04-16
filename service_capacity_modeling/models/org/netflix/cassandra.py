@@ -574,8 +574,10 @@ class NflxCassandraCapacityModel(CapacityModel):
         require_attached_disks: bool = extra_model_arguments.get(
             "require_attached_disks", False
         )
-        required_cluster_size: Optional[int] = extra_model_arguments.get(
-            "required_cluster_size", None
+        required_cluster_size: Optional[int] = (
+            math.ceil(extra_model_arguments["required_cluster_size"])
+            if "required_cluster_size" in extra_model_arguments
+            else None
         )
         max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 500)
         max_regional_size: int = extra_model_arguments.get("max_regional_size", 192)
