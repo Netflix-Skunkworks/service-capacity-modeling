@@ -830,11 +830,14 @@ def get_disk_from_current_capacity(
     else:
         cluster_instance = current_capacity.cluster_instance
 
-    assert cluster_instance.drive is not None, "Drive should not be None"
+    if cluster_instance.drive is not None:
+        instance_disk_allocated = cluster_instance.drive.max_size_gib
+    else:
+        assert current_capacity.cluster_drive is not None, "Drive should not be None"
+        instance_disk_allocated = current_capacity.cluster_drive.size_gib
 
     zonal_disk_allocated = (
-        cluster_instance.drive.max_size_gib
-        * current_capacity.cluster_instance_count.mid
+        instance_disk_allocated * current_capacity.cluster_instance_count.mid
     )
 
     # These are the desired buffers
