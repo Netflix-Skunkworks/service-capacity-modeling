@@ -21,7 +21,6 @@ from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
-from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import FixedInterval
@@ -92,35 +91,32 @@ def calculate_vitals_for_capacity_planner(
         target_shape=instance,
         reference_shape=desires.reference_shape,
     )
-
     needed_network_mbps = simple_network_mbps(desires)
-
     needed_memory_gib = current_memory_gib
-
     needed_disk_gib = current_disk_gib
 
-    # Checking if the current setup has been supplied, if so, use buffers to optimize
-    current_cluster = desires.current_clusters
-    if current_cluster is not None:
-        current_cluster_capacity: CurrentClusterCapacity = current_cluster.zonal[0]
-        if current_cluster_capacity is not None:
-            needed_cores = normalize_cores(
-                get_cores_from_current_capacity(
-                    current_cluster_capacity, desires.buffers, instance
-                ),
-                instance,
-                current_cluster_capacity.cluster_instance,
-            )
-            needed_network_mbps = get_network_from_current_capacity(
-                current_cluster_capacity, desires.buffers
-            )
-            needed_memory_gib = get_memory_from_current_capacity(
-                current_cluster_capacity, desires.buffers
-            )
-            needed_disk_gib = get_disk_from_current_capacity(
-                current_cluster_capacity, desires.buffers
-            )
-
+    # Check if we can apply optimizations based on current cluster capacity
+    current_capacity = (
+        desires.current_clusters.zonal[0]
+        if desires.current_clusters and desires.current_clusters.zonal
+        else None
+    )
+    if not current_capacity:
+        return needed_cores, needed_network_mbps, needed_memory_gib, needed_disk_gib
+    needed_cores = normalize_cores(
+        core_count=get_cores_from_current_capacity(
+            current_capacity, desires.buffers, instance
+        ),
+        target_shape=instance,
+        reference_shape=current_capacity.cluster_instance,
+    )
+    needed_network_mbps = get_network_from_current_capacity(
+        current_capacity, desires.buffers
+    )
+    needed_memory_gib = get_memory_from_current_capacity(
+        current_capacity, desires.buffers
+    )
+    needed_disk_gib = get_disk_from_current_capacity(current_capacity, desires.buffers)
     return needed_cores, needed_network_mbps, needed_memory_gib, needed_disk_gib
 
 
