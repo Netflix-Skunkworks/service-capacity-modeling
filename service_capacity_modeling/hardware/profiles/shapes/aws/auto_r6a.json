@@ -1,0 +1,104 @@
+{
+  "instances": {
+    "r6a.large": {
+      "name": "r6a.large",
+      "cpu": 2,
+      "cpu_cores": 1,
+      "cpu_ghz": 3.6,
+      "cpu_ipc_scale": 1.15,
+      "ram_gib": 15.26,
+      "net_mbps": 781.0,
+      "drive": null
+    },
+    "r6a.xlarge": {
+      "name": "r6a.xlarge",
+      "cpu": 4,
+      "cpu_cores": 2,
+      "cpu_ghz": 3.6,
+      "cpu_ipc_scale": 1.15,
+      "ram_gib": 30.52,
+      "net_mbps": 1562.0,
+      "drive": null
+    },
+    "r6a.2xlarge": {
+      "name": "r6a.2xlarge",
+      "cpu": 8,
+      "cpu_cores": 4,
+      "cpu_ghz": 3.6,
+      "cpu_ipc_scale": 1.15,
+      "ram_gib": 61.04,
+      "net_mbps": 3125.0,
+      "drive": null
+    },
+    "r6a.4xlarge": {
+      "name": "r6a.4xlarge",
+      "cpu": 16,
+      "cpu_cores": 8,
+      "cpu_ghz": 3.6,
+      "cpu_ipc_scale": 1.15,
+      "ram_gib": 122.07,
+      "net_mbps": 6250.0,
+      "drive": null
+    },
+    "r6a.8xlarge": {
+      "name": "r6a.8xlarge",
+      "cpu": 32,
+      "cpu_cores": 16,
+      "cpu_ghz": 3.6,
+      "cpu_ipc_scale": 1.15,
+      "ram_gib": 244.14,
+      "net_mbps": 12500.0,
+      "drive": null
+    },
+    "r6a.12xlarge": {
+      "name": "r6a.12xlarge",
+      "cpu": 48,
+      "cpu_cores": 24,
+      "cpu_ghz": 3.6,
+      "cpu_ipc_scale": 1.15,
+      "ram_gib": 366.21,
+      "net_mbps": 18750.0,
+      "drive": null
+    },
+    "r6a.16xlarge": {
+      "name": "r6a.16xlarge",
+      "cpu": 64,
+      "cpu_cores": 32,
+      "cpu_ghz": 3.6,
+      "cpu_ipc_scale": 1.15,
+      "ram_gib": 488.28,
+      "net_mbps": 25000.0,
+      "drive": null
+    },
+    "r6a.24xlarge": {
+      "name": "r6a.24xlarge",
+      "cpu": 96,
+      "cpu_cores": 48,
+      "cpu_ghz": 3.6,
+      "cpu_ipc_scale": 1.15,
+      "ram_gib": 732.42,
+      "net_mbps": 37500.0,
+      "drive": null
+    },
+    "r6a.32xlarge": {
+      "name": "r6a.32xlarge",
+      "cpu": 128,
+      "cpu_cores": 64,
+      "cpu_ghz": 3.6,
+      "cpu_ipc_scale": 1.15,
+      "ram_gib": 976.56,
+      "net_mbps": 50000.0,
+      "drive": null
+    },
+    "r6a.48xlarge": {
+      "name": "r6a.48xlarge",
+      "cpu": 192,
+      "cpu_cores": 96,
+      "cpu_ghz": 3.6,
+      "cpu_ipc_scale": 1.15,
+      "ram_gib": 1464.84,
+      "net_mbps": 50000.0,
+      "drive": null
+    }
+  }
+}
