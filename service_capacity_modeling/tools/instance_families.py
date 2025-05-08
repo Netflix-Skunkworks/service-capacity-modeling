@@ -8,7 +8,7 @@ ROME_IPC = 1.03
 MILAN_IPC = SKX_IPC * 1.15
 GENOA_IPC = MILAN_IPC * 1.13
 
-instance_families = {
+INSTANCE_TYPES = {
     "c5": {
         "xl_iops": None,
         "io_latency_curve": None,

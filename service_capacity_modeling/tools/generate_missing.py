@@ -5,11 +5,9 @@ from pathlib import Path
 from typing import Any
 from typing import Dict
 
-try:
-    from . import instance_families
-except ImportError:
-    # in case run as a script
-    from instance_families import instance_families
+from instance_families import INSTANCE_TYPES  # pylint: disable=import-error
+
+print("Loaded instance family count =", len(INSTANCE_TYPES))
 
 
 def get_auto_shape_path() -> Path:
@@ -52,7 +50,7 @@ def main(debug: bool = True, execute: bool = False):
     # Check which families need to be generated
     missing_families = {
         family: params
-        for family, params in instance_families.items()
+        for family, params in INSTANCE_TYPES.items()
         if not (expected_path / f"auto_{family}.json").exists()
     }
 
