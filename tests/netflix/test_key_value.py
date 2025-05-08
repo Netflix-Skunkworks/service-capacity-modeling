@@ -147,7 +147,6 @@ def test_kv_increasing_qps_compare_working_sets():
         zlr_small_cost = cap_plan_small.least_regret[
             0
         ].candidate_clusters.total_annual_cost
-        zlr_small_family = zlr_small.instance.family
 
         zlr_large = cap_plan_large.least_regret[0].candidate_clusters.zonal[0]
         zlr_large_cpu = zlr_large.count * zlr_large.instance.cpu
@@ -155,7 +154,6 @@ def test_kv_increasing_qps_compare_working_sets():
         zlr_large_cost = cap_plan_large.least_regret[
             0
         ].candidate_clusters.total_annual_cost
-        zlr_large_family = zlr_large.instance.family
 
         # For smaller qps, cost should be less for smaller working set
         # (due to needing to keep less in memory). This tilts to c/m instead of

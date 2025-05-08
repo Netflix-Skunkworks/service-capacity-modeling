@@ -1,8 +1,9 @@
-from fractions import Fraction
-from typing import Dict, List, Tuple, Optional, Set
+import re
+from typing import Dict
+from typing import List
+from typing import Tuple
 
 from service_capacity_modeling.hardware import shapes
-import re
 
 
 def test_r6id() -> None:
@@ -65,14 +66,14 @@ def test_consistent_core_counts_across_generations() -> None:
         if len(instances) <= 1:
             continue
 
-        base_family, base_instance = instances[0]
+        _, base_instance = instances[0]
         base_cpu = region.instances[base_instance].cpu
 
         for family, instance_name in instances[1:]:
             instance = region.instances[instance_name]
             assert instance.cpu == base_cpu, (
-                f"CPU count mismatch for size {size}: {base_instance} has {base_cpu} cores, "
-                f"but {instance_name} has {instance.cpu} cores"
+                f"CPU count mismatch for size {size}: {base_instance} has {base_cpu} "
+                f"cores, but {instance_name} has {instance.cpu} cores"
             )
 
 
@@ -81,57 +82,48 @@ def test_performance_increases_with_generation() -> None:
     generation_groups = get_generation_groups()
     region = shapes.region("us-east-1")
 
-    failed_msgs: List[Tuple[str, str]] = []
-    for base_type, generations in generation_groups.items():
+    failed_msgs: List[str] = []
+    for _, generations in generation_groups.items():
         if len(generations) <= 1:
             continue
 
         # For each generation pair (gen_n, gen_n+1)
-        for i in range(len(generations) - 1):
-            curr_family, curr_gen = generations[i]
-            next_family, next_gen = generations[i + 1]
+        for curr_gen, next_gen in zip(generations, generations[1:]):
+            curr_family, next_family = curr_gen[0], next_gen[0]
 
-            # Get a representative instance from each family (prefer xlarge if available)
+            # Get a representative instance from each family
             curr_instances = [name for name, _ in get_instance_families()[curr_family]]
             next_instances = [name for name, _ in get_instance_families()[next_family]]
 
-            # Try to find matching size instances for fair comparison
-            matching_sizes: List[Tuple[str, str]] = []
-            for curr_inst in curr_instances:
-                curr_match = re.match(r"[a-z0-9]+\.([a-z0-9]+)", curr_inst)
-                if not curr_match:
-                    continue
-                curr_size = curr_match.group(1)
-                for next_inst in next_instances:
-                    next_match = re.match(r"[a-z0-9]+\.([a-z0-9]+)", next_inst)
-                    if not next_match:
-                        continue
-                    next_size = next_match.group(1)
-                    if curr_size == next_size:
-                        matching_sizes.append((curr_inst, next_inst))
-                        break
+            # Find matching size instances or fallback to the first instance
+            matching_sizes = [
+                (curr, next)
+                for curr in curr_instances
+                for next in next_instances
+                if curr.split(".")[1] == next.split(".")[1]
+            ]
 
-            if matching_sizes:
-                curr_inst, next_inst = matching_sizes[0]  # Use the first matching pair
-            else:
-                # Fallback to any instances if no matching sizes
-                curr_inst = curr_instances[0]
-                next_inst = next_instances[0]
+            curr_inst, next_inst = (
+                matching_sizes[0]
+                if matching_sizes
+                else (curr_instances[0], next_instances[0])
+            )
 
-            curr_instance = region.instances[curr_inst]
-            next_instance = region.instances[next_inst]
+            # Calculate performance
+            curr_perf = (
+                region.instances[curr_inst].cpu_ghz
+                * region.instances[curr_inst].cpu_ipc_scale
+            )
+            next_perf = (
+                region.instances[next_inst].cpu_ghz
+                * region.instances[next_inst].cpu_ipc_scale
+            )
 
-            # Calculate performance (instructions/second = cpu_ghz * cpu_ipc_scale)
-            curr_perf = curr_instance.cpu_ghz * curr_instance.cpu_ipc_scale
-            next_perf = next_instance.cpu_ghz * next_instance.cpu_ipc_scale
-
-            # assert next_perf > curr_perf, "oops"
             if not next_perf > curr_perf:
                 failed_msgs.append(
-                    (
-                        f"Performance did not increase from {curr_family} ({curr_gen}) to {next_family} ({next_gen}): ",
-                        f"{curr_inst} perf={curr_perf} vs {next_inst} perf={next_perf}",
-                    )
+                    f"Performance did not increase from {curr_family} ({curr_gen})"
+                    + f" to {next_family} ({next_gen}): {curr_inst} perf={curr_perf}"
+                    + f" vs {next_inst} perf={next_perf}"
                 )
 
     assert (
@@ -163,8 +155,8 @@ def test_memory_proportional_to_cpu() -> None:
             max_relative_diff = 10  # Allow for a 10% difference
             assert relative_diff < max_relative_diff, (
                 f"Memory to CPU ratio mismatch in family {family}: "
-                f"{base_name} has {base_ratio:.2f} GB/core, but {name} has {ratio:.2f} GB/core "
-                f"(difference: {relative_diff:.2f}%)"
+                f"{base_name} has {base_ratio:.2f} GB/core, but {name} has "
+                f"{ratio:.2f} GB/core (difference: {relative_diff:.2f}%)"
             )
 
 

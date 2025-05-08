@@ -1,11 +1,15 @@
 #!/usr/bin/python3
-import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
+from typing import Dict
 
-from instance_families import instance_families
+try:
+    from . import instance_families
+except ImportError:
+    # in case run as a script
+    from instance_families import instance_families
 
 
 def get_auto_shape_path() -> Path:
@@ -39,42 +43,34 @@ def build_command(family: str, params: Dict[str, Any], output_path: Path) -> lis
 
 
 def main(debug: bool = True, execute: bool = False):
-    # Get the path where shape files should be stored
-    expected_path = Path(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "hardware",
-        "profiles",
-        "shapes",
-        "aws",
+    expected_path = (
+        Path(__file__).resolve().parent.parent / "hardware/profiles/shapes/aws"
     )
 
-    # Check which families need to be generated
-    missing_families = {}
-    for family, params in instance_families.items():
-        filename = f"auto_{family}.json"
-        expected_file = expected_path / filename
+    print("Checking for files in", expected_path)
 
-        if not expected_file.exists():
-            print(f"Missing {family} in {expected_file}")
-            missing_families[family] = params
+    # Check which families need to be generated
+    missing_families = {
+        family: params
+        for family, params in instance_families.items()
+        if not (expected_path / f"auto_{family}.json").exists()
+    }
 
     if not missing_families:
         print("All instance family files are present.")
         return
 
     # Build commands for missing families
-    commands = {}
-    for family, params in missing_families.items():
-        cmd = build_command(family, params, expected_path)
-        commands[family] = cmd
+    commands = {
+        family: build_command(family, params, expected_path)
+        for family, params in missing_families.items()
+    }
 
+    for family, cmd in commands.items():
         if debug:
-            print(f"\nWould run for {family}:")
-            print(" ".join(cmd))
+            print(f"\nWould run for {family}:\n{' '.join(cmd)}")
 
-    # Execute commands if requested
-    if execute:
-        for family, cmd in commands.items():
+        if execute:
             print(f"\nGenerating {family}...")
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -84,7 +80,8 @@ def main(debug: bool = True, execute: bool = False):
             except subprocess.CalledProcessError as e:
                 print(f"Error generating {family}: {e}")
                 print(e.stderr)
-    elif not debug:
+
+    if not debug and not execute:
         print("\nRun with --execute to generate the missing files")
 
 
