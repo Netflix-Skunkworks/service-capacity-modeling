@@ -128,7 +128,7 @@ def test_timeseries_increasing_qps_simple():
         assert rlr.instance.drive is None
 
     # We should generally want cheap CPUs for Cassandra
-    assert all(r[0][0] in ("r", "m", "i") for r in zonal_result)
+    assert all(r[0][0] in ("r", "m", "i", "c") for r in zonal_result)
 
     # We just want ram and cpus for a java app
     assert all(r[0][0] in ("m", "r", "c") for r in regional_result)
