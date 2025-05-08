@@ -68,10 +68,13 @@ def test_evcache_inmemory_low_latency_reads_cpu():
             * candidate.candidate_clusters.zonal[0].instance.cpu_ghz
         )
 
-        assert total_cpu_power > 1000, (f"CPU power is not sufficient for low latency reads, with"
-                                        f" {candidate.candidate_clusters.zonal[0].count} *"
-                                        f" {candidate.candidate_clusters.zonal[0].instance.name},"
-                                        f" total= {total_cpu_power}.")
+        assert total_cpu_power > 1000, (
+            f"CPU power is not sufficient for low latency reads, with"
+            f" {candidate.candidate_clusters.zonal[0].count} *"
+            f" {candidate.candidate_clusters.zonal[0].instance.name},"
+            f" total= {total_cpu_power}."
+        )
+
 
 class BufferComponents:
     pass

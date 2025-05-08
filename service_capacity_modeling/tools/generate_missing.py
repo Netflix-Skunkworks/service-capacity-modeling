@@ -7,10 +7,12 @@ from typing import Dict, Any, Optional
 
 from instance_families import instance_families
 
+
 def get_auto_shape_path() -> Path:
     """Get the path to auto_shape.py script"""
     current_dir = Path(__file__).parent
     return current_dir / "auto_shape.py"
+
 
 def build_command(family: str, params: Dict[str, Any], output_path: Path) -> list:
     """Build the command to run auto_shape.py with the appropriate parameters"""
@@ -18,14 +20,14 @@ def build_command(family: str, params: Dict[str, Any], output_path: Path) -> lis
     cmd = [sys.executable, str(auto_shape_path)]
 
     # Add optional parameters if they are provided
-    if params.get('xl_iops') is not None:
-        cmd.extend(["--xl-iops", params['xl_iops']])
+    if params.get("xl_iops") is not None:
+        cmd.extend(["--xl-iops", params["xl_iops"]])
 
-    if params.get('io_latency_curve') is not None:
-        cmd.extend(["--io-latency-curve", params['io_latency_curve']])
+    if params.get("io_latency_curve") is not None:
+        cmd.extend(["--io-latency-curve", params["io_latency_curve"]])
 
-    if params.get('cpu_ipc_scale') is not None:
-        cmd.extend(["--cpu-ipc-scale", str(params['cpu_ipc_scale'])])
+    if params.get("cpu_ipc_scale") is not None:
+        cmd.extend(["--cpu-ipc-scale", str(params["cpu_ipc_scale"])])
 
     # Add output path
     cmd.extend(["--output-path", str(output_path)])
@@ -34,6 +36,7 @@ def build_command(family: str, params: Dict[str, Any], output_path: Path) -> lis
     cmd.append(family)
 
     return cmd
+
 
 def main(debug: bool = True, execute: bool = False):
     # Get the path where shape files should be stored
@@ -83,6 +86,7 @@ def main(debug: bool = True, execute: bool = False):
                 print(e.stderr)
     elif not debug:
         print("\nRun with --execute to generate the missing files")
+
 
 if __name__ == "__main__":
     # Parse arguments to determine whether to execute commands

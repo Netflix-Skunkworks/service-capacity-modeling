@@ -162,9 +162,7 @@ def test_kv_increasing_qps_compare_working_sets():
         # m/r. But, they should be at least cheaper than the heavy
         # working set instances.
         assert zlr_small_cost <= zlr_large_cost
-        assert (
-            zlr_small_cpu <= zlr_large_cpu or zlr_small_memory <= zlr_large_memory
-        )
+        assert zlr_small_cpu <= zlr_large_cpu or zlr_small_memory <= zlr_large_memory
 
         # We should generally want cheap CPUs for Cassandra
         assert all(
