@@ -1,0 +1,84 @@
+{
+  "instances": {
+    "c5a.large": {
+      "name": "c5a.large",
+      "cpu": 2,
+      "cpu_cores": 1,
+      "cpu_ghz": 3.3,
+      "cpu_ipc_scale": 1.03,
+      "ram_gib": 3.81,
+      "net_mbps": 750.0,
+      "drive": null
+    },
+    "c5a.xlarge": {
+      "name": "c5a.xlarge",
+      "cpu": 4,
+      "cpu_cores": 2,
+      "cpu_ghz": 3.3,
+      "cpu_ipc_scale": 1.03,
+      "ram_gib": 7.63,
+      "net_mbps": 1250.0,
+      "drive": null
+    },
+    "c5a.2xlarge": {
+      "name": "c5a.2xlarge",
+      "cpu": 8,
+      "cpu_cores": 4,
+      "cpu_ghz": 3.3,
+      "cpu_ipc_scale": 1.03,
+      "ram_gib": 15.26,
+      "net_mbps": 2500.0,
+      "drive": null
+    },
+    "c5a.4xlarge": {
+      "name": "c5a.4xlarge",
+      "cpu": 16,
+      "cpu_cores": 8,
+      "cpu_ghz": 3.3,
+      "cpu_ipc_scale": 1.03,
+      "ram_gib": 30.52,
+      "net_mbps": 5000.0,
+      "drive": null
+    },
+    "c5a.8xlarge": {
+      "name": "c5a.8xlarge",
+      "cpu": 32,
+      "cpu_cores": 16,
+      "cpu_ghz": 3.3,
+      "cpu_ipc_scale": 1.03,
+      "ram_gib": 61.04,
+      "net_mbps": 10000.0,
+      "drive": null
+    },
+    "c5a.12xlarge": {
+      "name": "c5a.12xlarge",
+      "cpu": 48,
+      "cpu_cores": 24,
+      "cpu_ghz": 3.3,
+      "cpu_ipc_scale": 1.03,
+      "ram_gib": 91.55,
+      "net_mbps": 12000.0,
+      "drive": null
+    },
+    "c5a.16xlarge": {
+      "name": "c5a.16xlarge",
+      "cpu": 64,
+      "cpu_cores": 32,
+      "cpu_ghz": 3.3,
+      "cpu_ipc_scale": 1.03,
+      "ram_gib": 122.07,
+      "net_mbps": 20000.0,
+      "drive": null
+    },
+    "c5a.24xlarge": {
+      "name": "c5a.24xlarge",
+      "cpu": 96,
+      "cpu_cores": 48,
+      "cpu_ghz": 3.3,
+      "cpu_ipc_scale": 1.03,
+      "ram_gib": 183.11,
+      "net_mbps": 20000.0,
+      "drive": null
+    }
+  }
+}

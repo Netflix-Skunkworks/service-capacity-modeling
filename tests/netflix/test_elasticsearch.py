@@ -40,7 +40,7 @@ def test_es_increasing_qps_simple():
         for zonal in cap_plan.least_regret[0].candidate_clusters.zonal:
             zonal_result[zonal.cluster_type].append(zonal_summary(zonal))
 
-    expected_families = {"r", "m", "i"}
+    expected_families = {"r", "m", "c", "i"}
     for cluster_type in list(zonal_result.keys()):
         zonal_by_increasing_qps = zonal_result[cluster_type]
 

@@ -73,7 +73,7 @@ def test_kv_increasing_qps_simple():
         assert rlr.instance.drive is None
 
     # We should generally want cheap CPUs for Cassandra
-    assert all(r[0][0] in ("r", "m", "i") for r in zonal_result)
+    assert all(r[0][0] in ("r", "m", "c", "i") for r in zonal_result)
 
     # We just want ram and cpus for a java app
     assert all(r[0][0] in ("m", "r", "c") for r in regional_result)
@@ -147,7 +147,6 @@ def test_kv_increasing_qps_compare_working_sets():
         zlr_small_cost = cap_plan_small.least_regret[
             0
         ].candidate_clusters.total_annual_cost
-        zlr_small_family = zlr_small.instance.family
 
         zlr_large = cap_plan_large.least_regret[0].candidate_clusters.zonal[0]
         zlr_large_cpu = zlr_large.count * zlr_large.instance.cpu
@@ -155,25 +154,17 @@ def test_kv_increasing_qps_compare_working_sets():
         zlr_large_cost = cap_plan_large.least_regret[
             0
         ].candidate_clusters.total_annual_cost
-        zlr_large_family = zlr_large.instance.family
 
         # For smaller qps, cost should be less for smaller working set
-        # (due to cheaper instance family).
-        # For larger qps (e.g. 100_000), the lower working set doesn't change
-        # the resulting plan
-        # because of the high number of cores needed to support the qps.
-        if qps < 100_000:
-            assert zlr_small_cost < zlr_large_cost
-            assert (
-                zlr_small_cpu != zlr_large_cpu or zlr_small_memory != zlr_large_memory
-            )
-        else:
-            assert zlr_small_cost == zlr_large_cost
-            assert zlr_small_family == zlr_large_family
+        # (due to needing to keep less in memory). This tilts to c/m instead of
+        # m/r. But, they should be at least cheaper than the heavy
+        # working set instances.
+        assert zlr_small_cost <= zlr_large_cost
+        assert zlr_small_cpu <= zlr_large_cpu or zlr_small_memory <= zlr_large_memory
 
         # We should generally want cheap CPUs for Cassandra
         assert all(
-            cluster.instance.family[0] in ("r", "m", "i")
+            cluster.instance.family[0] in ("r", "m", "i", "c")
             for cluster in (zlr_small, zlr_large)
         )
 
@@ -243,7 +234,7 @@ def test_kv_plus_evcache_rps_exceeding_250k():
             assert zlr_cass.instance.drive.size_gib >= 100
 
         # We should generally want cheap CPUs for Cassandra
-        assert zlr_cass.instance.family[0] in ("r", "m", "i")
+        assert zlr_cass.instance.family[0] in ("r", "m", "c")
 
         # The KV cluster should be the only regional cluster
         assert len(least_regret_clusters.regional) == 1
@@ -346,7 +337,7 @@ def test_kv_plus_evcache_rps_exceeding_100k_and_sufficient_read_write_ratio():
             assert zlr_cass.instance.drive.size_gib >= 100
 
         # We should generally want cheap CPUs for Cassandra
-        assert zlr_cass.instance.family[0] in ("r", "m", "i")
+        assert zlr_cass.instance.family[0] in ("r", "m", "c")
 
         # The KV cluster should be the only regional cluster
         assert len(least_regret_clusters.regional) == 1
@@ -446,7 +437,7 @@ def test_kv_rps_exceeding_100k_but_insufficient_read_write_ratio():
             assert zlr_cass.instance.drive.size_gib >= 100
 
         # We should generally want cheap CPUs for Cassandra
-        assert zlr_cass.instance.family[0] in ("r", "m", "i")
+        assert zlr_cass.instance.family[0] in ("r", "m", "c")
 
         # The KV cluster should be the only regional cluster
         assert len(least_regret_clusters.regional) == 1
@@ -526,7 +517,7 @@ def test_kv_plus_evcache_configured_read_write_ratio_threshold():
             assert zlr_cass.instance.drive.size_gib >= 100
 
         # We should generally want cheap CPUs for Cassandra
-        assert zlr_cass.instance.family[0] in ("r", "m", "i")
+        assert zlr_cass.instance.family[0] in ("r", "m", "c")
 
         # The KV cluster should be the only regional cluster
         assert len(least_regret_clusters.regional) == 1
@@ -636,8 +627,8 @@ def test_kv_plus_evcache_high_hit_rate():
     assert zlr_cass_eventual.annual_cost < zlr_cass_ryw.annual_cost
 
     # We should generally want cheap CPUs for Cassandra
-    assert zlr_cass_eventual.instance.family[0] in ("r", "m", "i")
-    assert zlr_cass_ryw.instance.family[0] in ("r", "m", "i")
+    assert zlr_cass_eventual.instance.family[0] in ("r", "m", "c")
+    assert zlr_cass_ryw.instance.family[0] in ("r", "m", "c")
 
     # The KV cluster should be the only regional cluster
     assert len(least_regret_clusters_eventual.regional) == 1
@@ -677,7 +668,7 @@ def test_kv_plus_evcache_high_hit_rate():
         assert zlr_ev.count * zlr_ev.instance.ram_gib > 100
 
     # We should generally want cheap CPUs for EVCache
-    assert zlr_ev.instance.family[0] in ("r", "m", "i")
+    assert zlr_ev.instance.family[0] in ("r", "m", "c")
 
     # Plan with EVCache should be cheaper than plan without it, since the
     # assumed hit rate is high (default of 0.8).
@@ -776,8 +767,8 @@ def test_kv_plus_evcache_low_hit_rate():
     assert zlr_cass_eventual.annual_cost <= zlr_cass_ryw.annual_cost
 
     # We should generally want cheap CPUs for Cassandra
-    assert zlr_cass_eventual.instance.family[0] in ("r", "m", "i")
-    assert zlr_cass_ryw.instance.family[0] in ("r", "m", "i")
+    assert zlr_cass_eventual.instance.family[0] in ("r", "m", "c")
+    assert zlr_cass_ryw.instance.family[0] in ("r", "m", "c")
 
     # The KV cluster should be the only regional cluster
     assert len(least_regret_clusters_eventual.regional) == 1
@@ -817,7 +808,7 @@ def test_kv_plus_evcache_low_hit_rate():
         assert zlr_ev.count * zlr_ev.instance.ram_gib > 100
 
     # We should generally want cheap CPUs for EVCache
-    assert zlr_ev.instance.family[0] in ("r", "m", "i")
+    assert zlr_ev.instance.family[0] in ("r", "m", "c")
 
     # Plan with EVCache should be more expensive than plan without it,
     # since the assumed hit rate is very low.

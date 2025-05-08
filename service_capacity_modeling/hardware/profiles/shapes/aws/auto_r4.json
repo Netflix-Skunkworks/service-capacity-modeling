@@ -1,0 +1,64 @@
+{
+  "instances": {
+    "r4.large": {
+      "name": "r4.large",
+      "cpu": 2,
+      "cpu_cores": 1,
+      "cpu_ghz": 2.3,
+      "cpu_ipc_scale": 0.85,
+      "ram_gib": 14.54,
+      "net_mbps": 750.0,
+      "drive": null
+    },
+    "r4.xlarge": {
+      "name": "r4.xlarge",
+      "cpu": 4,
+      "cpu_cores": 2,
+      "cpu_ghz": 2.3,
+      "cpu_ipc_scale": 0.85,
+      "ram_gib": 29.09,
+      "net_mbps": 1250.0,
+      "drive": null
+    },
+    "r4.2xlarge": {
+      "name": "r4.2xlarge",
+      "cpu": 8,
+      "cpu_cores": 4,
+      "cpu_ghz": 2.3,
+      "cpu_ipc_scale": 0.85,
+      "ram_gib": 58.17,
+      "net_mbps": 2500.0,
+      "drive": null
+    },
+    "r4.4xlarge": {
+      "name": "r4.4xlarge",
+      "cpu": 16,
+      "cpu_cores": 8,
+      "cpu_ghz": 2.3,
+      "cpu_ipc_scale": 0.85,
+      "ram_gib": 116.35,
+      "net_mbps": 5000.0,
+      "drive": null
+    },
+    "r4.8xlarge": {
+      "name": "r4.8xlarge",
+      "cpu": 32,
+      "cpu_cores": 16,
+      "cpu_ghz": 2.3,
+      "cpu_ipc_scale": 0.85,
+      "ram_gib": 232.7,
+      "net_mbps": 12000.0,
+      "drive": null
+    },
+    "r4.16xlarge": {
+      "name": "r4.16xlarge",
+      "cpu": 64,
+      "cpu_cores": 32,
+      "cpu_ghz": 2.3,
+      "cpu_ipc_scale": 0.85,
+      "ram_gib": 465.39,
+      "net_mbps": 25000.0,
+      "drive": null
+    }
+  }
+}
