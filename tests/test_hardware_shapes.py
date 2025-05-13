@@ -3,6 +3,7 @@ from typing import Dict
 from typing import List
 from typing import Tuple
 
+from service_capacity_modeling.hardware import Instance
 from service_capacity_modeling.hardware import shapes
 
 
@@ -16,13 +17,8 @@ def get_instance_families() -> Dict[str, List[Tuple[str, str]]]:
     """Extract all instance families from available instances."""
     region = shapes.region("us-east-1")
     families: Dict[str, List[Tuple[str, str]]] = {}
-    for instance_name in region.instances:
-        match = re.match(r"([a-z]+\d+[a-z]*)\.(\d+xl|[a-z]+)", instance_name)
-        if match:
-            family, size = match.groups()
-            if family not in families:
-                families[family] = []
-            families[family].append((instance_name, size))
+    for instance in region.instances.values():
+        families.setdefault(instance.family, []).append((instance.name, instance.size))
     return families
 
 
@@ -50,16 +46,14 @@ def get_generation_groups() -> Dict[str, List[Tuple[str, int]]]:
 
 def test_consistent_core_counts_across_generations() -> None:
     """Test that same-sized instances have consistent CPU counts across generations."""
-    families = get_instance_families()
     region = shapes.region("us-east-1")
 
     # Group instances by size
-    instances_by_size: Dict[str, List[Tuple[str, str]]] = {}
-    for family, instances in families.items():
-        for instance_name, size in instances:
-            if size not in instances_by_size:
-                instances_by_size[size] = []
-            instances_by_size[size].append((family, instance_name))
+    instances_by_size: Dict[str, List[Tuple[str, Instance]]] = {}
+    for instance in region.instances.values():
+        instances_by_size.setdefault(instance.size, []).append(
+            (instance.family, instance)
+        )
 
     # Check that core counts are consistent within each size
     for size, instances in instances_by_size.items():
@@ -67,13 +61,12 @@ def test_consistent_core_counts_across_generations() -> None:
             continue
 
         _, base_instance = instances[0]
-        base_cpu = region.instances[base_instance].cpu
+        base_cpu = base_instance.cpu
 
-        for family, instance_name in instances[1:]:
-            instance = region.instances[instance_name]
+        for _, instance in instances[1:]:
             assert instance.cpu == base_cpu, (
                 f"CPU count mismatch for size {size}: {base_instance} has {base_cpu} "
-                f"cores, but {instance_name} has {instance.cpu} cores"
+                f"cores, but {instance.name} has {instance.cpu} cores"
             )
 
 
@@ -81,6 +74,7 @@ def test_performance_increases_with_generation() -> None:
     """Test that CPU performance increases with each generation."""
     generation_groups = get_generation_groups()
     region = shapes.region("us-east-1")
+    instance_families = get_instance_families()
 
     failed_msgs: List[str] = []
     for _, generations in generation_groups.items():
@@ -92,8 +86,8 @@ def test_performance_increases_with_generation() -> None:
             curr_family, next_family = curr_gen[0], next_gen[0]
 
             # Get a representative instance from each family
-            curr_instances = [name for name, _ in get_instance_families()[curr_family]]
-            next_instances = [name for name, _ in get_instance_families()[next_family]]
+            curr_instances = [name for name, _ in instance_families[curr_family]]
+            next_instances = [name for name, _ in instance_families[next_family]]
 
             # Find matching size instances or fallback to the first instance
             matching_sizes = [
