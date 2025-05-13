@@ -31,7 +31,7 @@ def test_zk_tier_0():
     lr_cluster = lr.candidate_clusters.zonal
 
     assert sum(c.count for c in lr_cluster) == 5
-    assert lr_cluster[0].instance.family in ("m5d", "r5d")
+    assert lr_cluster[0].instance.family in ("m5d", "r5d", "c5d")
 
 
 def test_zk_tier_1():
@@ -61,6 +61,7 @@ def test_zk_tier_1():
 
     assert sum(c.count for c in lr_cluster) == 3
     assert lr_cluster[0].instance.name in (
+        "c5d.large",
         "m5d.large",
         "r5d.large",
     )

@@ -33,7 +33,7 @@ def test_crdb_basic():
     lr_cluster = lr.candidate_clusters.zonal[0]
 
     # Resulting cluster should not be too expensive
-    assert 2000 < lr.candidate_clusters.total_annual_cost < 10_000
+    assert 1900 < lr.candidate_clusters.total_annual_cost < 10_000
 
     # Should have enough disk space for around 80GiB of data in a single
     # replica (compression). Also that drive should be ephemeral

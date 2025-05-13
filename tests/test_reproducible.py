@@ -83,7 +83,7 @@ def test_multiple_options():
     assert len(least_regret) < 4
     families = [lr.candidate_clusters.zonal[0].instance.family for lr in least_regret]
     for f in families:
-        assert f in {"i3en", "m6id", "m5d", "i4i", "i3"}
+        assert f in {"i3en", "m6id", "m5d", "i4i", "i3", "c6id", "c5d"}
 
     # With 1024 simulations we get a 4th instance family (r5)
     result = planner.plan(
@@ -98,4 +98,4 @@ def test_multiple_options():
 
     families = [lr.candidate_clusters.zonal[0].instance.family for lr in least_regret]
     for f in families:
-        assert f.startswith("i") or f.startswith("r") or f.startswith("m")
+        assert f[0] in ("i", "r", "c", "m")

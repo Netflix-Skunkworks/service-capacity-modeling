@@ -59,6 +59,7 @@
       "name": "i4i.large",
       "cpu": 2,
       "cpu_ghz": 3.5,
+      "cpu_ipc_scale": 1.15,
       "ram_gib": 15.48,
       "net_mbps": 781,
       "drive": {
@@ -76,6 +77,7 @@
       "name": "i4i.xlarge",
       "cpu": 4,
       "cpu_ghz": 3.5,
+      "cpu_ipc_scale": 1.15,
       "ram_gib": 30.955,
       "net_mbps": 1875,
       "drive": {
@@ -93,6 +95,7 @@
       "name": "i4i.2xlarge",
       "cpu": 8,
       "cpu_ghz": 3.5,
+      "cpu_ipc_scale": 1.15,
       "ram_gib": 61.91,
       "net_mbps": 4687.5 ,
       "drive": {
@@ -110,6 +113,7 @@
       "name": "i4i.4xlarge",
       "cpu": 16,
       "cpu_ghz": 3.5,
+      "cpu_ipc_scale": 1.15,
       "ram_gib": 123.82,
       "net_mbps": 9375,
       "drive": {
@@ -127,6 +131,7 @@
       "name": "i4i.8xlarge",
       "cpu": 32,
       "cpu_ghz": 3.5,
+      "cpu_ipc_scale": 1.15,
       "ram_gib": 247.76,
       "net_mbps": 18750,
       "drive": {
@@ -144,6 +149,7 @@
       "name": "i4i.16xlarge",
       "cpu": 64,
       "cpu_ghz": 3.5,
+      "cpu_ipc_scale": 1.15,
       "ram_gib": 495.82,
       "net_mbps": 35000,
       "drive": {
