@@ -1,5 +1,6 @@
 from service_capacity_modeling.capacity_planner import planner
-from service_capacity_modeling.interface import CapacityDesires, AccessPattern, FixedInterval, DataShape
+from service_capacity_modeling.interface import CapacityDesires, AccessPattern, FixedInterval, DataShape, Drive, \
+    DriveType
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import CurrentZoneClusterCapacity
@@ -349,6 +350,7 @@ def test_plan_certain_ads():
     """
     cluster_capacity = CurrentZoneClusterCapacity(
         cluster_instance_name="r7a.4xlarge",
+        cluster_drive= Drive(name="gp3", drive_type=DriveType.attached_ssd, size_gib=1000, block_size_kib=16),
         cluster_instance_count=Interval(low=15, mid=15, high=15, confidence=1),
         cpu_utilization=Interval(low=5.441147804260254, mid=13.548842955300195, high=25.11203956604004, confidence=1),
         memory_utilization_gib=Interval(low=0, mid=0, high=0, confidence=1),
@@ -380,15 +382,15 @@ def test_plan_certain_ads():
             read_latency_slo_ms=FixedInterval(low=0.4, mid=4, high=10, confidence=0.98),
             write_latency_slo_ms=FixedInterval(low=0.4, mid=4, high=10, confidence=0.98),
         ),
-        data_shape=DataShape(
-            estimated_state_size_gib=Interval(low=43671.45714327494, mid=86178.33169034678, high=91577.48839340209, confidence=1),
-        ),
+        # data_shape=DataShape(
+        #     estimated_state_size_gib=Interval(low=43671.45714327494, mid=86178.33169034678, high=91577.48839340209, confidence=1),
+        # ),
     )
 
     cap_plan = planner.plan_certain(
         model_name="org.netflix.kafka",
         region="us-east-1",
-        num_results=3,
+        num_results=10,
         num_regions=4,
         desires=desires,
         extra_model_arguments={
@@ -406,4 +408,5 @@ def test_plan_certain_ads():
     assert len(lr_clusters) >= 1
     print(lr_clusters[0].instance.name)
     assert lr_clusters[0].count == cluster_capacity.cluster_instance_count.high
-    print(cap_plan)
+    for lr in cap_plan:
+        print(lr.candidate_clusters.zonal[0])
