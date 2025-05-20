@@ -1,5 +1,5 @@
 from service_capacity_modeling.capacity_planner import planner
-from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import CapacityDesires, AccessPattern, FixedInterval, DataShape
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import CurrentZoneClusterCapacity
@@ -339,3 +339,71 @@ def test_plan_certain():
     assert len(lr_clusters) >= 1
     print(lr_clusters[0].instance.name)
     assert lr_clusters[0].count == cluster_capacity.cluster_instance_count.high
+
+
+#This test case currently DOES NOT work due to the `data_shape` argument. It is working without that.
+def test_plan_certain_ads():
+    """
+    Use current clusters cpu utilization to determine instance types directly as
+    supposed to extrapolating it from the Data Shape
+    """
+    cluster_capacity = CurrentZoneClusterCapacity(
+        cluster_instance_name="r7a.4xlarge",
+        cluster_instance_count=Interval(low=15, mid=15, high=15, confidence=1),
+        cpu_utilization=Interval(low=5.441147804260254, mid=13.548842955300195, high=25.11203956604004, confidence=1),
+        memory_utilization_gib=Interval(low=0, mid=0, high=0, confidence=1),
+        network_utilization_mbps=Interval(low=4580.919447446355, mid=19451.59814477331, high=42963.441154527085, confidence=1),
+        disk_utilization_gib=Interval(
+            low=1341.579345703125, mid=1940.8741284013684, high=2437.607421875, confidence=1
+        ),
+    )
+
+    desires = CapacityDesires(
+        service_tier=1,
+        current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+        query_pattern=QueryPattern(
+            access_pattern=AccessPattern(AccessPattern.latency),
+            # 2 consumers
+            estimated_read_per_second=Interval(low=2.029700653202406, mid=2.5959199721997015, high=3.7729526631963917, confidence=1),
+            # 1 producer
+            estimated_write_per_second=Interval(low=1, mid=1, high=1, confidence=0.98),
+            estimated_mean_read_latency_ms=Interval(low=1, mid=1, high=1, confidence=1),
+            estimated_mean_write_latency_ms=Interval(low=1, mid=1, high=1, confidence=1),
+            estimated_mean_read_size_bytes=Interval(
+                low=1024, mid=1024, high=1024, confidence=1
+            ),
+            estimated_mean_write_size_bytes=Interval(
+                low=125609708.04374632, mid=579467189.8731459, high=1351530381.0148356, confidence=0.98
+            ),
+            estimated_read_parallelism=Interval(low=1, mid=1, high=1, confidence=1),
+            estimated_write_parallelism=Interval(low=1, mid=1, high=1, confidence=1),
+            read_latency_slo_ms=FixedInterval(low=0.4, mid=4, high=10, confidence=0.98),
+            write_latency_slo_ms=FixedInterval(low=0.4, mid=4, high=10, confidence=0.98),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(low=43671.45714327494, mid=86178.33169034678, high=91577.48839340209, confidence=1),
+        ),
+    )
+
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.kafka",
+        region="us-east-1",
+        num_results=3,
+        num_regions=4,
+        desires=desires,
+        extra_model_arguments={
+            "cluster_type": ClusterType.ha,
+            "retention": "PT8H",
+            "require_attached_disks": True,
+            "required_zone_size": cluster_capacity.cluster_instance_count.mid,
+        },
+    )
+
+    print("CAP PLAN: " + str(cap_plan))
+
+    assert len(cap_plan) >= 1
+    lr_clusters = cap_plan[0].candidate_clusters.zonal
+    assert len(lr_clusters) >= 1
+    print(lr_clusters[0].instance.name)
+    assert lr_clusters[0].count == cluster_capacity.cluster_instance_count.high
+    print(cap_plan)
