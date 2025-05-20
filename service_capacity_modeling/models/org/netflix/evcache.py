@@ -9,6 +9,7 @@ from typing import Tuple
 from pydantic import BaseModel
 from pydantic import Field
 
+from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
@@ -103,6 +104,17 @@ def calculate_vitals_for_capacity_planner(
     )
     if not current_capacity:
         return needed_cores, needed_network_mbps, needed_memory_gib, needed_disk_gib
+
+    is_cluster_disk_based = True
+    if current_capacity is not None:
+        if current_capacity.cluster_instance is None:
+            cluster_instance = shapes.instance(current_capacity.cluster_instance_name)
+        else:
+            cluster_instance = current_capacity.cluster_instance
+
+        if cluster_instance.drive is None or current_capacity.cluster_drive is None:
+            is_cluster_disk_based = False
+
     needed_cores = normalize_cores(
         core_count=get_cores_from_current_capacity(
             current_capacity, desires.buffers, instance
@@ -116,7 +128,8 @@ def calculate_vitals_for_capacity_planner(
     needed_memory_gib = get_memory_from_current_capacity(
         current_capacity, desires.buffers
     )
-    needed_disk_gib = get_disk_from_current_capacity(current_capacity, desires.buffers)
+
+    needed_disk_gib = current_disk_gib if not is_cluster_disk_based else get_disk_from_current_capacity(current_capacity, desires.buffers)
     return needed_cores, needed_network_mbps, needed_memory_gib, needed_disk_gib
 
 
