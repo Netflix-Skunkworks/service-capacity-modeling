@@ -508,7 +508,11 @@ class NflxKafkaCapacityModel(CapacityModel):
         retention_secs = iso_to_seconds(retention)
 
         # write throughput * retention * replication factor = usage
-        state_gib = (write_bytes.mid * retention_secs * NflxKafkaCapacityModel.HA_DEFAULT_REPLICATION_FACTOR) / GIB_IN_BYTES
+        state_gib = (
+            write_bytes.mid
+            * retention_secs
+            * NflxKafkaCapacityModel.HA_DEFAULT_REPLICATION_FACTOR
+        ) / GIB_IN_BYTES
 
         return CapacityDesires(
             query_pattern=QueryPattern(
