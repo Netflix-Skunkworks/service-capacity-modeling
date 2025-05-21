@@ -417,7 +417,8 @@ class NflxKafkaArguments(BaseModel):
 
 class NflxKafkaCapacityModel(CapacityModel):
 
-    DEFAULT_REPLICATION_FACTOR = 2
+    HA_DEFAULT_REPLICATION_FACTOR = 2
+    SC_DEFAULT_REPLICATION_FACTOR = 3
 
     @staticmethod
     def capacity_plan(
@@ -430,9 +431,9 @@ class NflxKafkaCapacityModel(CapacityModel):
         cluster_type: ClusterType = ClusterType(
             extra_model_arguments.get("cluster_type", "high-availability")
         )
-        replication_factor = NflxKafkaCapacityModel.DEFAULT_REPLICATION_FACTOR
+        replication_factor = NflxKafkaCapacityModel.HA_DEFAULT_REPLICATION_FACTOR
         if cluster_type == ClusterType.strong:
-            replication_factor = 3
+            replication_factor = NflxKafkaCapacityModel.SC_DEFAULT_REPLICATION_FACTOR
         copies_per_region: int = extra_model_arguments.get(
             "copies_per_region", replication_factor
         )
@@ -506,8 +507,8 @@ class NflxKafkaCapacityModel(CapacityModel):
         retention = extra_model_arguments.get("retention", "PT8H")
         retention_secs = iso_to_seconds(retention)
 
-        # write throughput * retention * 2 replication factor = usage
-        state_gib = (write_bytes.mid * retention_secs * NflxKafkaCapacityModel.DEFAULT_REPLICATION_FACTOR) / GIB_IN_BYTES
+        # write throughput * retention * replication factor = usage
+        state_gib = (write_bytes.mid * retention_secs * NflxKafkaCapacityModel.HA_DEFAULT_REPLICATION_FACTOR) / GIB_IN_BYTES
 
         return CapacityDesires(
             query_pattern=QueryPattern(

@@ -342,7 +342,7 @@ def test_plan_certain():
     assert lr_clusters[0].count == cluster_capacity.cluster_instance_count.high
 
 
-def test_plan_certain_ads():
+def test_plan_certain_data_shape():
     """
     Use current clusters cpu utilization to determine instance types directly as
     supposed to extrapolating it from the Data Shape
