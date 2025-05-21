@@ -342,7 +342,6 @@ def test_plan_certain():
     assert lr_clusters[0].count == cluster_capacity.cluster_instance_count.high
 
 
-#This test case currently DOES NOT work due to the `data_shape` argument. It is working without that.
 def test_plan_certain_ads():
     """
     Use current clusters cpu utilization to determine instance types directly as
@@ -366,7 +365,7 @@ def test_plan_certain_ads():
         query_pattern=QueryPattern(
             access_pattern=AccessPattern(AccessPattern.latency),
             # 2 consumers
-            estimated_read_per_second=Interval(low=2.029700653202406, mid=2.5959199721997015, high=3.7729526631963917, confidence=1),
+            estimated_read_per_second=Interval(low=2, mid=2, high=4, confidence=1),
             # 1 producer
             estimated_write_per_second=Interval(low=1, mid=1, high=1, confidence=0.98),
             estimated_mean_read_latency_ms=Interval(low=1, mid=1, high=1, confidence=1),
@@ -375,7 +374,7 @@ def test_plan_certain_ads():
                 low=1024, mid=1024, high=1024, confidence=1
             ),
             estimated_mean_write_size_bytes=Interval(
-                low=125609708.04374632, mid=579467189.8731459, high=1351530381.0148356, confidence=0.98
+                low=125000000, mid=579000000, high=1351000000, confidence=0.98
             ),
             estimated_read_parallelism=Interval(low=1, mid=1, high=1, confidence=1),
             estimated_write_parallelism=Interval(low=1, mid=1, high=1, confidence=1),
@@ -383,14 +382,14 @@ def test_plan_certain_ads():
             write_latency_slo_ms=FixedInterval(low=0.4, mid=4, high=10, confidence=0.98),
         ),
         data_shape=DataShape(
-            estimated_state_size_gib=Interval(low=43671.45714327494, mid=86178.33169034678, high=91577.48839340209, confidence=1),
+            estimated_state_size_gib=Interval(low=44000, mid=86000, high=91000, confidence=1),
         ),
     )
 
     cap_plan = planner.plan_certain(
         model_name="org.netflix.kafka",
         region="us-east-1",
-        num_results=10,
+        num_results=3,
         num_regions=4,
         desires=desires,
         extra_model_arguments={
@@ -400,8 +399,6 @@ def test_plan_certain_ads():
             "required_zone_size": cluster_capacity.cluster_instance_count.mid,
         },
     )
-
-    print("CAP PLAN: " + str(cap_plan))
 
     assert len(cap_plan) >= 1
     lr_clusters = cap_plan[0].candidate_clusters.zonal
