@@ -159,7 +159,7 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
     needed_network_mbps = max(bw_in, bw_out) * 1.40
 
     needed_disk = math.ceil(
-        desires.data_shape.estimated_state_size_gib.mid * copies_per_region,
+        desires.data_shape.estimated_state_size_gib.mid,
     )
 
     # Keep the last N seconds hot in cache
