@@ -416,6 +416,9 @@ class NflxKafkaArguments(BaseModel):
 
 
 class NflxKafkaCapacityModel(CapacityModel):
+
+    DEFAULT_REPLICATION_FACTOR = 2
+
     @staticmethod
     def capacity_plan(
         instance: Instance,
@@ -427,11 +430,11 @@ class NflxKafkaCapacityModel(CapacityModel):
         cluster_type: ClusterType = ClusterType(
             extra_model_arguments.get("cluster_type", "high-availability")
         )
-        default_replication = 2
+        replication_factor = NflxKafkaCapacityModel.DEFAULT_REPLICATION_FACTOR
         if cluster_type == ClusterType.strong:
-            default_replication = 3
+            replication_factor = 3
         copies_per_region: int = extra_model_arguments.get(
-            "copies_per_region", default_replication
+            "copies_per_region", replication_factor
         )
         if cluster_type == ClusterType.strong and copies_per_region < 3:
             raise ValueError("Strong consistency and RF<3 doesn't work")
@@ -503,8 +506,8 @@ class NflxKafkaCapacityModel(CapacityModel):
         retention = extra_model_arguments.get("retention", "PT8H")
         retention_secs = iso_to_seconds(retention)
 
-        # write throughput * retention = usage
-        state_gib = (write_bytes.mid * retention_secs) / GIB_IN_BYTES
+        # write throughput * retention * 2 replication factor = usage
+        state_gib = (write_bytes.mid * retention_secs * NflxKafkaCapacityModel.DEFAULT_REPLICATION_FACTOR) / GIB_IN_BYTES
 
         return CapacityDesires(
             query_pattern=QueryPattern(
