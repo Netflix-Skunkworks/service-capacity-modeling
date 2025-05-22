@@ -19,10 +19,10 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install Tox and any other packages
       run: pip install tox
-    - name: Run end-to-end test suite
-      run: tox -e py
     - name: Run linters via pre-commit
       run: tox -e pre-commit
+    - name: Run end-to-end test suite
+      run: tox -e py
   release:
     runs-on: ubuntu-latest
     environment:
