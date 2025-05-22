@@ -508,10 +508,11 @@ class NflxKafkaCapacityModel(CapacityModel):
         retention_secs = iso_to_seconds(retention)
 
         # write throughput * retention * replication factor = usage
+        replication_factor = NflxKafkaCapacityModel.HA_DEFAULT_REPLICATION_FACTOR
+        if extra_model_arguments.get("cluster_type", None) == ClusterType.strong:
+            replication_factor = NflxKafkaCapacityModel.SC_DEFAULT_REPLICATION_FACTOR
         state_gib = (
-            write_bytes.mid
-            * retention_secs
-            * NflxKafkaCapacityModel.HA_DEFAULT_REPLICATION_FACTOR
+            write_bytes.mid * retention_secs * replication_factor
         ) / GIB_IN_BYTES
 
         return CapacityDesires(

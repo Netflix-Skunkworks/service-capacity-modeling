@@ -1,15 +1,13 @@
 from service_capacity_modeling.capacity_planner import planner
-from service_capacity_modeling.interface import (
-    CapacityDesires,
-    AccessPattern,
-    FixedInterval,
-    DataShape,
-    Drive,
-    DriveType,
-)
+from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import CurrentZoneClusterCapacity
+from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import DriveType
+from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.common import normalize_cores
@@ -72,7 +70,7 @@ def test_kafka_large_scale():
         region="us-east-1",
         desires=desires,
         extra_model_arguments={
-            "cluster_type": "strong",
+            "cluster_type": ClusterType.strong,
             "retention": "PT4H",
         },
     )
