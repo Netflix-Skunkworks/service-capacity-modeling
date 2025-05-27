@@ -58,7 +58,6 @@ def target_cpu_utilization(tier: int) -> float:
 def _get_current_zonal_cluster(
     desires: CapacityDesires,
 ) -> Optional[CurrentZoneClusterCapacity]:
-    # use the current cluster capacity if available
     return (
         None
         if desires.current_clusters is None
