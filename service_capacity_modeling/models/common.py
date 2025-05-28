@@ -751,7 +751,10 @@ def get_memory_from_current_capacity(
     current_capacity: CurrentClusterCapacity, buffers: Buffers
 ):
     # compute memory required per zone
-    current_memory_utilization = current_capacity.memory_utilization_gib.mid
+    current_memory_utilization = (
+        current_capacity.memory_utilization_gib.mid
+        * current_capacity.cluster_instance_count.mid
+    )
 
     if current_capacity.cluster_instance is None:
         cluster_instance = shapes.instance(current_capacity.cluster_instance_name)
@@ -790,7 +793,10 @@ def get_network_from_current_capacity(
     current_capacity: CurrentClusterCapacity, buffers: Buffers
 ):
     # compute network required per zone
-    current_network_utilization = current_capacity.network_utilization_mbps.mid
+    current_network_utilization = (
+        current_capacity.network_utilization_mbps.mid
+        * current_capacity.cluster_instance_count.mid
+    )
 
     if current_capacity.cluster_instance is None:
         cluster_instance = shapes.instance(current_capacity.cluster_instance_name)
@@ -829,7 +835,10 @@ def get_disk_from_current_capacity(
     current_capacity: CurrentClusterCapacity, buffers: Buffers
 ):
     # compute disk required per zone
-    current_disk_utilization = current_capacity.disk_utilization_gib.mid
+    current_disk_utilization = (
+        current_capacity.disk_utilization_gib.mid
+        * current_capacity.cluster_instance_count.mid
+    )
 
     if current_capacity.cluster_instance is None:
         cluster_instance = shapes.instance(current_capacity.cluster_instance_name)

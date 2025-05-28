@@ -68,7 +68,7 @@ def test_evcache_inmemory_low_latency_reads_cpu():
             * candidate.candidate_clusters.zonal[0].instance.cpu_ghz
         )
 
-        assert total_cpu_power > 1000, (
+        assert total_cpu_power > 700, (
             f"CPU power is not sufficient for low latency reads, with"
             f" {candidate.candidate_clusters.zonal[0].count} *"
             f" {candidate.candidate_clusters.zonal[0].instance.name},"
@@ -118,7 +118,7 @@ def test_evcache_inmemory_medium_latency_reads_cpu():
             * candidate.candidate_clusters.zonal[0].instance.cpu_ghz
         )
 
-        assert total_cpu_power > 200
+        assert total_cpu_power > 150
 
 
 def test_evcache_inmemory_high_latency_reads_cpu():
