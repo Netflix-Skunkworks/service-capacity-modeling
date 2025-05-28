@@ -48,10 +48,8 @@ def target_cpu_utilization(tier: int) -> float:
     """
     Returns the target average cluster CPU utilization for a given tier
     """
-    if tier == 0:
+    if tier in (0, 1):
         return 0.40
-    if tier == 1:
-        return 0.45
     return 0.50
 
 
