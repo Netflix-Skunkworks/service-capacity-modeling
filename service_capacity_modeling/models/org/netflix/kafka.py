@@ -119,14 +119,33 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
         and required_zone_size is not None
         and desires.current_clusters is not None
     ):
+        # zonal_requirements_from_current uses the midpoint utilization of the
+        # current cluster. For Kafka, we want to use the high value instead
+        # for cpu, disk, network, etc.
+        normalize_midpoint_desires = desires.model_copy(deep=True)
+        curr_disk = desires.current_clusters.zonal[0].disk_utilization_gib
+        curr_cpu = desires.current_clusters.zonal[0].cpu_utilization
+        curr_network = desires.current_clusters.zonal[0].network_utilization_mbps
+        normalize_midpoint_desires.current_clusters.zonal[
+            0
+        ].disk_utilization_gib = Interval(
+            low=curr_disk.high, mid=curr_disk.high, high=curr_disk.high
+        )
+        normalize_midpoint_desires.current_clusters.zonal[0].cpu_utilization = Interval(
+            low=curr_cpu.high, mid=curr_cpu.high, high=curr_cpu.high
+        )
+        normalize_midpoint_desires.current_clusters.zonal[
+            0
+        ].network_utilization_mbps = Interval(
+            low=curr_network.high, mid=curr_network.high, high=curr_network.high
+        )
         capacity_requirement = zonal_requirements_from_current(
-            current_cluster=desires.current_clusters,
+            current_cluster=normalize_midpoint_desires.current_clusters,
             buffers=desires.buffers,
             instance=current_zonal_capacity.cluster_instance,
             reference_shape=desires.reference_shape,
         )
         needed_cores = int(capacity_requirement.cpu_cores.mid)
-        needed_memory = int(capacity_requirement.mem_gib.mid)
         needed_disk = int(capacity_requirement.disk_gib.mid)
         needed_network_mbps = int(capacity_requirement.network_mbps.mid)
         logger.debug(
@@ -152,8 +171,8 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
             desires.data_shape.estimated_state_size_gib.mid * copies_per_region,
         )
 
-        # Keep the last N seconds hot in cache
-        needed_memory = (write_mib_per_second * hot_retention_seconds) // 1024
+    # Keep the last N seconds hot in cache
+    needed_memory = (write_mib_per_second * hot_retention_seconds) // 1024
 
     # Now convert to per zone
     needed_cores = max(1, needed_cores // zones_per_region)
@@ -498,14 +517,17 @@ class NflxKafkaCapacityModel(CapacityModel):
 
         # By supplying these buffers we can deconstruct observed utilization into
         # load versus buffer.
+        compute_buffer_ratio = 2.5 if user_desires.service_tier in (0, 1) else 2.0
         buffers = Buffers(
             default=Buffer(ratio=1.5),
             desired={
                 # Amount of compute buffer that we need to reserve in addition to
                 # cpu_headroom_target that is reserved on a per instance basis
-                "compute": Buffer(ratio=1.5, components=[BufferComponent.compute]),
-                # This makes sure we use only 25% of the available storage
-                "storage": Buffer(ratio=4.0, components=[BufferComponent.storage]),
+                "compute": Buffer(
+                    ratio=compute_buffer_ratio, components=[BufferComponent.compute]
+                ),
+                # This makes sure we use only 40% of the available storage
+                "storage": Buffer(ratio=2.5, components=[BufferComponent.storage]),
                 "background": Buffer(
                     ratio=2.0,
                     components=[
