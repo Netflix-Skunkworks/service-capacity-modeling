@@ -226,9 +226,6 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     if instance.ram_gib < min_instance_memory_gib:
         return None
 
-    if instance.drive is None:
-        return None
-
     # Based on the disk latency and the read latency SLOs we adjust our
     # working set to keep more or less data in RAM. Faster drives need
     # less fronting RAM.
