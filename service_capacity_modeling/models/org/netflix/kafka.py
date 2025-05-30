@@ -48,15 +48,6 @@ class ClusterType(str, Enum):
     ha = "high-availability"
 
 
-def target_cpu_utilization(tier: int) -> float:
-    """
-    Returns the target average cluster CPU utilization for a given tier
-    """
-    if tier in (0, 1):
-        return 0.40
-    return 0.50
-
-
 def _get_current_zonal_cluster(
     desires: CapacityDesires,
 ) -> Optional[CurrentZoneClusterCapacity]:
