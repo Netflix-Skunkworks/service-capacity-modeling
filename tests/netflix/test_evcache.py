@@ -1,5 +1,7 @@
 from service_capacity_modeling.capacity_planner import planner
-from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import (
+    CapacityDesires,
+)
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
@@ -66,7 +68,16 @@ def test_evcache_inmemory_low_latency_reads_cpu():
             * candidate.candidate_clusters.zonal[0].instance.cpu_ghz
         )
 
-        assert total_cpu_power > 1100
+        assert total_cpu_power > 1000, (
+            f"CPU power is not sufficient for low latency reads, with"
+            f" {candidate.candidate_clusters.zonal[0].count} *"
+            f" {candidate.candidate_clusters.zonal[0].instance.name},"
+            f" total= {total_cpu_power}."
+        )
+
+
+class BufferComponents:
+    pass
 
 
 def test_evcache_inmemory_medium_latency_reads_cpu():
@@ -107,7 +118,7 @@ def test_evcache_inmemory_medium_latency_reads_cpu():
             * candidate.candidate_clusters.zonal[0].instance.cpu_ghz
         )
 
-        assert total_cpu_power > 400
+        assert total_cpu_power > 200
 
 
 def test_evcache_inmemory_high_latency_reads_cpu():

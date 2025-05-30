@@ -108,7 +108,7 @@ def test_increasing_qps_simple():
         )
 
     # We should generally want cheap CPUs
-    assert all(r[0][0] in ("r", "m", "i") for r in result)
+    assert all(r[0][0] in ("r", "m", "i", "c") for r in result)
 
     # Should have more capacity as requirement increases
     x = [r[1] for r in result]
@@ -209,9 +209,7 @@ def test_worn_dataset_ebs():
         <= lr.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
         < 1_000_000
     )
-    assert lr_cluster.instance.name.startswith(
-        "m5."
-    ) or lr_cluster.instance.name.startswith("r5.")
+    assert lr_cluster.instance.family in ("m5", "r5", "r6a")
     assert lr_cluster.attached_drives[0].name == "gp3"
     # gp2 should not provision massive drives, prefer to upcolor
     assert lr_cluster.attached_drives[0].size_gib < 9000

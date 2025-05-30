@@ -69,7 +69,7 @@ def test_counter_increasing_qps_simple():
     # We should generally want cheap CPUs for Cassandra
     zonal_families = {r[0] for r in zonal_result}
     assert all(
-        family[0] in ("r", "m", "i") for family in zonal_families
+        family[0] in ("r", "m", "c") for family in zonal_families
     ), f"{zonal_families}"
 
     # We just want ram and cpus for a java app

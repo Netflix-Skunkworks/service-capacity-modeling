@@ -11,6 +11,9 @@ from pydantic import Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
@@ -29,6 +32,10 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import get_cores_from_current_capacity
+from service_capacity_modeling.models.common import get_disk_from_current_capacity
+from service_capacity_modeling.models.common import get_memory_from_current_capacity
+from service_capacity_modeling.models.common import get_network_from_current_capacity
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -72,6 +79,47 @@ def calculate_spread_cost(cluster_size: int, max_cost=100000, min_cost=0.0) -> f
     return min_cost + (max_cost - cluster_size * (max_cost - min_cost) / 30.0)
 
 
+def calculate_vitals_for_capacity_planner(
+    desires: CapacityDesires,
+    instance: Instance,
+    current_memory_gib: float,
+    current_disk_gib: float,
+):
+    # First calculate assuming new deployment
+    needed_cores = normalize_cores(
+        core_count=sqrt_staffed_cores(desires),
+        target_shape=instance,
+        reference_shape=desires.reference_shape,
+    )
+    needed_network_mbps = simple_network_mbps(desires)
+    needed_memory_gib = current_memory_gib
+    needed_disk_gib = current_disk_gib
+
+    # Check if we can apply optimizations based on current cluster capacity
+    current_capacity = (
+        desires.current_clusters.zonal[0]
+        if desires.current_clusters and desires.current_clusters.zonal
+        else None
+    )
+    if not current_capacity:
+        return needed_cores, needed_network_mbps, needed_memory_gib, needed_disk_gib
+    needed_cores = normalize_cores(
+        core_count=get_cores_from_current_capacity(
+            current_capacity, desires.buffers, instance
+        ),
+        target_shape=instance,
+        reference_shape=current_capacity.cluster_instance,
+    )
+    needed_network_mbps = get_network_from_current_capacity(
+        current_capacity, desires.buffers
+    )
+    needed_memory_gib = get_memory_from_current_capacity(
+        current_capacity, desires.buffers
+    )
+    needed_disk_gib = get_disk_from_current_capacity(current_capacity, desires.buffers)
+    return needed_cores, needed_network_mbps, needed_memory_gib, needed_disk_gib
+
+
 def _estimate_evcache_requirement(
     instance: Instance,
     desires: CapacityDesires,
@@ -83,25 +131,9 @@ def _estimate_evcache_requirement(
     The input desires should be the **regional** desire, and this function will
     return the zonal capacity requirement
     """
-    needed_cores = normalize_cores(
-        core_count=sqrt_staffed_cores(desires),
-        target_shape=instance,
-        reference_shape=desires.reference_shape,
-    )
-
-    # For tier 0, we double the number of cores to account for caution
-    if desires.service_tier == 0:
-        needed_cores = needed_cores * 2
-
-    # (Arun): Keep 20% of available bandwidth for cache warmer
-    needed_network_mbps = simple_network_mbps(desires) * 1.25
-
-    needed_disk = math.ceil(
-        desires.data_shape.estimated_state_size_gib.mid,
-    )
-
     regrets: Tuple[str, ...] = ("spend", "mem")
     state_size = desires.data_shape.estimated_state_size_gib
+    needed_memory = state_size.mid
     item_count = desires.data_shape.estimated_state_item_count
     payload_greater_than_classic = False
     if state_size is not None and item_count is not None and item_count.mid != 0:
@@ -120,13 +152,23 @@ def _estimate_evcache_requirement(
     ):
         # We can't currently store data on cloud drives, but we can put the
         # dataset into memory!
-        needed_memory = float(needed_disk)
-        needed_disk = 0
+        needed_memory = float(needed_memory)
+        needed_disk = 0.0
     else:
         # We can store data on fast ephems (reducing the working set that must
         # be kept in RAM)
-        needed_memory = float(working_set) * float(needed_disk)
+        needed_disk = needed_memory
+        needed_memory = float(working_set) * float(needed_memory)
         regrets = ("spend", "disk", "mem")
+
+    (
+        needed_cores,
+        needed_network_mbps,
+        needed_memory,
+        needed_disk,
+    ) = calculate_vitals_for_capacity_planner(
+        desires, instance, needed_memory, needed_disk
+    )
 
     # For EVCache, writes go to all zones
     # Regional reads can also go to any one zone due to app's zone affinity
@@ -486,6 +528,23 @@ class NflxEVCacheCapacityModel(CapacityModel):
                     # (Arun) We currently use 1 GiB for connection memory
                     reserved_instance_system_mem_gib=(1 + 2),
                 ),
+                buffers=Buffers(
+                    default=Buffer(ratio=1.5),
+                    desired={
+                        "cpu": Buffer(
+                            ratio=1.5, components=[BufferComponent.cpu]
+                        ),  # ~70%
+                        "storage": Buffer(
+                            ratio=1.25, components=[BufferComponent.storage]
+                        ),  # ~80%
+                        "memory": Buffer(
+                            ratio=1.11, components=[BufferComponent.memory]
+                        ),  # 90%
+                        "network": Buffer(
+                            ratio=1.5, components=[BufferComponent.network]
+                        ),  # ~70%
+                    },
+                ),
             )
         else:
             return CapacityDesires(
@@ -541,6 +600,23 @@ class NflxEVCacheCapacityModel(CapacityModel):
                     # and system requirements.
                     # (Arun) We currently use 1 GiB base for connection memory
                     reserved_instance_system_mem_gib=(1 + 2),
+                ),
+                buffers=Buffers(
+                    default=Buffer(ratio=1.5),
+                    desired={
+                        "cpu": Buffer(
+                            ratio=1.5, components=[BufferComponent.cpu]
+                        ),  # ~70%
+                        "storage": Buffer(
+                            ratio=1.25, components=[BufferComponent.storage]
+                        ),  # ~80%
+                        "memory": Buffer(
+                            ratio=1.11, components=[BufferComponent.memory]
+                        ),  # 90%
+                        "network": Buffer(
+                            ratio=1.5, components=[BufferComponent.network]
+                        ),  # ~70%
+                    },
                 ),
             )
 

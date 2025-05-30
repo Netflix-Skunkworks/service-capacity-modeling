@@ -718,11 +718,10 @@ def get_cores_from_current_capacity(
     cpu_success_buffer = (1 - cpu_headroom_target(instance, buffers)) * 100
     current_cpu_utilization = current_capacity.cpu_utilization.mid
 
-    cluster_instance = (
-        current_capacity.cluster_instance
-        if current_capacity.cluster_instance is not None
-        else shapes.instance(current_capacity.cluster_instance_name)
-    )
+    if current_capacity.cluster_instance is None:
+        cluster_instance = shapes.instance(current_capacity.cluster_instance_name)
+    else:
+        cluster_instance = current_capacity.cluster_instance
 
     current_cores = cluster_instance.cpu * current_capacity.cluster_instance_count.mid
 
@@ -827,17 +826,18 @@ def get_disk_from_current_capacity(
     current_disk_utilization = current_capacity.disk_utilization_gib.mid
 
     if current_capacity.cluster_instance is None:
-        current_cluster_instance = shapes.instance(
-            current_capacity.cluster_instance_name
-        )
+        cluster_instance = shapes.instance(current_capacity.cluster_instance_name)
     else:
-        current_cluster_instance = current_capacity.cluster_instance
+        cluster_instance = current_capacity.cluster_instance
 
-    assert current_cluster_instance.drive is not None, "Drive should not be None"
+    if cluster_instance.drive is not None:
+        instance_disk_allocated = cluster_instance.drive.max_size_gib
+    else:
+        assert current_capacity.cluster_drive is not None, "Drive should not be None"
+        instance_disk_allocated = current_capacity.cluster_drive.size_gib
 
     zonal_disk_allocated = (
-        current_cluster_instance.drive.max_size_gib
-        * current_capacity.cluster_instance_count.mid
+        instance_disk_allocated * current_capacity.cluster_instance_count.mid
     )
 
     # These are the desired buffers

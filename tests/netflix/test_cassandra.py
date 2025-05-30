@@ -61,7 +61,7 @@ def test_capacity_small_fast():
         )[0]
         small_result = cap_plan.candidate_clusters.zonal[0]
         # We really should just pay for CPU here
-        assert small_result.instance.name.startswith("m")
+        assert small_result.instance.name.startswith("c")
 
         cores = small_result.count * small_result.instance.cpu
         assert 30 <= cores <= 80
@@ -158,7 +158,7 @@ def test_capacity_high_writes():
         extra_model_arguments={"copies_per_region": 2},
     )[0]
     high_writes_result = cap_plan.candidate_clusters.zonal[0]
-    assert high_writes_result.instance.family.startswith("m")
+    assert high_writes_result.instance.family.startswith("c")
     assert high_writes_result.count > 4
 
     num_cpus = high_writes_result.instance.cpu * high_writes_result.count

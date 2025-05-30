@@ -739,6 +739,7 @@ class DataShape(ExcludeUnsetModel):
 class CurrentClusterCapacity(ExcludeUnsetModel):
     cluster_instance_name: str
     cluster_instance: Optional[Instance] = None
+    cluster_drive: Optional[Drive] = None
     cluster_instance_count: Interval
     # The distribution cpu utilization in the cluster.
     cpu_utilization: Interval = certain_float(0.0)

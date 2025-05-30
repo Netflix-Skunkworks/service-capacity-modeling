@@ -167,9 +167,9 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
         #   BW = (in + out) because duplex then 40% headroom.
         needed_network_mbps = max(bw_in, bw_out) * 1.40
 
-        needed_disk = math.ceil(
-            desires.data_shape.estimated_state_size_gib.mid * copies_per_region,
-        )
+    needed_disk = math.ceil(
+        desires.data_shape.estimated_state_size_gib.mid,
+    )
 
     # Keep the last N seconds hot in cache
     needed_memory = (write_mib_per_second * hot_retention_seconds) // 1024
@@ -425,6 +425,10 @@ class NflxKafkaArguments(BaseModel):
 
 
 class NflxKafkaCapacityModel(CapacityModel):
+
+    HA_DEFAULT_REPLICATION_FACTOR = 2
+    SC_DEFAULT_REPLICATION_FACTOR = 3
+
     @staticmethod
     def capacity_plan(
         instance: Instance,
@@ -436,11 +440,11 @@ class NflxKafkaCapacityModel(CapacityModel):
         cluster_type: ClusterType = ClusterType(
             extra_model_arguments.get("cluster_type", "high-availability")
         )
-        default_replication = 2
+        replication_factor = NflxKafkaCapacityModel.HA_DEFAULT_REPLICATION_FACTOR
         if cluster_type == ClusterType.strong:
-            default_replication = 3
+            replication_factor = NflxKafkaCapacityModel.SC_DEFAULT_REPLICATION_FACTOR
         copies_per_region: int = extra_model_arguments.get(
-            "copies_per_region", default_replication
+            "copies_per_region", replication_factor
         )
         if cluster_type == ClusterType.strong and copies_per_region < 3:
             raise ValueError("Strong consistency and RF<3 doesn't work")
@@ -512,8 +516,13 @@ class NflxKafkaCapacityModel(CapacityModel):
         retention = extra_model_arguments.get("retention", "PT8H")
         retention_secs = iso_to_seconds(retention)
 
-        # write throughput * retention = usage
-        state_gib = (write_bytes.mid * retention_secs) / GIB_IN_BYTES
+        # write throughput * retention * replication factor = usage
+        replication_factor = NflxKafkaCapacityModel.HA_DEFAULT_REPLICATION_FACTOR
+        if extra_model_arguments.get("cluster_type", None) == ClusterType.strong:
+            replication_factor = NflxKafkaCapacityModel.SC_DEFAULT_REPLICATION_FACTOR
+        state_gib = (
+            write_bytes.mid * retention_secs * replication_factor
+        ) / GIB_IN_BYTES
 
         # By supplying these buffers we can deconstruct observed utilization into
         # load versus buffer.
