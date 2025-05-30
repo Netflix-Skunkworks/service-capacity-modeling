@@ -21,6 +21,7 @@ from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
+from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import GIB_IN_BYTES
@@ -51,13 +52,30 @@ def target_cpu_utilization(tier: int) -> float:
     """
     Returns the target average cluster CPU utilization for a given tier
     """
-    if tier == 0:
-        return 0.25
-    if tier == 1:
-        return 0.30
-    if tier == 2:
-        return 0.35
-    return 0.40
+    if tier in (0, 1):
+        return 0.40
+    return 0.50
+
+
+def _get_current_zonal_cluster(
+    desires: CapacityDesires,
+) -> Optional[CurrentZoneClusterCapacity]:
+    return (
+        None
+        if desires.current_clusters is None
+        else (
+            desires.current_clusters.zonal[0]
+            if len(desires.current_clusters.zonal)
+            else None
+        )
+    )
+
+
+def _is_same_instance_family(cluster, target_family):
+    """Check if cluster has a different instance family than the target."""
+    if not cluster or not cluster.cluster_instance:
+        return False
+    return cluster.cluster_instance.family == target_family
 
 
 def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-arguments
@@ -94,15 +112,7 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
         write_mib_per_second
     )
     # use the current cluster capacity if available
-    current_zonal_capacity = (
-        None
-        if desires.current_clusters is None
-        else (
-            desires.current_clusters.zonal[0]
-            if len(desires.current_clusters.zonal)
-            else None
-        )
-    )
+    current_zonal_capacity = _get_current_zonal_cluster(desires)
 
     bw_in = (
         (write_mib_per_second * MIB_IN_BYTES) * copies_per_region
@@ -239,6 +249,7 @@ def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-argume
     max_local_disk_gib: int = 1024 * 5,
     min_instance_cpu: int = 2,
     min_instance_memory_gib: int = 12,
+    require_same_instance_family: bool = True,
 ) -> Optional[CapacityPlan]:
 
     # Kafka doesn't like to deploy on single CPU instances or with < 12 GiB of ram
@@ -255,6 +266,15 @@ def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-argume
 
     # Kafka only deploys on gp3 drives right now
     if instance.drive is None and drive.name != "gp3":
+        return None
+
+    # If there is a current cluster, check if we are restricted to same instance family
+    current_zonal_cluster = _get_current_zonal_cluster(desires)
+    if (
+        current_zonal_cluster
+        and require_same_instance_family
+        and not _is_same_instance_family(current_zonal_cluster, instance.family)
+    ):
         return None
 
     requirement, regrets = _estimate_kafka_requirement(
@@ -470,6 +490,10 @@ class NflxKafkaCapacityModel(CapacityModel):
         required_zone_size: Optional[int] = extra_model_arguments.get(
             "required_zone_size", None
         )
+        # By default, for existing clusters, restrict to only using same instance family
+        require_same_instance_family: bool = extra_model_arguments.get(
+            "require_same_instance_family", True
+        )
 
         return _estimate_kafka_cluster_zonal(
             instance=instance,
@@ -485,6 +509,7 @@ class NflxKafkaCapacityModel(CapacityModel):
             min_instance_cpu=min_instance_cpu,
             min_instance_memory_gib=min_instance_memory_gib,
             hot_retention_seconds=hot_retention_seconds,
+            require_same_instance_family=require_same_instance_family,
         )
 
     @staticmethod
