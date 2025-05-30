@@ -537,14 +537,6 @@ class NflxKafkaCapacityModel(CapacityModel):
                 ),
                 # This makes sure we use only 40% of the available storage
                 "storage": Buffer(ratio=2.5, components=[BufferComponent.storage]),
-                "background": Buffer(
-                    ratio=2.0,
-                    components=[
-                        BufferComponent.cpu,
-                        BufferComponent.network,
-                        "background",
-                    ],
-                ),
             },
         )
 
