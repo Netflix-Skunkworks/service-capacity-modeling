@@ -167,9 +167,9 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
         #   BW = (in + out) because duplex then 40% headroom.
         needed_network_mbps = max(bw_in, bw_out) * 1.40
 
-    needed_disk = math.ceil(
-        desires.data_shape.estimated_state_size_gib.mid,
-    )
+        needed_disk = math.ceil(
+            desires.data_shape.estimated_state_size_gib.mid,
+        )
 
     # Keep the last N seconds hot in cache
     needed_memory = (write_mib_per_second * hot_retention_seconds) // 1024
