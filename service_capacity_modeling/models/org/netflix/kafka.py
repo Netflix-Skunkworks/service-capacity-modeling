@@ -143,8 +143,8 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
         capacity_requirement = zonal_requirements_from_current(
             current_cluster=normalize_midpoint_desires.current_clusters,
             buffers=desires.buffers,
-            instance=current_zonal_capacity.cluster_instance,
-            reference_shape=desires.reference_shape,
+            instance=instance,
+            reference_shape=current_zonal_capacity.cluster_instance,
         )
         needed_cores = int(capacity_requirement.cpu_cores.mid)
         needed_disk = int(capacity_requirement.disk_gib.mid)
