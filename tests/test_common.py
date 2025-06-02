@@ -247,9 +247,9 @@ current_cluster = CurrentClusters(
             cpu_utilization=Interval(
                 low=10.12, mid=13.2, high=14.194801291058118, confidence=1
             ),
-            memory_utilization_gib=certain_float(32.0),
-            network_utilization_mbps=certain_float(128.0),
-            disk_utilization_gib=certain_float(159),
+            memory_utilization_gib=certain_float(4.0),
+            network_utilization_mbps=certain_float(32.0),
+            disk_utilization_gib=certain_float(20),
         )
     ]
 )
@@ -309,12 +309,12 @@ def test_get_cores_with_buffer_preserve():
 
 def test_get_disk_with_buffer_desired():
     needed_disk = get_disk_from_current_capacity(current_cluster.zonal[0], buffers)
-    assert needed_disk == 636
+    assert needed_disk == 640
 
 
 def test_get_disk_with_buffer_scale():
     current_cluster_copy = current_cluster.model_copy(deep=True)
-    current_cluster_copy.zonal[0].disk_utilization_gib = certain_float(1200)
+    current_cluster_copy.zonal[0].disk_utilization_gib = certain_float(150)
     buffers_copy = buffers.model_copy(deep=True)
     buffers_copy.derived = {
         "storage": Buffer(
