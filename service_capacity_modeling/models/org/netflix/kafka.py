@@ -154,10 +154,13 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
         )
     else:
         # We have no existing utilization to go from
-        needed_cores = normalize_cores(
-            core_count=sqrt_staffed_cores(normalized_to_mib),
-            target_shape=instance,
-            reference_shape=desires.reference_shape,
+        needed_cores = (
+            normalize_cores(
+                core_count=sqrt_staffed_cores(normalized_to_mib),
+                target_shape=instance,
+                reference_shape=desires.reference_shape,
+            )
+            // zones_per_region
         )
 
         # (Nick): Keep 40% of available bandwidth for node recovery
@@ -166,20 +169,17 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
         #   BW_in = X * RF
         #   BW_out = X * (consumers) + X * (RF - 1)
         #   BW = (in + out) because duplex then 40% headroom.
-        needed_network_mbps = max(bw_in, bw_out) * 1.40
+        needed_network_mbps = (max(bw_in, bw_out) * 1.40) // zones_per_region
 
         needed_disk = math.ceil(
-            desires.data_shape.estimated_state_size_gib.mid,
+            desires.data_shape.estimated_state_size_gib.mid // zones_per_region,
         )
 
     # Keep the last N seconds hot in cache
-    needed_memory = (write_mib_per_second * hot_retention_seconds) // 1024
+    needed_memory = (
+        (write_mib_per_second * hot_retention_seconds) // 1024
+    ) // zones_per_region
 
-    # Now convert to per zone
-    needed_cores = max(1, needed_cores // zones_per_region)
-    needed_disk = max(1, needed_disk // zones_per_region)
-    needed_memory = max(1, int(needed_memory // zones_per_region))
-    needed_network_mbps = max(1, int(needed_network_mbps // zones_per_region))
     logger.debug(
         "Need (cpu, mem, disk) = (%s, %s, %s)",
         needed_cores,
@@ -329,8 +329,7 @@ def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-argume
             # Leave 100% IO headroom for writes
             copies_per_region * (write_ios_per_second / count) * 2,
         ),
-        # Kafka can run up to 60% full on disk, let's stay safe at 40%
-        required_disk_space=lambda x: x * 2.5,
+        required_disk_space=lambda x: x,
         max_local_disk_gib=max_local_disk_gib,
         cluster_size=lambda x: x,
         min_count=max(min_count, required_zone_size or 1),
