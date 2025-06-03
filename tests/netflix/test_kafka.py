@@ -122,7 +122,7 @@ def test_kafka_high_throughput():
     expected_cpu = (120, 200)
     expected_ram = (400, 1200)
     expected_net = (20_000 * 1.4, 28_000 * 1.4)
-    expected_disk = (22_000, 30_000)
+    expected_disk = (30_000, 75_000)
 
     assert expected_cpu[0] < lr_zone_requirements.cpu_cores.mid < expected_cpu[1]
     assert expected_ram[0] < lr_zone_requirements.mem_gib.mid < expected_ram[1]
@@ -194,7 +194,7 @@ def test_kafka_high_throughput_ebs():
     expected_cpu = (80, 140)
     expected_ram = (400, 1200)
     expected_net = (20_000 * 1.4, 28_000 * 1.4)
-    expected_disk = (22000, 25400)
+    expected_disk = (40000, 63500)
     req = lr_zone_requirements
 
     assert (
