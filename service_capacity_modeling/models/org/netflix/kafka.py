@@ -171,8 +171,12 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
         #   BW = (in + out) because duplex then 40% headroom.
         needed_network_mbps = (max(bw_in, bw_out) * 1.40) // zones_per_region
 
+        # NOTE: data_shape is region, we need to convert it to zonal
+        # If we don't have an existing cluster, the estimated state size should be
+        # at most 40% of the total cluster's available disk.
+        # i.e. needed_disk = state_size * 2.5
         needed_disk = math.ceil(
-            desires.data_shape.estimated_state_size_gib.mid // zones_per_region,
+            (desires.data_shape.estimated_state_size_gib.mid // zones_per_region) * 2.5,
         )
 
     # Keep the last N seconds hot in cache
