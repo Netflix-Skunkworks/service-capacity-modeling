@@ -335,6 +335,7 @@ def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-argume
             # Leave 100% IO headroom for writes
             copies_per_region * (write_ios_per_second / count) * 2,
         ),
+        # Disk buffer is already added when computing kafka disk requirements
         required_disk_space=lambda x: x,
         max_local_disk_gib=max_local_disk_gib,
         cluster_size=lambda x: x,
