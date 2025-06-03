@@ -124,6 +124,8 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
         # current cluster. For Kafka, we want to use the high value instead
         # for cpu, disk, network, etc.
         normalize_midpoint_desires = desires.model_copy(deep=True)
+        # This is checked in the if statement above. Assert here for mypy linter purpose
+        assert normalize_midpoint_desires.current_clusters is not None
         curr_disk = desires.current_clusters.zonal[0].disk_utilization_gib
         curr_cpu = desires.current_clusters.zonal[0].cpu_utilization
         curr_network = desires.current_clusters.zonal[0].network_utilization_mbps
@@ -169,7 +171,7 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
         #   BW_in = X * RF
         #   BW_out = X * (consumers) + X * (RF - 1)
         #   BW = (in + out) because duplex then 40% headroom.
-        needed_network_mbps = (max(bw_in, bw_out) * 1.40) // zones_per_region
+        needed_network_mbps = int((max(bw_in, bw_out) * 1.40) // zones_per_region)
 
         # NOTE: data_shape is region, we need to convert it to zonal
         # If we don't have an existing cluster, the estimated state size should be
