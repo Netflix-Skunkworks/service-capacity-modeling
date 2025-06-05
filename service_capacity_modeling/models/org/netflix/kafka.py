@@ -34,6 +34,7 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import utils
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -224,7 +225,8 @@ def _kafka_read_io(rps, io_size_kib, size_gib, recovery_seconds: int) -> float:
     # In practice we have cache reducing this by 99% or more
     read_ios = rps * 0.05
     # Recover the node in 60 minutes, to do that we need
-    size_kib = size_gib * (1024 * 1024)
+    # Estimate that we are using ~ 50% of the disk prior to a recovery
+    size_kib = size_gib * 0.5 * (1024 * 1024)
     recovery_ios = max(1, size_kib / io_size_kib) / recovery_seconds
     # Leave 50% headroom for read IOs since generally we will hit cache
     return (read_ios + int(round(recovery_ios))) * 1.5
@@ -232,7 +234,8 @@ def _kafka_read_io(rps, io_size_kib, size_gib, recovery_seconds: int) -> float:
 
 # pylint: disable=too-many-locals
 # pylint: disable=too-many-return-statements
-def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-arguments
+# pylint: disable=too-many-positional-arguments
+def _estimate_kafka_cluster_zonal(
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,
@@ -349,10 +352,22 @@ def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-argume
     params = {"kafka.copies": copies_per_region}
     _upsert_params(cluster, params)
 
-    # Sometimes we don't want to modify cluster topology, so only allow
-    # topologies that match the desired zone size
-    if required_zone_size is not None and cluster.count != required_zone_size:
-        return None
+    # This is roughly the disk we would have tried to provision with the current
+    # cluster's instance count (or required_zone_size)
+    if required_zone_size is not None:
+        space_gib = max(1, math.ceil(requirement.disk_gib.mid / required_zone_size))
+        ebs_gib = utils.next_n(space_gib, n=100)
+        max_size = drive.max_size_gib / 3  # Max allowed disk in `compute_stateful_zone`
+
+        # Capacity planner only allows ~ 5TB disk (max_size) for gp3 drives
+        # If ebs_gib > max_size, we do not have enough instances within the
+        # required_zone_size for the required disk. In these cases, it is
+        # not possible for cluster.count == required_zone_size. We should
+        # allow higher instance count for these cases so that we return some result
+        # If we did not exceed the max disk size with the required_zone_size, then
+        # we only allow topologies that match the desired zone size
+        if ebs_gib <= max_size and cluster.count != required_zone_size:
+            return None
 
     # Kafka clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as
