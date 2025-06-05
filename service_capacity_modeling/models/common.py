@@ -465,7 +465,7 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
         # with smaller volumes)
         max_size = drive.max_size_gib / 3
         if max_attached_disk_gib is not None:
-            max_size = max(max_size, max_attached_disk_gib)
+            max_size = max_attached_disk_gib
 
         if ebs_gib > max_size > 0:
             ratio = ebs_gib / max_size
