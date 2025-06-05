@@ -453,6 +453,10 @@ def test_plan_certain_data_shape():
     # check that we did not restrict the instance family to only r7a
     assert families != {"r7a"}
 
+    # check that we have the same instance count as the disk pressure
+    # should not be too high
+    assert lr_clusters[0].count == cluster_capacity.cluster_instance_count.high
+
 
 def test_plan_certain_data_shape_same_instance_type():
     """
@@ -551,6 +555,10 @@ def test_plan_certain_data_shape_same_instance_type():
     )
     # check that we restricted the instance family to only r7a
     assert families == {"r7a"}
+
+    # check that we have the same instance count as the disk pressure
+    # should not be too high
+    assert lr_clusters[0].count == cluster_capacity.cluster_instance_count.high
 
     for lr in cap_plan:
         print(lr.candidate_clusters.zonal[0])
@@ -687,6 +695,9 @@ def test_scale_up_using_buffers():
     assert (
         int(cap_plan[0].candidate_clusters.zonal[0].instance.name.split(".")[1][0]) > 4
     )
+
+    # check that we have at least as many instances as the current cluster
+    assert lr_clusters[0].count >= cluster_capacity.cluster_instance_count.high
 
     # Check that we provisioned enough storage
     minimum_provisioned_disk = (
@@ -826,6 +837,9 @@ def test_scale_up_using_buffers_high_disk_change_instance_count():
     )
     # check that we restricted the instance family to only r7a
     assert families == {"r7a"}
+
+    # check that we have at least as many instances as the current cluster
+    assert lr_clusters[0].count >= cluster_capacity.cluster_instance_count.high
 
     # Since the disk required per instance is > 5TB allowed by cap planner, we
     # allow higher instance count. This means we may not have vertically scaled
