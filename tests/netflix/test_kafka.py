@@ -526,7 +526,6 @@ def test_plan_certain_data_shape_same_instance_type():
             "require_attached_disks": True,
             "required_zone_size": cluster_capacity.cluster_instance_count.mid,
             "require_same_instance_family": True,
-            "max_results_per_family": 4,
         },
     )
 

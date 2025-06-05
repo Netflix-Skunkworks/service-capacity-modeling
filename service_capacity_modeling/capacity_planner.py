@@ -511,6 +511,7 @@ class CapacityPlanner:
         num_results: Optional[int] = None,
         num_regions: int = 3,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
+        max_results_per_family: int = 1,
     ) -> Sequence[CapacityPlan]:
         if model_name not in self._models:
             raise ValueError(
@@ -538,6 +539,7 @@ class CapacityPlanner:
                 lifecycles=lifecycles,
                 instance_families=instance_families,
                 drives=drives,
+                max_results_per_family=max_results_per_family,
             )
             if sub_plan:
                 results.append(sub_plan)
@@ -555,6 +557,7 @@ class CapacityPlanner:
         instance_families: Optional[Sequence[str]] = None,
         drives: Optional[Sequence[str]] = None,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
+        max_results_per_family: int = 1,
     ) -> Sequence[CapacityPlan]:
         extra_model_arguments = extra_model_arguments or {}
         model = self._models[model_name]
@@ -577,8 +580,7 @@ class CapacityPlanner:
         plans.sort(key=lambda p: (p.rank, p.candidate_clusters.total_annual_cost))
 
         num_results = num_results or self._default_num_results
-        max_per_family = extra_model_arguments.get("max_results_per_family", 1)
-        return reduce_by_family(plans, max_results_per_family=max_per_family)[
+        return reduce_by_family(plans, max_results_per_family=max_results_per_family)[
             :num_results
         ]
 
@@ -699,6 +701,7 @@ class CapacityPlanner:
         regret_params: Optional[CapacityRegretParameters] = None,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
         explain: bool = False,
+        max_results_per_family: int = 1,
     ) -> UncertainCapacityPlan:
         extra_model_arguments = extra_model_arguments or {}
 
@@ -744,6 +747,7 @@ class CapacityPlanner:
                             lifecycles=lifecycles,
                             instance_families=instance_families,
                             drives=drives,
+                            max_results_per_family=max_results_per_family,
                         ),
                     )
                 )
@@ -766,7 +770,8 @@ class CapacityPlanner:
                 ],
                 zonal_requirements,
                 regional_requirements,
-            )
+            ),
+            max_results_per_family=max_results_per_family,
         )[:num_results]
 
         low_p, high_p = sorted(percentiles)[0], sorted(percentiles)[-1]
