@@ -374,6 +374,9 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     min_count: int = 0,
     adjusted_disk_io_needed: float = 0.0,
     read_write_ratio: float = 0.0,
+    # Max attached EBS volume size per node. Higher value here could allow
+    # for a lower instance count (allows more vertical scaling vs forcing horizontal)
+    max_attached_disk_gib: Optional[float] = None,
 ) -> ZoneClusterCapacity:
     # Datastores often require disk headroom for e.g. compaction and such
     if instance.drive is not None:
@@ -461,6 +464,9 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
         # 1/3 the maximum volume size in one node (preferring more nodes
         # with smaller volumes)
         max_size = drive.max_size_gib / 3
+        if max_attached_disk_gib is not None:
+            max_size = max(max_size, max_attached_disk_gib)
+
         if ebs_gib > max_size > 0:
             ratio = ebs_gib / max_size
             count = max(cluster_size(math.ceil(count * ratio)), min_count)
