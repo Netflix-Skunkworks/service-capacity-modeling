@@ -577,7 +577,10 @@ class CapacityPlanner:
         plans.sort(key=lambda p: (p.rank, p.candidate_clusters.total_annual_cost))
 
         num_results = num_results or self._default_num_results
-        return reduce_by_family(plans)[:num_results]
+        max_per_family = extra_model_arguments.get("max_results_per_family", 1)
+        return reduce_by_family(plans, max_results_per_family=max_per_family)[
+            :num_results
+        ]
 
     # Calculates the minimum cpu, memory, and network requirements based on desires.
     def _per_instance_requirements(self, desires) -> Tuple[int, float]:

@@ -8,7 +8,7 @@ from service_capacity_modeling.models import CapacityPlan
 
 
 def reduce_by_family(
-    plans: Iterable[CapacityPlan], max_per_family: int = 1
+    plans: Iterable[CapacityPlan], max_results_per_family: int = 1
 ) -> List[CapacityPlan]:
     """Groups a potential set of clusters by hardware family sorted by cost.
 
@@ -16,7 +16,8 @@ def reduce_by_family(
 
     Args:
         plans: Iterable of CapacityPlan objects to filter
-        max_per_family: Maximum number of results to return per family combination
+        max_results_per_family: Maximum number of results to return per
+            family combination
     """
     zonal_families: Dict[Tuple[Tuple[str, str], ...], int] = {}
     regional_families: Dict[Tuple[Tuple[str, str], ...], int] = {}
@@ -42,7 +43,10 @@ def reduce_by_family(
         regional_count = regional_families.get(regional_type, 0)
 
         # Add the plan if we haven't reached the maximum for either family type
-        if zonal_count < max_per_family or regional_count < max_per_family:
+        if (
+            zonal_count < max_results_per_family
+            or regional_count < max_results_per_family
+        ):
             result.append(plan)
 
             # Update counters

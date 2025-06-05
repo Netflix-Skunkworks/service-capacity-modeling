@@ -139,7 +139,7 @@ class TestUtils(unittest.TestCase):
     def test_reduce_by_family_multiple(self):
         """Test that reduce_by_family with max_per_family > 1
         returns multiple plans per family."""
-        result = reduce_by_family(self.plans, max_per_family=2)
+        result = reduce_by_family(self.plans, max_results_per_family=2)
 
         # Should return 4 plans - two from family_a and two from family_b
         self.assertEqual(len(result), 4)
@@ -158,7 +158,7 @@ class TestUtils(unittest.TestCase):
         """Test that reduce_by_family with max_per_family > available plans
         returns all plans."""
         # Set max_per_family higher than the number of plans we have
-        result = reduce_by_family(self.plans, max_per_family=10)
+        result = reduce_by_family(self.plans, max_results_per_family=10)
 
         # Should return all 5 plans since we have 3 from family_a and 2 from family_b
         self.assertEqual(len(result), 5)
