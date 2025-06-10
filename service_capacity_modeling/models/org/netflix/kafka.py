@@ -346,6 +346,8 @@ def _estimate_kafka_cluster_zonal(
         # Sidecars and Variable OS Memory
         # Kafka currently uses 8GiB fixed, might want to change to min(30, x // 2)
         reserve_memory=lambda instance_mem_gib: base_mem + 8,
+        # allow up to 8TiB of attached EBS
+        max_attached_disk_gib=8 * 1024,
     )
 
     # Communicate to the actual provision that if we want reduced RF
