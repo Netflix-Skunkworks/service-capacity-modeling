@@ -315,6 +315,7 @@ def _estimate_kafka_cluster_zonal(
     write_ios_per_second = max(
         1, (write_mib_per_second * 1024) // drive.seq_io_size_kib
     )
+    max_attached_disk_gib = 8 * 1024
 
     cluster = compute_stateful_zone(
         instance=instance,
@@ -347,7 +348,7 @@ def _estimate_kafka_cluster_zonal(
         # Kafka currently uses 8GiB fixed, might want to change to min(30, x // 2)
         reserve_memory=lambda instance_mem_gib: base_mem + 8,
         # allow up to 8TiB of attached EBS
-        max_attached_disk_gib=8 * 1024,
+        max_attached_disk_gib=max_attached_disk_gib,
     )
 
     # Communicate to the actual provision that if we want reduced RF
@@ -359,9 +360,14 @@ def _estimate_kafka_cluster_zonal(
     if required_zone_size is not None:
         space_gib = max(1, math.ceil(requirement.disk_gib.mid / required_zone_size))
         ebs_gib = utils.next_n(space_gib, n=100)
-        max_size = drive.max_size_gib / 3  # Max allowed disk in `compute_stateful_zone`
+        max_size = (
+            max_attached_disk_gib
+            if max_attached_disk_gib is not None
+            else drive.max_size_gib / 3
+        )  # Max allowed disk in `compute_stateful_zone`
 
         # Capacity planner only allows ~ 5TB disk (max_size) for gp3 drives
+        # or max_attached_disk_gib if provided.
         # If ebs_gib > max_size, we do not have enough instances within the
         # required_zone_size for the required disk. In these cases, it is
         # not possible for cluster.count == required_zone_size. We should
