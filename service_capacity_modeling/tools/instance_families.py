@@ -101,6 +101,13 @@ INSTANCE_TYPES = {
     #     'io_latency_curve': '5th-gen-ssd',
     #     'cpu_ipc_scale': None
     # },
+    "i7i": {
+        "xl_iops": "150,000/82,500",
+        "io_latency_curve": "7th-gen-ephemeral",
+        "cpu_ipc_scale": EMERALD_RAPIDS_IPC,
+        "cpu_turbo_single_ghz": 4.0,
+        "cpu_turbo_all_ghz": 3.2,
+    },
     "m4": {
         "xl_iops": None,
         "io_latency_curve": None,
