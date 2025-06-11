@@ -92,7 +92,7 @@ INSTANCE_TYPES = {
         "io_latency_curve": "7th-gen-ephemeral",
         "cpu_ipc_scale": EMR_IPC,
         "cpu_turbo_single_ghz": 4.0,
-        "cpu_turbo_all_ghz": 3.2
+        "cpu_turbo_all_ghz": 3.2,
     },
     "m4": {
         "xl_iops": None,
