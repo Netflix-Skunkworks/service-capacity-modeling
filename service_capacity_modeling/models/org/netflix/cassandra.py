@@ -47,6 +47,10 @@ from service_capacity_modeling.stats import dist_for_interval
 logger = logging.getLogger(__name__)
 
 BACKGROUND_BUFFER = "background"
+CRITICAL_TIERS: set[int] = {0,1}
+# cluster size aka nodes per ASG
+CRITICAL_TIER_MIN_CLUSTER_SIZE = 2
+
 
 
 def _write_buffer_gib_zone(
@@ -362,10 +366,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     # Cassandra clusters should aim to be at least 2 nodes per zone to start
     # out with for tier 0 or tier 1. This gives us more room to "up-color"]
     # clusters.
-    min_count = 0
-    if desires.service_tier <= 1:
-        min_count = 2
-
+    min_count = 2 if desires.service_tier in CRITICAL_TIERS else 0
     base_mem = _get_base_memory(desires)
 
     heap_fn = _cass_heap_for_write_buffer(
@@ -584,6 +585,32 @@ class NflxCassandraArguments(BaseModel):
 
 class NflxCassandraCapacityModel(CapacityModel):
     @staticmethod
+    def get_required_cluster_size(tier, extra_model_arguments):
+        required_cluster_size: Optional[int] = (
+            math.ceil(extra_model_arguments["required_cluster_size"])
+            if "required_cluster_size" in extra_model_arguments
+            else None
+        )
+
+        if tier not in CRITICAL_TIERS or required_cluster_size is None:
+            return required_cluster_size
+
+        # If the upstream explicitly set a cluster size, make sure it is
+        # at least CRITICAL_TIER_MIN_CLUSTER_SIZE. We cannot do a max
+        # of the two because the horizontal scaling is disabled
+        if required_cluster_size < CRITICAL_TIER_MIN_CLUSTER_SIZE:
+            raise ValueError("Required cluster size must be at least "
+                             f"{CRITICAL_TIER_MIN_CLUSTER_SIZE=} when "
+                             f"service tier({tier}) is a "
+                             f"critical tier({CRITICAL_TIERS})."
+                             f"If it is an existing cluster, horizontally "
+                             f"scale the cluster to be >= "
+                             f"{CRITICAL_TIER_MIN_CLUSTER_SIZE}")
+
+        return required_cluster_size
+
+
+    @staticmethod
     def capacity_plan(
         instance: Instance,
         drive: Drive,
@@ -602,10 +629,10 @@ class NflxCassandraCapacityModel(CapacityModel):
             "require_attached_disks", False
         )
         required_cluster_size: Optional[int] = (
-            math.ceil(extra_model_arguments["required_cluster_size"])
-            if "required_cluster_size" in extra_model_arguments
-            else None
-        )
+            NflxCassandraCapacityModel.get_required_cluster_size(
+            desires.service_tier, extra_model_arguments
+        ))
+
         max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 500)
         max_regional_size: int = extra_model_arguments.get("max_regional_size", 192)
         max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 5120)
