@@ -1,19 +1,26 @@
 import math
+from typing import Dict
 from typing import Iterable
 from typing import List
-from typing import Set
 from typing import Tuple
 
 from service_capacity_modeling.models import CapacityPlan
 
 
-def reduce_by_family(plans: Iterable[CapacityPlan]) -> List[CapacityPlan]:
+def reduce_by_family(
+    plans: Iterable[CapacityPlan], max_results_per_family: int = 1
+) -> List[CapacityPlan]:
     """Groups a potential set of clusters by hardware family sorted by cost.
 
     Useful for showing different family options.
+
+    Args:
+        plans: Iterable of CapacityPlan objects to filter
+        max_results_per_family: Maximum number of results to return per
+            family combination
     """
-    zonal_families: Set[Tuple[Tuple[str, str], ...]] = set()
-    regional_families: Set[Tuple[Tuple[str, str], ...]] = set()
+    zonal_families: Dict[Tuple[Tuple[str, str], ...], int] = {}
+    regional_families: Dict[Tuple[Tuple[str, str], ...], int] = {}
 
     result: List[CapacityPlan] = []
     for plan in plans:
@@ -31,11 +38,20 @@ def reduce_by_family(plans: Iterable[CapacityPlan]) -> List[CapacityPlan]:
                 sorted({(c.cluster_type, c.instance.family) for c in topo.zonal})
             )
 
-        if not (zonal_type in zonal_families and regional_type in regional_families):
+        # Count how many of each family combination we've seen
+        zonal_count = zonal_families.get(zonal_type, 0)
+        regional_count = regional_families.get(regional_type, 0)
+
+        # Add the plan if we haven't reached the maximum for either family type
+        if (
+            zonal_count < max_results_per_family
+            or regional_count < max_results_per_family
+        ):
             result.append(plan)
 
-        regional_families.add(regional_type)
-        zonal_families.add(zonal_type)
+            # Update counters
+            zonal_families[zonal_type] = zonal_count + 1
+            regional_families[regional_type] = regional_count + 1
 
     return result
 
