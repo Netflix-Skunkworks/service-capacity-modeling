@@ -376,9 +376,9 @@ def test_plan_certain_data_shape():
         ),
         memory_utilization_gib=Interval(low=0, mid=0, high=0, confidence=1),
         network_utilization_mbps=Interval(
-            low=4580.919447446355,
-            mid=19451.59814477331,
-            high=42963.441154527085,
+            low=217.18696,
+            mid=590.5934259505216,
+            high=1220.205184,
             confidence=1,
         ),
         disk_utilization_gib=Interval(
@@ -480,9 +480,9 @@ def test_plan_certain_data_shape_same_instance_type():
         ),
         memory_utilization_gib=Interval(low=0, mid=0, high=0, confidence=1),
         network_utilization_mbps=Interval(
-            low=4580.919447446355,
-            mid=19451.59814477331,
-            high=42963.441154527085,
+            low=217.18696,
+            mid=590.5934259505216,
+            high=1220.205184,
             confidence=1,
         ),
         disk_utilization_gib=Interval(
