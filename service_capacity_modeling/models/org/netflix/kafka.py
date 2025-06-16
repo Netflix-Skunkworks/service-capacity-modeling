@@ -11,6 +11,9 @@ from pydantic import Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
@@ -31,9 +34,11 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import utils
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import sqrt_staffed_cores
+from service_capacity_modeling.models.common import zonal_requirements_from_current
 from service_capacity_modeling.models.org.netflix.iso_date_math import iso_to_seconds
 
 logger = logging.getLogger(__name__)
@@ -42,15 +47,6 @@ logger = logging.getLogger(__name__)
 class ClusterType(str, Enum):
     strong = "strong"
     ha = "high-availability"
-
-
-def target_cpu_utilization(tier: int) -> float:
-    """
-    Returns the target average cluster CPU utilization for a given tier
-    """
-    if tier in (0, 1):
-        return 0.40
-    return 0.50
 
 
 def _get_current_zonal_cluster(
@@ -108,54 +104,8 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
         write_mib_per_second
     )
     # use the current cluster capacity if available
-    current_zonal_cluster = _get_current_zonal_cluster(desires)
+    current_zonal_capacity = _get_current_zonal_cluster(desires)
 
-    if (
-        current_zonal_cluster
-        and current_zonal_cluster.cluster_instance
-        and required_zone_size is not None
-    ):
-        # For now, use the highest average CPU utilization seen on the cluster
-        cpu_utilization = current_zonal_cluster.cpu_utilization.high
-        # Validate with data if we should instead estimate 99th percentile here to get
-        # rid of spikes in collected cpu usage data ?
-        # Use the formula: 99th Percentile ≈ Average + (Z-score * SD).
-        # https://en.wikipedia.org/wiki/Normal_curve_equivalent#:~:text=The%2099th%20percentile%20in%20a,49/2.3263%20=%2021.06.
-        # curr_cpu_util = cpu_util.mid + (2.33 * (cpu_util.high - cpu_util.low) / 6)
-        current_utilized_cores = (
-            current_zonal_cluster.cluster_instance.cpu
-            * required_zone_size
-            * zones_per_region
-            * cpu_utilization
-        ) / 100
-
-        # compute needed core capacity for cluster so avg cpu utilization for the
-        # cluster stays under threshold for that tier
-        needed_cores = int(
-            current_utilized_cores / target_cpu_utilization(desires.service_tier)
-        )
-        logger.debug("kafka needed cores: %s", needed_cores)
-        # Normalize those cores to the target shape
-        reference_shape = current_zonal_cluster.cluster_instance
-        needed_cores = normalize_cores(
-            core_count=needed_cores,
-            target_shape=instance,
-            reference_shape=reference_shape,
-        )
-        logger.debug("kafka normalized needed cores: %s", needed_cores)
-    else:
-        # We have no existing utilization to go from
-        needed_cores = normalize_cores(
-            core_count=sqrt_staffed_cores(normalized_to_mib),
-            target_shape=instance,
-            reference_shape=desires.reference_shape,
-        )
-
-    # (Nick): Keep 40% of available bandwidth for node recovery
-    # (Joey): For kafka BW = BW_write + BW_reads
-    #   let X = input write BW
-    #   BW_in = X * RF
-    #   BW_out = X * (consumers) + X * (RF - 1)
     bw_in = (
         (write_mib_per_second * MIB_IN_BYTES) * copies_per_region
     ) / MEGABIT_IN_BYTES
@@ -165,21 +115,78 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
             + ((write_mib_per_second * MIB_IN_BYTES) * (copies_per_region - 1))
         )
     ) / MEGABIT_IN_BYTES
-    #   BW = (in + out) because duplex then 40% headroom.
-    needed_network_mbps = max(bw_in, bw_out) * 1.40
+    if (
+        current_zonal_capacity
+        and current_zonal_capacity.cluster_instance
+        and required_zone_size is not None
+        and desires.current_clusters is not None
+    ):
+        # zonal_requirements_from_current uses the midpoint utilization of the
+        # current cluster. For Kafka, we want to use the high value instead
+        # for cpu, disk, network, etc.
+        normalize_midpoint_desires = desires.model_copy(deep=True)
+        # This is checked in the if statement above. Assert here for mypy linter purpose
+        assert normalize_midpoint_desires.current_clusters is not None
+        curr_disk = desires.current_clusters.zonal[0].disk_utilization_gib
+        curr_cpu = desires.current_clusters.zonal[0].cpu_utilization
+        curr_network = desires.current_clusters.zonal[0].network_utilization_mbps
+        normalize_midpoint_desires.current_clusters.zonal[
+            0
+        ].disk_utilization_gib = Interval(
+            low=curr_disk.high, mid=curr_disk.high, high=curr_disk.high
+        )
+        normalize_midpoint_desires.current_clusters.zonal[0].cpu_utilization = Interval(
+            low=curr_cpu.high, mid=curr_cpu.high, high=curr_cpu.high
+        )
+        normalize_midpoint_desires.current_clusters.zonal[
+            0
+        ].network_utilization_mbps = Interval(
+            low=curr_network.high, mid=curr_network.high, high=curr_network.high
+        )
+        capacity_requirement = zonal_requirements_from_current(
+            current_cluster=normalize_midpoint_desires.current_clusters,
+            buffers=desires.buffers,
+            instance=instance,
+            reference_shape=current_zonal_capacity.cluster_instance,
+        )
+        needed_cores = int(capacity_requirement.cpu_cores.mid)
+        needed_disk = int(capacity_requirement.disk_gib.mid)
+        needed_network_mbps = int(capacity_requirement.network_mbps.mid)
+        logger.debug(
+            "kafka normalized needed cores: %s", capacity_requirement.cpu_cores
+        )
+    else:
+        # We have no existing utilization to go from
+        needed_cores = (
+            normalize_cores(
+                core_count=sqrt_staffed_cores(normalized_to_mib),
+                target_shape=instance,
+                reference_shape=desires.reference_shape,
+            )
+            // zones_per_region
+        )
 
-    needed_disk = math.ceil(
-        desires.data_shape.estimated_state_size_gib.mid,
-    )
+        # (Nick): Keep 40% of available bandwidth for node recovery
+        # (Joey): For kafka BW = BW_write + BW_reads
+        #   let X = input write BW
+        #   BW_in = X * RF
+        #   BW_out = X * (consumers) + X * (RF - 1)
+        #   BW = (in + out) because duplex then 40% headroom.
+        needed_network_mbps = int((max(bw_in, bw_out) * 1.40) // zones_per_region)
+
+        # NOTE: data_shape is region, we need to convert it to zonal
+        # If we don't have an existing cluster, the estimated state size should be
+        # at most 40% of the total cluster's available disk.
+        # i.e. needed_disk = state_size * 2.5
+        needed_disk = math.ceil(
+            (desires.data_shape.estimated_state_size_gib.mid // zones_per_region) * 2.5,
+        )
 
     # Keep the last N seconds hot in cache
-    needed_memory = (write_mib_per_second * hot_retention_seconds) // 1024
+    needed_memory = (
+        (write_mib_per_second * hot_retention_seconds) // 1024
+    ) // zones_per_region
 
-    # Now convert to per zone
-    needed_cores = max(1, needed_cores // zones_per_region)
-    needed_disk = max(1, needed_disk // zones_per_region)
-    needed_memory = max(1, int(needed_memory // zones_per_region))
-    needed_network_mbps = max(1, int(needed_network_mbps // zones_per_region))
     logger.debug(
         "Need (cpu, mem, disk) = (%s, %s, %s)",
         needed_cores,
@@ -218,7 +225,8 @@ def _kafka_read_io(rps, io_size_kib, size_gib, recovery_seconds: int) -> float:
     # In practice we have cache reducing this by 99% or more
     read_ios = rps * 0.05
     # Recover the node in 60 minutes, to do that we need
-    size_kib = size_gib * (1024 * 1024)
+    # Estimate that we are using ~ 50% of the disk prior to a recovery
+    size_kib = size_gib * 0.5 * (1024 * 1024)
     recovery_ios = max(1, size_kib / io_size_kib) / recovery_seconds
     # Leave 50% headroom for read IOs since generally we will hit cache
     return (read_ios + int(round(recovery_ios))) * 1.5
@@ -226,7 +234,8 @@ def _kafka_read_io(rps, io_size_kib, size_gib, recovery_seconds: int) -> float:
 
 # pylint: disable=too-many-locals
 # pylint: disable=too-many-return-statements
-def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-arguments
+# pylint: disable=too-many-positional-arguments
+def _estimate_kafka_cluster_zonal(
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,
@@ -306,6 +315,7 @@ def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-argume
     write_ios_per_second = max(
         1, (write_mib_per_second * 1024) // drive.seq_io_size_kib
     )
+    max_attached_disk_gib = 8 * 1024
 
     cluster = compute_stateful_zone(
         instance=instance,
@@ -329,8 +339,8 @@ def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-argume
             # Leave 100% IO headroom for writes
             copies_per_region * (write_ios_per_second / count) * 2,
         ),
-        # Kafka can run up to 60% full on disk, let's stay safe at 40%
-        required_disk_space=lambda x: x * 2.5,
+        # Disk buffer is already added when computing kafka disk requirements
+        required_disk_space=lambda x: x,
         max_local_disk_gib=max_local_disk_gib,
         cluster_size=lambda x: x,
         min_count=max(min_count, required_zone_size or 1),
@@ -338,17 +348,34 @@ def _estimate_kafka_cluster_zonal(  # pylint: disable=too-many-positional-argume
         # Kafka currently uses 8GiB fixed, might want to change to min(30, x // 2)
         reserve_memory=lambda instance_mem_gib: base_mem + 8,
         # allow up to 8TiB of attached EBS
-        max_attached_disk_gib=8 * 1024,
+        max_attached_disk_gib=max_attached_disk_gib,
     )
 
     # Communicate to the actual provision that if we want reduced RF
     params = {"kafka.copies": copies_per_region}
     _upsert_params(cluster, params)
 
-    # Sometimes we don't want to modify cluster topology, so only allow
-    # topologies that match the desired zone size
-    if required_zone_size is not None and cluster.count != required_zone_size:
-        return None
+    # This is roughly the disk we would have tried to provision with the current
+    # cluster's instance count (or required_zone_size)
+    if required_zone_size is not None:
+        space_gib = max(1, math.ceil(requirement.disk_gib.mid / required_zone_size))
+        ebs_gib = utils.next_n(space_gib, n=100)
+        max_size = (
+            max_attached_disk_gib
+            if max_attached_disk_gib is not None
+            else drive.max_size_gib / 3
+        )  # Max allowed disk in `compute_stateful_zone`
+
+        # Capacity planner only allows ~ 5TB disk (max_size) for gp3 drives
+        # or max_attached_disk_gib if provided.
+        # If ebs_gib > max_size, we do not have enough instances within the
+        # required_zone_size for the required disk. In these cases, it is
+        # not possible for cluster.count == required_zone_size. We should
+        # allow higher instance count for these cases so that we return some result
+        # If we did not exceed the max disk size with the required_zone_size, then
+        # we only allow topologies that match the desired zone size
+        if ebs_gib <= max_size and cluster.count != required_zone_size:
+            return None
 
     # Kafka clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as
@@ -542,6 +569,22 @@ class NflxKafkaCapacityModel(CapacityModel):
             write_bytes.mid * retention_secs * replication_factor
         ) / GIB_IN_BYTES
 
+        # By supplying these buffers we can deconstruct observed utilization into
+        # load versus buffer.
+        compute_buffer_ratio = 2.5 if user_desires.service_tier in (0, 1) else 2.0
+        buffers = Buffers(
+            default=Buffer(ratio=1.5),
+            desired={
+                # Amount of compute buffer that we need to reserve in addition to
+                # cpu_headroom_target that is reserved on a per instance basis
+                "compute": Buffer(
+                    ratio=compute_buffer_ratio, components=[BufferComponent.compute]
+                ),
+                # This makes sure we use only 40% of the available storage
+                "storage": Buffer(ratio=2.5, components=[BufferComponent.storage]),
+            },
+        )
+
         return CapacityDesires(
             query_pattern=QueryPattern(
                 access_pattern=AccessPattern.throughput,
@@ -581,6 +624,7 @@ class NflxKafkaCapacityModel(CapacityModel):
                 # Connection overhead, kernel, etc ...
                 reserved_instance_system_mem_gib=3,
             ),
+            buffers=buffers,
         )
 
 

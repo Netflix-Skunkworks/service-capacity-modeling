@@ -1,5 +1,9 @@
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import BufferIntent
+from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import CurrentClusters
@@ -118,7 +122,7 @@ def test_kafka_high_throughput():
     expected_cpu = (120, 200)
     expected_ram = (400, 1200)
     expected_net = (20_000 * 1.4, 28_000 * 1.4)
-    expected_disk = (22_000, 30_000)
+    expected_disk = (30_000, 75_000)
 
     assert expected_cpu[0] < lr_zone_requirements.cpu_cores.mid < expected_cpu[1]
     assert expected_ram[0] < lr_zone_requirements.mem_gib.mid < expected_ram[1]
@@ -190,7 +194,7 @@ def test_kafka_high_throughput_ebs():
     expected_cpu = (80, 140)
     expected_ram = (400, 1200)
     expected_net = (20_000 * 1.4, 28_000 * 1.4)
-    expected_disk = (22000, 25400)
+    expected_disk = (40000, 63500)
     req = lr_zone_requirements
 
     assert (
@@ -301,13 +305,17 @@ def test_plan_certain():
     """
     cluster_capacity = CurrentZoneClusterCapacity(
         cluster_instance_name="r5.2xlarge",
+        cluster_drive=Drive(
+            name="gp3",
+            drive_type=DriveType.attached_ssd,
+            size_gib=5000,
+            block_size_kib=16,
+        ),
         cluster_instance_count=Interval(low=27, mid=27, high=27, confidence=1),
         cpu_utilization=Interval(low=11.6, mid=19.29, high=27.57, confidence=1),
         memory_utilization_gib=certain_float(32.0),
         network_utilization_mbps=certain_float(128.0),
-        disk_utilization_gib=Interval(
-            low=2006.083, mid=2252.5, high=2480.41, confidence=0.98
-        ),
+        disk_utilization_gib=Interval(low=1000, mid=1500, high=2000, confidence=0.98),
     )
 
     throughput = 2 * 1024 * 1024 * 1024
@@ -368,15 +376,15 @@ def test_plan_certain_data_shape():
         ),
         memory_utilization_gib=Interval(low=0, mid=0, high=0, confidence=1),
         network_utilization_mbps=Interval(
-            low=4580.919447446355,
-            mid=19451.59814477331,
-            high=42963.441154527085,
+            low=217.18696,
+            mid=590.5934259505216,
+            high=1220.205184,
             confidence=1,
         ),
         disk_utilization_gib=Interval(
-            low=1341.579345703125,
-            mid=1940.8741284013684,
-            high=2437.607421875,
+            low=1000,
+            mid=1500,
+            high=2000,
             confidence=1,
         ),
     )
@@ -445,6 +453,10 @@ def test_plan_certain_data_shape():
     # check that we did not restrict the instance family to only r7a
     assert families != {"r7a"}
 
+    # check that we have the same instance count as the disk pressure
+    # should not be too high
+    assert lr_clusters[0].count == cluster_capacity.cluster_instance_count.high
+
 
 def test_plan_certain_data_shape_same_instance_type():
     """
@@ -468,15 +480,15 @@ def test_plan_certain_data_shape_same_instance_type():
         ),
         memory_utilization_gib=Interval(low=0, mid=0, high=0, confidence=1),
         network_utilization_mbps=Interval(
-            low=4580.919447446355,
-            mid=19451.59814477331,
-            high=42963.441154527085,
+            low=217.18696,
+            mid=590.5934259505216,
+            high=1220.205184,
             confidence=1,
         ),
         disk_utilization_gib=Interval(
-            low=1341.579345703125,
-            mid=1940.8741284013684,
-            high=2437.607421875,
+            low=1000,
+            mid=1500,
+            high=2000,
             confidence=1,
         ),
     )
@@ -543,6 +555,307 @@ def test_plan_certain_data_shape_same_instance_type():
     )
     # check that we restricted the instance family to only r7a
     assert families == {"r7a"}
+
+    # check that we have the same instance count as the disk pressure
+    # should not be too high
+    assert lr_clusters[0].count == cluster_capacity.cluster_instance_count.high
+
+    for lr in cap_plan:
+        print(lr.candidate_clusters.zonal[0])
+
+
+def test_scale_up_using_buffers():
+    """
+    Use current clusters cpu utilization to determine instance types directly as
+    supposed to extrapolating it from the Data Shape
+    """
+    cluster_capacity = CurrentZoneClusterCapacity(
+        cluster_instance_name="r7a.4xlarge",
+        cluster_drive=Drive(
+            name="gp3",
+            drive_type=DriveType.attached_ssd,
+            size_gib=5000,
+            block_size_kib=16,
+        ),
+        cluster_instance_count=Interval(low=15, mid=15, high=15, confidence=1),
+        cpu_utilization=Interval(
+            low=5.441147804260254,
+            mid=13.548842955300195,
+            high=25.11203956604004,
+            confidence=1,
+        ),
+        memory_utilization_gib=Interval(low=0, mid=0, high=0, confidence=1),
+        network_utilization_mbps=Interval(
+            low=217.18696,
+            mid=590.5934259505216,
+            high=1220.205184,
+            confidence=1,
+        ),
+        # use lower numbers here for testing since cap planner only
+        # allows 5TB max disk per node
+        disk_utilization_gib=Interval(
+            low=100,
+            mid=500,
+            high=1000,
+            confidence=1,
+        ),
+    )
+
+    scale_ratio = 1.70
+    buffer_ratio = 2.5
+    buffers = Buffers(
+        default=Buffer(ratio=1.5),
+        desired={
+            # Amount of compute buffer that we need to reserve in addition to
+            # cpu_headroom_target that is reserved on a per instance basis
+            "compute": Buffer(ratio=buffer_ratio, components=[BufferComponent.compute]),
+            # This makes sure we use only 40% of the available storage
+            "storage": Buffer(ratio=buffer_ratio, components=[BufferComponent.storage]),
+        },
+        derived={
+            "compute": Buffer(
+                ratio=scale_ratio,
+                intent=BufferIntent.scale,
+                components=[BufferComponent.compute],
+            ),
+            "storage": Buffer(
+                ratio=scale_ratio,
+                intent=BufferIntent.scale,
+                components=[BufferComponent.storage],
+            ),
+        },
+    )
+
+    desires = CapacityDesires(
+        service_tier=1,
+        buffers=buffers,
+        current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+        query_pattern=QueryPattern(
+            access_pattern=AccessPattern(AccessPattern.latency),
+            # 2 consumers
+            estimated_read_per_second=Interval(low=2, mid=2, high=4, confidence=1),
+            # 1 producer
+            estimated_write_per_second=Interval(low=1, mid=1, high=1, confidence=0.98),
+            estimated_mean_read_latency_ms=Interval(low=1, mid=1, high=1, confidence=1),
+            estimated_mean_write_latency_ms=Interval(
+                low=1, mid=1, high=1, confidence=1
+            ),
+            estimated_mean_read_size_bytes=Interval(
+                low=1024, mid=1024, high=1024, confidence=1
+            ),
+            estimated_mean_write_size_bytes=Interval(
+                low=125000000, mid=579000000, high=1351000000, confidence=0.98
+            ),
+            estimated_read_parallelism=Interval(low=1, mid=1, high=1, confidence=1),
+            estimated_write_parallelism=Interval(low=1, mid=1, high=1, confidence=1),
+            read_latency_slo_ms=FixedInterval(low=0.4, mid=4, high=10, confidence=0.98),
+            write_latency_slo_ms=FixedInterval(
+                low=0.4, mid=4, high=10, confidence=0.98
+            ),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(
+                low=44000, mid=86000, high=91000, confidence=1
+            ),
+        ),
+    )
+
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.kafka",
+        region="us-east-1",
+        num_results=3,
+        num_regions=4,
+        desires=desires,
+        extra_model_arguments={
+            "cluster_type": ClusterType.ha,
+            "retention": "PT8H",
+            "require_attached_disks": True,
+            "required_zone_size": cluster_capacity.cluster_instance_count.mid,
+            "require_same_instance_family": True,
+        },
+    )
+
+    assert len(cap_plan) >= 1
+    lr_clusters = cap_plan[0].candidate_clusters.zonal
+    assert len(lr_clusters) >= 1
+    print(lr_clusters[0].instance.name)
+    assert lr_clusters[0].count == cluster_capacity.cluster_instance_count.high
+
+    families = set(
+        map(
+            lambda curr_plan: curr_plan.candidate_clusters.zonal[0].instance.family,
+            cap_plan,
+        )
+    )
+    # check that we restricted the instance family to only r7a
+    assert families == {"r7a"}
+
+    # check that we scaled to something higher than r7a.4xlarge
+    # get the starting integer of the size of the instance type i.e. 8 for r7a.8xlarge
+    assert (
+        int(cap_plan[0].candidate_clusters.zonal[0].instance.name.split(".")[1][0]) > 4
+    )
+
+    # check that we have at least as many instances as the current cluster
+    assert lr_clusters[0].count >= cluster_capacity.cluster_instance_count.high
+
+    # Check that we provisioned enough storage
+    minimum_provisioned_disk = (
+        cluster_capacity.disk_utilization_gib.high
+        * cluster_capacity.cluster_instance_count.mid
+        * buffer_ratio
+        * scale_ratio
+    )
+    assert (
+        lr_clusters[0].attached_drives[0].size_gib * lr_clusters[0].count
+        >= minimum_provisioned_disk
+    )
+
+    for lr in cap_plan:
+        print(lr.candidate_clusters.zonal[0])
+
+
+def test_scale_up_using_buffers_high_disk_change_instance_count():
+    """
+    Use current clusters cpu utilization to determine instance types directly as
+    supposed to extrapolating it from the Data Shape
+    """
+    cluster_capacity = CurrentZoneClusterCapacity(
+        cluster_instance_name="r7a.4xlarge",
+        cluster_drive=Drive(
+            name="gp3",
+            drive_type=DriveType.attached_ssd,
+            size_gib=5000,
+            block_size_kib=16,
+        ),
+        cluster_instance_count=Interval(low=15, mid=15, high=15, confidence=1),
+        cpu_utilization=Interval(
+            low=5.441147804260254,
+            mid=13.548842955300195,
+            high=25.11203956604004,
+            confidence=1,
+        ),
+        memory_utilization_gib=Interval(low=0, mid=0, high=0, confidence=1),
+        network_utilization_mbps=Interval(
+            low=217.18696,
+            mid=590.5934259505216,
+            high=1220.205184,
+            confidence=1,
+        ),
+        disk_utilization_gib=Interval(
+            low=1341.579345703125,
+            mid=1940.8741284013684,
+            high=2437.607421875,
+            confidence=1,
+        ),
+    )
+
+    scale_ratio = 1.70
+    buffer_ratio = 2.5
+    buffers = Buffers(
+        default=Buffer(ratio=1.5),
+        desired={
+            # Amount of compute buffer that we need to reserve in addition to
+            # cpu_headroom_target that is reserved on a per instance basis
+            "compute": Buffer(ratio=buffer_ratio, components=[BufferComponent.compute]),
+            # This makes sure we use only 40% of the available storage
+            "storage": Buffer(ratio=buffer_ratio, components=[BufferComponent.storage]),
+        },
+        derived={
+            "compute": Buffer(
+                ratio=scale_ratio,
+                intent=BufferIntent.scale,
+                components=[BufferComponent.compute],
+            ),
+            "storage": Buffer(
+                ratio=scale_ratio,
+                intent=BufferIntent.scale,
+                components=[BufferComponent.storage],
+            ),
+        },
+    )
+
+    desires = CapacityDesires(
+        service_tier=1,
+        buffers=buffers,
+        current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+        query_pattern=QueryPattern(
+            access_pattern=AccessPattern(AccessPattern.latency),
+            # 2 consumers
+            estimated_read_per_second=Interval(low=2, mid=2, high=4, confidence=1),
+            # 1 producer
+            estimated_write_per_second=Interval(low=1, mid=1, high=1, confidence=0.98),
+            estimated_mean_read_latency_ms=Interval(low=1, mid=1, high=1, confidence=1),
+            estimated_mean_write_latency_ms=Interval(
+                low=1, mid=1, high=1, confidence=1
+            ),
+            estimated_mean_read_size_bytes=Interval(
+                low=1024, mid=1024, high=1024, confidence=1
+            ),
+            estimated_mean_write_size_bytes=Interval(
+                low=125000000, mid=579000000, high=1351000000, confidence=0.98
+            ),
+            estimated_read_parallelism=Interval(low=1, mid=1, high=1, confidence=1),
+            estimated_write_parallelism=Interval(low=1, mid=1, high=1, confidence=1),
+            read_latency_slo_ms=FixedInterval(low=0.4, mid=4, high=10, confidence=0.98),
+            write_latency_slo_ms=FixedInterval(
+                low=0.4, mid=4, high=10, confidence=0.98
+            ),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(
+                low=44000, mid=86000, high=91000, confidence=1
+            ),
+        ),
+    )
+
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.kafka",
+        region="us-east-1",
+        num_results=3,
+        num_regions=4,
+        desires=desires,
+        extra_model_arguments={
+            "cluster_type": ClusterType.ha,
+            "retention": "PT8H",
+            "require_attached_disks": True,
+            "required_zone_size": cluster_capacity.cluster_instance_count.mid,
+            "require_same_instance_family": True,
+        },
+    )
+
+    assert len(cap_plan) >= 1
+    lr_clusters = cap_plan[0].candidate_clusters.zonal
+    assert len(lr_clusters) >= 1
+    print(lr_clusters[0].instance.name)
+
+    families = set(
+        map(
+            lambda curr_plan: curr_plan.candidate_clusters.zonal[0].instance.family,
+            cap_plan,
+        )
+    )
+    # check that we restricted the instance family to only r7a
+    assert families == {"r7a"}
+
+    # check that we have at least as many instances as the current cluster
+    assert lr_clusters[0].count >= cluster_capacity.cluster_instance_count.high
+
+    # Since the disk required per instance is > 5TB allowed by cap planner, we
+    # allow higher instance count. This means we may not have vertically scaled
+    # the instance type up since a lower instance type may be ok with the higher count
+
+    # Check that we provisioned enough storage
+    minimum_provisioned_disk = (
+        cluster_capacity.disk_utilization_gib.high
+        * cluster_capacity.cluster_instance_count.mid
+        * buffer_ratio
+        * scale_ratio
+    )
+    assert (
+        lr_clusters[0].attached_drives[0].size_gib * lr_clusters[0].count
+        >= minimum_provisioned_disk
+    )
 
     for lr in cap_plan:
         print(lr.candidate_clusters.zonal[0])
