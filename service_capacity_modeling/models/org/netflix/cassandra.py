@@ -164,7 +164,11 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
         disk_scale, _ = derived_buffer_for_component(
             desires.buffers.derived, ["storage", "disk"]
         )
-        disk_used_gib = current_capacity.disk_utilization_gib.mid * (disk_scale or 1)
+        disk_used_gib = (
+            current_capacity.disk_utilization_gib.mid
+            * current_capacity.cluster_instance_count.mid
+            * (disk_scale or 1)
+        )
     else:
         # If the cluster is not yet provisioned
         capacity_requirement = _zonal_requirement_for_new_cluster(
