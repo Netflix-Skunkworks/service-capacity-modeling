@@ -1,6 +1,10 @@
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import BufferIntent
+from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
@@ -397,3 +401,51 @@ def test_plan_certain():
     lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
     assert lr_clusters.count == 8
     assert lr_clusters.instance.cpu == 12
+
+
+def test_preserve_memory():
+    cluster_capacity = CurrentZoneClusterCapacity(
+        cluster_instance_name="r5d.4xlarge",
+        cluster_instance_count=Interval(low=2, mid=2, high=2, confidence=1),
+        cpu_utilization=Interval(
+            low=10.12, mid=13.2, high=14.194801291058118, confidence=1
+        ),
+        memory_utilization_gib=certain_float(32.0),
+        disk_utilization_gib=certain_float(100),
+        network_utilization_mbps=certain_float(128.0),
+    )
+
+    derived_buffer = Buffers(
+        derived={
+            "memory": Buffer(
+                intent=BufferIntent.preserve,
+                components=[BufferComponent.memory],
+            )
+        }
+    )
+
+    worn_desire = CapacityDesires(
+        service_tier=1,
+        current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(10_000),
+            estimated_write_per_second=certain_int(100_000),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=certain_int(300),
+        ),
+        buffers=derived_buffer,
+    )
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        num_results=3,
+        num_regions=4,
+        desires=worn_desire,
+        extra_model_arguments={
+            "required_cluster_size": 2,
+        },
+    )
+
+    lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
+    assert lr_clusters.instance.ram_gib >= 128
