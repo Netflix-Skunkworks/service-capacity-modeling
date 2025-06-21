@@ -1000,10 +1000,6 @@ def test_non_ebs():
     # check that we have at least as many instances as the current cluster
     assert lr_clusters[0].count >= cluster_capacity.cluster_instance_count.high
 
-    # Since the disk required per instance is > 5TB allowed by cap planner, we
-    # allow higher instance count. This means we may not have vertically scaled
-    # the instance type up since a lower instance type may be ok with the higher count
-
     # Check that we provisioned enough storage
     minimum_provisioned_disk = (
         cluster_capacity.disk_utilization_gib.high
