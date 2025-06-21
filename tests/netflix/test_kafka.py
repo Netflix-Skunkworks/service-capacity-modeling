@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
@@ -854,6 +855,164 @@ def test_scale_up_using_buffers_high_disk_change_instance_count():
     )
     assert (
         lr_clusters[0].attached_drives[0].size_gib * lr_clusters[0].count
+        >= minimum_provisioned_disk
+    )
+
+    for lr in cap_plan:
+        print(lr.candidate_clusters.zonal[0])
+
+
+def test_non_ebs():
+    cluster_capacity = CurrentZoneClusterCapacity(
+        cluster_instance_name="i3en.2xlarge",
+        cluster_instance=None,
+        cluster_drive=None,
+        cluster_instance_count=Interval(low=44.0, mid=44.0, high=44.0, confidence=1.0),
+        cpu_utilization=Interval(
+            low=3.0162736316287893,
+            mid=17.47713213503852,
+            high=28.850521087646484,
+            confidence=1.0,
+        ),
+        memory_utilization_gib=Interval(low=0.0, mid=0.0, high=0.0, confidence=1.0),
+        network_utilization_mbps=Interval(
+            low=18.110018933333333,
+            mid=908.3751514114257,
+            high=2515.735296,
+            confidence=1.0,
+        ),
+        disk_utilization_gib=Interval(
+            low=311.24108505249023,
+            mid=1413.8721423142003,
+            high=2350.127197265625,
+            confidence=1.0,
+        ),
+    )
+
+    scale_ratio = 1.47
+    buffer_ratio = 2.5
+    buffers = Buffers(
+        default=Buffer(ratio=1.5, intent=BufferIntent.desired, components=["compute"]),
+        desired={
+            "compute": Buffer(
+                ratio=buffer_ratio, intent=BufferIntent.desired, components=["compute"]
+            ),
+            "storage": Buffer(
+                ratio=buffer_ratio, intent=BufferIntent.desired, components=["storage"]
+            ),
+        },
+        derived={
+            "compute": Buffer(
+                ratio=scale_ratio, intent=BufferIntent.scale, components=["compute"]
+            ),
+            "storage": Buffer(
+                ratio=scale_ratio, intent=BufferIntent.scale, components=["storage"]
+            ),
+        },
+    )
+
+    desires = CapacityDesires(
+        service_tier=1,
+        buffers=buffers,
+        current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+        query_pattern=QueryPattern(
+            access_pattern=AccessPattern.latency,
+            estimated_read_per_second=Interval(
+                low=4.0, mid=4.0, high=4.0, confidence=1.0
+            ),
+            estimated_write_per_second=Interval(
+                low=1.0, mid=1.0, high=1.0, confidence=0.98
+            ),
+            estimated_mean_read_latency_ms=Interval(
+                low=1.0, mid=1.0, high=1.0, confidence=1.0
+            ),
+            estimated_mean_write_latency_ms=Interval(
+                low=1.0, mid=1.0, high=1.0, confidence=1.0
+            ),
+            estimated_mean_read_size_bytes=Interval(
+                low=1024.0, mid=1024.0, high=1024.0, confidence=1.0
+            ),
+            estimated_mean_write_size_bytes=Interval(
+                low=45934839.712777786,
+                mid=2832737185.7793183,
+                high=5291668222.459846,
+                confidence=0.98,
+            ),
+            estimated_read_parallelism=Interval(
+                low=1.0, mid=1.0, high=1.0, confidence=1.0
+            ),
+            estimated_write_parallelism=Interval(
+                low=1.0, mid=1.0, high=1.0, confidence=1.0
+            ),
+            read_latency_slo_ms=FixedInterval(
+                low=0.4, mid=4.0, high=10.0, confidence=0.98
+            ),
+            write_latency_slo_ms=FixedInterval(
+                low=0.4, mid=4.0, high=10.0, confidence=0.98
+            ),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(
+                low=35428.05778477986,
+                mid=209861.32096354378,
+                high=294807.85949808755,
+                confidence=1.0,
+            ),
+            reserved_instance_app_mem_gib=2,
+            reserved_instance_system_mem_gib=1,
+            estimated_compression_ratio=Interval(
+                low=1.0, mid=1.0, high=1.0, confidence=1.0
+            ),
+        ),
+    )
+
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.kafka",
+        region="us-east-1",
+        num_results=3,
+        num_regions=1,
+        desires=desires,
+        extra_model_arguments={
+            "cluster_type": ClusterType.ha,
+            "retention": "PT8H",
+            "context": "fleet analysis from AG.kafka",
+            "context-memo": "fleet analysis from AG.kafka",
+            "nflx-sensitivedata": False,
+            "required_zone_size": 44.0,
+            "require_local_disks": True,
+        },
+    )
+
+    assert len(cap_plan) >= 1
+    lr_clusters = cap_plan[0].candidate_clusters.zonal
+    assert len(lr_clusters) >= 1
+    print(lr_clusters[0].instance.name)
+
+    families = set(
+        map(
+            lambda curr_plan: curr_plan.candidate_clusters.zonal[0].instance.family,
+            cap_plan,
+        )
+    )
+    # check that we restricted the instance family to only i3en
+    assert families == {"i3en"}
+
+    # check that we have at least as many instances as the current cluster
+    assert lr_clusters[0].count >= cluster_capacity.cluster_instance_count.high
+
+    # Since the disk required per instance is > 5TB allowed by cap planner, we
+    # allow higher instance count. This means we may not have vertically scaled
+    # the instance type up since a lower instance type may be ok with the higher count
+
+    # Check that we provisioned enough storage
+    minimum_provisioned_disk = (
+        cluster_capacity.disk_utilization_gib.high
+        * cluster_capacity.cluster_instance_count.mid
+        * buffer_ratio
+        * scale_ratio
+    )
+    assert (
+        lr_clusters[0].instance.drive.size_gib * lr_clusters[0].count
         >= minimum_provisioned_disk
     )
 

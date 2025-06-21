@@ -235,7 +235,7 @@ def _kafka_read_io(rps, io_size_kib, size_gib, recovery_seconds: int) -> float:
 # pylint: disable=too-many-locals
 # pylint: disable=too-many-return-statements
 # pylint: disable=too-many-positional-arguments
-def _estimate_kafka_cluster_zonal(
+def _estimate_kafka_cluster_zonal(  # noqa: C901
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,
@@ -246,7 +246,7 @@ def _estimate_kafka_cluster_zonal(
     require_attached_disks: bool = False,
     required_zone_size: Optional[int] = None,
     max_regional_size: int = 150,
-    max_local_disk_gib: int = 1024 * 5,
+    max_local_disk_gib: int = 1024 * 16,  # i3en.6xl has 15TB disk
     min_instance_cpu: int = 2,
     min_instance_memory_gib: int = 12,
     require_same_instance_family: bool = True,
@@ -360,11 +360,13 @@ def _estimate_kafka_cluster_zonal(
     if required_zone_size is not None:
         space_gib = max(1, math.ceil(requirement.disk_gib.mid / required_zone_size))
         ebs_gib = utils.next_n(space_gib, n=100)
-        max_size = (
-            max_attached_disk_gib
-            if max_attached_disk_gib is not None
-            else drive.max_size_gib / 3
-        )  # Max allowed disk in `compute_stateful_zone`
+
+        # Max allowed disk size in `compute_stateful_zone`
+        max_size = drive.max_size_gib / 3
+        if instance.drive is not None and instance.drive.size_gib > 0:
+            max_size = min(max_local_disk_gib, instance.drive.size_gib)
+        elif max_attached_disk_gib is not None:
+            max_size = max_attached_disk_gib
 
         # Capacity planner only allows ~ 5TB disk (max_size) for gp3 drives
         # or max_attached_disk_gib if provided.
@@ -492,7 +494,7 @@ class NflxKafkaCapacityModel(CapacityModel):
         max_regional_size: int = extra_model_arguments.get("max_regional_size", 150)
         # Very large nodes are hard to cache warm
         max_local_disk_gib: int = extra_model_arguments.get(
-            "max_local_disk_gib", 1024 * 5
+            "max_local_disk_gib", 1024 * 16  # i3en.6xlarge can use up to 15TB
         )
         min_instance_cpu: int = extra_model_arguments.get("min_instance_cpu", 2)
         min_instance_memory_gib: int = extra_model_arguments.get(
