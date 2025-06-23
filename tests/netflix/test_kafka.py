@@ -1,4 +1,6 @@
 # pylint: disable=too-many-lines
+import logging
+
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
@@ -17,6 +19,16 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.org.netflix.kafka import ClusterType
+
+logger = logging.getLogger(__name__)
+
+logging.basicConfig(
+    level=logging.WARNING,  # Set to DEBUG for detailed capacity planner reasoning
+    format="%(name)s - %(levelname)s - %(message)s",
+    force=True,
+)
+
+logger.setLevel(logging.DEBUG)
 
 
 def test_kafka_basic():
@@ -144,7 +156,7 @@ def test_kafka_high_throughput():
     )
 
     for lr in plan.least_regret:
-        print(lr.candidate_clusters.zonal[0])
+        logger.debug(lr.candidate_clusters.zonal[0])
         assert 50_000 < lr.candidate_clusters.total_annual_cost < 200_000
         clstr = lr.candidate_clusters.zonal[0]
         if clstr.instance.drive is None:
@@ -351,7 +363,7 @@ def test_plan_certain():
     assert len(cap_plan) >= 1
     lr_clusters = cap_plan[0].candidate_clusters.zonal
     assert len(lr_clusters) >= 1
-    print(lr_clusters[0].instance.name)
+    logger.debug(lr_clusters[0].instance.name)
     assert lr_clusters[0].count == cluster_capacity.cluster_instance_count.high
 
 
@@ -441,10 +453,10 @@ def test_plan_certain_data_shape():
     assert len(cap_plan) >= 1
     lr_clusters = cap_plan[0].candidate_clusters.zonal
     assert len(lr_clusters) >= 1
-    print(lr_clusters[0].instance.name)
+    logger.debug(lr_clusters[0].instance.name)
     assert lr_clusters[0].count == cluster_capacity.cluster_instance_count.high
     for lr in cap_plan:
-        print(lr.candidate_clusters.zonal[0])
+        logger.debug(lr.candidate_clusters.zonal[0])
     families = set(
         map(
             lambda curr_plan: curr_plan.candidate_clusters.zonal[0].instance.family,
@@ -545,7 +557,7 @@ def test_plan_certain_data_shape_same_instance_type():
     assert len(cap_plan) >= 1
     lr_clusters = cap_plan[0].candidate_clusters.zonal
     assert len(lr_clusters) >= 1
-    print(lr_clusters[0].instance.name)
+    logger.debug(lr_clusters[0].instance.name)
     assert lr_clusters[0].count == cluster_capacity.cluster_instance_count.high
 
     families = set(
@@ -562,7 +574,7 @@ def test_plan_certain_data_shape_same_instance_type():
     assert lr_clusters[0].count == cluster_capacity.cluster_instance_count.high
 
     for lr in cap_plan:
-        print(lr.candidate_clusters.zonal[0])
+        logger.debug(lr.candidate_clusters.zonal[0])
 
 
 def test_scale_up_using_buffers():
@@ -679,7 +691,7 @@ def test_scale_up_using_buffers():
     assert len(cap_plan) >= 1
     lr_clusters = cap_plan[0].candidate_clusters.zonal
     assert len(lr_clusters) >= 1
-    print(lr_clusters[0].instance.name)
+    logger.debug(lr_clusters[0].instance.name)
     assert lr_clusters[0].count == cluster_capacity.cluster_instance_count.high
 
     families = set(
@@ -713,7 +725,7 @@ def test_scale_up_using_buffers():
     )
 
     for lr in cap_plan:
-        print(lr.candidate_clusters.zonal[0])
+        logger.debug(lr.candidate_clusters.zonal[0])
 
 
 def test_scale_up_using_buffers_high_disk_change_instance_count():
@@ -828,7 +840,7 @@ def test_scale_up_using_buffers_high_disk_change_instance_count():
     assert len(cap_plan) >= 1
     lr_clusters = cap_plan[0].candidate_clusters.zonal
     assert len(lr_clusters) >= 1
-    print(lr_clusters[0].instance.name)
+    logger.debug(lr_clusters[0].instance.name)
 
     families = set(
         map(
@@ -859,7 +871,7 @@ def test_scale_up_using_buffers_high_disk_change_instance_count():
     )
 
     for lr in cap_plan:
-        print(lr.candidate_clusters.zonal[0])
+        logger.debug(lr.candidate_clusters.zonal[0])
 
 
 def test_non_ebs():
@@ -986,7 +998,7 @@ def test_non_ebs():
     assert len(cap_plan) >= 1
     lr_clusters = cap_plan[0].candidate_clusters.zonal
     assert len(lr_clusters) >= 1
-    print(lr_clusters[0].instance.name)
+    logger.debug(lr_clusters[0].instance.name)
 
     families = set(
         map(
@@ -1014,4 +1026,4 @@ def test_non_ebs():
     )
 
     for lr in cap_plan:
-        print(lr.candidate_clusters.zonal[0])
+        logger.debug(lr.candidate_clusters.zonal[0])

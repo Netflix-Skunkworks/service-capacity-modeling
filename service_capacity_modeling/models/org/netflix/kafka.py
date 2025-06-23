@@ -188,7 +188,8 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
     ) // zones_per_region
 
     logger.debug(
-        "Need (cpu, mem, disk) = (%s, %s, %s)",
+        "Need (instance, cpu, mem, disk) = (%s, %s, %s, %s)",
+        instance.name,
         needed_cores,
         needed_memory,
         needed_disk,
