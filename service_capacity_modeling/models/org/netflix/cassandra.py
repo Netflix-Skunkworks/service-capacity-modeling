@@ -144,6 +144,7 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     disk_buffer = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     )
+    memory_preserve = False
     reference_shape = desires.reference_shape
     current_capacity = (
         None
@@ -168,6 +169,9 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
             current_capacity.disk_utilization_gib.mid
             * current_capacity.cluster_instance_count.mid
             * (disk_scale or 1)
+        )
+        _, memory_preserve = derived_buffer_for_component(
+            desires.buffers.derived, ["storage", "memory"]
         )
     else:
         # If the cluster is not yet provisioned
@@ -202,13 +206,19 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     )
     rps_working_set = min(1.0, disk_rps / max_rps_to_disk)
 
-    # If disk RPS will be smaller than our target because there are no
-    # reads, we don't need to hold as much data in memory.
-    # For c*, we can skip memory buffer and can just keep using the heap and write buffer calc
-    # Eventually we'll want to phrase those heap, read cache, and write cache as buffers
-    needed_memory = min(working_set, rps_working_set) * disk_used_gib * zones_per_region
-    # Now convert to per zone
-    needed_memory = max(1, int(needed_memory // zones_per_region))
+    if memory_preserve:
+        needed_memory = capacity_requirement.mem_gib.mid
+    else:
+        # If disk RPS will be smaller than our target because there are no
+        # reads, we don't need to hold as much data in memory.
+        # For c*, we can skip memory buffer and can just keep using the heap and write buffer calc
+        # Eventually we'll want to phrase those heap, read cache, and write cache as buffers
+        needed_memory = (
+            min(working_set, rps_working_set) * disk_used_gib * zones_per_region
+        )
+        # Now convert to per zone
+        needed_memory = max(1, int(needed_memory // zones_per_region))
+
     logger.debug(
         "Need (cpu, mem, disk, working) = (%s, %s, %s, %f)",
         needed_cores,
@@ -381,6 +391,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         # C* clusters provision in powers of 2 because doubling
         cluster_size=next_power_of_2,
         min_count=max(min_count, required_cluster_size or 0),
+        # TODO: Take reserve memory calculation into account during buffer calculation
         # C* heap usage takes away from OS page cache memory
         reserve_memory=lambda x: base_mem + heap_fn(x),
         # C* heap buffers the writes at roughly a rate of
