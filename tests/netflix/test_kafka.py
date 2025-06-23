@@ -894,9 +894,9 @@ def test_non_ebs():
             confidence=1.0,
         ),
         disk_utilization_gib=Interval(
-            low=311.24108505249023,
-            mid=1413.8721423142003,
-            high=2350.127197265625,
+            low=500.24108505249023,
+            mid=750.8721423142003,
+            high=1300.127197265625,
             confidence=1.0,
         ),
     )
