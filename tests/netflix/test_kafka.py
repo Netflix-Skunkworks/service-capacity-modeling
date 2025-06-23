@@ -1008,7 +1008,8 @@ def test_non_ebs():
         * scale_ratio
     )
     assert (
-        lr_clusters[0].instance.drive.size_gib * lr_clusters[0].count
+        lr_clusters[0].instance.drive is not None
+        and lr_clusters[0].instance.drive.size_gib * lr_clusters[0].count
         >= minimum_provisioned_disk
     )
 

@@ -246,7 +246,7 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     require_attached_disks: bool = False,
     required_zone_size: Optional[int] = None,
     max_regional_size: int = 150,
-    max_local_disk_gib: int = 1024 * 16,  # i3en.6xl has 15TB disk
+    max_local_disk_gib: int = 1024 * 8,
     min_instance_cpu: int = 2,
     min_instance_memory_gib: int = 12,
     require_same_instance_family: bool = True,
@@ -494,7 +494,7 @@ class NflxKafkaCapacityModel(CapacityModel):
         max_regional_size: int = extra_model_arguments.get("max_regional_size", 150)
         # Very large nodes are hard to cache warm
         max_local_disk_gib: int = extra_model_arguments.get(
-            "max_local_disk_gib", 1024 * 16  # i3en.6xlarge can use up to 15TB
+            "max_local_disk_gib", 1024 * 8
         )
         min_instance_cpu: int = extra_model_arguments.get("min_instance_cpu", 2)
         min_instance_memory_gib: int = extra_model_arguments.get(
