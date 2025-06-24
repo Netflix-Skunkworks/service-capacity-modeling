@@ -363,11 +363,12 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
         ebs_gib = utils.next_n(space_gib, n=100)
 
         # Max allowed disk size in `compute_stateful_zone`
-        max_size = drive.max_size_gib / 3
         if instance.drive is not None and instance.drive.size_gib > 0:
             max_size = min(max_local_disk_gib, instance.drive.size_gib)
         elif max_attached_disk_gib is not None:
             max_size = max_attached_disk_gib
+        else:
+            max_size = drive.max_size_gib / 3
 
         # Capacity planner only allows ~ 5TB disk (max_size) for gp3 drives
         # or max_attached_disk_gib if provided.
