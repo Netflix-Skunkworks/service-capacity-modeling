@@ -188,7 +188,8 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
     ) // zones_per_region
 
     logger.debug(
-        "Need (cpu, mem, disk) = (%s, %s, %s)",
+        "Need (instance, cpu, mem, disk) = (%s, %s, %s, %s)",
+        instance.name,
         needed_cores,
         needed_memory,
         needed_disk,
@@ -235,7 +236,7 @@ def _kafka_read_io(rps, io_size_kib, size_gib, recovery_seconds: int) -> float:
 # pylint: disable=too-many-locals
 # pylint: disable=too-many-return-statements
 # pylint: disable=too-many-positional-arguments
-def _estimate_kafka_cluster_zonal(
+def _estimate_kafka_cluster_zonal(  # noqa: C901
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,
@@ -360,11 +361,14 @@ def _estimate_kafka_cluster_zonal(
     if required_zone_size is not None:
         space_gib = max(1, math.ceil(requirement.disk_gib.mid / required_zone_size))
         ebs_gib = utils.next_n(space_gib, n=100)
-        max_size = (
-            max_attached_disk_gib
-            if max_attached_disk_gib is not None
-            else drive.max_size_gib / 3
-        )  # Max allowed disk in `compute_stateful_zone`
+
+        # Max allowed disk size in `compute_stateful_zone`
+        if instance.drive is not None and instance.drive.size_gib > 0:
+            max_size = min(max_local_disk_gib, instance.drive.size_gib)
+        elif max_attached_disk_gib is not None:
+            max_size = max_attached_disk_gib
+        else:
+            max_size = drive.max_size_gib / 3
 
         # Capacity planner only allows ~ 5TB disk (max_size) for gp3 drives
         # or max_attached_disk_gib if provided.
