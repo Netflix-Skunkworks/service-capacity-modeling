@@ -206,8 +206,34 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     )
     rps_working_set = min(1.0, disk_rps / max_rps_to_disk)
 
-    if memory_preserve:
-        needed_memory = capacity_requirement.mem_gib.mid
+    # Cassandra can defer writes either by buffering in memory or by
+    # waiting longer before recompacting (the min-threshold on the
+    # L0 compactions or STCS compactions)
+    min_threshold = 4
+    write_buffer_gib = _write_buffer_gib_zone(
+        desires=desires,
+        zones_per_region=zones_per_region,
+        flushes_before_compaction=min_threshold,
+    )
+
+    while write_buffer_gib > 12 and min_threshold < 16:
+        min_threshold *= 2
+        write_buffer_gib = _write_buffer_gib_zone(
+            desires=desires,
+            zones_per_region=zones_per_region,
+            flushes_before_compaction=min_threshold,
+        )
+
+    if current_capacity and current_capacity.cluster_instance and memory_preserve:
+        # remove base memory and heap from per node ram and then
+        # multiply by number of nodes in a zone to compute the zonal requirement.
+        reserve_memory = _get_base_memory(desires) + _cass_heap(
+            current_capacity.cluster_instance.ram_gib
+        )
+        needed_memory = (
+            current_capacity.cluster_instance.ram_gib - reserve_memory
+        ) * current_capacity.cluster_instance_count.mid
+        write_buffer_gib = 0
     else:
         # If disk RPS will be smaller than our target because there are no
         # reads, we don't need to hold as much data in memory.
@@ -226,24 +252,6 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
         needed_disk,
         working_set,
     )
-
-    # Cassandra can defer writes either by buffering in memory or by
-    # waiting longer before recompacting (the min-threshold on the
-    # L0 compactions or STCS compactions)
-    min_threshold = 4
-    write_buffer_gib = _write_buffer_gib_zone(
-        desires=desires,
-        zones_per_region=zones_per_region,
-        flushes_before_compaction=min_threshold,
-    )
-
-    while write_buffer_gib > 12 and min_threshold < 16:
-        min_threshold *= 2
-        write_buffer_gib = _write_buffer_gib_zone(
-            desires=desires,
-            zones_per_region=zones_per_region,
-            flushes_before_compaction=min_threshold,
-        )
 
     return CapacityRequirement(
         requirement_type="cassandra-zonal",
@@ -358,10 +366,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     if desires.service_tier <= 1:
         min_count = 2
 
-    base_mem = (
-        desires.data_shape.reserved_instance_app_mem_gib
-        + desires.data_shape.reserved_instance_system_mem_gib
-    )
+    base_mem = _get_base_memory(desires)
 
     heap_fn = _cass_heap_for_write_buffer(
         instance=instance,
@@ -482,6 +487,13 @@ def _cass_io_per_read(node_size_gib, sstable_size_mb=160):
     # One disk IO per data read and one per index read (assume we miss
     # the key cache)
     return 2 * levels
+
+
+def _get_base_memory(desires: CapacityDesires):
+    return (
+        desires.data_shape.reserved_instance_app_mem_gib
+        + desires.data_shape.reserved_instance_system_mem_gib
+    )
 
 
 def _cass_heap_for_write_buffer(
