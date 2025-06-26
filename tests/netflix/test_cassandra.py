@@ -448,4 +448,4 @@ def test_preserve_memory():
     )
 
     lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
-    assert lr_clusters.instance.ram_gib >= 128
+    assert lr_clusters.instance.ram_gib == 128
