@@ -1,10 +1,16 @@
 """Contains definitions for AWS instance families."""
 
+# These are _relative_ IPC values with Skylake as a baseline.
+# They are not targeted to a specific workload, but instead an average
+# typical value across a broad range of tests such as those used
+# in common online benchmarks.
+
 HSW_IPC = 0.85
 SKX_IPC = 1.0
-ICX_IPC = SKX_IPC * 1.15  # harshad says 1.15, chatgpt says 1.18
-SPR_IPC = ICX_IPC * 1.12  # harshad says 1.12, chatgpt says 1.19
-EMR_IPC = SPR_IPC * 1.10  # seems like 10-15% uplift
+ICX_IPC = SKX_IPC * 1.15
+SPR_IPC = ICX_IPC * 1.12
+EMR_IPC = SPR_IPC * 1.03
+GNR_IPC = SPR_IPC * 1.10
 
 ROME_IPC = 1.03
 MILAN_IPC = SKX_IPC * 1.15
