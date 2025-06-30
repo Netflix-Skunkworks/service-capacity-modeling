@@ -449,3 +449,72 @@ def test_preserve_memory():
 
     lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
     assert lr_clusters.instance.ram_gib == 128
+
+
+desire = CapacityDesires(
+    service_tier=1,
+    buffers=Buffers(
+        derived={
+            "memory": Buffer(
+                components=[
+                    BufferComponent.storage
+                ],
+                intent=BufferIntent.preserve,
+            ),
+            "scale": Buffer(
+            components=[BufferComponent.compute],
+            intent=BufferIntent.scale,
+            ratio=1.5,
+        )}
+    ),
+    current_clusters=CurrentClusters(
+        zonal=[
+            CurrentZoneClusterCapacity(
+                cluster_instance_name="m6id.16xlarge",
+                cluster_instance_count=Interval(
+                    low=12,
+                    mid=12,
+                    high=12,
+                    confidence=1,
+                ),
+                cpu_utilization=Interval(
+                    low=1.509,
+                    mid=1.876,
+                    high=4.669,
+                    confidence=1
+                ),
+                disk_utilization_gib=Interval(
+                    low=495.375,
+                    mid=500,
+                    high=503,
+                    confidence=1
+                ),
+                network_utilization_mbps=Interval(
+                    low=7.86,
+                    mid=18.557,
+                    high=356.855,
+                    confidence=1
+                ),
+            )
+        ]
+    )
+)
+
+def test_dats1():
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=desire,
+        extra_model_arguments={
+            "current_asg_size": 3,
+            "max_disk_used_gib": 728.9932595095704,
+            "max_local_disk_gib": 16384,
+            "required_cluster_size": 12,
+
+        },
+    )[0]
+    result = cap_plan.candidate_clusters.zonal[0]
+    for r in result:
+        assert r.instance.ram_gib == 256
+        assert r.instance.ram_gib < r.instance.drive.max_size_gib == 3800
+        print(r.instance.name)
