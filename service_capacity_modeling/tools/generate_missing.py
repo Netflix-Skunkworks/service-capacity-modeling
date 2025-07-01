@@ -40,7 +40,7 @@ def build_command(family: str, params: Dict[str, Any], output_path: Path) -> lis
     return cmd
 
 
-def main(debug: bool = True, execute: bool = False):
+def main(debug: bool = True, execute: bool = False, force: bool = False):
     expected_path = (
         Path(__file__).resolve().parent.parent / "hardware/profiles/shapes/aws"
     )
@@ -51,7 +51,7 @@ def main(debug: bool = True, execute: bool = False):
     missing_families = {
         family: params
         for family, params in INSTANCE_TYPES.items()
-        if not (expected_path / f"auto_{family}.json").exists()
+        if force or not (expected_path / f"auto_{family}.json").exists()
     }
 
     if not missing_families:
@@ -87,5 +87,6 @@ if __name__ == "__main__":
     # Parse arguments to determine whether to execute commands
     execute_mode = "--execute" in sys.argv
     debug_mode = "--debug" in sys.argv or not execute_mode
+    force_mode = "--force" in sys.argv
 
-    main(debug=debug_mode, execute=execute_mode)
+    main(debug=debug_mode, execute=execute_mode, force=force_mode)
