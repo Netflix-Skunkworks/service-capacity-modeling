@@ -112,7 +112,7 @@ def test_dats1():
         extra_model_arguments=extra_model_args,
     )[0]
     result = cap_plan.candidate_clusters.zonal
-    assert result[0].instance.name == "m6id.24xlarge"
+    assert result[0].instance.name == "m6id.16xlarge"
 
     del buffers.derived["memory"]
     cap_plan = planner.plan_certain(
@@ -122,7 +122,7 @@ def test_dats1():
         extra_model_arguments=extra_model_args,
     )[0]
     result = cap_plan.candidate_clusters.zonal
-    assert result[0].instance.name == "m6idn.16xlarge"
+    assert result[0].instance.name == "c6id.16xlarge"
 
     del buffers.derived["scale"]
     cap_plan = planner.plan_certain(

@@ -394,7 +394,9 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         # want to avoid clusters with more than 1 TiB of local state
         max_local_disk_gib=max_local_disk_gib,
         # C* clusters provision in powers of 2 because doubling
-        cluster_size=next_power_of_2,
+        # But if the required cluster size is specified, we want to strictly
+        # honor it as-is until we have horizontal scaling
+        cluster_size=(lambda n: n) if required_cluster_size else next_power_of_2,
         min_count=max(min_count, required_cluster_size or 0),
         # TODO: Take reserve memory calculation into account during buffer calculation
         # C* heap usage takes away from OS page cache memory
