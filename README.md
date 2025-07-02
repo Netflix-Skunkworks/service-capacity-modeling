@@ -220,6 +220,18 @@ To contribute to this project:
 tox -e py38 -- -k test_<your_functionality> --pdb --pdbcls=IPython.terminal.debugger:Pdb
 ```
 
+### Pre-commit / Linting
+To install the pre-commit linter
+```
+pre-commit install
+```
+
+To run the linting manually:
+```
+tox -e pre-commit
+```
+
+
 ### PyCharm IDE Setup
 Use one of the test environments for IDE development, e.g. `tox -e py310` and then
 `Add New Interpreter -> Add Local -> Select Existing -> Navigate to (workdir)/.tox/py310`.
