@@ -255,6 +255,22 @@ def test_high_write_throughput_ebs():
     assert high_writes_result.cluster_params["cassandra.compaction.min_threshold"] > 4
 
 
+def test_capacity_non_power_of_two():
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=large_footprint,
+        extra_model_arguments={
+            "require_local_disks": True,
+            "required_cluster_size": 12,
+        },
+    )[0]
+
+    result = cap_plan.candidate_clusters.zonal[0]
+    assert result.count == 12
+    assert result.instance.name.startswith("i")
+
+
 def test_capacity_large_footprint():
     cap_plan = planner.plan_certain(
         model_name="org.netflix.cassandra",
