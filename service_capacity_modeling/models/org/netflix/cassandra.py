@@ -603,7 +603,7 @@ class NflxCassandraCapacityModel(CapacityModel):
                 f"Required cluster size must be at least "
                 f"{CRITICAL_TIER_MIN_CLUSTER_SIZE=} when "
                 f"service tier({tier}) is a "
-                f"critical tier({CRITICAL_TIERS})."
+                f"critical tier({CRITICAL_TIERS}). "
                 f"If it is an existing cluster, horizontally "
                 f"scale the cluster to be >= "
                 f"{CRITICAL_TIER_MIN_CLUSTER_SIZE}"
