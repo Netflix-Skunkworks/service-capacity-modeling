@@ -18,9 +18,11 @@ from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.models.common import get_cores_from_current_capacity
 from service_capacity_modeling.models.org.netflix.cassandra import (
     NflxCassandraCapacityModel,
 )
+from tests.test_common import current_cluster
 
 small_but_high_qps = CapacityDesires(
     service_tier=1,
@@ -496,3 +498,182 @@ def test_get_required_cluster_size_exceptions(tier, extra_model_arguments):
         NflxCassandraCapacityModel.get_required_cluster_size(
             tier, extra_model_arguments
         )
+
+
+def test_scale_cpu_preserve_memory_preservedown_disk():
+    """
+    Scale CPU by 1.5x, preserve memory and preserve down disk. Ideal for read only
+    workloads. Where you need to
+        1. scale CPU to handle more reads
+        2. preserve the memory buffer for caching (although disk size did not change
+        percentage of memory used could potentially change maybe hence preserve
+        the buffer ratio. Here you might increase actual memory)
+        3. don't need to scale disk because there are no writes. Previously for
+        some reason we have been keeping the disk size very high. Its okay to
+        go back to the 4X buffer. Its in the live path. So either scale down or
+        keep it as it is.
+    """
+    cluster_capacity = CurrentZoneClusterCapacity(
+        cluster_instance_name="i3en.2xlarge",
+        cluster_instance_count=Interval(low=4, mid=4, high=4, confidence=1),
+        cpu_utilization=Interval(low=20.0, mid=20.0, high=20.0, confidence=1),
+        memory_utilization_gib=certain_float(64.0),
+        disk_utilization_gib=certain_float(200),
+        network_utilization_mbps=certain_float(100.0),
+    )
+
+    derived_buffer = Buffers(
+        derived={
+            "cpu": Buffer(
+                ratio=1.5,
+                intent=BufferIntent.scale,
+                components=[BufferComponent.cpu],
+            ),
+            "memory": Buffer(
+                intent=BufferIntent.preserve,
+                components=[BufferComponent.memory],
+            ),
+            "disk": Buffer(
+                intent=BufferIntent.preservedown,
+                components=[BufferComponent.disk],
+            ),
+        }
+    )
+
+    desires = CapacityDesires(
+        service_tier=1,
+        current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(20_000),
+            estimated_write_per_second=certain_int(50_000),
+        ),
+        data_shape=DataShape(estimated_state_size_gib=certain_int(400)),
+        buffers=derived_buffer,
+    )
+
+    plan = planner.plan_certain(
+        model_name="org.netflix.dataproc",
+        region="us-west-1",
+        num_results=1,
+        num_regions=2,
+        desires=desires,
+        extra_model_arguments={"required_cluster_size": 2},
+    )
+    cluster = plan[0].candidate_clusters.zonal[0]
+    assert cluster.instance.cpu >= 40.0 * 1.5
+    assert cluster.instance.ram_gib == 64
+
+
+# PreserveDown Memory, Scale Disk
+def test_preservedown_memory_scale_disk():
+    """
+    Scale Disk by 1.5x, preserve down memory. Ideal for workloads where
+        1. Writes are increasing and you need to scale disk
+        2. However, you cant do anything about the memory. Writes are so random
+        and not cachable hence its no point scaling memory. Use the default/desired
+        buffer to scale it down or keep it the same. Do not increase memory.
+    """
+    cluster_capacity = CurrentZoneClusterCapacity(
+        cluster_instance_name="m5d.4xlarge",
+        cluster_instance_count=Interval(low=1, mid=1, high=1, confidence=1),
+        cpu_utilization=Interval(low=20.0, mid=25.0, high=30.0, confidence=1),
+        memory_utilization_gib=certain_float(128.0),
+        disk_utilization_gib=certain_float(300),
+        network_utilization_mbps=certain_float(120.0),
+    )
+
+    derived_buffer = Buffers(
+        derived={
+            "memory": Buffer(
+                intent=BufferIntent.preservedown,
+                components=[BufferComponent.memory],
+            ),
+            "disk": Buffer(
+                ratio=1.4,
+                intent=BufferIntent.scale,
+                components=[BufferComponent.disk],
+            ),
+        }
+    )
+
+    desires = CapacityDesires(
+        service_tier=2,
+        current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(30_000),
+            estimated_write_per_second=certain_int(60_000),
+        ),
+        data_shape=DataShape(estimated_state_size_gib=certain_int(600)),
+        buffers=derived_buffer,
+    )
+
+    plan = planner.plan_certain(
+        model_name="org.netflix.analytics",
+        region="us-east-1",
+        num_results=1,
+        num_regions=2,
+        desires=desires,
+        extra_model_arguments={"required_cluster_size": 1},
+    )
+
+    cluster = plan[0].candidate_clusters.zonal[0]
+    assert cluster.instance.disk_gib >= 300  # preserveup shouldn't reduce
+    assert cluster.instance.ram_gib >= 128.0 * 1.4
+
+
+def test_preservedown_cpu_and_memory_preserve_disk():
+    """
+    Preserve down everything while preserve disk. Workloads where bulk writes with rare
+    reads.
+        1. Disk size keeps increasing and you need to preserve the 4X buffer
+        2. CPU and Memory utilization is not as high so right size them.
+    """
+    cluster_capacity = CurrentZoneClusterCapacity(
+        cluster_instance_name="c5.9xlarge",
+        cluster_instance_count=Interval(low=1, mid=1, high=1, confidence=1),
+        cpu_utilization=Interval(low=70.0, mid=80.0, high=90.0, confidence=1),
+        memory_utilization_gib=certain_float(96.0),
+        disk_utilization_gib=certain_float(250),
+        network_utilization_mbps=certain_float(100.0),
+    )
+
+    derived_buffer = Buffers(
+        derived={
+            "cpu": Buffer(
+                intent=BufferIntent.preservedown,
+                components=[BufferComponent.cpu],
+            ),
+            "memory": Buffer(
+                intent=BufferIntent.preservedown,
+                components=[BufferComponent.memory],
+            ),
+            "disk": Buffer(
+                intent=BufferIntent.preserve,
+                components=[BufferComponent.disk],
+            ),
+        }
+    )
+
+    desires = CapacityDesires(
+        service_tier=3,
+        current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(50_000),
+            estimated_write_per_second=certain_int(150_000),
+        ),
+        data_shape=DataShape(estimated_state_size_gib=certain_int(100)),
+        buffers=derived_buffer,
+    )
+
+    plan = planner.plan_certain(
+        model_name="org.netflix.cache",
+        region="us-east-2",
+        num_results=1,
+        num_regions=1,
+        desires=desires,
+        extra_model_arguments={"required_cluster_size": 1},
+    )
+
+    cluster = plan[0].candidate_clusters.zonal[0]
+    assert cluster.instance.cpu <= 80.0  # preservedown allows downscaling
+    assert cluster.instance.ram_gib <= 96.0
