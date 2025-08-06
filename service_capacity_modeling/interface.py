@@ -788,6 +788,8 @@ class BufferComponent(str, Enum):
 
 
 class BufferIntent(str, Enum):
+    # TODO: change the name of this desired to something else
+    # come up with a synonym that is unique
     # Most buffers show "desired" buffer, this is the default
     desired = "desired"
     # ratio on top of existing buffers to ensure exists. Generally combined
@@ -795,6 +797,10 @@ class BufferIntent(str, Enum):
     scale = "scale"
     # Ignore model preferences, just preserve existing buffers
     preserve = "preserve"
+    # Using existing buffers scale up if you need more if not remain at the same level
+    preserveup = "preserveup"
+    # Using existing buffers scale down if you need more if not remain at the same level
+    preservedown = "preservedown"
 
 
 class Buffer(ExcludeUnsetModel):
