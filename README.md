@@ -221,16 +221,28 @@ tox -e py38 -- -k test_<your_functionality> --pdb --pdbcls=IPython.terminal.debu
 ```
 
 ### Pre-commit / Linting
-To install the pre-commit linter
-```
-pre-commit install
-```
-
 To run the linting manually:
 ```
 tox -e pre-commit
 ```
 
+### Installing Pre-commit Hooks
+
+This repository includes a custom pre-commit hook that runs all linting and formatting checks through the tox environment. To install it:
+
+```bash
+# Install the custom pre-commit hook
+tox -e install-hooks
+
+# Or manually copy the hook
+cp hooks/pre-commit .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+The hook will automatically:
+- Create the tox pre-commit environment if it doesn't exist
+- Run all pre-commit checks (ruff, flake8, etc.)
+- Ensure all code quality standards are met before commits
 
 ### PyCharm IDE Setup
 Use one of the test environments for IDE development, e.g. `tox -e py310` and then

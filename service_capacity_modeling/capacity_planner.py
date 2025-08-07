@@ -586,7 +586,6 @@ class CapacityPlanner:
 
     # Calculates the minimum cpu, memory, and network requirements based on desires.
     def _per_instance_requirements(self, desires) -> Tuple[int, float]:
-
         # Applications often set fixed reservations of heap or OS memory
         per_instance_mem = (
             desires.data_shape.reserved_instance_app_mem_gib

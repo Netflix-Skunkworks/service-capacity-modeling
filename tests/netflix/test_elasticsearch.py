@@ -53,14 +53,14 @@ def test_es_increasing_qps_simple():
         assert cpu[0] <= cpu[-1], f"cpu for {cluster_type} going down as QPS went up?"
 
         cost = [r[3] for r in zonal_by_increasing_qps]
-        assert (
-            cost[0] <= cost[-1]
-        ), f"cost for {cluster_type} going down as QPS went up?"
+        assert cost[0] <= cost[-1], (
+            f"cost for {cluster_type} going down as QPS went up?"
+        )
 
         disk = [r[4] for r in zonal_by_increasing_qps]
-        assert (
-            disk[0] <= disk[-1]
-        ), f"disk for {cluster_type} going down as QPS went up?"
+        assert disk[0] <= disk[-1], (
+            f"disk for {cluster_type} going down as QPS went up?"
+        )
 
 
 def test_es_simple_mean_percentiles():
@@ -89,14 +89,14 @@ def test_es_simple_mean_percentiles():
     )
 
     assert len(cap_plan.mean) > 0, "mean is empty"
-    assert all(
-        mean_plan for mean_plan in cap_plan.mean
-    ), "One or more mean plans are empty"
+    assert all(mean_plan for mean_plan in cap_plan.mean), (
+        "One or more mean plans are empty"
+    )
 
     assert len(cap_plan.percentiles) > 0, "percentiles are empty"
-    assert all(
-        percentile_plan for percentile_plan in cap_plan.percentiles.values()
-    ), "One or more percentile plans are empty"
+    assert all(percentile_plan for percentile_plan in cap_plan.percentiles.values()), (
+        "One or more percentile plans are empty"
+    )
 
 
 def test_es_simple_certain():
@@ -129,24 +129,24 @@ def test_es_simple_certain():
         assert plan, "One or more plans is empty"
         assert plan.candidate_clusters, "candidate_clusters is empty"
         assert plan.candidate_clusters.zonal, "candidate_clusters.zonal is empty"
-        assert (
-            len(plan.candidate_clusters.zonal) == 9
-        ), "len(candidate_clusters.zonal) != 9"
+        assert len(plan.candidate_clusters.zonal) == 9, (
+            "len(candidate_clusters.zonal) != 9"
+        )
 
         cluster_type_counts = Counter(
             zone.cluster_type for zone in plan.candidate_clusters.zonal
         )
 
         assert len(cluster_type_counts) == 3, "Expecting 3 cluster types"
-        assert (
-            cluster_type_counts["elasticsearch-search"] == 3
-        ), "Expecting exactly 3 search nodes"
-        assert (
-            cluster_type_counts["elasticsearch-master"] == 3
-        ), "Expecting exactly 3 master nodes"
-        assert (
-            cluster_type_counts["elasticsearch-data"] >= 3
-        ), "Expecting at least 3 data nodes"
+        assert cluster_type_counts["elasticsearch-search"] == 3, (
+            "Expecting exactly 3 search nodes"
+        )
+        assert cluster_type_counts["elasticsearch-master"] == 3, (
+            "Expecting exactly 3 master nodes"
+        )
+        assert cluster_type_counts["elasticsearch-data"] >= 3, (
+            "Expecting at least 3 data nodes"
+        )
 
 
 def zonal_summary(zlr):

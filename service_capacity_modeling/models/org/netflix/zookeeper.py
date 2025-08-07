@@ -35,7 +35,6 @@ def _zk_requirement(
     heap_overhead: float,
     disk_overhead: float,
 ) -> Optional[CapacityRequirement]:
-
     # We only deploy Zookeeper to fast ephemeral storage
     # Due to fsync latency to the disk.
     if instance.drive is None:
@@ -94,7 +93,6 @@ class NflxZookeeperCapacityModel(CapacityModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
-
         # We only deploy Zookeeper to 3 zone regions at this time
         if context.zones_in_region != 3:
             return None

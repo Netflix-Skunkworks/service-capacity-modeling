@@ -13,7 +13,6 @@ from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
-from service_capacity_modeling.interface import BufferIntent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
@@ -629,10 +628,10 @@ class NflxCassandraCapacityModel(CapacityModel):
         require_attached_disks: bool = extra_model_arguments.get(
             "require_attached_disks", False
         )
-        required_cluster_size: Optional[
-            int
-        ] = NflxCassandraCapacityModel.get_required_cluster_size(
-            desires.service_tier, extra_model_arguments
+        required_cluster_size: Optional[int] = (
+            NflxCassandraCapacityModel.get_required_cluster_size(
+                desires.service_tier, extra_model_arguments
+            )
         )
 
         max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 500)

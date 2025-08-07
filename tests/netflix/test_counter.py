@@ -68,15 +68,15 @@ def test_counter_increasing_qps_simple():
 
     # We should generally want cheap CPUs for Cassandra
     zonal_families = {r[0] for r in zonal_result}
-    assert all(
-        family[0] in ("r", "m", "c") for family in zonal_families
-    ), f"{zonal_families}"
+    assert all(family[0] in ("r", "m", "c") for family in zonal_families), (
+        f"{zonal_families}"
+    )
 
     # We just want ram and cpus for a java app
     regional_families = {r[0] for r in regional_result}
-    assert all(
-        family[0] in ("m", "r", "c") for family in regional_families
-    ), f"{regional_families}"
+    assert all(family[0] in ("m", "r", "c") for family in regional_families), (
+        f"{regional_families}"
+    )
 
     # Should have more capacity as requirement increases
     x = [r[1] for r in zonal_result]

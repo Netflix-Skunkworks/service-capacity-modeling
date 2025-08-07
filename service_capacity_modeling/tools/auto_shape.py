@@ -178,9 +178,9 @@ def pull_family(
                     # The biggest size drive is the single tenant one
                     disk_max_size = max(disk_max_size, int(disk["SizeInGB"]))
 
-            instance_jsons_dict[
-                instance_type_json["InstanceType"].split(".")[1]
-            ] = instance_type_json
+            instance_jsons_dict[instance_type_json["InstanceType"].split(".")[1]] = (
+                instance_type_json
+            )
 
     if disk_type.name.startswith("local"):
         if (

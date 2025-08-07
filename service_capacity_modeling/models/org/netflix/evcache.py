@@ -217,7 +217,6 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     min_instance_memory_gib: int = 12,
     cross_region_replication: Replication = Replication.none,
 ) -> Optional[CapacityPlan]:
-
     # EVCache doesn't like to deploy on single CPU instances
     if instance.cpu < 2:
         return None

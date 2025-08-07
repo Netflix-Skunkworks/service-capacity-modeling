@@ -355,9 +355,8 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     # or less IOs for a given data size as well as space
     # Contract for disk ios is
     # (per_node_size_gib, node_count) -> (read_ios, write_ios)
-    required_disk_ios: Callable[
-        [float, int], Tuple[float, float]
-    ] = lambda size_gib, count: (0, 0),
+    required_disk_ios: Callable[[float, int], Tuple[float, float]] = lambda size_gib,
+    count: (0, 0),
     required_disk_space: Callable[[float], float] = lambda size_gib: size_gib,
     # The maximum amount of state we can hold per node in the database
     # typically you don't want stateful systems going much higher than a

@@ -22,7 +22,6 @@ def extract_3yr_upfront_price(price_data):
             and term_attrs.get("PurchaseOption") == "All Upfront"
             and term_attrs.get("OfferingClass") == "standard"
         ):
-
             # Get upfront fee
             for dim in term["priceDimensions"].values():
                 if dim["unit"] == "Quantity":
