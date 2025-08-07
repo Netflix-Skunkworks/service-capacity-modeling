@@ -41,7 +41,6 @@ from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
-from service_capacity_modeling.models.utils import next_n
 from service_capacity_modeling.stats import dist_for_interval
 
 logger = logging.getLogger(__name__)
@@ -530,8 +529,8 @@ class NflxEVCacheCapacityModel(CapacityModel):
                             ratio=1.25, components=[BufferComponent.storage]
                         ),  # ~80%
                         "memory": Buffer(
-                            ratio=1.11, components=[BufferComponent.memory]
-                        ),  # 90%
+                            ratio=1.25, components=[BufferComponent.memory]
+                        ),  # 80%
                         "network": Buffer(
                             ratio=1.5, components=[BufferComponent.network]
                         ),  # ~70%
@@ -603,8 +602,8 @@ class NflxEVCacheCapacityModel(CapacityModel):
                             ratio=1.25, components=[BufferComponent.storage]
                         ),  # ~80%
                         "memory": Buffer(
-                            ratio=1.11, components=[BufferComponent.memory]
-                        ),  # 90%
+                            ratio=1.2, components=[BufferComponent.memory]
+                        ),  # 80%
                         "network": Buffer(
                             ratio=1.5, components=[BufferComponent.network]
                         ),  # ~70%
