@@ -110,10 +110,8 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
         (write_mib_per_second * MIB_IN_BYTES) * copies_per_region
     ) / MEGABIT_IN_BYTES
     bw_out = (
-        (
-            (read_mib_per_second * MIB_IN_BYTES)
-            + ((write_mib_per_second * MIB_IN_BYTES) * (copies_per_region - 1))
-        )
+        (read_mib_per_second * MIB_IN_BYTES)
+        + ((write_mib_per_second * MIB_IN_BYTES) * (copies_per_region - 1))
     ) / MEGABIT_IN_BYTES
     if (
         current_zonal_capacity
@@ -252,7 +250,6 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     min_instance_memory_gib: int = 12,
     require_same_instance_family: bool = True,
 ) -> Optional[CapacityPlan]:
-
     # Kafka doesn't like to deploy on single CPU instances or with < 12 GiB of ram
     if instance.cpu < min_instance_cpu or instance.ram_gib < min_instance_memory_gib:
         return None
@@ -469,7 +466,6 @@ class NflxKafkaArguments(BaseModel):
 
 
 class NflxKafkaCapacityModel(CapacityModel):
-
     HA_DEFAULT_REPLICATION_FACTOR = 2
     SC_DEFAULT_REPLICATION_FACTOR = 3
 

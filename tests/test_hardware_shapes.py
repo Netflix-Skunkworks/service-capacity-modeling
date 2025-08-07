@@ -120,9 +120,9 @@ def test_performance_increases_with_generation() -> None:
                     + f" vs {next_inst} perf={next_perf}"
                 )
 
-    assert (
-        len(failed_msgs) == 0
-    ), f"Not all generations passed the performance test, {failed_msgs}."
+    assert len(failed_msgs) == 0, (
+        f"Not all generations passed the performance test, {failed_msgs}."
+    )
 
 
 def test_memory_proportional_to_cpu() -> None:

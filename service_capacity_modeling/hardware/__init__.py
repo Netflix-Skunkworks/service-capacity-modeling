@@ -110,8 +110,7 @@ def merge_hardware(existing: Hardware, override: Hardware) -> Hardware:
             for shape in existing_keys | override_keys:
                 if shape in existing_keys and shape in override_keys:
                     raise ValueError(
-                        f"Duplicate shape {shape}! "
-                        "Only one file should contain a shape"
+                        f"Duplicate shape {shape}! Only one file should contain a shape"
                     )
                 if shape not in existing_keys:
                     merged_field[shape] = override_field[shape]

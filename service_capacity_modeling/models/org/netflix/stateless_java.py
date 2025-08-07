@@ -91,7 +91,6 @@ def _estimate_java_app_region(  # pylint: disable=too-many-positional-arguments
     failover: bool = True,
     jvm_memory_overhead: float = 2,
 ) -> Optional[CapacityPlan]:
-
     if drive.name != "gp2":
         return None
 

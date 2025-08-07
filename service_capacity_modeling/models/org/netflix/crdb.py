@@ -143,7 +143,6 @@ def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-p
     min_vcpu_per_instance: int = 4,
     license_fee_per_core: float = 0.0,
 ) -> Optional[CapacityPlan]:
-
     if instance.cpu < min_vcpu_per_instance:
         return None
 

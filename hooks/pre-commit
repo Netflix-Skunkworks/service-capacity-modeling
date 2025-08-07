@@ -1,0 +1,13 @@
+#!/bin/bash
+set -e
+
+echo "Running pre-commit hooks via tox environment..."
+
+# Check if tox environment exists
+if [ ! -d ".tox/pre-commit" ]; then
+    echo "Creating tox pre-commit environment..."
+    tox -e pre-commit --notest
+fi
+
+# Run pre-commit hooks
+exec tox -e pre-commit -- pre-commit run

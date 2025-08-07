@@ -405,7 +405,7 @@ class Instance(ExcludeUnsetModel):
         self_dict = self.model_dump()
         other_dict = overrides.model_dump(exclude_unset=True)
 
-        for (k, v) in other_dict.items():
+        for k, v in other_dict.items():
             # TODO we need a deep merge on drive (recursive merge)
             if k in ("platforms",):
                 # Unique merge platforms

@@ -1,0 +1,4 @@
+# Exclude notebooks from ruff linting
+exclude = [
+    "notebooks/",
+]

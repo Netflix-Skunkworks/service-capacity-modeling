@@ -30,7 +30,6 @@ class NflxWALCapacityModel(CapacityModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
-
         wal_app = nflx_java_app_capacity_model.capacity_plan(
             instance=instance,
             drive=drive,

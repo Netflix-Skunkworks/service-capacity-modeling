@@ -184,7 +184,6 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
-
         copies_per_region: int = _target_rf(
             desires, extra_model_arguments.get("copies_per_region", None)
         )

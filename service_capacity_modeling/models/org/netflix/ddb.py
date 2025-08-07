@@ -191,9 +191,9 @@ def _get_write_consistency_percentages(
             transactional_write_percent = 0.0
             non_transactional_write_percent = 1.0
     total_percent = transactional_write_percent + non_transactional_write_percent
-    assert (
-        total_percent == 1
-    ), "transactional_write_percent, non_transactional_write_percent should sum to 1"
+    assert total_percent == 1, (
+        "transactional_write_percent, non_transactional_write_percent should sum to 1"
+    )
     return {
         "transactional_write_percent": transactional_write_percent,
         "non_transactional_write_percent": non_transactional_write_percent,
@@ -452,9 +452,9 @@ class NflxDynamoDBCapacityModel(CapacityModel):
             "data_transfer_gib": data_transfer_plan.total_data_transfer_gib,
             "target_utilization_percentage": target_util_percentage,
         }
-        requirement_context[
-            "replicated_write_capacity_units"
-        ] = write_plan.replicated_write_capacity_units
+        requirement_context["replicated_write_capacity_units"] = (
+            write_plan.replicated_write_capacity_units
+        )
 
         dynamo_costs = {
             "dynamo.regional-writes": write_plan.total_annual_write_cost,
@@ -462,9 +462,9 @@ class NflxDynamoDBCapacityModel(CapacityModel):
             "dynamo.regional-storage": storage_plan.total_annual_data_storage_cost,
         }
 
-        dynamo_costs[
-            "dynamo.regional-transfer"
-        ] = data_transfer_plan.total_annual_data_transfer_cost
+        dynamo_costs["dynamo.regional-transfer"] = (
+            data_transfer_plan.total_annual_data_transfer_cost
+        )
 
         dynamo_costs["dynamo.data-backup"] = backup_plan.total_annual_backup_cost
 
