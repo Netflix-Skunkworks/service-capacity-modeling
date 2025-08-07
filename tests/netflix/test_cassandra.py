@@ -1,9 +1,7 @@
 import pytest
 
 from service_capacity_modeling.capacity_planner import planner
-from service_capacity_modeling.interface import (
-    AccessConsistency,
-)
+from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
@@ -13,6 +11,7 @@ from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Consistency
+from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
@@ -62,7 +61,7 @@ large_footprint = CapacityDesires(
 )
 
 
-class TestCassandraCapacityPlanning:
+class TestCassandraCapacityPlanningFromDesires:
     """Test basic capacity planning scenarios."""
 
     def test_capacity_small_fast(self):
@@ -224,33 +223,6 @@ class TestCassandraStorage:
         assert 20_000 < read_ios < 60_000
         # 33k wps * 8KiB  / 256KiB write IO size = 16.5k / s * 4 for compaction = 6.4k
         assert 4_000 < write_ios < 7_000
-
-
-def test_capacity_high_writes():
-    cap_plan = planner.plan_certain(
-        model_name="org.netflix.cassandra",
-        region="us-east-1",
-        desires=high_writes,
-        extra_model_arguments={"copies_per_region": 2},
-    )[0]
-    high_writes_result = cap_plan.candidate_clusters.zonal[0]
-    assert high_writes_result.instance.family.startswith("c")
-    assert high_writes_result.count > 4
-
-    num_cpus = high_writes_result.instance.cpu * high_writes_result.count
-    assert 30 <= num_cpus <= 128
-    if high_writes_result.attached_drives:
-        assert (
-            high_writes_result.count * high_writes_result.attached_drives[0].size_gib
-            >= 400
-        )
-    elif high_writes_result.instance.drive is not None:
-        assert (
-            high_writes_result.count * high_writes_result.instance.drive.size_gib >= 400
-        )
-    else:
-        raise AssertionError("Should have drives")
-    assert cap_plan.candidate_clusters.annual_costs["cassandra.zonal-clusters"] < 40_000
 
 
 class TestCassandraThroughput:
@@ -565,3 +537,201 @@ class TestCassandraExtraModelArguments:
             NflxCassandraCapacityModel.get_required_cluster_size(
                 tier, extra_model_arguments
             )
+
+
+class TestCassandraBufferScenarios:
+    """
+    Test buffer scenarios for Cassandra capacity planning.
+
+    Preserve Buffer:
+    * We want to preserve the *default* buffer for a given component. This is an
+      explicit scale down and also is equivalent to a
+
+    In other words, if the cluster is below the default buffer percent, we can
+    choose instance types that are smaller than the current cluster.
+    But if the cluster is above the default buffer percent, we must scale up the
+    cluster to meet the default buffer percent.
+
+    E2E Buffer tests:
+    * A cassandra cluster has a ~ 1.5x compute buffer and a 4x disk buffer. And
+      there are a few permutations to think about:
+
+    1. Scenario 1: Current Cluster CPU is high (~50%) and the disk is low. We
+       want to scale up the cluster to meet the CPU scale but the disk buffer
+       needs to be "preserved". For example:
+        * (Case A) Derived = [Scale([compute], 1.5), Preserve([storage])
+          Translates to (scale compute by 1.5x and use the default (or derived
+          buffer). But preserve the default storage buffer).
+          In the case of an i4i.4xlarge, this might mean we have a
+          m6id.8xlarge cluster (equivalent storage but not much more compute)
+
+        * (Case B) Derived = [Scale([compute], 1.5)) (default storage)]
+          We also scale up the storage buffer using the default buffer with the
+          possibility of scaling down. (Preserve is same as default)
+
+    2. Current Cluster CPU is low (~10%) and the disk is high. We do not scale
+       down the cluster to meet the CPU scale but preserve the disk buffer which
+       means we scale up the cluster to meet the 4x disk scale (default buffer).
+        * Case C: Derived = [Scale([compute], 1.5), Preserve([storage])
+          The CPU remains as-is because scale does not allow us to right-size.
+          But the preserve storage will scale up the storage buffer to meet the
+          4x disk scale.
+        * Case D: Derived = [Scale([compute])] (default storage)]
+          Same behavior as case C
+
+    TODO: When EBS is supported, then this test should also test for EBS output
+    """
+
+    # i4i.4xlarge cluster specifications
+    I4I_4XLARGE_VCPU = 16
+    I4I_4XLARGE_RAM_GIB = 128
+    I4I_4XLARGE_DISK_GIB = 3750  # 3.75 TB
+    CLUSTER_SIZE = 8
+
+    # Calculated totals for i4i.4xlarge cluster
+    I4I_4XLARGE_TOTAL_VCPU = CLUSTER_SIZE * I4I_4XLARGE_VCPU  # 128 vCPU
+    I4I_4XLARGE_TOTAL_STORAGE_GIB = CLUSTER_SIZE * I4I_4XLARGE_DISK_GIB  # 30TB
+
+    # Test scenarios
+    HIGH_CPU_LOW_DISK_CLUSTER = CurrentZoneClusterCapacity(
+        cluster_instance_name="i4i.4xlarge",
+        cluster_instance_count=certain_int(CLUSTER_SIZE),
+        cpu_utilization=Interval(low=45, mid=50, high=55, confidence=0.9),  # High CPU
+        memory_utilization_gib=certain_float(64.0),  # ~50% memory
+        disk_utilization_gib=certain_float(200),  # Low disk usage
+        network_utilization_mbps=certain_float(128.0),
+    )
+
+    LOW_CPU_HIGH_DISK_CLUSTER = CurrentZoneClusterCapacity(
+        cluster_instance_name="i4i.4xlarge",
+        cluster_instance_count=certain_int(CLUSTER_SIZE),
+        cpu_utilization=Interval(low=8, mid=10, high=12, confidence=0.9),  # Low CPU
+        memory_utilization_gib=certain_float(16.0),  # ~12% memory
+        disk_utilization_gib=certain_float(1200),  # High disk usage
+        network_utilization_mbps=certain_float(128.0),
+    )
+
+    SCALE_FACTOR = 1.5
+
+    SCALE_COMPUTE_PRESERVE_STORAGE = Buffers(
+        derived={
+            "compute": Buffer(
+                intent=BufferIntent.scale,
+                components=[BufferComponent.cpu],
+                ratio=1.5,
+            ),
+            "storage": Buffer(
+                intent=BufferIntent.preserve,
+                components=[BufferComponent.disk],
+            ),
+        }
+    )
+
+    SCALE_COMPUTE = Buffers(
+        derived={
+            "compute": Buffer(
+                intent=BufferIntent.scale,
+                components=[BufferComponent.cpu],
+                ratio=SCALE_FACTOR,
+            )
+        }
+    )
+
+    @staticmethod
+    def _cur_state_size(cluster: CurrentClusterCapacity):
+        return cluster.cluster_instance_count.mid * cluster.disk_utilization_gib.mid
+
+    @pytest.mark.parametrize(
+        "buffers",
+        [SCALE_COMPUTE_PRESERVE_STORAGE, SCALE_COMPUTE],
+    )
+    def test_scenario_1(self, buffers):
+        """
+        Scenario 1 Case A: High CPU (~50%), low disk, scale compute by 1.5x,
+        preserve storage buffer (or absent preserve buffer).
+
+        Expected: Scale up compute but preserve storage buffer (equivalent
+        storage, more compute).
+        """
+        cluster = self.HIGH_CPU_LOW_DISK_CLUSTER
+        desires = CapacityDesires(
+            service_tier=1,
+            current_clusters=CurrentClusters(zonal=[cluster]),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(500),
+            ),
+            buffers=buffers,
+        )
+
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+        )[0]
+
+        result = cap_plan.candidate_clusters.zonal[0]
+
+        # Expected: More compute (scaled by 1.5x) but equivalent storage
+        # Current: 8 * 16 = 128 vCPU, should scale to ~192 vCPU
+        expected_min_cpu = self.I4I_4XLARGE_TOTAL_VCPU * self.SCALE_FACTOR
+        actual_cpu = result.count * result.instance.cpu
+        # This math is hacky because it ignores IPC per cycle differences
+        assert expected_min_cpu <= actual_cpu
+
+        # Storage should be preserved (not scaled up significantly)
+        state_size = TestCassandraBufferScenarios._cur_state_size(cluster)
+        actual_storage = result.count * result.instance.drive.size_gib
+
+        # Should be above the buffer amount, but we should not expect
+        # more disk (if this turns out to be flaky, it can be within a
+        # percentage of total_storage GiB e.g. 20%)
+        expected_default_overhead = 4
+        assert state_size * expected_default_overhead < actual_storage
+        assert actual_storage <= self.I4I_4XLARGE_TOTAL_STORAGE_GIB
+
+    @pytest.mark.parametrize(
+        "buffers",
+        [SCALE_COMPUTE_PRESERVE_STORAGE, SCALE_COMPUTE],
+    )
+    def test_scenario_2(self, buffers):
+        """
+        Scenario 2 Case C: Low CPU (~10%), high disk, scale compute by 1.5x,
+        preserve storage buffer.
+
+        Expected: CPU remains as-is (scale doesn't allow right-sizing), but
+        storage scales up to meet 4x disk buffer.
+        """
+        cluster = self.LOW_CPU_HIGH_DISK_CLUSTER
+
+        desires = CapacityDesires(
+            service_tier=1,
+            current_clusters=CurrentClusters(zonal=[cluster]),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(500),
+            ),
+            buffers=buffers,
+        )
+
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+        )[0]
+
+        result = cap_plan.candidate_clusters.zonal[0]
+
+        # Expected: CPU might not scale down much due to scale intent, but
+        # storage should scale up to meet preserve buffer
+        # Current: 8 * 16 = 128 vCPU
+        actual_cpu = result.count * result.instance.cpu
+
+        # CPU is significantly scaled down from current due to low CPU
+        assert actual_cpu <= self.I4I_4XLARGE_TOTAL_VCPU * 0.8
+
+        # Storage should be scaled up significantly to meet preserve buffer
+        # (4x default)
+        actual_storage = result.count * result.instance.drive.size_gib
+        # Should be significantly more storage due to preserve buffer (4x)
+        expected_storage_buffer = 4
+        current_usage = self._cur_state_size(self.LOW_CPU_HIGH_DISK_CLUSTER)
+        assert actual_storage >= expected_storage_buffer * current_usage

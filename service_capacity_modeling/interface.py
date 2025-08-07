@@ -788,12 +788,52 @@ class BufferComponent(str, Enum):
 
 
 class BufferIntent(str, Enum):
+    """
+    BufferIntent is used to describe how a buffer should be applied
+    """
+
     # Most buffers show "desired" buffer, this is the default
     desired = "desired"
-    # ratio on top of existing buffers to ensure exists. Generally combined
-    # with a different desired buffer to ensure we don't just scale needlessly
+
+    """
+    Adds a requirement that a cluster's buffer should be a ratio of the current
+    utilization. In other words, the model should filter for cluster candidates
+    that satisfy:
+
+    target_cores = current_used_cores * scale_ratio * (desired_buffer or default_buffer)
+
+    This is different from the default 'desired' behavior which uses:
+    target_cores = required_cores * default_buffer
+
+    Examples with 1.5x scale_ratio and 1.5x default buffer:
+
+    (1) Current CPU usage: 20% of 128 cores (25.6 cores used)
+        target_cores = 25.6 * 1.5 * 1.5 = 57.6 cores
+        Result: Scale UP to ~58 cores (45% of current capacity)
+
+    (2) Current CPU usage: 80% of 128 cores (102.4 cores used)
+        target_cores = 102.4 * 1.5 * 1.5 = 230.4 cores
+        Result: Scale UP to ~230 cores (180% of current capacity)
+
+    (3) Current CPU usage: 10% of 128 cores (12.8 cores used)
+        target_cores = 12.8 * 1.5 * 1.5 = 28.8 cores
+        Result: Scale UP to ~29 cores (23% of current capacity)
+
+    The scale_ratio controls the scaling factor:
+    - scale_ratio = 1.0: Maintain the current buffer
+    - scale_ratio = 2.0: Double the current buffer
+    - scale_ratio = 0.5: Halve the current buffer
+
+    Note: The actual implementation may use more sophisticated headroom calculations
+    that result in different scaling behavior than the simple formula above.
+    """
     scale = "scale"
-    # Ignore model preferences, just preserve existing buffers
+    # Preserve the default desired buffers for the model
+
+    """
+    Right size the cluster's resources to match the desired / default buffer
+    as-is. This is the same as scale_ratio == 1.0
+    """
     preserve = "preserve"
 
 
