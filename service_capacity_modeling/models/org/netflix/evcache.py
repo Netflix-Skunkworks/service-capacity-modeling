@@ -299,11 +299,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         # EVCache doesn't use cloud drives to store data, we will have
         # accounted for the data going on drives or memory via working set
         max_local_disk_gib=max_local_disk_gib,
-        # EVCache clusters should be balanced per zone
-        cluster_size=lambda x: next_n(x, copies_per_region),
         min_count=max(min_count, 0),
-        # Sidecars and Variable OS Memory
-        reserve_memory=lambda x: base_mem,
         adjusted_disk_io_needed=adjusted_disk_io_needed,
         read_write_ratio=read_write_ratio,
     )
