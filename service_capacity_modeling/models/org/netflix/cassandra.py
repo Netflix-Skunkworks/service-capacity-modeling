@@ -186,6 +186,7 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     needed_cores = math.ceil(capacity_requirement.cpu_cores.mid)
     needed_disk = capacity_requirement.disk_gib.mid
     needed_network_mbps = capacity_requirement.network_mbps.mid
+    needed_memory = capacity_requirement.mem_gib.mid
 
     # it can be 0 for cases where disk utilization is not passed as a part of current cluster capacity
     if needed_disk == 0:
