@@ -115,7 +115,12 @@ def calculate_vitals_for_capacity_planner(
     needed_memory_gib = get_memory_from_current_capacity(
         current_capacity, desires.buffers
     )
-    needed_disk_gib = get_disk_from_current_capacity(current_capacity, desires.buffers)
+    if current_capacity.cluster_drive is None:
+        needed_disk_gib = 0.0
+    else:
+        needed_disk_gib = get_disk_from_current_capacity(
+            current_capacity, desires.buffers
+        )
     return needed_cores, needed_network_mbps, needed_memory_gib, needed_disk_gib
 
 
@@ -249,6 +254,10 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         working_set=working_set,
         copies_per_region=copies_per_region,
     )
+
+    # reject instances without ephemeral drives is the requirements need disk
+    if requirement.disk_gib.mid > 0.0 and instance.drive is None:
+        return None
 
     # Account for sidecars and base system memory
     base_mem = (
