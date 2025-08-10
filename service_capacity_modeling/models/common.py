@@ -713,6 +713,9 @@ def derived_buffer_for_component(buffer: Dict[str, Buffer], components: List[str
             if bfr.intent == BufferIntent.preserve:
                 preserve = True
 
+    if scale == 0.0:
+        scale = 1.0
+
     return scale, preserve
 
 
@@ -720,8 +723,8 @@ def get_cores_from_current_capacity(
     current_capacity: CurrentClusterCapacity, buffers: Buffers, instance: Instance
 ):
     # compute cores required per zone
-    cpu_success_buffer = (1 - cpu_headroom_target(instance, buffers)) * 100
-    current_cpu_utilization = current_capacity.cpu_utilization.mid
+    cpu_success_util_limit = (1 - cpu_headroom_target(instance, buffers)) * 100
+    current_cpu_util = current_capacity.cpu_utilization.mid
 
     if current_capacity.cluster_instance is None:
         cluster_instance = shapes.instance(current_capacity.cluster_instance_name)
@@ -731,19 +734,20 @@ def get_cores_from_current_capacity(
     current_cores = cluster_instance.cpu * current_capacity.cluster_instance_count.mid
 
     scale, preserve = derived_buffer_for_component(buffers.derived, ["compute", "cpu"])
-    # Scale and preserve for the same component should not be passed together.
-    # If user passes it, then scale will be preferred over preserve.
-    if scale > 0:
-        # if the new cpu core is less than the current,
-        # then take no action and return the current cpu cores
-        new_cpu_utilization = current_cpu_utilization * scale
-        core_scale_up_factor = max(1.0, new_cpu_utilization / cpu_success_buffer)
-        return math.ceil(current_cores * core_scale_up_factor)
 
     if preserve:
-        return current_cores
-
-    return int(current_cores * (current_cpu_utilization / cpu_success_buffer))
+        # Apply default buffer to current utilization
+        return math.ceil(current_cores * (current_cpu_util / cpu_success_util_limit))
+    else:
+        # Apply scale factor to current utilization and calculate required cores
+        # Formula: target_cores = current_used_cores * scale_ratio * default_buffer
+        cpu_buffer = buffer_for_components(
+            buffers=buffers, components=[BufferComponent.cpu]
+        )
+        target_cores = (
+            current_cores * (current_cpu_util / 100) * scale * cpu_buffer.ratio
+        )
+        return math.ceil(target_cores)
 
 
 def get_memory_from_current_capacity(
@@ -755,15 +759,6 @@ def get_memory_from_current_capacity(
         * current_capacity.cluster_instance_count.mid
     )
 
-    if current_capacity.cluster_instance is None:
-        cluster_instance = shapes.instance(current_capacity.cluster_instance_name)
-    else:
-        cluster_instance = current_capacity.cluster_instance
-
-    zonal_ram_allocated = (
-        cluster_instance.ram_gib * current_capacity.cluster_instance_count.mid
-    )
-
     # These are the desired buffers
     memory_buffer = buffer_for_components(
         buffers=buffers, components=[BufferComponent.memory]
@@ -772,20 +767,13 @@ def get_memory_from_current_capacity(
     scale, preserve = derived_buffer_for_component(
         buffers.derived, ["memory", "storage"]
     )
-    # Scale and preserve for the same component should not be passed together.
-    # If user passes it, then scale will be preferred over preserve.
-    if scale > 0:
-        # if the new required memory is less than the current,
-        # then take no action and return the current ram
-        return max(
-            current_memory_utilization * scale * memory_buffer.ratio,
-            zonal_ram_allocated,
-        )
 
     if preserve:
-        return zonal_ram_allocated
-
-    return current_memory_utilization * memory_buffer.ratio
+        # Apply default buffer to current memory utilization
+        return current_memory_utilization * memory_buffer.ratio
+    else:
+        # Apply scale factor to current memory utilization
+        return current_memory_utilization * scale * memory_buffer.ratio
 
 
 def get_network_from_current_capacity(
@@ -797,15 +785,6 @@ def get_network_from_current_capacity(
         * current_capacity.cluster_instance_count.mid
     )
 
-    if current_capacity.cluster_instance is None:
-        cluster_instance = shapes.instance(current_capacity.cluster_instance_name)
-    else:
-        cluster_instance = current_capacity.cluster_instance
-
-    zonal_network_allocated = (
-        cluster_instance.net_mbps * current_capacity.cluster_instance_count.mid
-    )
-
     # These are the desired buffers
     network_buffer = buffer_for_components(
         buffers=buffers, components=[BufferComponent.network]
@@ -814,20 +793,13 @@ def get_network_from_current_capacity(
     scale, preserve = derived_buffer_for_component(
         buffers.derived, ["compute", "network"]
     )
-    # Scale and preserve for the same component should not be passed together.
-    # If user passes it, then scale will be preferred over preserve.
-    if scale > 0:
-        # if the new required network is less than the current,
-        # then take no action and return the current bandwidth
-        return max(
-            current_network_utilization * scale * network_buffer.ratio,
-            zonal_network_allocated,
-        )
 
     if preserve:
-        return zonal_network_allocated
-
-    return current_network_utilization * network_buffer.ratio
+        # Apply default buffer to current network utilization
+        return current_network_utilization * network_buffer.ratio
+    else:
+        # Apply scale factor to current network utilization
+        return current_network_utilization * scale * network_buffer.ratio
 
 
 def get_disk_from_current_capacity(
@@ -839,40 +811,19 @@ def get_disk_from_current_capacity(
         * current_capacity.cluster_instance_count.mid
     )
 
-    if current_capacity.cluster_instance is None:
-        cluster_instance = shapes.instance(current_capacity.cluster_instance_name)
-    else:
-        cluster_instance = current_capacity.cluster_instance
-
-    if cluster_instance.drive is not None:
-        instance_disk_allocated = cluster_instance.drive.max_size_gib
-    else:
-        assert current_capacity.cluster_drive is not None, "Drive should not be None"
-        instance_disk_allocated = current_capacity.cluster_drive.size_gib
-
-    zonal_disk_allocated = (
-        instance_disk_allocated * current_capacity.cluster_instance_count.mid
-    )
-
     # These are the desired buffers
     disk_buffer = buffer_for_components(
         buffers=buffers, components=[BufferComponent.disk]
     )
 
     scale, preserve = derived_buffer_for_component(buffers.derived, ["storage", "disk"])
-    # Scale and preserve for the same component should not be passed together.
-    # If user passes it, then scale will be preferred over preserve.
-    if scale > 0:
-        # if the new required disk is less than the current,
-        # then take no action and return the current disk
-        return max(
-            current_disk_utilization * scale * disk_buffer.ratio, zonal_disk_allocated
-        )
-    if preserve:
-        # preserve the current disk size for the zone
-        return zonal_disk_allocated
 
-    return current_disk_utilization * disk_buffer.ratio
+    if preserve:
+        # Apply default buffer to current disk utilization
+        return current_disk_utilization * disk_buffer.ratio
+    else:
+        # Apply scale factor to current disk utilization
+        return current_disk_utilization * scale * disk_buffer.ratio
 
 
 def zonal_requirements_from_current(
