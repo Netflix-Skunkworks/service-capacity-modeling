@@ -792,9 +792,27 @@ class BufferIntent(str, Enum):
     desired = "desired"
     # ratio on top of existing buffers to ensure exists. Generally combined
     # with a different desired buffer to ensure we don't just scale needlessly
+    # This means we can scale up or down as as long as we meet the desired buffer.
     scale = "scale"
-    # Ignore model preferences, just preserve existing buffers
+
+    # DEPRECATED: Use scale_up/scale_down instead
+    # Ignores model preferences, just preserve existing buffers
+    # We rarely actually want to do this since it can cause severe over provisioning
     preserve = "preserve"
+
+    # Scale up or down as necessary to meet the desired buffer.
+    # If the existing resource is already over-provisioned, do not reduce it.
+    # If under-provisioned, scale up to meet the desired buffer.
+    # Example: need 20 cores but have 10 → scale up to 20 cores.
+    # Example 2: need 20 cores but have 40 → do not scale down and require at
+    # least 40 cores
+    scale_up = "scale_up"
+    # Scale down as necessary to meet the desired buffer.
+    # If the existing resource is already under-provisioned, do not increase it.
+    # If over-provisioned, scale down to meet the desired buffer.
+    # Example: need 20 cores but have 10 → maintain buffer and do not scale up.
+    # Example 2: need 20 cores but have 40 → scale down to 20 cores.
+    scale_down = "scale_down"
 
 
 class Buffer(ExcludeUnsetModel):
