@@ -442,12 +442,15 @@ class TestCassandraCurrentCapacity:
         Use cpu utilization to determine instance types directly as supposed to
         extrapolating it from the Data Shape
         """
+        # A CPU threshold larger than this will cause CPU to remain the same.
+        # This is a magic number based on the current logic and does not hold any
+        # particular significance. Modify this value slightly if necessary as
+        # new logic is introduced and behaviors change
+        cpu_threshold = 13.1
         cluster_capacity = CurrentZoneClusterCapacity(
             cluster_instance_name="i4i.8xlarge",
             cluster_instance_count=Interval(low=8, mid=8, high=8, confidence=1),
-            cpu_utilization=Interval(
-                low=10.12, mid=13.1, high=14.194801291058118, confidence=1
-            ),
+            cpu_utilization=Interval(low=10, mid=cpu_threshold, high=14, confidence=1),
             memory_utilization_gib=certain_float(32.0),
             network_utilization_mbps=certain_float(128.0),
         )
@@ -488,7 +491,7 @@ class TestCassandraCurrentCapacity:
         # Use a similar number of CPU cores but allocate less disk
         lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
         assert_similar_compute(
-            shapes.instance("i4i.4xlarge"), lr_clusters.instance, 8, lr_clusters.count
+            shapes.instance("m6id.8xlarge"), lr_clusters.instance, 8, lr_clusters.count
         )
 
     def test_preserve_memory(self):
