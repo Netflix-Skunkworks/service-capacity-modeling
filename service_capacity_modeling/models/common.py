@@ -713,6 +713,13 @@ def derived_buffer_for_component(buffer: Dict[str, Buffer], components: List[str
             if bfr.intent == BufferIntent.preserve:
                 preserve = True
 
+    # TODO: Implement new scaling intents:
+    # - BufferIntent.scale_up: Scale up to meet demand but don't scale down
+    # - BufferIntent.scale_down: Allow scaling down to meet demand
+    # - BufferIntent.floor: Prevent scaling below current capacity
+    # - BufferIntent.ceiling: Prevent scaling above current capacity
+    # These should be integrated with the existing scale/preserve logic
+
     return scale, preserve
 
 
@@ -742,6 +749,13 @@ def get_cores_from_current_capacity(
 
     if preserve:
         return current_cores
+
+    # TODO: Implement new scaling logic for compute:
+    # - BufferIntent.scale_up: Scale up by ratio but don't scale down below current
+    # - BufferIntent.scale_down: Allow scaling down to meet demand
+    # - BufferIntent.floor: Prevent scaling below current core count
+    # - BufferIntent.ceiling: Prevent scaling above current core count
+    # This should integrate with the existing scale/preserve logic above
 
     return int(current_cores * (current_cpu_utilization / cpu_success_buffer))
 
@@ -785,6 +799,13 @@ def get_memory_from_current_capacity(
     if preserve:
         return zonal_ram_allocated
 
+    # TODO: Implement new memory scaling logic:
+    # - BufferIntent.scale_up: Scale up memory but don't scale down below current
+    # - BufferIntent.scale_down: Allow memory to scale down to meet demand
+    # - BufferIntent.floor: Prevent memory from scaling below current capacity
+    # - BufferIntent.ceiling: Prevent memory from scaling above current capacity
+    # This should integrate with the existing scale/preserve logic above
+
     return current_memory_utilization * memory_buffer.ratio
 
 
@@ -826,6 +847,13 @@ def get_network_from_current_capacity(
 
     if preserve:
         return zonal_network_allocated
+
+    # TODO: Implement new network scaling logic:
+    # - BufferIntent.scale_up: Scale up network but don't scale down below current
+    # - BufferIntent.scale_down: Allow network to scale down to meet demand
+    # - BufferIntent.floor: Prevent network from scaling below current capacity
+    # - BufferIntent.ceiling: Prevent network from scaling above current capacity
+    # This should integrate with the existing scale/preserve logic above
 
     return current_network_utilization * network_buffer.ratio
 
@@ -871,6 +899,14 @@ def get_disk_from_current_capacity(
     if preserve:
         # preserve the current disk size for the zone
         return zonal_disk_allocated
+
+    # TODO: Implement new storage scaling logic:
+    # - BufferIntent.scale_up: Scale up storage but don't scale down below current
+    # - BufferIntent.scale_down: Allow storage to scale down to meet demand
+    # - BufferIntent.floor: Prevent storage from scaling below current capacity
+    # - BufferIntent.ceiling: Prevent storage from scaling above current capacity
+    # This should integrate with the existing scale/preserve logic above
+    # and respect the floor/ceiling constraints from the buffer configuration
 
     return current_disk_utilization * disk_buffer.ratio
 
