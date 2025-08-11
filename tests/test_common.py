@@ -19,11 +19,10 @@ from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
-from service_capacity_modeling.models.common import get_cores_from_current_capacity
-from service_capacity_modeling.models.common import get_disk_from_current_capacity
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 
 
@@ -271,6 +270,10 @@ buffers = Buffers(
 )
 
 
+EXPECTED_CPU_WHEN_SCALING_UP = 141
+EXPECTED_CPU_WHEN_SCALING_DOWN = 36
+
+
 def test_get_cores_with_buffer_scale():
     buffers_copy = buffers.model_copy(deep=True)
     buffers_copy.derived = {
@@ -279,18 +282,97 @@ def test_get_cores_with_buffer_scale():
         )
     }
     i3_2xlarge = shapes.region("us-east-1").instances["i3.2xlarge"]
-    needed_cores = get_cores_from_current_capacity(
-        current_cluster.zonal[0], buffers_copy, i3_2xlarge
-    )
-    assert needed_cores == 141
+    cluster_size = current_cluster.zonal[0].cluster_instance_count.mid
+    needed_cpu = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster.zonal[0],
+        buffers=buffers_copy,
+        instance_candidate=i3_2xlarge,
+    ).cpu
+    assert needed_cpu == EXPECTED_CPU_WHEN_SCALING_UP
+
+    # Allow scale down with 1.0 scale
+    buffers_copy.derived = {
+        "compute": Buffer(
+            ratio=1, intent=BufferIntent.scale, components=[BufferComponent.compute]
+        )
+    }
+    needed_cpu = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster.zonal[0],
+        buffers=buffers_copy,
+        instance_candidate=i3_2xlarge,
+    ).cpu
+    assert needed_cpu == EXPECTED_CPU_WHEN_SCALING_DOWN
+    assert needed_cpu < i3_2xlarge.cpu * cluster_size
+
+
+def test_get_cores_with_buffer_scale_up():
+    buffers_copy = buffers.model_copy(deep=True)
+    buffers_copy.derived = {
+        "compute": Buffer(
+            ratio=1.0,
+            intent=BufferIntent.scale_up,
+            components=[BufferComponent.compute],
+        )
+    }
+    i3_2xlarge = shapes.region("us-east-1").instances["i3.2xlarge"]
+    cluster_size = current_cluster.zonal[0].cluster_instance_count.mid
+    needed_cpu = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster.zonal[0],
+        buffers=buffers_copy,
+        instance_candidate=i3_2xlarge,
+    ).cpu
+    assert needed_cpu == i3_2xlarge.cpu * cluster_size
+    assert needed_cpu == 64
+
+    buffers_copy.derived = {
+        "compute": Buffer(
+            ratio=4, intent=BufferIntent.scale_up, components=[BufferComponent.compute]
+        )
+    }
+    needed_cpu = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster.zonal[0],
+        buffers=buffers_copy,
+        instance_candidate=i3_2xlarge,
+    ).cpu
+    assert needed_cpu == 141  # Same as the scale behavior
+
+
+def test_get_cores_with_buffer_scale_down():
+    buffers_copy = buffers.model_copy(deep=True)
+    buffers_copy.derived = {
+        "compute": Buffer(
+            ratio=4,
+            intent=BufferIntent.scale_down,
+            components=[BufferComponent.compute],
+        )
+    }
+    i3_2xlarge = shapes.region("us-east-1").instances["i3.2xlarge"]
+    cluster_size = current_cluster.zonal[0].cluster_instance_count.mid
+    needed_cpu = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster.zonal[0],
+        buffers=buffers_copy,
+        instance_candidate=i3_2xlarge,
+    ).cpu
+    assert needed_cpu == i3_2xlarge.cpu * cluster_size
+    assert needed_cpu == 64
+
+    buffers_copy.derived = {
+        "compute": Buffer(
+            ratio=1,
+            intent=BufferIntent.scale_down,
+            components=[BufferComponent.compute],
+        )
+    }
 
 
 def test_get_cores_with_buffer_desired():
     i3_2xlarge = shapes.region("us-east-1").instances["i3.2xlarge"]
-    needed_cores = get_cores_from_current_capacity(
-        current_cluster.zonal[0], buffers, i3_2xlarge
-    )
-    assert needed_cores == 35
+    needed_cpu = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster.zonal[0],
+        buffers=buffers,
+        instance_candidate=i3_2xlarge,
+    ).cpu
+    assert needed_cpu == 36
 
 
 def test_get_cores_with_buffer_preserve():
@@ -301,14 +383,20 @@ def test_get_cores_with_buffer_preserve():
         )
     }
     i3_2xlarge = shapes.region("us-east-1").instances["i3.2xlarge"]
-    needed_cores = get_cores_from_current_capacity(
-        current_cluster.zonal[0], buffers_copy, i3_2xlarge
-    )
+    needed_cores = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster.zonal[0],
+        buffers=buffers_copy,
+        instance_candidate=i3_2xlarge,
+    ).cpu
     assert needed_cores == 64
 
 
 def test_get_disk_with_buffer_desired():
-    needed_disk = get_disk_from_current_capacity(current_cluster.zonal[0], buffers)
+    needed_disk = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster.zonal[0],
+        buffers=buffers,
+        instance_candidate=default_reference_shape,
+    ).disk_gib
     assert needed_disk == 640
 
 
@@ -321,10 +409,175 @@ def test_get_disk_with_buffer_scale():
             ratio=8, intent=BufferIntent.scale, components=[BufferComponent.disk]
         )
     }
-    needed_disk = get_disk_from_current_capacity(
-        current_cluster_copy.zonal[0], buffers_copy
-    )
+    needed_disk = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster_copy.zonal[0],
+        buffers=buffers_copy,
+        instance_candidate=default_reference_shape,
+    ).disk_gib
     assert needed_disk == 38400
+
+
+def test_get_disk_with_buffer_scale_up():
+    cluster_size = certain_float(2)
+    disk_utilization_gib = certain_float(4000)
+    current_cluster_copy = CurrentClusters(
+        zonal=[
+            # Roughly 5TB * 2 storage allocated as opposed to 2 * 15TB
+            CurrentZoneClusterCapacity(
+                cluster_instance_name="i3en.6xlarge",
+                cluster_instance=shapes.region("us-east-1").instances["i3en.6xlarge"],
+                cluster_instance_count=cluster_size,
+                cpu_utilization=certain_float(26),
+                memory_utilization_gib=certain_float(4.0),
+                network_utilization_mbps=certain_float(32.0),
+                disk_utilization_gib=disk_utilization_gib,
+            )
+        ]
+    )
+    buffers_copy = buffers.model_copy(deep=True)
+    scale_ratio = 2
+    buffers_copy.derived = {
+        "disk up": Buffer(
+            ratio=scale_ratio,
+            intent=BufferIntent.scale_up,
+            components=[BufferComponent.disk],
+        )
+    }
+
+    # Case 1: The max_size_gib is not specified, so we expect to use the entire disk
+    # Usage implies we require 4 TB * 2 nodes * 4x buffer == 32TB to meet buffer
+    # Only 28TB is currently allocated, so scale up to meet desired buffer
+    # because of the `scale_up` intent
+    needed_disk = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster_copy.zonal[0],
+        buffers=buffers_copy,
+        instance_candidate=default_reference_shape,
+    ).disk_gib
+    expected_buffer = 4  # disk buffer
+    assert (
+        needed_disk
+        == disk_utilization_gib.mid * cluster_size.mid * expected_buffer * scale_ratio
+    )
+    assert needed_disk == 64000
+
+    # Case 2: Same as case (1) but the max_size_gib is specified.
+    # The behavior should still scale up
+    needed_disk = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster_copy.zonal[0],
+        buffers=buffers_copy,
+        instance_candidate=default_reference_shape,
+        max_size_gib=5000,
+    ).disk_gib
+    assert (
+        needed_disk
+        == disk_utilization_gib.mid * cluster_size.mid * expected_buffer * scale_ratio
+    )
+    assert needed_disk == 64000
+
+    # Case 3: The disk usage exceeded max_size_gib, so we expect to still scale up
+    current_cluster_copy.zonal[0].disk_utilization_gib = certain_float(5500)
+    needed_disk = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster_copy.zonal[0],
+        buffers=buffers_copy,
+        instance_candidate=default_reference_shape,
+        max_size_gib=5000,
+    ).disk_gib
+    assert needed_disk == 5500 * cluster_size.mid * expected_buffer * scale_ratio
+    assert needed_disk == 88000
+
+    # Case 4: The desired buffer is lower than the current usage, so we expect
+    # a lower disk requirement (i.e. scale down storage requirement) than
+    # the 28TB we currently have allocated
+    current_cluster_copy.zonal[0].disk_utilization_gib = certain_float(1000)
+    needed_disk = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster_copy.zonal[0],
+        buffers=buffers_copy,
+        instance_candidate=default_reference_shape,
+    ).disk_gib
+
+    # Still require 28TB that we allocated because we cannot scale down
+    assert needed_disk == 14000 * cluster_size.mid
+    assert needed_disk == 28000
+
+    # Which is greater than the
+    assert needed_disk > 1000 * cluster_size.mid * expected_buffer * scale_ratio
+    assert needed_disk > 16000
+
+    # Case 5: Same as case (4) but the max_size_gib is specified. So the
+    # requirement is based on the max_size_gib
+    needed_disk = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster_copy.zonal[0],
+        buffers=buffers_copy,
+        instance_candidate=default_reference_shape,
+        max_size_gib=9000,
+    ).disk_gib
+    # Still require 18TB that we allocated because we cannot scale down
+    assert needed_disk == 9000 * cluster_size.mid
+    assert needed_disk == 18000
+    assert needed_disk > 1000 * cluster_size.mid * expected_buffer * scale_ratio
+    assert needed_disk > 16000
+
+
+def test_get_disk_with_buffer_scale_down():
+    cluster_size = certain_float(2)
+    disk_utilization_gib = certain_float(4000)
+    current_cluster_copy = CurrentClusters(
+        zonal=[
+            # Roughly 5TB * 2 storage allocated as opposed to 2 * 15TB
+            CurrentZoneClusterCapacity(
+                cluster_instance_name="i3en.6xlarge",
+                cluster_instance=shapes.region("us-east-1").instances["i3en.6xlarge"],
+                cluster_instance_count=cluster_size,
+                cpu_utilization=certain_float(26),
+                memory_utilization_gib=certain_float(4.0),
+                network_utilization_mbps=certain_float(32.0),
+                disk_utilization_gib=disk_utilization_gib,
+            )
+        ]
+    )
+    buffers_copy = buffers.model_copy(deep=True)
+    buffers_copy.derived = {
+        "disk down": Buffer(
+            ratio=1, intent=BufferIntent.scale_down, components=[BufferComponent.disk]
+        )
+    }
+
+    # Case 1: The max_size_gib is not specified, so we expect to use the entire disk
+    # Usage implies we require 4 TB * 2 nodes * 4x buffer == 32TB to meet buffer
+    # Only 28TB is currently allocated, but we do *not* want to scale up to meet
+    # desired buffer because of the `scale_down` intent
+    needed_disk = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster_copy.zonal[0],
+        buffers=buffers_copy,
+        instance_candidate=default_reference_shape,
+    ).disk_gib
+    expected_buffer = 4  # disk buffer
+    assert needed_disk <= disk_utilization_gib.mid * cluster_size.mid * expected_buffer
+    assert needed_disk == 14000 * cluster_size.mid
+    assert needed_disk == 28000
+
+    # Case 2: Same as case (1) but the max_size_gib is specified.
+    # Treat the 14TB as a 5TB disk because we would never want a 5TB+ disk
+    # due to node density. So we do not want to scale up more than 10 TB
+    needed_disk_with_max = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster_copy.zonal[0],
+        buffers=buffers_copy,
+        instance_candidate=default_reference_shape,
+        max_size_gib=5000,
+    ).disk_gib
+    assert needed_disk_with_max == 10000
+
+    # Case 3: The desired buffer is lower than the current usage, so we expect
+    # a lower disk requirement (i.e. scale down storage requirement)
+    current_cluster_copy.zonal[0].disk_utilization_gib = certain_float(1000)
+    needed_disk_with_max = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster_copy.zonal[0],
+        buffers=buffers_copy,
+        instance_candidate=default_reference_shape,
+        max_size_gib=5000,
+    ).disk_gib
+    assert needed_disk_with_max == 1000 * cluster_size.mid * expected_buffer
+    assert needed_disk_with_max == 8000
 
 
 def test_get_disk_with_buffer_preserve():
@@ -334,5 +587,9 @@ def test_get_disk_with_buffer_preserve():
             intent=BufferIntent.preserve, components=[BufferComponent.disk]
         )
     }
-    needed_disk = get_disk_from_current_capacity(current_cluster.zonal[0], buffers_copy)
+    needed_disk = RequirementFromCurrentCapacity(
+        current_capacity=current_cluster.zonal[0],
+        buffers=buffers_copy,
+        instance_candidate=default_reference_shape,
+    ).disk_gib
     assert needed_disk == 13968
