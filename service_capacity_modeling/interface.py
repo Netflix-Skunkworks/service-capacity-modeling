@@ -792,9 +792,42 @@ class BufferIntent(str, Enum):
     desired = "desired"
     # ratio on top of existing buffers to ensure exists. Generally combined
     # with a different desired buffer to ensure we don't just scale needlessly
+    # This means we can scale up or down as as long as we meet the desired buffer.
     scale = "scale"
+
+    # DEPRECATED: Use ceiling(1.0) + floor(1.0) instead
+    # We rarely actually want to do this since it can cause severe over provisioning
     # Ignore model preferences, just preserve existing buffers
     preserve = "preserve"
+
+    """
+    Scale with Constraints
+    - Floor: The cluster must be at least this buffer
+    - Ceiling: The cluster requirement cannot exceed this buffer
+    - Scale Up: The cluster can only scale up to meet the desired buffer
+    - Scale Down: The cluster can only scale down to meet the desired buffer
+
+    Scale Up  == scale intent + floor intent(1.0)
+    Scale Down == scale intent + ceiling intent(1.0)
+
+    Floor and Ceiling can be combined with Scale Intent to constrain
+    how much the capacity can change during a scale flow.
+    """
+    # Scale up or down as necessary to meet the desired buffer.
+    # This means we can scale up to meet the desired buffer but if the existing
+    # buffer is larger than the desired buffer, we will not scale down the component
+    # This is equivalent to scale (N) + floor (1.0)
+    scale_up = "scale_up"
+    # Scale down as necessary to meet the desired buffer.
+    # This means we can scale down to meet the desired buffer but if the existing
+    # buffer is smaller than the desired buffer, we will not scale up the component
+    # This is equivalent to scale (N) + ceiling (1.0)
+    scale_down = "scale_down"
+
+    # Ratio of existing buffer is the floor. The cluster must be at least this threshold
+    floor = "floor"
+    # Ratio of existing buffer is the ceiling. The cluster cannot exceed this threshold
+    ceiling = "ceiling"
 
 
 class Buffer(ExcludeUnsetModel):
