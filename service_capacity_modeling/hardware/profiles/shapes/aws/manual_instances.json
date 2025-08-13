@@ -145,6 +145,30 @@
         "block_size_kib": 4, "single_tenant": true
       }
     },
+    "i4i.12xlarge": {
+      "name": "i4i.12xlarge",
+      "cpu": 48,
+      "cpu_cores": 24,
+      "cpu_ghz": 3.5,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 366.21,
+      "net_mbps": 28125.0,
+      "drive": {
+        "name": "ephem",
+        "size_gib": 10477,
+        "read_io_per_s": 1200000,
+        "write_io_per_s": 660000,
+        "single_tenant": true,
+        "read_io_latency_ms": {
+          "low": 0.1,
+          "mid": 0.125,
+          "high": 0.17,
+          "confidence": 0.9,
+          "minimum_value": 0.05,
+          "maximum_value": 2.0
+        }
+      }
+    },
     "i4i.16xlarge": {
       "name": "i4i.16xlarge",
       "cpu": 64,
