@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 import logging
 import math
 import random
@@ -7,6 +8,9 @@ from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Tuple
+
+from pydantic import BaseModel
+from pydantic import Field
 
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import AVG_ITEM_SIZE_BYTES
@@ -61,6 +65,23 @@ def _QOS(tier: int) -> float:
     # P(queue) ~= 0.29 ~= 0.3
     else:
         return 1
+
+
+def combine_buffer_ratios(left: Optional[float], right: Optional[float]) -> float:
+    """
+    Strategy for how two buffers for the same component are combined.
+    - Multiply two buffers by multiplying if both are not None
+    """
+
+    if left is None and right is None:
+        raise ValueError("Cannot combine buffer ratios when both values are None")
+    if left is None:
+        assert right is not None  # MyPy
+        return right
+    if right is None:
+        assert left is not None  # MyPy
+        return left
+    return left * right
 
 
 def _sqrt_staffed_cores(rps: float, latency_s: float, qos: float) -> int:
@@ -153,18 +174,31 @@ def normalize_cores(
     target_shape: Instance,
     reference_shape: Optional[Instance] = None,
 ) -> int:
-    """Calculates equivalent cores on a target shape relative to a reference
+    """Calculates equivalent CPU on a target shape relative to a reference
 
     Takes into account relative core frequency and IPC factor from the hardware
     description to give a rough estimate of how many equivalent cores you need
     in a target_shape to have the core_count number of cores on the reference_shape
     """
+    # Normalize the core count the same as CPUs
+    return _normalize_cpu(
+        cpu_count=core_count,
+        target_shape=target_shape,
+        reference_shape=reference_shape,
+    )
+
+
+def _normalize_cpu(
+    cpu_count: float,
+    target_shape: Instance,
+    reference_shape: Optional[Instance] = None,
+) -> int:
     if reference_shape is None:
         reference_shape = default_reference_shape
 
     target_speed = target_shape.cpu_ghz * target_shape.cpu_ipc_scale
     reference_speed = reference_shape.cpu_ghz * reference_shape.cpu_ipc_scale
-    return max(1, math.ceil(core_count / (target_speed / reference_speed)))
+    return max(1, math.ceil(cpu_count / (target_speed / reference_speed)))
 
 
 def _reserved_headroom(
@@ -268,7 +302,7 @@ def buffer_for_components(
     for name, buffer in desired.items():
         if any(i in unique_components for i in buffer.components):
             sources[name] = buffer
-            ratio *= buffer.ratio
+            ratio = combine_buffer_ratios(ratio, buffer.ratio)
     if not sources:
         ratio = buffers.default.ratio
 
@@ -483,7 +517,7 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
         # When initially provisioniong we don't want to attach more than
         # 1/3 the maximum volume size in one node (preferring more nodes
         # with smaller volumes)
-        max_size = drive.max_size_gib / 3
+        max_size = math.ceil(drive.max_size_gib / 3)
         if ebs_gib > max_size > 0:
             ratio = ebs_gib / max_size
             count = max(cluster_size(math.ceil(count * ratio)), min_count)
@@ -717,6 +751,65 @@ def merge_plan(
     )
 
 
+class DerivedBuffers(BaseModel):
+    scale: Optional[float] = Field(default=None, gt=0)
+    preserve: bool = False
+    # When present, this is the maximum ratio of the current usage
+    ceiling: Optional[float] = Field(
+        default=None,
+        gt=0,
+    )
+    # When present, this is the minimum ratio of the current usage
+    floor: Optional[float] = Field(default=None, gt=0)
+
+    @staticmethod
+    def for_components(buffer: Dict[str, Buffer], components: List[str]):
+        scale = 1.0
+        preserve = False
+        ceiling = None
+        floor = None
+
+        for bfr in buffer.values():
+            if any(component in components for component in bfr.components):
+                if bfr.intent == BufferIntent.scale:
+                    scale = combine_buffer_ratios(scale, bfr.ratio)
+                if bfr.intent == BufferIntent.preserve:
+                    preserve = True
+                if bfr.intent == BufferIntent.scale_up:
+                    scale = combine_buffer_ratios(scale, bfr.ratio)
+                    floor = 1  # Create a floor of 1.0x the current usage
+                if bfr.intent == BufferIntent.scale_down:
+                    scale = combine_buffer_ratios(scale, bfr.ratio)
+                    ceiling = 1  # Create a ceiling of 1.0x the current usage
+
+        return DerivedBuffers(
+            scale=scale, preserve=preserve, ceiling=ceiling, floor=floor
+        )
+
+    def calculate_requirement(
+        self,
+        current_usage: float,
+        existing_capacity: float,
+        desired_buffer_ratio: float = 1.0,
+    ) -> float:
+        if self.preserve:
+            return existing_capacity
+
+        if self.scale is None:
+            requirement = current_usage * desired_buffer_ratio
+        else:
+            requirement = self.scale * current_usage * desired_buffer_ratio
+
+        if self.ceiling is not None:
+            requirement = min(requirement, self.ceiling * existing_capacity)
+
+        if self.floor is not None:
+            requirement = max(requirement, self.floor * existing_capacity)
+        return requirement
+
+
+# DEPRECATED: Use DerivedBuffers.for_components instead. Currently only used
+# for memory which is being replaced
 def derived_buffer_for_component(buffer: Dict[str, Buffer], components: List[str]):
     scale = 0.0
     preserve = False
@@ -738,38 +831,101 @@ def derived_buffer_for_component(buffer: Dict[str, Buffer], components: List[str
     return scale, preserve
 
 
-def get_cores_from_current_capacity(
-    current_capacity: CurrentClusterCapacity, buffers: Buffers, instance: Instance
-):
-    # compute cores required per zone
-    cpu_success_buffer = (1 - cpu_headroom_target(instance, buffers)) * 100
-    current_cpu_utilization = current_capacity.cpu_utilization.mid
+class RequirementFromCurrentCapacity(BaseModel):
+    current_capacity: CurrentClusterCapacity
+    buffers: Buffers
 
-    if current_capacity.cluster_instance is None:
-        cluster_instance = shapes.instance(current_capacity.cluster_instance_name)
-    else:
-        cluster_instance = current_capacity.cluster_instance
+    @property
+    def current_instance(self) -> Instance:
+        if self.current_capacity.cluster_instance is not None:
+            return self.current_capacity.cluster_instance
+        return shapes.instance(self.current_capacity.cluster_instance_name)
 
-    current_cores = cluster_instance.cpu * current_capacity.cluster_instance_count.mid
+    def cpu(self, instance_candidate: Instance) -> int:
+        current_cpu_util = self.current_capacity.cpu_utilization.mid / 100
+        current_total_cpu = (
+            self.current_instance.cpu * self.current_capacity.cluster_instance_count.mid
+        )
 
-    scale, preserve = derived_buffer_for_component(buffers.derived, ["compute", "cpu"])
-    # Scale and preserve for the same component should not be passed together.
-    # If user passes it, then scale will be preferred over preserve.
-    if scale > 0:
-        # if the new cpu core is less than the current,
-        # then take no action and return the current cpu cores
-        new_cpu_utilization = current_cpu_utilization * scale
-        core_scale_up_factor = max(1.0, new_cpu_utilization / cpu_success_buffer)
-        return math.ceil(current_cores * core_scale_up_factor)
+        derived_buffers = DerivedBuffers.for_components(
+            self.buffers.derived, ["compute", "cpu"]
+        )
 
-    if preserve:
-        return current_cores
+        # The ideal CPU% that accomodates the headroom + desired buffer, sometimes
+        # referred to as the "success buffer"
+        target_cpu_util = 1 - cpu_headroom_target(instance_candidate, self.buffers)
+        # current_util / target_util ratio indicates CPU scaling direction:
+        # > 1: scale up, < 1: scale down, = 1: no change needed
+        used_cpu = (current_cpu_util / target_cpu_util) * current_total_cpu
+        return math.ceil(
+            derived_buffers.calculate_requirement(
+                current_usage=used_cpu,
+                existing_capacity=current_total_cpu,
+                # Desired buffer is omitted because the cpu_headroom already
+                # takes it into account
+            )
+        )
 
-    # TODO: Implement new scaling logic for compute:
-    # - BufferIntent.scale_up: Scale up by ratio but don't scale down below current
-    # - BufferIntent.scale_down: Allow scaling down to meet demand
+    @property
+    def disk_gib(self) -> int:
+        current_cluster_disk_util_gib = (
+            self.current_capacity.disk_utilization_gib.mid
+            * self.current_capacity.cluster_instance_count.mid
+        )
+        current_node_disk_gib = (
+            self.current_instance.drive.max_size_gib
+            if self.current_instance.drive is not None
+            else (
+                self.current_capacity.cluster_drive.size_gib
+                if self.current_capacity.cluster_drive is not None
+                else 0
+            )
+        )
 
-    return int(current_cores * (current_cpu_utilization / cpu_success_buffer))
+        zonal_disk_allocated = (
+            current_node_disk_gib * self.current_capacity.cluster_instance_count.mid
+        )
+        # These are the desired buffers
+        disk_buffer = buffer_for_components(
+            buffers=self.buffers, components=[BufferComponent.disk]
+        )
+
+        derived_buffer = DerivedBuffers.for_components(
+            self.buffers.derived, ["storage", "disk"]
+        )
+        required_disk = derived_buffer.calculate_requirement(
+            current_usage=current_cluster_disk_util_gib,
+            existing_capacity=zonal_disk_allocated,
+            desired_buffer_ratio=disk_buffer.ratio,
+        )
+        return math.ceil(required_disk)
+
+    @property
+    def network(self) -> int:
+        current_network_utilization = (
+            self.current_capacity.network_utilization_mbps.mid
+            * self.current_capacity.cluster_instance_count.mid
+        )
+        zonal_network_allocated = (
+            self.current_instance.net_mbps
+            * self.current_capacity.cluster_instance_count.mid
+        )
+
+        # These are the desired buffers
+        network_buffer = buffer_for_components(
+            buffers=self.buffers, components=[BufferComponent.network]
+        )
+        derived_buffer = DerivedBuffers.for_components(
+            self.buffers.derived, ["compute", "network"]
+        )
+
+        return math.ceil(
+            derived_buffer.calculate_requirement(
+                current_usage=current_network_utilization,
+                existing_capacity=zonal_network_allocated,
+                desired_buffer_ratio=network_buffer.ratio,
+            )
+        )
 
 
 def get_memory_from_current_capacity(
@@ -795,6 +951,8 @@ def get_memory_from_current_capacity(
         buffers=buffers, components=[BufferComponent.memory]
     )
 
+    # TODO: Replace with DerivedBuffers implementation which supports
+    #  scale_up / scale_down
     scale, preserve = derived_buffer_for_component(
         buffers.derived, ["memory", "storage"]
     )
@@ -811,106 +969,7 @@ def get_memory_from_current_capacity(
     if preserve:
         return zonal_ram_allocated
 
-    # TODO: Implement new memory scaling logic:
-    # - BufferIntent.scale_up: Scale up memory but don't scale down below current
-    # - BufferIntent.scale_down: Allow memory to scale down to meet demand
-
     return current_memory_utilization * memory_buffer.ratio
-
-
-def get_network_from_current_capacity(
-    current_capacity: CurrentClusterCapacity, buffers: Buffers
-):
-    # compute network required per zone
-    current_network_utilization = (
-        current_capacity.network_utilization_mbps.mid
-        * current_capacity.cluster_instance_count.mid
-    )
-
-    if current_capacity.cluster_instance is None:
-        cluster_instance = shapes.instance(current_capacity.cluster_instance_name)
-    else:
-        cluster_instance = current_capacity.cluster_instance
-
-    zonal_network_allocated = (
-        cluster_instance.net_mbps * current_capacity.cluster_instance_count.mid
-    )
-
-    # These are the desired buffers
-    network_buffer = buffer_for_components(
-        buffers=buffers, components=[BufferComponent.network]
-    )
-
-    scale, preserve = derived_buffer_for_component(
-        buffers.derived, ["compute", "network"]
-    )
-    # Scale and preserve for the same component should not be passed together.
-    # If user passes it, then scale will be preferred over preserve.
-    if scale > 0:
-        # if the new required network is less than the current,
-        # then take no action and return the current bandwidth
-        return max(
-            current_network_utilization * scale * network_buffer.ratio,
-            zonal_network_allocated,
-        )
-
-    if preserve:
-        return zonal_network_allocated
-
-    # TODO: Implement new network scaling logic:
-    # - BufferIntent.scale_up: Scale up network but don't scale down below current
-    # - BufferIntent.scale_down: Allow network to scale down to meet demand
-
-    return current_network_utilization * network_buffer.ratio
-
-
-def get_disk_from_current_capacity(
-    current_capacity: CurrentClusterCapacity, buffers: Buffers
-):
-    # compute disk required per zone
-    current_disk_utilization = (
-        current_capacity.disk_utilization_gib.mid
-        * current_capacity.cluster_instance_count.mid
-    )
-
-    if current_capacity.cluster_instance is None:
-        cluster_instance = shapes.instance(current_capacity.cluster_instance_name)
-    else:
-        cluster_instance = current_capacity.cluster_instance
-
-    if cluster_instance.drive is not None:
-        instance_disk_allocated = cluster_instance.drive.max_size_gib
-    else:
-        assert current_capacity.cluster_drive is not None, "Drive should not be None"
-        instance_disk_allocated = current_capacity.cluster_drive.size_gib
-
-    zonal_disk_allocated = (
-        instance_disk_allocated * current_capacity.cluster_instance_count.mid
-    )
-
-    # These are the desired buffers
-    disk_buffer = buffer_for_components(
-        buffers=buffers, components=[BufferComponent.disk]
-    )
-
-    scale, preserve = derived_buffer_for_component(buffers.derived, ["storage", "disk"])
-    # Scale and preserve for the same component should not be passed together.
-    # If user passes it, then scale will be preferred over preserve.
-    if scale > 0:
-        # if the new required disk is less than the current,
-        # then take no action and return the current disk
-        return max(
-            current_disk_utilization * scale * disk_buffer.ratio, zonal_disk_allocated
-        )
-    if preserve:
-        # preserve the current disk size for the zone
-        return zonal_disk_allocated
-
-    # TODO: Implement new storage scaling logic:
-    # - BufferIntent.scale_up: Scale up storage but don't scale down below current
-    # - BufferIntent.scale_down: Allow storage to scale down to meet demand
-
-    return current_disk_utilization * disk_buffer.ratio
 
 
 def zonal_requirements_from_current(
@@ -918,23 +977,36 @@ def zonal_requirements_from_current(
     buffers: Buffers,
     instance: Instance,
     reference_shape: Instance,
+    max_disk_size_gib: float = float("inf"),
 ) -> CapacityRequirement:
     if current_cluster is not None and current_cluster.zonal[0] is not None:
         current_capacity: CurrentClusterCapacity = current_cluster.zonal[0]
-        needed_cores = normalize_cores(
-            get_cores_from_current_capacity(current_capacity, buffers, instance),
+
+        # Adjust the CPUs (vCPU + cores) based on generation / instance type
+        requirement = RequirementFromCurrentCapacity(
+            current_capacity=current_capacity,
+            buffers=buffers,
+            instance_candidate=instance,
+            max_size_gib=max_disk_size_gib,
+        )
+        normalized_cpu = _normalize_cpu(
+            requirement.cpu(instance),
             instance,
             reference_shape,
         )
-        needed_network_mbps = get_network_from_current_capacity(
-            current_capacity, buffers
-        )
+
+        needed_network_mbps = requirement.network
+        needed_disk_gib = requirement.disk_gib
+
+        # TODO: Memory should also be calculated via the requirement class
+        # so that it handles scale_up and scale_down. But since the memory
+        # calculation is not using the current utilization, this method is left
+        # as-is
         needed_memory_gib = get_memory_from_current_capacity(current_capacity, buffers)
-        needed_disk_gib = get_disk_from_current_capacity(current_capacity, buffers)
 
         return CapacityRequirement(
             requirement_type="zonal-capacity",
-            cpu_cores=certain_int(needed_cores),
+            cpu_cores=certain_int(normalized_cpu),
             mem_gib=certain_float(needed_memory_gib),
             disk_gib=certain_float(needed_disk_gib),
             network_mbps=certain_float(needed_network_mbps),
