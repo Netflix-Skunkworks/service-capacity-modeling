@@ -164,7 +164,6 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
         capacity_requirement = zonal_requirements_from_current(
             desires.current_clusters, desires.buffers, instance, reference_shape
         )
-        reference_shape = capacity_requirement.reference_shape
         disk_scale, _ = derived_buffer_for_component(
             desires.buffers.derived, ["storage", "disk"]
         )

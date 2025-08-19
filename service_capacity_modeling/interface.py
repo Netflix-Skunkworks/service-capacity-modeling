@@ -876,7 +876,13 @@ class CapacityDesires(ExcludeUnsetModel):
 
     @property
     def reference_shape(self) -> Instance:
-        # TODO: this should use the shape from current clusters if it is there
+        if (
+            self.current_clusters
+            and self.current_clusters.zonal
+            and self.current_clusters.zonal[0].cluster_instance
+        ):
+            return self.current_clusters.zonal[0].cluster_instance
+        # TODO: Support regional reference shapes from the current cluster
         return default_reference_shape
 
     def merge_with(self, defaults: "CapacityDesires") -> "CapacityDesires":

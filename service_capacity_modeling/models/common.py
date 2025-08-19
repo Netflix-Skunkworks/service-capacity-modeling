@@ -900,7 +900,7 @@ def zonal_requirements_from_current(
             mem_gib=certain_float(needed_memory_gib),
             disk_gib=certain_float(needed_disk_gib),
             network_mbps=certain_float(needed_network_mbps),
-            reference_shape=current_capacity.cluster_instance,
+            reference_shape=reference_shape,
         )
     else:
         raise ValueError("Please check if current_cluster is populated correctly.")
