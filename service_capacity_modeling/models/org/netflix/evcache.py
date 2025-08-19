@@ -33,13 +33,11 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
-from service_capacity_modeling.models.common import get_cores_from_current_capacity
-from service_capacity_modeling.models.common import get_disk_from_current_capacity
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import get_memory_from_current_capacity
-from service_capacity_modeling.models.common import get_network_from_current_capacity
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
@@ -104,25 +102,23 @@ def calculate_vitals_for_capacity_planner(
     )
     if not current_capacity:
         return needed_cores, needed_network_mbps, needed_memory_gib, needed_disk_gib
+    requirements = RequirementFromCurrentCapacity(
+        current_capacity=current_capacity,
+        buffers=desires.buffers,
+    )
     needed_cores = normalize_cores(
-        core_count=get_cores_from_current_capacity(
-            current_capacity, desires.buffers, instance
-        ),
+        core_count=requirements.cpu(instance_candidate=instance),
         target_shape=instance,
         reference_shape=current_capacity.cluster_instance,
     )
-    needed_network_mbps = get_network_from_current_capacity(
-        current_capacity, desires.buffers
+    needed_network_mbps = requirements.network
+    needed_disk_gib = (
+        requirements.disk_gib if current_capacity.cluster_drive is not None else 0.0
     )
+
     needed_memory_gib = get_memory_from_current_capacity(
         current_capacity, desires.buffers
     )
-    if current_capacity.cluster_drive is None:
-        needed_disk_gib = 0.0
-    else:
-        needed_disk_gib = get_disk_from_current_capacity(
-            current_capacity, desires.buffers
-        )
     return needed_cores, needed_network_mbps, needed_memory_gib, needed_disk_gib
 
 

@@ -286,8 +286,7 @@ def test_get_cores_with_buffer_scale():
     needed_cpu = RequirementFromCurrentCapacity(
         current_capacity=current_cluster.zonal[0],
         buffers=buffers_copy,
-        instance_candidate=i3_2xlarge,
-    ).cpu
+    ).cpu(instance_candidate=i3_2xlarge)
     assert needed_cpu == EXPECTED_CPU_WHEN_SCALING_UP
 
     # Allow scale down with 1.0 scale
@@ -299,8 +298,7 @@ def test_get_cores_with_buffer_scale():
     needed_cpu = RequirementFromCurrentCapacity(
         current_capacity=current_cluster.zonal[0],
         buffers=buffers_copy,
-        instance_candidate=i3_2xlarge,
-    ).cpu
+    ).cpu(instance_candidate=i3_2xlarge)
     assert needed_cpu == EXPECTED_CPU_WHEN_SCALING_DOWN
     assert needed_cpu < i3_2xlarge.cpu * cluster_size
 
@@ -319,8 +317,7 @@ def test_get_cores_with_buffer_scale_up():
     needed_cpu = RequirementFromCurrentCapacity(
         current_capacity=current_cluster.zonal[0],
         buffers=buffers_copy,
-        instance_candidate=i3_2xlarge,
-    ).cpu
+    ).cpu(instance_candidate=i3_2xlarge)
     assert needed_cpu == i3_2xlarge.cpu * cluster_size
     assert needed_cpu == 64
 
@@ -332,8 +329,7 @@ def test_get_cores_with_buffer_scale_up():
     needed_cpu = RequirementFromCurrentCapacity(
         current_capacity=current_cluster.zonal[0],
         buffers=buffers_copy,
-        instance_candidate=i3_2xlarge,
-    ).cpu
+    ).cpu(instance_candidate=i3_2xlarge)
     assert needed_cpu == 141  # Same as the scale behavior
 
 
@@ -351,8 +347,7 @@ def test_get_cores_with_buffer_scale_down():
     needed_cpu = RequirementFromCurrentCapacity(
         current_capacity=current_cluster.zonal[0],
         buffers=buffers_copy,
-        instance_candidate=i3_2xlarge,
-    ).cpu
+    ).cpu(instance_candidate=i3_2xlarge)
     assert needed_cpu == i3_2xlarge.cpu * cluster_size
     assert needed_cpu == 64
 
@@ -370,8 +365,7 @@ def test_get_cores_with_buffer_desired():
     needed_cpu = RequirementFromCurrentCapacity(
         current_capacity=current_cluster.zonal[0],
         buffers=buffers,
-        instance_candidate=i3_2xlarge,
-    ).cpu
+    ).cpu(instance_candidate=i3_2xlarge)
     assert needed_cpu == 36
 
 
@@ -386,8 +380,7 @@ def test_get_cores_with_buffer_preserve():
     needed_cores = RequirementFromCurrentCapacity(
         current_capacity=current_cluster.zonal[0],
         buffers=buffers_copy,
-        instance_candidate=i3_2xlarge,
-    ).cpu
+    ).cpu(instance_candidate=i3_2xlarge)
     assert needed_cores == 64
 
 

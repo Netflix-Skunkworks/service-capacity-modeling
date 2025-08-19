@@ -33,6 +33,7 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import utils
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import derived_buffer_for_component
@@ -181,12 +182,15 @@ def _zonal_requirement_for_new_cluster(
     )
 
 
-def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-arguments
+# pylint: disable=too-many-locals
+# pylint: disable=too-many-positional-arguments
+def _estimate_cassandra_requirement(
     instance: Instance,
     desires: CapacityDesires,
     working_set: float,
     reads_per_second: float,
     max_rps_to_disk: int,
+    max_local_disk_gib: float,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
 ) -> CapacityRequirement:
@@ -205,7 +209,11 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     # If the cluster is already provisioned
     if current_capacity and desires.current_clusters is not None:
         capacity_requirement = zonal_requirements_from_current(
-            desires.current_clusters, desires.buffers, instance, reference_shape
+            desires.current_clusters,
+            desires.buffers,
+            instance,
+            reference_shape,
+            max_local_disk_gib,
         )
         disk_scale, _ = derived_buffer_for_component(
             desires.buffers.derived, ["storage", "disk"]
@@ -433,6 +441,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         working_set=working_set,
         reads_per_second=rps,
         max_rps_to_disk=max_rps_to_disk,
+        max_local_disk_gib=max_local_data_per_node_gib,
         zones_per_region=zones_per_region,
         copies_per_region=copies_per_region,
     )
