@@ -168,7 +168,7 @@ def cpu_headroom_target(instance: Instance, buffers: Optional[Buffers] = None) -
     cpu_boost = 1.0 if instance.cores < instance.cpu else 1.0 / 0.6
     reserved_headroom = _reserved_headroom(instance.cpu, cpu_boost)
     if buffers is not None:
-        cpu_ratio = buffer_for_components(
+        cpu_ratio = desired_buffer_for_components(
             buffers=buffers, components=[BufferComponent.cpu]
         ).ratio
         buffer_adjusted_headroom = (1.0 - reserved_headroom) / cpu_ratio
@@ -190,7 +190,7 @@ _default_buffer_fallbacks: Dict[str, List[str]] = {
 }
 
 
-def buffer_for_components(
+def desired_buffer_for_components(
     buffers: Buffers,
     components: List[str],
     current_capacity: Optional[CurrentClusterCapacity] = None,
@@ -765,7 +765,7 @@ def get_memory_from_current_capacity(
     )
 
     # These are the desired buffers
-    memory_buffer = buffer_for_components(
+    memory_buffer = desired_buffer_for_components(
         buffers=buffers, components=[BufferComponent.memory]
     )
 
@@ -807,7 +807,7 @@ def get_network_from_current_capacity(
     )
 
     # These are the desired buffers
-    network_buffer = buffer_for_components(
+    network_buffer = desired_buffer_for_components(
         buffers=buffers, components=[BufferComponent.network]
     )
 
@@ -855,7 +855,7 @@ def get_disk_from_current_capacity(
     )
 
     # These are the desired buffers
-    disk_buffer = buffer_for_components(
+    disk_buffer = desired_buffer_for_components(
         buffers=buffers, components=[BufferComponent.disk]
     )
 
