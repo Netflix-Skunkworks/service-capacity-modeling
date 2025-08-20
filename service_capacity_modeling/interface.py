@@ -876,13 +876,22 @@ class CapacityDesires(ExcludeUnsetModel):
 
     @property
     def reference_shape(self) -> Instance:
-        if (
-            self.current_clusters
-            and self.current_clusters.zonal
-            and self.current_clusters.zonal[0].cluster_instance
-        ):
-            return self.current_clusters.zonal[0].cluster_instance
-        # TODO: Support regional reference shapes from the current cluster
+        if not self.current_clusters:
+            return default_reference_shape
+
+        zonal, regional = (self.current_clusters.zonal, self.current_clusters.regional)
+        if zonal and regional:
+            raise ValueError(
+                "The current cluster should not have both "
+                "zonal and regional instances. They're mutually exclusive."
+            )
+
+        if zonal and zonal[0].cluster_instance:
+            return zonal[0].cluster_instance
+
+        if regional and regional[0].cluster_instance:
+            return regional[0].cluster_instance
+
         return default_reference_shape
 
     def merge_with(self, defaults: "CapacityDesires") -> "CapacityDesires":
