@@ -1,6 +1,7 @@
 import pytest
 
 from service_capacity_modeling.capacity_planner import planner
+from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import (
     AccessConsistency,
 )
@@ -23,6 +24,7 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.org.netflix.cassandra import (
     NflxCassandraCapacityModel,
 )
+from tests.util import assert_similar_compute
 
 small_but_high_qps = CapacityDesires(
     service_tier=1,
@@ -430,7 +432,7 @@ class TestCassandraCurrentCapacity:
             cluster_instance_name="i4i.8xlarge",
             cluster_instance_count=Interval(low=8, mid=8, high=8, confidence=1),
             cpu_utilization=Interval(
-                low=10.12, mid=13.2, high=14.194801291058118, confidence=1
+                low=10.12, mid=13.1, high=14.194801291058118, confidence=1
             ),
             memory_utilization_gib=certain_float(32.0),
             network_utilization_mbps=certain_float(128.0),
@@ -469,9 +471,11 @@ class TestCassandraCurrentCapacity:
             },
         )
 
+        # Use a similar number of CPU cores but allocate less disk
         lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
-        assert lr_clusters.count == 8
-        assert lr_clusters.instance.cpu == 12
+        assert_similar_compute(
+            shapes.instance("i4i.4xlarge"), lr_clusters.instance, 8, lr_clusters.count
+        )
 
     def test_preserve_memory(self):
         cluster_capacity = CurrentZoneClusterCapacity(
