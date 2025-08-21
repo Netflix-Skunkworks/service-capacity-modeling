@@ -5,8 +5,8 @@ from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
-from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import cpu_headroom_target
+from service_capacity_modeling.models.common import desired_buffer_for_components
 
 
 def test_m5_same_headroom_as_r5():
@@ -84,7 +84,7 @@ def test_2xl_headroom_with_buffer_no_hyperthreading():
 def test_default_buffer():
     buffers = Buffers(default=Buffer(ratio=4, sources={"default": Buffer(ratio=4)}))
     for component in BufferComponent:
-        result = buffer_for_components(buffers, [component])
+        result = desired_buffer_for_components(buffers, [component])
         assert result.ratio == 4
         assert component in result.components
         assert not result.sources
@@ -98,25 +98,25 @@ def test_common_buffer_fallbacks():
         }
     )
 
-    assert buffer_for_components(buffers, [BufferComponent.cpu]) == Buffer(
+    assert desired_buffer_for_components(buffers, [BufferComponent.cpu]) == Buffer(
         ratio=2.0,
         components=["compute", "cpu"],
         sources={"compute": buffers.desired["compute"]},
     )
 
-    assert buffer_for_components(buffers, [BufferComponent.network]) == Buffer(
+    assert desired_buffer_for_components(buffers, [BufferComponent.network]) == Buffer(
         ratio=2.0,
         components=["compute", "network"],
         sources={"compute": buffers.desired["compute"]},
     )
 
-    assert buffer_for_components(buffers, [BufferComponent.disk]) == Buffer(
+    assert desired_buffer_for_components(buffers, [BufferComponent.disk]) == Buffer(
         ratio=3.2,
         components=["disk", "storage"],
         sources={"storage": buffers.desired["storage"]},
     )
 
-    assert buffer_for_components(buffers, [BufferComponent.memory]) == Buffer(
+    assert desired_buffer_for_components(buffers, [BufferComponent.memory]) == Buffer(
         ratio=3.2,
         components=["memory", "storage"],
         sources={"storage": buffers.desired["storage"]},
@@ -133,22 +133,22 @@ def test_precise_buffers():
         }
     )
 
-    assert buffer_for_components(buffers, [BufferComponent.cpu]) == Buffer(
+    assert desired_buffer_for_components(buffers, [BufferComponent.cpu]) == Buffer(
         ratio=2.0,
         components=["compute", "cpu"],
         sources={"custom-cpu": buffers.desired["custom-cpu"]},
     )
-    assert buffer_for_components(buffers, [BufferComponent.network]) == Buffer(
+    assert desired_buffer_for_components(buffers, [BufferComponent.network]) == Buffer(
         ratio=2.5,
         components=["compute", "network"],
         sources={"custom-network": buffers.desired["custom-network"]},
     )
-    assert buffer_for_components(buffers, [BufferComponent.disk]) == Buffer(
+    assert desired_buffer_for_components(buffers, [BufferComponent.disk]) == Buffer(
         ratio=3.0,
         components=["disk", "storage"],
         sources={"custom-disk": buffers.desired["custom-disk"]},
     )
-    assert buffer_for_components(buffers, [BufferComponent.memory]) == Buffer(
+    assert desired_buffer_for_components(buffers, [BufferComponent.memory]) == Buffer(
         ratio=3.5,
         components=["memory", "storage"],
         sources={"custom-memory": buffers.desired["custom-memory"]},

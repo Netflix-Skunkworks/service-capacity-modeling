@@ -32,9 +32,9 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
-from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import derived_buffer_for_component
+from service_capacity_modeling.models.common import desired_buffer_for_components
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -76,7 +76,7 @@ def _write_buffer_gib_zone(
 
 
 def _get_cores_from_desires(desires, instance):
-    cpu_buffer = buffer_for_components(
+    cpu_buffer = desired_buffer_for_components(
         buffers=desires.buffers, components=[BACKGROUND_BUFFER]
     )
 
@@ -94,7 +94,7 @@ def _get_cores_from_desires(desires, instance):
 
 
 def _get_disk_from_desires(desires, copies_per_region):
-    disk_buffer = buffer_for_components(
+    disk_buffer = desired_buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     )
     # Do not add disk buffers now as memory calculation is done on the disk usage
@@ -113,7 +113,7 @@ def _zonal_requirement_for_new_cluster(
     needed_disk = _get_disk_from_desires(desires, copies_per_region)
 
     # Keep some of the bandwidth available for backup and repair streaming
-    network_buffer = buffer_for_components(
+    network_buffer = desired_buffer_for_components(
         buffers=desires.buffers, components=[BACKGROUND_BUFFER]
     )
     needed_network_mbps = simple_network_mbps(desires) * network_buffer.ratio
@@ -144,7 +144,7 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     The input desires should be the **regional** desire, and this function will
     return the zonal capacity requirement
     """
-    disk_buffer = buffer_for_components(
+    disk_buffer = desired_buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     )
     memory_preserve = False
