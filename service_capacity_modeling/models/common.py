@@ -397,12 +397,12 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     # for a lower instance count (allows more vertical scaling vs forcing horizontal)
     max_attached_disk_gib: Optional[float] = None,
 ) -> ZoneClusterCapacity:
-    # Datastores often require disk headroom for e.g. compaction and such
-    if instance.drive is not None:
-        needed_disk_gib = math.ceil(required_disk_space(needed_disk_gib))
-
     # How many instances do we need for the CPU
     count = math.ceil(needed_cores / instance.cpu)
+    max_local_disk_capacity_gib = required_disk_space(max_local_disk_gib)
+    max_attached_disk_capacity_gib = (
+        max_attached_disk_gib  # Should EBS be buffer aware?
+    )
 
     # How many instances do we need for the ram, taking into account
     # reserved memory for the application and system
@@ -429,7 +429,7 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
         and instance.drive.size_gib > 0
         and max_local_disk_gib > 0
     ):
-        disk_per_node = min(max_local_disk_gib, instance.drive.size_gib)
+        disk_per_node = min(max_local_disk_capacity_gib, instance.drive.size_gib)
         count = max(count, math.ceil(needed_disk_gib / disk_per_node))
         if adjusted_disk_io_needed != 0.0:
             instance_read_iops = (
@@ -461,13 +461,13 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     cost = count * instance.annual_cost
 
     attached_drives = []
-    if instance.drive is None and required_disk_space(needed_disk_gib) > 0:
+    if instance.drive is None and needed_disk_gib > 0:
         # If we don't have disks attach the cloud drive with enough
         # space and IO for the requirement
 
         # Note that cloud drivers are provisioned _per node_ and must be chosen for
         # the max of space and IOS.
-        space_gib = max(1, math.ceil(required_disk_space(needed_disk_gib) / count))
+        space_gib = max(1, math.ceil(needed_disk_gib / count))
         read_io, write_io = required_disk_ios(space_gib, count)
         read_io, write_io = (
             utils.next_n(read_io, n=200),
@@ -483,8 +483,8 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
         # 1/3 the maximum volume size in one node (preferring more nodes
         # with smaller volumes)
         max_size = drive.max_size_gib / 3
-        if max_attached_disk_gib is not None:
-            max_size = max_attached_disk_gib
+        if max_attached_disk_capacity_gib is not None:
+            max_size = max_attached_disk_capacity_gib
 
         if ebs_gib > max_size > 0:
             ratio = ebs_gib / max_size
@@ -802,7 +802,6 @@ class RequirementFromCurrentCapacity(BaseModel):
     current_capacity: CurrentClusterCapacity
     buffers: Buffers
     instance_candidate: Instance
-    max_size_gib: float = float("inf")
 
     @property
     def current_instance(self) -> Instance:
@@ -850,22 +849,8 @@ class RequirementFromCurrentCapacity(BaseModel):
             )
         )
 
-        # Calculate the allocated amount using an adjusted disk size because
-        # sometimes the capacity planner provisions a cluster where each node
-        # has a large disk (e.g. 15TB for i3en.6xlarge). But the cluster is
-        # allocated assuming that we wouldn't want to use the full disk size
-        # (e.g. 5TB). So now that we are calculating the existing capacity, we
-        # also need to take into account the max node_density and not just
-        # use the full instance disk size as-is
-
-        # If there's a case where the existing usage is larger than the
-        # max node density, we should use that as the max disk size
-        max_node_density = max(
-            self.max_size_gib, self.current_capacity.disk_utilization_gib.mid
-        )
-        max_usable_disk = min(current_instance_disk_gib, max_node_density)
         zonal_disk_allocated = (
-            max_usable_disk * self.current_capacity.cluster_instance_count.mid
+            current_instance_disk_gib * self.current_capacity.cluster_instance_count.mid
         )
         # These are the desired buffers
         disk_buffer = buffer_for_components(
@@ -956,7 +941,6 @@ def zonal_requirements_from_current(
     buffers: Buffers,
     instance: Instance,
     reference_shape: Instance,
-    max_disk_size_gib: float = float("inf"),
 ) -> CapacityRequirement:
     if current_cluster is not None and current_cluster.zonal[0] is not None:
         current_capacity: CurrentClusterCapacity = current_cluster.zonal[0]
@@ -966,7 +950,6 @@ def zonal_requirements_from_current(
             current_capacity=current_capacity,
             buffers=buffers,
             instance_candidate=instance,
-            max_size_gib=max_disk_size_gib,
         )
         normalized_cpu = normalize_cores(
             requirement.cpu,  # NOTE: Although the method name is normalize_cores,

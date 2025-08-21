@@ -184,11 +184,12 @@ def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-p
         + desires.data_shape.reserved_instance_system_mem_gib
     )
 
+    disk_buffer = 1.2
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
         needed_cores=int(requirement.cpu_cores.mid),
-        needed_disk_gib=requirement.disk_gib.mid,
+        needed_disk_gib=requirement.disk_gib.mid * disk_buffer,
         needed_memory_gib=requirement.mem_gib.mid,
         needed_network_mbps=requirement.network_mbps.mid,
         # Take into account the reads per read
@@ -201,7 +202,7 @@ def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-p
         ),
         # CRDB requires ephemeral disks to be 80% full because leveled
         # compaction can make progress as long as there is some headroom
-        required_disk_space=lambda x: x * 1.2,
+        required_disk_space=lambda x: x * disk_buffer,
         max_local_disk_gib=max_local_disk_gib,
         # cockroachdb clusters will autobalance across available nodes
         cluster_size=lambda x: x,

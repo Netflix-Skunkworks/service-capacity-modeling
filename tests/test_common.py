@@ -444,8 +444,9 @@ def test_get_disk_with_buffer_scale_up():
         )
     }
 
-    # Case 1: The max_size_gib is not specified, so we expect to use the entire disk
-    # Usage implies we require 4 TB * 2 nodes * 4x buffer == 32TB to meet buffer
+    # Case 1: Scale up to meet desired buffer
+    # Usage implies we require 4 TB * 2 nodes * 4x buffer * 2x scale == 64TB
+    # to meet buffer.
     # Only 28TB is currently allocated, so scale up to meet desired buffer
     # because of the `scale_up` intent
     needed_disk = RequirementFromCurrentCapacity(
@@ -460,62 +461,19 @@ def test_get_disk_with_buffer_scale_up():
     )
     assert needed_disk == 64000
 
-    # Case 2: Same as case (1) but the max_size_gib is specified.
-    # The behavior should still scale up
-    needed_disk = RequirementFromCurrentCapacity(
-        current_capacity=current_cluster_copy.zonal[0],
-        buffers=buffers_copy,
-        instance_candidate=default_reference_shape,
-        max_size_gib=5000,
-    ).disk_gib
-    assert (
-        needed_disk
-        == disk_utilization_gib.mid * cluster_size.mid * expected_buffer * scale_ratio
-    )
-    assert needed_disk == 64000
-
-    # Case 3: The disk usage exceeded max_size_gib, so we expect to still scale up
-    current_cluster_copy.zonal[0].disk_utilization_gib = certain_float(5500)
-    needed_disk = RequirementFromCurrentCapacity(
-        current_capacity=current_cluster_copy.zonal[0],
-        buffers=buffers_copy,
-        instance_candidate=default_reference_shape,
-        max_size_gib=5000,
-    ).disk_gib
-    assert needed_disk == 5500 * cluster_size.mid * expected_buffer * scale_ratio
-    assert needed_disk == 88000
-
-    # Case 4: The desired buffer is lower than the current usage, so we expect
-    # a lower disk requirement (i.e. scale down storage requirement) than
-    # the 28TB we currently have allocated
+    # Case 2: The desired buffer is lower than the current usage, but since the
+    # intent is to scale up, we cannot reduce the disk requirement
     current_cluster_copy.zonal[0].disk_utilization_gib = certain_float(1000)
     needed_disk = RequirementFromCurrentCapacity(
         current_capacity=current_cluster_copy.zonal[0],
         buffers=buffers_copy,
-        instance_candidate=default_reference_shape,
+        instance_candidate=default_reference_shape,  # STUB
     ).disk_gib
 
+    # Cluster has 2 i3en.6xlarge each with 14TB disk per node
     # Still require 28TB that we allocated because we cannot scale down
     assert needed_disk == 14000 * cluster_size.mid
     assert needed_disk == 28000
-
-    # Which is greater than the
-    assert needed_disk > 1000 * cluster_size.mid * expected_buffer * scale_ratio
-    assert needed_disk > 16000
-
-    # Case 5: Same as case (4) but the max_size_gib is specified. So the
-    # requirement is based on the max_size_gib
-    needed_disk = RequirementFromCurrentCapacity(
-        current_capacity=current_cluster_copy.zonal[0],
-        buffers=buffers_copy,
-        instance_candidate=default_reference_shape,
-        max_size_gib=9000,
-    ).disk_gib
-    # Still require 18TB that we allocated because we cannot scale down
-    assert needed_disk == 9000 * cluster_size.mid
-    assert needed_disk == 18000
-    assert needed_disk > 1000 * cluster_size.mid * expected_buffer * scale_ratio
-    assert needed_disk > 16000
 
 
 def test_get_disk_with_buffer_scale_down():
@@ -549,32 +507,20 @@ def test_get_disk_with_buffer_scale_down():
     needed_disk = RequirementFromCurrentCapacity(
         current_capacity=current_cluster_copy.zonal[0],
         buffers=buffers_copy,
-        instance_candidate=default_reference_shape,
+        instance_candidate=default_reference_shape,  # STUB
     ).disk_gib
     expected_buffer = 4  # disk buffer
     assert needed_disk <= disk_utilization_gib.mid * cluster_size.mid * expected_buffer
     assert needed_disk == 14000 * cluster_size.mid
     assert needed_disk == 28000
 
-    # Case 2: Same as case (1) but the max_size_gib is specified.
-    # Treat the 14TB as a 5TB disk because we would never want a 5TB+ disk
-    # due to node density. So we do not want to scale up more than 10 TB
-    needed_disk_with_max = RequirementFromCurrentCapacity(
-        current_capacity=current_cluster_copy.zonal[0],
-        buffers=buffers_copy,
-        instance_candidate=default_reference_shape,
-        max_size_gib=5000,
-    ).disk_gib
-    assert needed_disk_with_max == 10000
-
-    # Case 3: The desired buffer is lower than the current usage, so we expect
+    # Case 2: The desired buffer is lower than the current usage, so we expect
     # a lower disk requirement (i.e. scale down storage requirement)
     current_cluster_copy.zonal[0].disk_utilization_gib = certain_float(1000)
     needed_disk_with_max = RequirementFromCurrentCapacity(
         current_capacity=current_cluster_copy.zonal[0],
         buffers=buffers_copy,
         instance_candidate=default_reference_shape,
-        max_size_gib=5000,
     ).disk_gib
     assert needed_disk_with_max == 1000 * cluster_size.mid * expected_buffer
     assert needed_disk_with_max == 8000

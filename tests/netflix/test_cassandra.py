@@ -315,8 +315,8 @@ class TestCassandraThroughput:
                 "require_local_disks": False,
                 "require_attached_disks": True,
             },
-        )[0]
-        high_writes_result = cap_plan.candidate_clusters.zonal[0]
+        )
+        high_writes_result = cap_plan[0].candidate_clusters.zonal[0]
 
         assert high_writes_result.instance.family[0] in ("m", "r")
         assert high_writes_result.count > 32
@@ -328,7 +328,7 @@ class TestCassandraThroughput:
             >= 100_000
         )
 
-        cluster_cost = cap_plan.candidate_clusters.annual_costs[
+        cluster_cost = cap_plan[0].candidate_clusters.annual_costs[
             "cassandra.zonal-clusters"
         ]
         assert 125_000 < cluster_cost < 900_000
@@ -432,7 +432,7 @@ class TestCassandraCurrentCapacity:
         # This is a magic number based on the current logic and does not hold any
         # particular significance. Modify this value slightly if necessary as
         # new logic is introduced and behaviors change
-        cpu_threshold = 13.1
+        cpu_threshold = 13.2
         cluster_capacity = CurrentZoneClusterCapacity(
             cluster_instance_name="i4i.8xlarge",
             cluster_instance_count=Interval(low=8, mid=8, high=8, confidence=1),
@@ -453,7 +453,9 @@ class TestCassandraCurrentCapacity:
                     low=19841, mid=31198, high=37307, confidence=0.98
                 ),
             ),
-            # We think we're going to have around 200 TiB of data
+            # We think we're going to have around ~27 TiB of data in a region
+            # or ~9 TiB per zone
+            # This is based on the math: 2.25TiB * 4 (desired buffer)
             data_shape=DataShape(
                 estimated_state_size_gib=Interval(
                     low=2006.083, mid=2252.5, high=2480.41, confidence=0.98
@@ -479,6 +481,8 @@ class TestCassandraCurrentCapacity:
         assert_similar_compute(
             shapes.instance("m6id.8xlarge"), lr_clusters.instance, 8, lr_clusters.count
         )
+        # Based on the above math about the drive size
+        assert lr_clusters.instance.drive.size_gib * lr_clusters.count >= 9000
 
     def test_preserve_memory(self):
         cluster_capacity = CurrentZoneClusterCapacity(

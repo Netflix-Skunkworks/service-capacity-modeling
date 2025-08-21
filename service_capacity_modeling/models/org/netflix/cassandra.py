@@ -138,7 +138,6 @@ def _estimate_cassandra_requirement(
     working_set: float,
     reads_per_second: float,
     max_rps_to_disk: int,
-    max_local_disk_gib: float,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
 ) -> CapacityRequirement:
@@ -169,7 +168,6 @@ def _estimate_cassandra_requirement(
             desires.buffers,
             instance,
             reference_shape,
-            max_local_disk_gib,
         )
         disk_scale, _ = derived_buffer_for_component(
             desires.buffers.derived, ["storage", "disk"]
@@ -364,7 +362,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         working_set=working_set,
         reads_per_second=rps,
         max_rps_to_disk=max_rps_to_disk,
-        max_local_disk_gib=max_local_disk_gib,
         zones_per_region=zones_per_region,
         copies_per_region=copies_per_region,
     )
@@ -382,6 +379,9 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         buffer_percent=(max_write_buffer_percent * max_table_buffer_percent),
     )
 
+    disk_buffer_ratio = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.disk]
+    ).ratio
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
@@ -396,7 +396,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             write_io_per_sec / count,
         ),
         # Disk buffer is already added while computing C* estimates
-        required_disk_space=lambda x: x,
+        required_disk_space=lambda x: x * disk_buffer_ratio,
         # C* clusters cannot recover data from neighbors quickly so we
         # want to avoid clusters with more than 1 TiB of local state
         max_local_disk_gib=max_local_disk_gib,

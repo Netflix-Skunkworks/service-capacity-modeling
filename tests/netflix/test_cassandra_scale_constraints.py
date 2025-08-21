@@ -566,11 +566,12 @@ class TestStorageAndCPUIntegration:
         result_cores = result.count * result.instance.cpu
         result_storage = result.count * get_drive_size_gib(result.instance)
 
-        # Double the compute capacity and have double the scale
+        # Cluster is already running 2x hot and we increase scale 2x
+        # Expect similar compute to a double vertically AND horizontal
         assert_similar_compute(
-            shapes.instance("i3en.6xlarge"),
+            shapes.instance("i4i.8xlarge"),
             result.instance,
-            CLUSTER_SIZE * 4,
+            CLUSTER_SIZE * 2,
             result.count,
         )
 

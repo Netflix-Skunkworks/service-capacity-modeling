@@ -35,6 +35,7 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import utils
+from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -231,6 +232,9 @@ def _kafka_read_io(rps, io_size_kib, size_gib, recovery_seconds: int) -> float:
     return (read_ios + int(round(recovery_ios))) * 1.5
 
 
+_MAX_ATTACHED_DISK_GIB = 8 * 1024
+
+
 # pylint: disable=too-many-locals
 # pylint: disable=too-many-return-statements
 # pylint: disable=too-many-positional-arguments
@@ -313,7 +317,9 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     write_ios_per_second = max(
         1, (write_mib_per_second * 1024) // drive.seq_io_size_kib
     )
-    max_attached_disk_gib = 8 * 1024
+    disk_buffer_ratio = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.disk]
+    ).ratio
 
     cluster = compute_stateful_zone(
         instance=instance,
@@ -338,7 +344,7 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
             copies_per_region * (write_ios_per_second / count) * 2,
         ),
         # Disk buffer is already added when computing kafka disk requirements
-        required_disk_space=lambda x: x,
+        required_disk_space=lambda x: x * disk_buffer_ratio,
         max_local_disk_gib=max_local_disk_gib,
         cluster_size=lambda x: x,
         min_count=max(min_count, required_zone_size or 1),
@@ -346,7 +352,7 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
         # Kafka currently uses 8GiB fixed, might want to change to min(30, x // 2)
         reserve_memory=lambda instance_mem_gib: base_mem + 8,
         # allow up to 8TiB of attached EBS
-        max_attached_disk_gib=max_attached_disk_gib,
+        max_attached_disk_gib=_MAX_ATTACHED_DISK_GIB,
     )
 
     # Communicate to the actual provision that if we want reduced RF
@@ -362,10 +368,8 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
         # Max allowed disk size in `compute_stateful_zone`
         if instance.drive is not None and instance.drive.size_gib > 0:
             max_size = min(max_local_disk_gib, instance.drive.size_gib)
-        elif max_attached_disk_gib is not None:
-            max_size = max_attached_disk_gib
         else:
-            max_size = drive.max_size_gib / 3
+            max_size = _MAX_ATTACHED_DISK_GIB
 
         # Capacity planner only allows ~ 5TB disk (max_size) for gp3 drives
         # or max_attached_disk_gib if provided.
