@@ -258,12 +258,15 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         # https://aws.amazon.com/ebs/volume-types/ says IOPS are 16k for
         # io2/gp2 so for now we're just hardcoding.
         data_write_io_per_sec = (1 + 10) * max(1, data_write_bytes_per_sec // 16384)
+        # Elasticsearch requires ephemeral disks to be % full because tiered
+        # merging can make progress as long as there is some headroom
+        disk_buffer = 1.33
 
         data_cluster = compute_stateful_zone(
             instance=instance,
             drive=drive,
             needed_cores=int(data_requirement.cpu_cores.mid),
-            needed_disk_gib=int(data_requirement.disk_gib.mid),
+            needed_disk_gib=int(data_requirement.disk_gib.mid * disk_buffer),
             needed_memory_gib=int(data_requirement.mem_gib.mid),
             needed_network_mbps=data_requirement.network_mbps.mid,
             # Take into account the reads per read
@@ -272,9 +275,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
                 _es_io_per_read(size) * math.ceil(data_rps / count),
                 data_write_io_per_sec / count,
             ),
-            # Elasticsearch requires ephemeral disks to be % full because tiered
-            # merging can make progress as long as there is some headroom
-            required_disk_space=lambda x: x * 1.33,
+            required_disk_space=lambda x: x * disk_buffer,
             max_local_disk_gib=max_local_disk_gib,
             # Elasticsearch clusters can auto-balance via shard placement
             cluster_size=lambda x: x,

@@ -33,6 +33,7 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
+from service_capacity_modeling.models.common import compute_density_gib
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import derived_buffer_for_component
 from service_capacity_modeling.models.common import network_services
@@ -130,7 +131,9 @@ def _zonal_requirement_for_new_cluster(
     )
 
 
-def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-arguments
+# pylint: disable=too-many-locals
+# pylint: disable=too-many-positional-arguments
+def _estimate_cassandra_requirement(
     instance: Instance,
     desires: CapacityDesires,
     working_set: float,
@@ -162,7 +165,10 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     # If the cluster is already provisioned
     if current_capacity and desires.current_clusters is not None:
         capacity_requirement = zonal_requirements_from_current(
-            desires.current_clusters, desires.buffers, instance, reference_shape
+            desires.current_clusters,
+            desires.buffers,
+            instance,
+            reference_shape,
         )
         disk_scale, _ = derived_buffer_for_component(
             desires.buffers.derived, ["storage", "disk"]
@@ -299,6 +305,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     required_cluster_size: Optional[int] = None,
     max_rps_to_disk: int = 500,
     max_local_disk_gib: int = 5120,
+    max_attached_disk_gib: int = 7 * 1024,
     max_regional_size: int = 192,
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
@@ -374,11 +381,23 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         buffer_percent=(max_write_buffer_percent * max_table_buffer_percent),
     )
 
+    disk_buffer_ratio = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.disk]
+    ).ratio
+    density_gib = compute_density_gib(
+        instance=instance,
+        drive=drive,
+        max_attached_disk_gib=max_attached_disk_gib,
+        max_local_disk_gib=max_local_disk_gib,
+        disk_buffer_ratio=disk_buffer_ratio,
+    )
+    needed_disk_gib = int(requirement.disk_gib.mid)
+    min_nodes_for_density = math.ceil(needed_disk_gib / density_gib)
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
         needed_cores=int(requirement.cpu_cores.mid),
-        needed_disk_gib=int(requirement.disk_gib.mid),
+        needed_disk_gib=needed_disk_gib,
         needed_memory_gib=int(requirement.mem_gib.mid),
         needed_network_mbps=requirement.network_mbps.mid,
         # Take into account the reads per read
@@ -391,10 +410,11 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         required_disk_space=lambda x: x,
         # C* clusters cannot recover data from neighbors quickly so we
         # want to avoid clusters with more than 1 TiB of local state
-        max_local_disk_gib=max_local_disk_gib,
+        max_local_disk_gib=density_gib,
+        max_attached_disk_gib=density_gib,
         # C* clusters provision in powers of 2 because doubling
         cluster_size=next_power_of_2,
-        min_count=max(min_count, required_cluster_size or 0),
+        min_count=max(min_count, required_cluster_size or 0, min_nodes_for_density),
         # TODO: Take reserve memory calculation into account during buffer calculation
         # C* heap usage takes away from OS page cache memory
         reserve_memory=lambda x: base_mem + heap_fn(x),
@@ -636,6 +656,9 @@ class NflxCassandraCapacityModel(CapacityModel):
         max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 500)
         max_regional_size: int = extra_model_arguments.get("max_regional_size", 192)
         max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 5120)
+        max_attached_disk_gib: int = extra_model_arguments.get(
+            "max_attached_disk_gib", 7 * 1024
+        )
         max_write_buffer_percent: float = min(
             0.5, extra_model_arguments.get("max_write_buffer_percent", 0.25)
         )
@@ -664,6 +687,7 @@ class NflxCassandraCapacityModel(CapacityModel):
             max_rps_to_disk=max_rps_to_disk,
             max_regional_size=max_regional_size,
             max_local_disk_gib=max_local_disk_gib,
+            max_attached_disk_gib=max_attached_disk_gib,
             max_write_buffer_percent=max_write_buffer_percent,
             max_table_buffer_percent=max_table_buffer_percent,
         )
