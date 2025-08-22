@@ -362,6 +362,18 @@ def compute_stateless_region(  # pylint: disable=too-many-positional-arguments
     )
 
 
+def compute_density_gib(
+    instance: Instance,
+    drive: Drive,
+    max_attached_disk_gib: Optional[float],
+    max_local_disk_gib: float,
+    disk_buffer_ratio: float,
+) -> float:
+    if instance.drive is None:
+        return min((max_attached_disk_gib or float("inf")), drive.max_size_gib)
+    return min(max_local_disk_gib * disk_buffer_ratio, instance.drive.size_gib)
+
+
 # pylint: disable=too-many-locals
 # pylint: disable=too-many-statements
 def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
@@ -424,6 +436,13 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     count = max(count, math.ceil(needed_network_mbps / instance.net_mbps))
 
     # How many instances do we need for the disk
+
+    # @matthewho to @josephl
+    # What should happen with all this code? If we do not adjust the
+    # needed_disk_gib to be buffer aware this count will be computed incorrectly
+    # Either we remove this code (bigger blast radius affecting ES, CRDB, Aurora etc)
+    # Or we do the math in both places (redundant?)
+    # Let me know what I am missing
     if (
         instance.drive is not None
         and instance.drive.size_gib > 0
@@ -482,9 +501,9 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
         # When initially provisioniong we don't want to attach more than
         # 1/3 the maximum volume size in one node (preferring more nodes
         # with smaller volumes)
-        max_size = drive.max_size_gib / 3
+        max_size = math.ceil(drive.max_size_gib / 3)
         if max_attached_disk_capacity_gib is not None:
-            max_size = max_attached_disk_capacity_gib
+            max_size = math.ceil(max_attached_disk_capacity_gib)
 
         if ebs_gib > max_size > 0:
             ratio = ebs_gib / max_size

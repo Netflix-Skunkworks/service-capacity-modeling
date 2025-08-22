@@ -482,6 +482,7 @@ class TestCassandraCurrentCapacity:
             shapes.instance("m6id.8xlarge"), lr_clusters.instance, 8, lr_clusters.count
         )
         # Based on the above math about the drive size
+        assert lr_clusters.instance.drive is not None
         assert lr_clusters.instance.drive.size_gib * lr_clusters.count >= 9000
 
     def test_preserve_memory(self):
