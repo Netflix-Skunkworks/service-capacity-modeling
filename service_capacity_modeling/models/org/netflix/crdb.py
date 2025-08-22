@@ -10,6 +10,9 @@ from pydantic import Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
@@ -27,6 +30,8 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models.common import buffer_for_components
+from service_capacity_modeling.models.common import compute_max_data_per_node
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -184,11 +189,23 @@ def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-p
         + desires.data_shape.reserved_instance_system_mem_gib
     )
 
+    disk_buffer_ratio = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.disk]
+    ).ratio
+    needed_disk_gib = requirement.disk_gib.mid * disk_buffer_ratio
+    max_data_per_node_gib = compute_max_data_per_node(
+        instance,
+        drive,
+        disk_buffer_ratio,
+        max_local_disk_gib=max_local_disk_gib,
+    )
+    min_count = math.ceil(needed_disk_gib / max_data_per_node_gib)
+
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
         needed_cores=int(requirement.cpu_cores.mid),
-        needed_disk_gib=requirement.disk_gib.mid,
+        needed_disk_gib=needed_disk_gib,
         needed_memory_gib=requirement.mem_gib.mid,
         needed_network_mbps=requirement.network_mbps.mid,
         # Take into account the reads per read
@@ -199,13 +216,9 @@ def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-p
             # TODO: presumably there are some write IOs here
             0,
         ),
-        # CRDB requires ephemeral disks to be 80% full because leveled
-        # compaction can make progress as long as there is some headroom
-        required_disk_space=lambda x: x * 1.2,
-        max_local_disk_gib=max_local_disk_gib,
         # cockroachdb clusters will autobalance across available nodes
         cluster_size=lambda x: x,
-        min_count=1,
+        min_count=min_count,
         # Sidecars/System takes away memory from cockroachdb
         # cockroachdb by default uses --max-sql-memory of 25% of system memory
         # that cannot be used for caching
@@ -269,6 +282,15 @@ class NflxCockroachDBArguments(BaseModel):
 
 class NflxCockroachDBCapacityModel(CapacityModel):
     @staticmethod
+    def default_buffers() -> Buffers:
+        return Buffers(
+            default=Buffer(ratio=1.5),
+            desired={
+                "storage": Buffer(ratio=1.2, components=[BufferComponent.storage]),
+            },
+        )
+
+    @staticmethod
     def capacity_plan(
         instance: Instance,
         drive: Drive,
@@ -330,6 +352,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
                     f"User asked for {key}={value}"
                 )
 
+        buffers = NflxCockroachDBCapacityModel.default_buffers()
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(
@@ -396,6 +419,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
                     # gateway taking about 1 MiB of memory
                     reserved_instance_app_mem_gib=0.001,
                 ),
+                buffers=buffers,
             )
         else:
             return CapacityDesires(
@@ -465,6 +489,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
                     # gateway taking about 1 MiB of memory
                     reserved_instance_app_mem_gib=0.001,
                 ),
+                buffers=buffers,
             )
 
 
