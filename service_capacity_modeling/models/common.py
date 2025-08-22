@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 import logging
 import math
 import random
@@ -142,12 +143,25 @@ def normalize_cores(
     description to give a rough estimate of how many equivalent cores you need
     in a target_shape to have the core_count number of cores on the reference_shape
     """
+    # Normalize the core count the same as CPUs
+    return _normalize_cpu(
+        cpu_count=core_count,
+        target_shape=target_shape,
+        reference_shape=reference_shape,
+    )
+
+
+def _normalize_cpu(
+    cpu_count: float,
+    target_shape: Instance,
+    reference_shape: Optional[Instance] = None,
+) -> int:
     if reference_shape is None:
         reference_shape = default_reference_shape
 
     target_speed = target_shape.cpu_ghz * target_shape.cpu_ipc_scale
     reference_speed = reference_shape.cpu_ghz * reference_shape.cpu_ipc_scale
-    return max(1, math.ceil(core_count / (target_speed / reference_speed)))
+    return max(1, math.ceil(cpu_count / (target_speed / reference_speed)))
 
 
 def _reserved_headroom(
@@ -795,7 +809,8 @@ class DerivedBuffers(BaseModel):
         return requirement
 
 
-# DEPRECATED: Use DerivedBuffers.for_components instead
+# DEPRECATED: Use DerivedBuffers.for_components instead. Currently only used
+# for memory which is being replaced
 def derived_buffer_for_component(buffer: Dict[str, Buffer], components: List[str]):
     scale = 0.0
     preserve = False
@@ -820,7 +835,6 @@ def derived_buffer_for_component(buffer: Dict[str, Buffer], components: List[str
 class RequirementFromCurrentCapacity(BaseModel):
     current_capacity: CurrentClusterCapacity
     buffers: Buffers
-    instance_candidate: Instance
 
     @property
     def current_instance(self) -> Instance:
@@ -828,9 +842,8 @@ class RequirementFromCurrentCapacity(BaseModel):
             return self.current_capacity.cluster_instance
         return shapes.instance(self.current_capacity.cluster_instance_name)
 
-    @property
-    def cpu(self):
-        current_cpu_utilization = self.current_capacity.cpu_utilization.mid / 100
+    def cpu(self, instance_candidate: Instance) -> int:
+        current_cpu_util = self.current_capacity.cpu_utilization.mid / 100
         current_total_cpu = (
             self.current_instance.cpu * self.current_capacity.cluster_instance_count.mid
         )
@@ -839,21 +852,23 @@ class RequirementFromCurrentCapacity(BaseModel):
             self.buffers.derived, ["compute", "cpu"]
         )
 
-        # The max usable CPU% excluding the headroom + desired buffer
-        max_cpu_util = 1 - cpu_headroom_target(self.instance_candidate, self.buffers)
-        # What percent util of the current CPUs are we using
-        used_cpu = (current_cpu_utilization / max_cpu_util) * current_total_cpu
-        required_cpu = derived_buffers.calculate_requirement(
-            current_usage=used_cpu,
-            existing_capacity=current_total_cpu,
-            # Desired buffer is omitted because the cpu_headroom already
-            # takes it into account
+        # The ideal CPU% that accomodates the headroom + desired buffer, sometimes
+        # referred to as the "success buffer"
+        target_cpu_util = 1 - cpu_headroom_target(instance_candidate, self.buffers)
+        # current_util / target_util ratio indicates CPU scaling direction:
+        # > 1: scale up, < 1: scale down, = 1: no change needed
+        used_cpu = (current_cpu_util / target_cpu_util) * current_total_cpu
+        return math.ceil(
+            derived_buffers.calculate_requirement(
+                current_usage=used_cpu,
+                existing_capacity=current_total_cpu,
+                # Desired buffer is omitted because the cpu_headroom already
+                # takes it into account
+            )
         )
 
-        return math.ceil(required_cpu)
-
     @property
-    def disk_gib(self):
+    def disk_gib(self) -> int:
         current_cluster_disk_util_gib = (
             self.current_capacity.disk_utilization_gib.mid
             * self.current_capacity.cluster_instance_count.mid
@@ -879,14 +894,15 @@ class RequirementFromCurrentCapacity(BaseModel):
         derived_buffer = DerivedBuffers.for_components(
             self.buffers.derived, ["storage", "disk"]
         )
-        return derived_buffer.calculate_requirement(
+        required_disk = derived_buffer.calculate_requirement(
             current_usage=current_cluster_disk_util_gib,
             existing_capacity=zonal_disk_allocated,
             desired_buffer_ratio=disk_buffer.ratio,
         )
+        return math.ceil(required_disk)
 
     @property
-    def network(self):
+    def network(self) -> float:
         current_network_utilization = (
             self.current_capacity.network_utilization_mbps.mid
             * self.current_capacity.cluster_instance_count.mid
@@ -970,14 +986,11 @@ def zonal_requirements_from_current(
             buffers=buffers,
             instance_candidate=instance,
         )
-        normalized_cpu = normalize_cores(
-            requirement.cpu,  # NOTE: Although the method name is normalize_cores,
-            # we are passing in CPUs
+        normalized_cpu = _normalize_cpu(
+            requirement.cpu(instance),
             instance,
             reference_shape,
-        )  # TODO: We should standardize on either cores or CPUs everywhere. Some
-        # services use cores and adjust via IPC scale. Other functions
-        # use the ratio of `cpu_cores` to `cpu` in the Instance definition
+        )
 
         needed_network_mbps = requirement.network
         needed_disk_gib = requirement.disk_gib

@@ -103,10 +103,9 @@ def calculate_vitals_for_capacity_planner(
     requirements = RequirementFromCurrentCapacity(
         current_capacity=current_capacity,
         buffers=desires.buffers,
-        instance_candidate=instance,
     )
     needed_cores = normalize_cores(
-        core_count=requirements.cpu,
+        core_count=requirements.cpu(instance_candidate=instance),
         target_shape=instance,
         reference_shape=current_capacity.cluster_instance,
     )
