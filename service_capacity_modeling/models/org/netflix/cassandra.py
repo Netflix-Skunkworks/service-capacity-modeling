@@ -33,6 +33,7 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
+from service_capacity_modeling.models.common import compute_density_gib
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import derived_buffer_for_component
 from service_capacity_modeling.models.common import network_services
@@ -365,6 +366,22 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     # out with for tier 0 or tier 1. This gives us more room to "up-color"]
     # clusters.
     min_count = 2 if desires.service_tier in CRITICAL_TIERS else 0
+    needed_disk_gib = int(requirement.disk_gib.mid)
+    disk_buffer_ratio = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.disk]
+    ).ratio
+    density_gib = compute_density_gib(
+        instance,
+        drive,
+        disk_buffer_ratio,
+        max_local_disk_gib=max_local_disk_gib,
+    )
+    min_count = max(
+        min_count,
+        required_cluster_size or 0,
+        math.ceil(needed_disk_gib / density_gib),
+    )
+
     base_mem = _get_base_memory(desires)
 
     heap_fn = _cass_heap_for_write_buffer(
@@ -378,7 +395,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         instance=instance,
         drive=drive,
         needed_cores=int(requirement.cpu_cores.mid),
-        needed_disk_gib=int(requirement.disk_gib.mid),
+        needed_disk_gib=needed_disk_gib,
         needed_memory_gib=int(requirement.mem_gib.mid),
         needed_network_mbps=requirement.network_mbps.mid,
         # Take into account the reads per read
@@ -387,14 +404,9 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             _cass_io_per_read(size) * math.ceil(read_io_per_sec / count),
             write_io_per_sec / count,
         ),
-        # Disk buffer is already added while computing C* estimates
-        required_disk_space=lambda x: x,
-        # C* clusters cannot recover data from neighbors quickly so we
-        # want to avoid clusters with more than 1 TiB of local state
-        max_local_disk_gib=max_local_disk_gib,
         # C* clusters provision in powers of 2 because doubling
         cluster_size=next_power_of_2,
-        min_count=max(min_count, required_cluster_size or 0),
+        min_count=min_count,
         # TODO: Take reserve memory calculation into account during buffer calculation
         # C* heap usage takes away from OS page cache memory
         reserve_memory=lambda x: base_mem + heap_fn(x),

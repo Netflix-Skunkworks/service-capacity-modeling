@@ -193,7 +193,7 @@ def test_kafka_high_throughput_ebs():
             "cluster_type": ClusterType.ha,
             "retention": "PT3H",
             # Force to attached drives
-            "max_local_disk_gib": 500,
+            "max_local_disk_gib": 125,
         },
         num_results=3,
     )

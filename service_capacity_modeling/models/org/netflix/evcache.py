@@ -31,6 +31,7 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models.common import compute_density_gib
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import get_cores_from_current_capacity
 from service_capacity_modeling.models.common import get_disk_from_current_capacity
@@ -297,16 +298,21 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         adjusted_disk_io_needed = 1.4 * adjusted_disk_io_needed
         read_write_ratio = reads_per_sec / (reads_per_sec + writes_per_sec)
 
+    needed_disk_gib = int(requirement.disk_gib.mid)
+    density_gib = compute_density_gib(
+        instance,
+        drive,
+        1,
+        max_local_disk_gib=max_local_disk_gib,
+    )
+    min_count = math.ceil(needed_disk_gib / density_gib)
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
         needed_cores=int(requirement.cpu_cores.mid),
-        needed_disk_gib=int(requirement.disk_gib.mid),
+        needed_disk_gib=needed_disk_gib,
         needed_memory_gib=int(requirement.mem_gib.mid),
         needed_network_mbps=requirement.network_mbps.mid,
-        # EVCache doesn't use cloud drives to store data, we will have
-        # accounted for the data going on drives or memory via working set
-        max_local_disk_gib=max_local_disk_gib,
         min_count=max(min_count, 0),
         adjusted_disk_io_needed=adjusted_disk_io_needed,
         read_write_ratio=read_write_ratio,

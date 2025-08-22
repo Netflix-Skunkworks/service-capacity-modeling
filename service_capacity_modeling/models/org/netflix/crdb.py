@@ -27,6 +27,7 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models.common import compute_density_gib
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -131,6 +132,9 @@ def _upsert_params(cluster, params):
 
 
 # pylint: disable=too-many-locals
+_DISK_BUFFER_RATIO = 1.2
+
+
 def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-positional-arguments
     instance: Instance,
     drive: Drive,
@@ -184,11 +188,20 @@ def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-p
         + desires.data_shape.reserved_instance_system_mem_gib
     )
 
+    needed_disk_gib = requirement.disk_gib.mid * _DISK_BUFFER_RATIO
+    density_gib = compute_density_gib(
+        instance,
+        drive,
+        _DISK_BUFFER_RATIO,
+        max_local_disk_gib=max_local_disk_gib,
+    )
+    min_count = math.ceil(needed_disk_gib / density_gib)
+
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
         needed_cores=int(requirement.cpu_cores.mid),
-        needed_disk_gib=requirement.disk_gib.mid,
+        needed_disk_gib=needed_disk_gib,
         needed_memory_gib=requirement.mem_gib.mid,
         needed_network_mbps=requirement.network_mbps.mid,
         # Take into account the reads per read
@@ -199,13 +212,9 @@ def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-p
             # TODO: presumably there are some write IOs here
             0,
         ),
-        # CRDB requires ephemeral disks to be 80% full because leveled
-        # compaction can make progress as long as there is some headroom
-        required_disk_space=lambda x: x * 1.2,
-        max_local_disk_gib=max_local_disk_gib,
         # cockroachdb clusters will autobalance across available nodes
         cluster_size=lambda x: x,
-        min_count=1,
+        min_count=min_count,
         # Sidecars/System takes away memory from cockroachdb
         # cockroachdb by default uses --max-sql-memory of 25% of system memory
         # that cannot be used for caching

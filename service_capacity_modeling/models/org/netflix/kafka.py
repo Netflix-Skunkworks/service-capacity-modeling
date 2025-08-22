@@ -35,6 +35,8 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import utils
+from service_capacity_modeling.models.common import buffer_for_components
+from service_capacity_modeling.models.common import compute_density_gib
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -315,6 +317,18 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     )
     max_attached_disk_gib = 8 * 1024
 
+    needed_disk_gib = int(requirement.disk_gib.mid)
+    disk_buffer_ratio = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.disk]
+    ).ratio
+    density_gib = compute_density_gib(
+        instance,
+        drive,
+        disk_buffer_ratio,
+        max_local_disk_gib=max_local_disk_gib,
+        max_attached_disk_gib=max_attached_disk_gib,
+    )
+    min_count = math.ceil(needed_disk_gib / density_gib)
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
@@ -337,16 +351,11 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
             # Leave 100% IO headroom for writes
             copies_per_region * (write_ios_per_second / count) * 2,
         ),
-        # Disk buffer is already added when computing kafka disk requirements
-        required_disk_space=lambda x: x,
-        max_local_disk_gib=max_local_disk_gib,
         cluster_size=lambda x: x,
         min_count=max(min_count, required_zone_size or 1),
         # Sidecars and Variable OS Memory
         # Kafka currently uses 8GiB fixed, might want to change to min(30, x // 2)
         reserve_memory=lambda instance_mem_gib: base_mem + 8,
-        # allow up to 8TiB of attached EBS
-        max_attached_disk_gib=max_attached_disk_gib,
     )
 
     # Communicate to the actual provision that if we want reduced RF
