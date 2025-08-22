@@ -36,7 +36,7 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import utils
 from service_capacity_modeling.models.common import buffer_for_components
-from service_capacity_modeling.models.common import compute_density_gib
+from service_capacity_modeling.models.common import compute_max_data_per_node
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -321,14 +321,14 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     disk_buffer_ratio = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     ).ratio
-    density_gib = compute_density_gib(
+    max_data_per_node_gib = compute_max_data_per_node(
         instance,
         drive,
         disk_buffer_ratio,
         max_local_disk_gib=max_local_disk_gib,
         max_attached_disk_gib=max_attached_disk_gib,
     )
-    min_count = math.ceil(needed_disk_gib / density_gib)
+    min_count = math.ceil(needed_disk_gib / max_data_per_node_gib)
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,

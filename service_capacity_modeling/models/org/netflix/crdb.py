@@ -10,6 +10,9 @@ from pydantic import Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
@@ -27,7 +30,8 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
-from service_capacity_modeling.models.common import compute_density_gib
+from service_capacity_modeling.models.common import buffer_for_components
+from service_capacity_modeling.models.common import compute_max_data_per_node
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -132,9 +136,6 @@ def _upsert_params(cluster, params):
 
 
 # pylint: disable=too-many-locals
-_DISK_BUFFER_RATIO = 1.2
-
-
 def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-positional-arguments
     instance: Instance,
     drive: Drive,
@@ -188,14 +189,17 @@ def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-p
         + desires.data_shape.reserved_instance_system_mem_gib
     )
 
-    needed_disk_gib = requirement.disk_gib.mid * _DISK_BUFFER_RATIO
-    density_gib = compute_density_gib(
+    disk_buffer_ratio = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.disk]
+    ).ratio
+    needed_disk_gib = requirement.disk_gib.mid * disk_buffer_ratio
+    max_data_per_node_gib = compute_max_data_per_node(
         instance,
         drive,
-        _DISK_BUFFER_RATIO,
+        disk_buffer_ratio,
         max_local_disk_gib=max_local_disk_gib,
     )
-    min_count = math.ceil(needed_disk_gib / density_gib)
+    min_count = math.ceil(needed_disk_gib / max_data_per_node_gib)
 
     cluster = compute_stateful_zone(
         instance=instance,
@@ -278,6 +282,15 @@ class NflxCockroachDBArguments(BaseModel):
 
 class NflxCockroachDBCapacityModel(CapacityModel):
     @staticmethod
+    def default_buffers() -> Buffers:
+        return Buffers(
+            default=Buffer(ratio=1.5),
+            desired={
+                "storage": Buffer(ratio=1.2, components=[BufferComponent.storage]),
+            },
+        )
+
+    @staticmethod
     def capacity_plan(
         instance: Instance,
         drive: Drive,
@@ -339,6 +352,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
                     f"User asked for {key}={value}"
                 )
 
+        buffers = NflxCockroachDBCapacityModel.default_buffers()
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(
@@ -405,6 +419,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
                     # gateway taking about 1 MiB of memory
                     reserved_instance_app_mem_gib=0.001,
                 ),
+                buffers=buffers,
             )
         else:
             return CapacityDesires(
@@ -474,6 +489,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
                     # gateway taking about 1 MiB of memory
                     reserved_instance_app_mem_gib=0.001,
                 ),
+                buffers=buffers,
             )
 
 

@@ -69,7 +69,7 @@ def _sqrt_staffed_cores(rps: float, latency_s: float, qos: float) -> int:
     return math.ceil((rps * latency_s) + qos * math.sqrt(rps * latency_s))
 
 
-def compute_density_gib(
+def compute_max_data_per_node(
     instance: Instance,
     drive: Drive,
     disk_buffer_ratio: float,

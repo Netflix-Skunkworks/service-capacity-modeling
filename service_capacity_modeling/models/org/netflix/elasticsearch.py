@@ -11,6 +11,9 @@ from pydantic import Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
@@ -27,7 +30,8 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
-from service_capacity_modeling.models.common import compute_density_gib
+from service_capacity_modeling.models.common import buffer_for_components
+from service_capacity_modeling.models.common import compute_max_data_per_node
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -176,10 +180,24 @@ class NflxElasticsearchArguments(BaseModel):
     )
 
 
-_DISK_BUFFER_RATIO = 1.33
-
-
 class NflxElasticsearchDataCapacityModel(CapacityModel):
+    @staticmethod
+    def default_buffers() -> Buffers:
+        return Buffers(
+            default=Buffer(ratio=1.5),
+            desired={
+                "storage": Buffer(ratio=1.33, components=[BufferComponent.storage]),
+            },
+        )
+
+    @staticmethod
+    def default_desires(
+        user_desires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
+        return CapacityDesires(
+            buffers=NflxElasticsearchDataCapacityModel.default_buffers()
+        )
+
     @staticmethod
     def capacity_plan(
         instance: Instance,
@@ -263,14 +281,17 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         # io2/gp2 so for now we're just hardcoding.
         data_write_io_per_sec = (1 + 10) * max(1, data_write_bytes_per_sec // 16384)
 
-        needed_disk_gib = data_requirement.disk_gib.mid * _DISK_BUFFER_RATIO
-        density_gib = compute_density_gib(
+        disk_buffer_ratio = buffer_for_components(
+            buffers=desires.buffers, components=[BufferComponent.disk]
+        ).ratio
+        needed_disk_gib = data_requirement.disk_gib.mid * disk_buffer_ratio
+        max_data_per_node_gib = compute_max_data_per_node(
             instance,
             drive,
-            _DISK_BUFFER_RATIO,
+            disk_buffer_ratio,
             max_local_disk_gib=max_local_disk_gib,
         )
-        min_count = math.ceil(needed_disk_gib / density_gib)
+        min_count = math.ceil(needed_disk_gib / max_data_per_node_gib)
 
         data_cluster = compute_stateful_zone(
             instance=instance,

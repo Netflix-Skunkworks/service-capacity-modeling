@@ -31,7 +31,7 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
-from service_capacity_modeling.models.common import compute_density_gib
+from service_capacity_modeling.models.common import compute_max_data_per_node
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import get_cores_from_current_capacity
 from service_capacity_modeling.models.common import get_disk_from_current_capacity
@@ -299,13 +299,13 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         read_write_ratio = reads_per_sec / (reads_per_sec + writes_per_sec)
 
     needed_disk_gib = int(requirement.disk_gib.mid)
-    density_gib = compute_density_gib(
+    max_data_per_node_gib = compute_max_data_per_node(
         instance,
         drive,
         1,
         max_local_disk_gib=max_local_disk_gib,
     )
-    min_count = math.ceil(needed_disk_gib / density_gib)
+    min_count = math.ceil(needed_disk_gib / max_data_per_node_gib)
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,

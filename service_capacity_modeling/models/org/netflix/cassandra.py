@@ -33,7 +33,7 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
-from service_capacity_modeling.models.common import compute_density_gib
+from service_capacity_modeling.models.common import compute_max_data_per_node
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import derived_buffer_for_component
 from service_capacity_modeling.models.common import network_services
@@ -104,6 +104,50 @@ def _get_disk_from_desires(desires, copies_per_region):
         * desires.data_shape.estimated_state_size_gib.mid
         * copies_per_region
         * disk_buffer.ratio
+    )
+
+
+def _get_min_count(
+    tier: int,
+    required_cluster_size: Optional[int],
+    needed_disk_gib: float,
+    max_data_per_node_gib: float,
+):
+    """
+    Compute the minimum number of nodes required for a zone.
+
+    This function is used to prevent the planner from allocating clusters that
+    would exceed the max data per node or under the required cluster size for
+    a tier or existing cluster
+    """
+
+    # Cassandra clusters should aim to be at least 2 nodes per zone to start
+    # out with for tier 0 or tier 1. This gives us more room to "up-color"]
+    # clusters.
+    min_nodes_for_tier = 2 if tier in CRITICAL_TIERS else 0
+
+    # Prevent allocating clusters that exceed the max data per node.
+    min_nodes_for_disk = math.ceil(needed_disk_gib / max_data_per_node_gib)
+
+    # Take the max of the following in order to avoid:
+    # (1) if `required_cluster_size` < `min_nodes_for_disk`, don't let the planner
+    #     pick a shape that would exceed the max data per node
+    #
+    #     For example, if we need 4TiB of disk, and the max data per node is 1TiB,
+    #     Regardless of the `required_cluster_size`, we cannot allocate less than 4
+    #     nodes because that would exceed the max data per node.
+    #
+    # (2) if `required_cluster_size` > `min_nodes_for_disk`, don't let the
+    #     node density requirement affect the min count because the required
+    #     cluster size already meets the node density requirement.
+    #
+    #     For example, if we need 4TiB of disk, and the max data per node is 1TiB,
+    #     and the upstream requires >= 8 nodes, we can allocate 8 nodes because
+    #     each node would only have 500GB of data.
+    return max(
+        min_nodes_for_tier,
+        required_cluster_size or 0,
+        min_nodes_for_disk,
     )
 
 
@@ -362,24 +406,22 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         copies_per_region=copies_per_region,
     )
 
-    # Cassandra clusters should aim to be at least 2 nodes per zone to start
-    # out with for tier 0 or tier 1. This gives us more room to "up-color"]
-    # clusters.
-    min_count = 2 if desires.service_tier in CRITICAL_TIERS else 0
+    # Adjust the min count to adjust to prevent too much data on a single
     needed_disk_gib = int(requirement.disk_gib.mid)
     disk_buffer_ratio = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     ).ratio
-    density_gib = compute_density_gib(
+    max_data_per_node_gib = compute_max_data_per_node(
         instance,
         drive,
         disk_buffer_ratio,
         max_local_disk_gib=max_local_disk_gib,
     )
-    min_count = max(
-        min_count,
-        required_cluster_size or 0,
-        math.ceil(needed_disk_gib / density_gib),
+    min_count = _get_min_count(
+        tier=desires.service_tier,
+        required_cluster_size=required_cluster_size,
+        needed_disk_gib=needed_disk_gib,
+        max_data_per_node_gib=max_data_per_node_gib,
     )
 
     base_mem = _get_base_memory(desires)
@@ -689,6 +731,26 @@ class NflxCassandraCapacityModel(CapacityModel):
         return NflxCassandraArguments.model_json_schema()
 
     @staticmethod
+    def default_buffers() -> Buffers:
+        return Buffers(
+            default=Buffer(ratio=1.5),
+            desired={
+                "compute": Buffer(ratio=1.5, components=[BufferComponent.compute]),
+                "storage": Buffer(ratio=4.0, components=[BufferComponent.storage]),
+                # Cassandra reserves headroom in both cpu and network for background
+                # work and tasks
+                "background": Buffer(
+                    ratio=2.0,
+                    components=[
+                        BufferComponent.cpu,
+                        BufferComponent.network,
+                        BACKGROUND_BUFFER,
+                    ],
+                ),
+            },
+        )
+
+    @staticmethod
     def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
         acceptable_consistency = {
             None,
@@ -715,24 +777,7 @@ class NflxCassandraCapacityModel(CapacityModel):
 
         # By supplying these buffers we can deconstruct observed utilization into
         # load versus buffer.
-        buffers = Buffers(
-            default=Buffer(ratio=1.5),
-            desired={
-                "compute": Buffer(ratio=1.5, components=[BufferComponent.compute]),
-                "storage": Buffer(ratio=4.0, components=[BufferComponent.storage]),
-                # Cassandra reserves headroom in both cpu and network for background
-                # work and tasks
-                "background": Buffer(
-                    ratio=2.0,
-                    components=[
-                        BufferComponent.cpu,
-                        BufferComponent.network,
-                        BACKGROUND_BUFFER,
-                    ],
-                ),
-            },
-        )
-
+        buffers = NflxCassandraCapacityModel.default_buffers()
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(
