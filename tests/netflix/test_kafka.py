@@ -157,7 +157,9 @@ def test_kafka_high_throughput():
 
     for lr in plan.least_regret:
         logger.debug(lr.candidate_clusters.zonal[0])
-        assert 50_000 < lr.candidate_clusters.total_annual_cost < 200_000
+        # 37 i3en.xlarge 166k
+        # 18 i3en.2xlarge 162k
+        assert 50_000 < lr.candidate_clusters.total_annual_cost < 205_000
         clstr = lr.candidate_clusters.zonal[0]
         if clstr.instance.drive is None:
             assert clstr.attached_drives[0].name == "gp3"

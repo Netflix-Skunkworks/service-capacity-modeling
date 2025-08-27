@@ -31,10 +31,11 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
-from service_capacity_modeling.models.common import compute_max_data_per_node
+from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import get_cores_from_current_capacity
 from service_capacity_modeling.models.common import get_disk_from_current_capacity
+from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import get_memory_from_current_capacity
 from service_capacity_modeling.models.common import get_network_from_current_capacity
 from service_capacity_modeling.models.common import network_services
@@ -217,7 +218,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     desires: CapacityDesires,
     context: RegionContext,
     copies_per_region: int = 3,
-    max_local_disk_gib: int = 2048,
+    max_local_data_per_node_gib: int = 2048,
     max_regional_size: int = 10000,
     min_instance_memory_gib: int = 12,
     cross_region_replication: Replication = Replication.none,
@@ -279,9 +280,9 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     requirement.context["osmem"] = reserve_memory(instance.ram_gib)
     # EVCache clusters aim to be at least 2 nodes per zone to start
     # out with for tier 0
-    min_count = 0
+    min_count_for_tier = 0
     if desires.service_tier < 1:
-        min_count = 2
+        min_count_for_tier = 2
 
     is_disk_io_constraint: bool = requirement.disk_gib.mid > 0.0
     adjusted_disk_io_needed = 0.0
@@ -299,13 +300,16 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         read_write_ratio = reads_per_sec / (reads_per_sec + writes_per_sec)
 
     needed_disk_gib = int(requirement.disk_gib.mid)
-    max_data_per_node_gib = compute_max_data_per_node(
+    disk_buffer_ratio = buffer_for_components(
+        desires.buffers, [BufferComponent.disk]
+    ).ratio
+    max_data_per_node_gib = get_effective_disk_per_node_gib(
         instance,
         drive,
-        1,
-        max_local_disk_gib=max_local_disk_gib,
+        disk_buffer_ratio,
+        max_local_data_per_node_gib=max_local_data_per_node_gib,
     )
-    min_count = math.ceil(needed_disk_gib / max_data_per_node_gib)
+    min_count_for_data = math.ceil(needed_disk_gib / max_data_per_node_gib)
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
@@ -313,7 +317,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         needed_disk_gib=needed_disk_gib,
         needed_memory_gib=int(requirement.mem_gib.mid),
         needed_network_mbps=requirement.network_mbps.mid,
-        min_count=max(min_count, 0),
+        min_count=max(min_count_for_data, min_count_for_tier),
         adjusted_disk_io_needed=adjusted_disk_io_needed,
         read_write_ratio=read_write_ratio,
     )
@@ -417,8 +421,9 @@ class NflxEVCacheCapacityModel(CapacityModel):
         )
         max_regional_size: int = extra_model_arguments.get("max_regional_size", 10000)
         # Very large nodes are hard to cache warm
-        max_local_disk_gib: int = extra_model_arguments.get(
-            "max_local_disk_gib", 1024 * 6
+        max_local_data_per_node_gib: int = extra_model_arguments.get(
+            "max_local_data_per_node_gib",
+            extra_model_arguments.get("max_local_disk_gib", 1024 * 5),
         )
         # Very small nodes are hard to run memcache on
         # (Arun) We do not deploy to less than 12 GiB
@@ -435,7 +440,7 @@ class NflxEVCacheCapacityModel(CapacityModel):
             desires=desires,
             copies_per_region=copies_per_region,
             max_regional_size=max_regional_size,
-            max_local_disk_gib=max_local_disk_gib,
+            max_local_data_per_node_gib=max_local_data_per_node_gib,
             min_instance_memory_gib=min_instance_memory_gib,
             cross_region_replication=cross_region_replication,
             context=context,

@@ -31,8 +31,8 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
-from service_capacity_modeling.models.common import compute_max_data_per_node
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -184,10 +184,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
     @staticmethod
     def default_buffers() -> Buffers:
         return Buffers(
-            default=Buffer(ratio=1.5),
-            desired={
-                "storage": Buffer(ratio=1.33, components=[BufferComponent.storage]),
-            },
+            default=Buffer(ratio=1.33),
         )
 
     @staticmethod
@@ -212,7 +209,10 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         max_regional_size: int = extra_model_arguments.get("max_regional_size", 120)
         max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 1000)
         # Very large nodes are hard to recover
-        max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 8192)
+        max_local_data_per_node_gib: int = extra_model_arguments.get(
+            "max_local_data_per_node_gib",
+            extra_model_arguments.get("max_local_disk_gib", 8192),
+        )
 
         # the ratio of traffic that should be handled by search nodes.
         #  0.0 = no search nodes, all searches handled by data nodes
@@ -285,11 +285,11 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             buffers=desires.buffers, components=[BufferComponent.disk]
         ).ratio
         needed_disk_gib = data_requirement.disk_gib.mid * disk_buffer_ratio
-        max_data_per_node_gib = compute_max_data_per_node(
+        max_data_per_node_gib = get_effective_disk_per_node_gib(
             instance,
             drive,
             disk_buffer_ratio,
-            max_local_disk_gib=max_local_disk_gib,
+            max_local_data_per_node_gib=max_local_data_per_node_gib,
         )
         min_count = math.ceil(needed_disk_gib / max_data_per_node_gib)
 

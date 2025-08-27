@@ -31,8 +31,8 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
-from service_capacity_modeling.models.common import compute_max_data_per_node
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -142,7 +142,7 @@ def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-p
     desires: CapacityDesires,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
-    max_local_disk_gib: int = 2048,
+    max_local_data_per_node_gib: int = 2048,
     max_regional_size: int = 288,
     max_rps_to_disk: int = 500,
     min_vcpu_per_instance: int = 4,
@@ -192,13 +192,13 @@ def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-p
     disk_buffer_ratio = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     ).ratio
-    needed_disk_gib = requirement.disk_gib.mid * disk_buffer_ratio
-    max_data_per_node_gib = compute_max_data_per_node(
+    max_data_per_node_gib = get_effective_disk_per_node_gib(
         instance,
         drive,
         disk_buffer_ratio,
-        max_local_disk_gib=max_local_disk_gib,
+        max_local_data_per_node_gib=max_local_data_per_node_gib,
     )
+    needed_disk_gib = requirement.disk_gib.mid * disk_buffer_ratio
     min_count = math.ceil(needed_disk_gib / max_data_per_node_gib)
 
     cluster = compute_stateful_zone(
@@ -284,10 +284,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
     @staticmethod
     def default_buffers() -> Buffers:
         return Buffers(
-            default=Buffer(ratio=1.5),
-            desired={
-                "storage": Buffer(ratio=1.2, components=[BufferComponent.storage]),
-            },
+            default=Buffer(ratio=1.2),
         )
 
     @staticmethod
@@ -304,7 +301,11 @@ class NflxCockroachDBCapacityModel(CapacityModel):
         max_regional_size: int = extra_model_arguments.get("max_regional_size", 500)
         max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 500)
         # Very large nodes are hard to recover
-        max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 2048)
+        max_local_data_per_node_gib: int = extra_model_arguments.get(
+            "max_local_data_per_node_gib",
+            extra_model_arguments.get("max_local_disk_gib", 2048),
+        )
+
         # Cockroach Labs recommends a minimum of 8 vCPUs and strongly
         # recommends no fewer than 4 vCPUs per node.
         min_vcpu_per_instance: int = extra_model_arguments.get(
@@ -321,7 +322,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
             zones_per_region=context.zones_in_region,
             copies_per_region=copies_per_region,
             max_regional_size=max_regional_size,
-            max_local_disk_gib=max_local_disk_gib,
+            max_local_data_per_node_gib=max_local_data_per_node_gib,
             max_rps_to_disk=max_rps_to_disk,
             min_vcpu_per_instance=min_vcpu_per_instance,
             license_fee_per_core=license_fee_per_core,

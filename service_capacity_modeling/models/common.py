@@ -69,16 +69,41 @@ def _sqrt_staffed_cores(rps: float, latency_s: float, qos: float) -> int:
     return math.ceil((rps * latency_s) + qos * math.sqrt(rps * latency_s))
 
 
-def compute_max_data_per_node(
+def get_effective_disk_per_node_gib(
     instance: Instance,
     drive: Drive,
     disk_buffer_ratio: float,
-    max_local_disk_gib: float = float("inf"),
-    max_attached_disk_gib: float = float("inf"),
+    max_local_data_per_node_gib: float = float("inf"),
+    max_attached_data_per_node_gib: float = float("inf"),
 ) -> float:
+    """Calculate usable disk for an instance while respecting per-node data limits
+    and desired disk buffer ratio
+
+    Prevents overloading nodes with too much data, which causes slow bootstrapping and
+    recovery times
+
+    Args:
+        instance: The compute instance configuration
+        drive: The drive configuration for the instance
+        disk_buffer_ratio: Buffer ratio for operational headroom
+        max_local_data_per_node_gib: Maximum data per node for local drives
+        max_attached_data_per_node_gib: Maximum data per node for attached drives
+
+    Returns:
+        float: Maximum usable disk capacity per node in GiB
+    """
+    # TODO: @homatthew / @vrayini: Incorporate disk headroom for attached / local drives
     if instance.drive is None:
-        return min(max_attached_disk_gib * disk_buffer_ratio, drive.max_size_gib)
-    return min(max_local_disk_gib * disk_buffer_ratio, instance.drive.size_gib)
+        if max_attached_data_per_node_gib == float("inf"):
+            return drive.max_size_gib
+
+        attached_disk_limit_gib = max_attached_data_per_node_gib * disk_buffer_ratio
+        # Attached disks are provisioned in 100GB limits
+        rounded_size = utils.next_n(attached_disk_limit_gib, n=100)
+        return min(rounded_size, drive.max_size_gib)
+
+    local_disk_limit_gib = max_local_data_per_node_gib * disk_buffer_ratio
+    return min(local_disk_limit_gib, instance.drive.size_gib)
 
 
 def sqrt_staffed_cores(desires: CapacityDesires) -> int:

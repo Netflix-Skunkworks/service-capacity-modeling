@@ -33,9 +33,9 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
-from service_capacity_modeling.models.common import compute_max_data_per_node
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import derived_buffer_for_component
+from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -111,7 +111,7 @@ def _get_min_count(
     tier: int,
     required_cluster_size: Optional[int],
     needed_disk_gib: float,
-    max_data_per_node_gib: float,
+    disk_per_node_gib: float,
 ):
     """
     Compute the minimum number of nodes required for a zone.
@@ -127,7 +127,7 @@ def _get_min_count(
     min_nodes_for_tier = 2 if tier in CRITICAL_TIERS else 0
 
     # Prevent allocating clusters that exceed the max data per node.
-    min_nodes_for_disk = math.ceil(needed_disk_gib / max_data_per_node_gib)
+    min_nodes_for_disk = math.ceil(needed_disk_gib / disk_per_node_gib)
 
     # Take the max of the following in order to avoid:
     # (1) if `required_cluster_size` < `min_nodes_for_disk`, don't let the planner
@@ -343,7 +343,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     require_attached_disks: bool = False,
     required_cluster_size: Optional[int] = None,
     max_rps_to_disk: int = 500,
-    max_local_disk_gib: int = 5120,
+    max_local_data_per_node_gib: int = 1280,
+    max_attached_data_per_node_gib: int = 2048,
     max_regional_size: int = 192,
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
@@ -411,17 +412,18 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     disk_buffer_ratio = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     ).ratio
-    max_data_per_node_gib = compute_max_data_per_node(
+    disk_per_node_gib = get_effective_disk_per_node_gib(
         instance,
         drive,
         disk_buffer_ratio,
-        max_local_disk_gib=max_local_disk_gib,
+        max_local_data_per_node_gib=max_local_data_per_node_gib,
+        max_attached_data_per_node_gib=max_attached_data_per_node_gib,
     )
     min_count = _get_min_count(
         tier=desires.service_tier,
         required_cluster_size=required_cluster_size,
         needed_disk_gib=needed_disk_gib,
-        max_data_per_node_gib=max_data_per_node_gib,
+        disk_per_node_gib=disk_per_node_gib,
     )
 
     base_mem = _get_base_memory(desires)
@@ -671,6 +673,11 @@ class NflxCassandraCapacityModel(CapacityModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
+        # TODO: Standardize these extra model argument defaults in a single
+        # place. Many of them are defined here and as default values in the
+        # downstream method but only these ones are used which is confusing for
+        # readability
+
         # Use durabiliy and consistency to compute RF.
         copies_per_region = _target_rf(
             desires, extra_model_arguments.get("copies_per_region", None)
@@ -689,7 +696,11 @@ class NflxCassandraCapacityModel(CapacityModel):
 
         max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 500)
         max_regional_size: int = extra_model_arguments.get("max_regional_size", 192)
-        max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 5120)
+        max_local_data_per_node_gib: int = extra_model_arguments.get(
+            "max_local_data_per_node_gib",
+            extra_model_arguments.get("max_local_disk_gib", 1280),
+        )
+
         max_write_buffer_percent: float = min(
             0.5, extra_model_arguments.get("max_write_buffer_percent", 0.25)
         )
@@ -717,7 +728,7 @@ class NflxCassandraCapacityModel(CapacityModel):
             required_cluster_size=required_cluster_size,
             max_rps_to_disk=max_rps_to_disk,
             max_regional_size=max_regional_size,
-            max_local_disk_gib=max_local_disk_gib,
+            max_local_data_per_node_gib=max_local_data_per_node_gib,
             max_write_buffer_percent=max_write_buffer_percent,
             max_table_buffer_percent=max_table_buffer_percent,
         )
