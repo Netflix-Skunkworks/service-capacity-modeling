@@ -2,9 +2,7 @@ import pytest
 
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.hardware import shapes
-from service_capacity_modeling.interface import (
-    AccessConsistency,
-)
+from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
@@ -17,6 +15,7 @@ from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import fixed_float
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Interval
@@ -152,6 +151,21 @@ class TestCassandraCapacityPlanning:
             large_footprint_result.cluster_params["cassandra.compaction.min_threshold"]
             == 4
         )
+
+    def test_capacity_non_power_of_two(self):
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=large_footprint,
+            extra_model_arguments={
+                "require_local_disks": True,
+                "required_cluster_size": 12,
+            },
+        )[0]
+
+        result = cap_plan.candidate_clusters.zonal[0]
+        assert result.count == 12
+        assert result.instance.name.startswith("i")
 
 
 class TestCassandraStorage:
@@ -523,6 +537,59 @@ class TestCassandraCurrentCapacity:
 
         lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
         assert lr_clusters.instance.ram_gib == 128
+
+    def test_capacity_non_power_of_two(self):
+        cluster_capacity = CurrentZoneClusterCapacity(
+            cluster_instance_name="r5d.4xlarge",
+            cluster_instance_count=fixed_float(3),
+            cpu_utilization=certain_float(80),
+            memory_utilization_gib=certain_float(32.0),
+            disk_utilization_gib=certain_float(1024),
+            network_utilization_mbps=certain_float(128.0),
+        )
+        desires = CapacityDesires(
+            service_tier=1,
+            current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+        )
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_local_disks": True,
+            },
+        )[0]
+        result = cap_plan.candidate_clusters.zonal[0]
+        # Doubles a 3 node cluster to 6
+        assert result.count == 6
+
+    def test_capacity_non_power_of_two_with_required_size(self):
+        cluster_capacity = CurrentZoneClusterCapacity(
+            cluster_instance_name="r5d.4xlarge",
+            cluster_instance_count=fixed_float(3),
+            cpu_utilization=Interval(
+                low=10.12, mid=30, high=14.194801291058118, confidence=1
+            ),
+            memory_utilization_gib=certain_float(32.0),
+            disk_utilization_gib=certain_float(1024),
+            network_utilization_mbps=certain_float(128.0),
+        )
+        desires = CapacityDesires(
+            service_tier=1,
+            current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+        )
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_local_disks": True,
+                "required_cluster_size": 24,
+            },
+        )[0]
+
+        result = cap_plan.candidate_clusters.zonal[0]
+        assert result.count == 24
 
 
 class TestCassandraExtraModelArguments:

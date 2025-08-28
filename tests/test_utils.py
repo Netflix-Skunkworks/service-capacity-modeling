@@ -7,6 +7,9 @@ from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
+from service_capacity_modeling.models.utils import is_power_of_2
+from service_capacity_modeling.models.utils import next_doubling
+from service_capacity_modeling.models.utils import next_power_of_2
 from service_capacity_modeling.models.utils import reduce_by_family
 
 
@@ -173,3 +176,39 @@ def test_reduce_by_family_unlimited():
 
     # Should return all 5 plans since we have 3 from family_a and 2 from family_b
     assert len(result) == 5
+
+
+def test_power_of_2_functions():
+    """Test both next_power_of_2 and is_power_of_2 functions comprehensively."""
+    # Edge cases: 0 → 1, False; 1 → 1, True
+    assert next_power_of_2(0) == 1
+    assert not is_power_of_2(0)
+    assert next_power_of_2(1) == 1
+    assert is_power_of_2(1)
+
+    powers_of_2 = [1, 2, 4, 8, 16, 32, 64, 128, 256]
+
+    # Test each power and range between powers
+    for i, current_power in enumerate(powers_of_2):
+        range_start = 0 if i == 0 else powers_of_2[i - 1] + 1
+
+        # Non-powers should round up to current_power
+        for test_value in range(range_start, current_power):
+            assert not is_power_of_2(test_value)
+            assert next_power_of_2(test_value) == current_power
+
+        # Current power should return itself
+        assert is_power_of_2(current_power)
+        assert next_power_of_2(current_power) == current_power
+
+
+def test_next_doubling():
+    # Case 1: prime (3)
+    for i in range(0, 4):
+        assert next_doubling(i, 3) == 3
+    for i in range(4, 7):
+        assert next_doubling(i, 3) == 6
+    for i in range(7, 13):
+        assert next_doubling(i, 3) == 12
+    for i in range(13, 25):
+        assert next_doubling(i, 3) == 24

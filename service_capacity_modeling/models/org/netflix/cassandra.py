@@ -21,6 +21,7 @@ from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
+from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import FixedInterval
@@ -42,6 +43,8 @@ from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
 from service_capacity_modeling.models.common import zonal_requirements_from_current
+from service_capacity_modeling.models.utils import is_power_of_2
+from service_capacity_modeling.models.utils import next_doubling
 from service_capacity_modeling.models.utils import next_power_of_2
 from service_capacity_modeling.stats import dist_for_interval
 
@@ -112,6 +115,7 @@ def _get_min_count(
     required_cluster_size: Optional[int],
     needed_disk_gib: float,
     disk_per_node_gib: float,
+    cluster_size_lambda: Callable[[int], int],
 ):
     """
     Compute the minimum number of nodes required for a zone.
@@ -144,11 +148,13 @@ def _get_min_count(
     #     For example, if we need 4TiB of disk, and the max data per node is 1TiB,
     #     and the upstream requires >= 8 nodes, we can allocate 8 nodes because
     #     each node would only have 500GB of data.
-    return max(
+    min_count = max(
         min_nodes_for_tier,
         required_cluster_size or 0,
         min_nodes_for_disk,
     )
+    # Ensure that the min count is an increment of the cluster size constraint (doubling)
+    return cluster_size_lambda(min_count)
 
 
 def _zonal_requirement_for_new_cluster(
@@ -194,15 +200,7 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     )
     memory_preserve = False
     reference_shape = desires.reference_shape
-    current_capacity = (
-        None
-        if desires.current_clusters is None
-        else (
-            desires.current_clusters.zonal[0]
-            if len(desires.current_clusters.zonal)
-            else desires.current_clusters.regional[0]
-        )
-    )
+    current_capacity = get_current_capacity(desires)
 
     # If the cluster is already provisioned
     if current_capacity and desires.current_clusters is not None:
@@ -322,11 +320,46 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     )
 
 
+def get_current_cluster_size(desires) -> int:
+    current_capacity = get_current_capacity(desires)
+    if current_capacity is None:
+        return 0
+    return math.ceil(current_capacity.cluster_instance_count.mid)
+
+
+def get_current_capacity(desires) -> Optional[CurrentClusterCapacity]:
+    current_capacity = (
+        None
+        if desires.current_clusters is None
+        else (
+            desires.current_clusters.zonal[0]
+            if len(desires.current_clusters.zonal)
+            else desires.current_clusters.regional[0]
+        )
+    )
+    return current_capacity
+
+
 def _upsert_params(cluster, params):
     if cluster.cluster_params:
         cluster.cluster_params.update(params)
     else:
         cluster.cluster_params = params
+
+
+def _get_cluster_size_lambda(
+    current_cluster_size: int,
+    required_cluster_size: Optional[int],
+) -> Callable[[int], int]:
+    if current_cluster_size and not is_power_of_2(current_cluster_size):
+        return lambda x: next_doubling(x, base=current_cluster_size)
+
+    # Default to powers of 2 if no cluster size is specified
+    if required_cluster_size is None or is_power_of_2(required_cluster_size):
+        return next_power_of_2
+
+    # Non power of 2 required cluster size should double instead of power of 2
+    return lambda x: next_doubling(x, base=required_cluster_size)
 
 
 # pylint: disable=too-many-locals
@@ -419,11 +452,17 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         max_local_data_per_node_gib=max_local_data_per_node_gib,
         max_attached_data_per_node_gib=max_attached_data_per_node_gib,
     )
+
+    current_cluster_size = get_current_cluster_size(desires)
+    cluster_size_lambda = _get_cluster_size_lambda(
+        current_cluster_size, required_cluster_size
+    )
     min_count = _get_min_count(
         tier=desires.service_tier,
         required_cluster_size=required_cluster_size,
         needed_disk_gib=needed_disk_gib,
         disk_per_node_gib=disk_per_node_gib,
+        cluster_size_lambda=cluster_size_lambda,
     )
 
     base_mem = _get_base_memory(desires)
@@ -449,7 +488,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             write_io_per_sec / count,
         ),
         # C* clusters provision in powers of 2 because doubling
-        cluster_size=next_power_of_2,
+        cluster_size=cluster_size_lambda,
         min_count=min_count,
         # TODO: Take reserve memory calculation into account during buffer calculation
         # C* heap usage takes away from OS page cache memory

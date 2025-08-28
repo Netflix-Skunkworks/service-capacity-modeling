@@ -62,5 +62,21 @@ def next_power_of_2(y: float) -> int:
     return 1 if x == 0 else 2 ** (x - 1).bit_length()
 
 
+def is_power_of_2(y: float) -> bool:
+    """Check if x is a power of 2 or 1"""
+    return y == next_power_of_2(y)
+
+
+def next_doubling(x: float, base: int) -> int:
+    # Some clusters were provisioned as non powers of (e.g. 12)
+    # And so if a requirement cannot be satisifed by a cluster
+    # we would want to round up to the next doubling
+    # E.g. 12 -> 24 -> 48
+    # e.g. 3 -> 6 -> 12
+    if x <= base:
+        return int(base)
+    return int(base * (2 ** math.ceil(math.log(x / base, 2))))
+
+
 def next_n(x: float, n: float) -> int:
     return int(math.ceil(x / n)) * int(n)
