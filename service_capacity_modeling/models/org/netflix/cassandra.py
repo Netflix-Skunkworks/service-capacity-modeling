@@ -33,7 +33,6 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
-from service_capacity_modeling.models import utils
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import derived_buffer_for_component
