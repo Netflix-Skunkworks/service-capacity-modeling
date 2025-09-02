@@ -43,7 +43,6 @@ from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
 from service_capacity_modeling.models.common import zonal_requirements_from_current
-from service_capacity_modeling.models.utils import is_power_of_2
 from service_capacity_modeling.models.utils import next_doubling
 from service_capacity_modeling.models.utils import next_power_of_2
 from service_capacity_modeling.stats import dist_for_interval
@@ -200,7 +199,7 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     )
     memory_preserve = False
     reference_shape = desires.reference_shape
-    current_capacity = get_current_capacity(desires)
+    current_capacity = _get_current_capacity(desires)
 
     # If the cluster is already provisioned
     if current_capacity and desires.current_clusters is not None:
@@ -320,14 +319,14 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     )
 
 
-def get_current_cluster_size(desires) -> int:
-    current_capacity = get_current_capacity(desires)
+def _get_current_cluster_size(desires) -> int:
+    current_capacity = _get_current_capacity(desires)
     if current_capacity is None:
         return 0
     return math.ceil(current_capacity.cluster_instance_count.mid)
 
 
-def get_current_capacity(desires) -> Optional[CurrentClusterCapacity]:
+def _get_current_capacity(desires) -> Optional[CurrentClusterCapacity]:
     current_capacity = (
         None
         if desires.current_clusters is None
@@ -351,15 +350,12 @@ def _get_cluster_size_lambda(
     current_cluster_size: int,
     required_cluster_size: Optional[int],
 ) -> Callable[[int], int]:
-    if current_cluster_size and not is_power_of_2(current_cluster_size):
+    if required_cluster_size:
+        return lambda x: next_doubling(x, base=required_cluster_size)
+    elif current_cluster_size:
         return lambda x: next_doubling(x, base=current_cluster_size)
-
-    # Default to powers of 2 if no cluster size is specified
-    if required_cluster_size is None or is_power_of_2(required_cluster_size):
+    else:  # New provisionings
         return next_power_of_2
-
-    # Non power of 2 required cluster size should double instead of power of 2
-    return lambda x: next_doubling(x, base=required_cluster_size)
 
 
 # pylint: disable=too-many-locals
@@ -453,7 +449,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         max_attached_data_per_node_gib=max_attached_data_per_node_gib,
     )
 
-    current_cluster_size = get_current_cluster_size(desires)
+    current_cluster_size = _get_current_cluster_size(desires)
     cluster_size_lambda = _get_cluster_size_lambda(
         current_cluster_size, required_cluster_size
     )
