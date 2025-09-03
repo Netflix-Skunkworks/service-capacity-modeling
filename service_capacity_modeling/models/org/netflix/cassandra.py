@@ -43,6 +43,7 @@ from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
 from service_capacity_modeling.models.common import zonal_requirements_from_current
+from service_capacity_modeling.models.utils import is_power_of_2
 from service_capacity_modeling.models.utils import next_doubling
 from service_capacity_modeling.models.utils import next_power_of_2
 from service_capacity_modeling.stats import dist_for_interval
@@ -352,7 +353,7 @@ def _get_cluster_size_lambda(
 ) -> Callable[[int], int]:
     if required_cluster_size:
         return lambda x: next_doubling(x, base=required_cluster_size)
-    elif current_cluster_size:
+    elif current_cluster_size and not is_power_of_2(current_cluster_size):
         return lambda x: next_doubling(x, base=current_cluster_size)
     else:  # New provisionings
         return next_power_of_2
