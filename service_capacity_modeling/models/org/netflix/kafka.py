@@ -34,8 +34,9 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
-from service_capacity_modeling.models import utils
+from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import zonal_requirements_from_current
@@ -245,7 +246,8 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     require_attached_disks: bool = False,
     required_zone_size: Optional[int] = None,
     max_regional_size: int = 150,
-    max_local_disk_gib: int = 1024 * 5,
+    max_local_data_per_node_gib: int = 2 * 1024,
+    max_attached_data_per_node_gib: int = 2 * 1024,
     min_instance_cpu: int = 2,
     min_instance_memory_gib: int = 12,
     require_same_instance_family: bool = True,
@@ -291,9 +293,9 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     )
 
     # Kafka clusters in prod (tier 0+1) need at least 2 nodes per zone
-    min_count = 1
+    min_count_for_tier = 1
     if desires.service_tier < 2:
-        min_count = 2
+        min_count_for_tier = 2
 
     # Kafka read io / second is zonal
     normalized_to_mib = desires.model_copy(deep=True)
@@ -313,8 +315,19 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     write_ios_per_second = max(
         1, (write_mib_per_second * 1024) // drive.seq_io_size_kib
     )
-    max_attached_disk_gib = 8 * 1024
 
+    needed_disk_gib = int(requirement.disk_gib.mid)
+    disk_buffer_ratio = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.disk]
+    ).ratio
+    max_disk_per_node_gib = get_effective_disk_per_node_gib(
+        instance,
+        drive,
+        disk_buffer_ratio,
+        max_local_data_per_node_gib=max_local_data_per_node_gib,
+        max_attached_data_per_node_gib=max_attached_data_per_node_gib,
+    )
+    min_count_for_data = math.ceil(needed_disk_gib / max_disk_per_node_gib)
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
@@ -337,16 +350,11 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
             # Leave 100% IO headroom for writes
             copies_per_region * (write_ios_per_second / count) * 2,
         ),
-        # Disk buffer is already added when computing kafka disk requirements
-        required_disk_space=lambda x: x,
-        max_local_disk_gib=max_local_disk_gib,
         cluster_size=lambda x: x,
-        min_count=max(min_count, required_zone_size or 1),
+        min_count=max(min_count_for_tier, min_count_for_data, required_zone_size or 1),
         # Sidecars and Variable OS Memory
         # Kafka currently uses 8GiB fixed, might want to change to min(30, x // 2)
         reserve_memory=lambda instance_mem_gib: base_mem + 8,
-        # allow up to 8TiB of attached EBS
-        max_attached_disk_gib=max_attached_disk_gib,
     )
 
     # Communicate to the actual provision that if we want reduced RF
@@ -355,28 +363,18 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
 
     # This is roughly the disk we would have tried to provision with the current
     # cluster's instance count (or required_zone_size)
-    if required_zone_size is not None:
-        space_gib = max(1, math.ceil(requirement.disk_gib.mid / required_zone_size))
-        ebs_gib = utils.next_n(space_gib, n=100)
-
-        # Max allowed disk size in `compute_stateful_zone`
-        if instance.drive is not None and instance.drive.size_gib > 0:
-            max_size = min(max_local_disk_gib, instance.drive.size_gib)
-        elif max_attached_disk_gib is not None:
-            max_size = max_attached_disk_gib
-        else:
-            max_size = drive.max_size_gib / 3
-
-        # Capacity planner only allows ~ 5TB disk (max_size) for gp3 drives
-        # or max_attached_disk_gib if provided.
-        # If ebs_gib > max_size, we do not have enough instances within the
-        # required_zone_size for the required disk. In these cases, it is
-        # not possible for cluster.count == required_zone_size. We should
-        # allow higher instance count for these cases so that we return some result
-        # If we did not exceed the max disk size with the required_zone_size, then
-        # we only allow topologies that match the desired zone size
-        if ebs_gib <= max_size and cluster.count != required_zone_size:
-            return None
+    # If we *could* have satisified the required_zone_size without exceeding the
+    # max data size per node constraints but the actual cluster count does not
+    # match the required_zone_size, then we want to omit the plan
+    # However if there was no way to satisfy the required_zone_size with the
+    # max data size per node constraints, then we would rather return some result
+    # with a higher instance count since this is the best we can do
+    if (
+        required_zone_size is not None
+        and min_count_for_data <= required_zone_size
+        and cluster.count != required_zone_size
+    ):
+        return None
 
     # Kafka clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as
@@ -491,8 +489,9 @@ class NflxKafkaCapacityModel(CapacityModel):
 
         max_regional_size: int = extra_model_arguments.get("max_regional_size", 150)
         # Very large nodes are hard to cache warm
-        max_local_disk_gib: int = extra_model_arguments.get(
-            "max_local_disk_gib", 1024 * 5
+        max_local_data_per_node_gib: int = extra_model_arguments.get(
+            "max_local_data_per_node_gib",
+            extra_model_arguments.get("max_local_disk_gib", 1024 * 2),
         )
         min_instance_cpu: int = extra_model_arguments.get("min_instance_cpu", 2)
         min_instance_memory_gib: int = extra_model_arguments.get(
@@ -525,7 +524,7 @@ class NflxKafkaCapacityModel(CapacityModel):
             require_attached_disks=require_attached_disks,
             required_zone_size=required_zone_size,
             max_regional_size=max_regional_size,
-            max_local_disk_gib=max_local_disk_gib,
+            max_local_data_per_node_gib=max_local_data_per_node_gib,
             min_instance_cpu=min_instance_cpu,
             min_instance_memory_gib=min_instance_memory_gib,
             hot_retention_seconds=hot_retention_seconds,

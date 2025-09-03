@@ -11,6 +11,9 @@ from pydantic import Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
@@ -27,7 +30,9 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -177,6 +182,20 @@ class NflxElasticsearchArguments(BaseModel):
 
 class NflxElasticsearchDataCapacityModel(CapacityModel):
     @staticmethod
+    def default_buffers() -> Buffers:
+        return Buffers(
+            default=Buffer(ratio=1.33),
+        )
+
+    @staticmethod
+    def default_desires(
+        user_desires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
+        return CapacityDesires(
+            buffers=NflxElasticsearchDataCapacityModel.default_buffers()
+        )
+
+    @staticmethod
     def capacity_plan(
         instance: Instance,
         drive: Drive,
@@ -190,7 +209,10 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         max_regional_size: int = extra_model_arguments.get("max_regional_size", 120)
         max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 1000)
         # Very large nodes are hard to recover
-        max_local_disk_gib: int = extra_model_arguments.get("max_local_disk_gib", 8192)
+        max_local_data_per_node_gib: int = extra_model_arguments.get(
+            "max_local_data_per_node_gib",
+            extra_model_arguments.get("max_local_disk_gib", 8192),
+        )
 
         # the ratio of traffic that should be handled by search nodes.
         #  0.0 = no search nodes, all searches handled by data nodes
@@ -259,11 +281,23 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         # io2/gp2 so for now we're just hardcoding.
         data_write_io_per_sec = (1 + 10) * max(1, data_write_bytes_per_sec // 16384)
 
+        disk_buffer_ratio = buffer_for_components(
+            buffers=desires.buffers, components=[BufferComponent.disk]
+        ).ratio
+        needed_disk_gib = data_requirement.disk_gib.mid * disk_buffer_ratio
+        max_data_per_node_gib = get_effective_disk_per_node_gib(
+            instance,
+            drive,
+            disk_buffer_ratio,
+            max_local_data_per_node_gib=max_local_data_per_node_gib,
+        )
+        min_count = math.ceil(needed_disk_gib / max_data_per_node_gib)
+
         data_cluster = compute_stateful_zone(
             instance=instance,
             drive=drive,
             needed_cores=int(data_requirement.cpu_cores.mid),
-            needed_disk_gib=int(data_requirement.disk_gib.mid),
+            needed_disk_gib=needed_disk_gib,
             needed_memory_gib=int(data_requirement.mem_gib.mid),
             needed_network_mbps=data_requirement.network_mbps.mid,
             # Take into account the reads per read
@@ -272,13 +306,9 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
                 _es_io_per_read(size) * math.ceil(data_rps / count),
                 data_write_io_per_sec / count,
             ),
-            # Elasticsearch requires ephemeral disks to be % full because tiered
-            # merging can make progress as long as there is some headroom
-            required_disk_space=lambda x: x * 1.33,
-            max_local_disk_gib=max_local_disk_gib,
             # Elasticsearch clusters can auto-balance via shard placement
             cluster_size=lambda x: x,
-            min_count=1,
+            min_count=min_count,
             # Sidecars/System takes away memory from Elasticsearch
             # which uses half of available system max of 32 for compressed oops
             reserve_memory=lambda x: base_mem + max(32, x / 2),

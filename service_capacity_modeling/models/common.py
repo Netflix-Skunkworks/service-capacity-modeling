@@ -69,6 +69,43 @@ def _sqrt_staffed_cores(rps: float, latency_s: float, qos: float) -> int:
     return math.ceil((rps * latency_s) + qos * math.sqrt(rps * latency_s))
 
 
+def get_effective_disk_per_node_gib(
+    instance: Instance,
+    drive: Drive,
+    disk_buffer_ratio: float,
+    max_local_data_per_node_gib: float = float("inf"),
+    max_attached_data_per_node_gib: float = float("inf"),
+) -> float:
+    """Calculate usable disk for an instance while respecting per-node data limits
+    and desired disk buffer ratio
+
+    Prevents overloading nodes with too much data, which causes slow bootstrapping and
+    recovery times
+
+    Args:
+        instance: The compute instance configuration
+        drive: The drive configuration for the instance
+        disk_buffer_ratio: Buffer ratio for operational headroom
+        max_local_data_per_node_gib: Maximum data per node for local drives
+        max_attached_data_per_node_gib: Maximum data per node for attached drives
+
+    Returns:
+        float: Maximum usable disk capacity per node in GiB
+    """
+    # TODO: @homatthew / @vrayini: Incorporate disk headroom for attached / local drives
+    if instance.drive is None:
+        if max_attached_data_per_node_gib == float("inf"):
+            return drive.max_size_gib
+
+        attached_disk_limit_gib = max_attached_data_per_node_gib * disk_buffer_ratio
+        # Attached disks are provisioned in 100GB limits
+        rounded_size = utils.next_n(attached_disk_limit_gib, n=100)
+        return min(rounded_size, drive.max_size_gib)
+
+    local_disk_limit_gib = max_local_data_per_node_gib * disk_buffer_ratio
+    return min(local_disk_limit_gib, instance.drive.size_gib)
+
+
 def sqrt_staffed_cores(desires: CapacityDesires) -> int:
     """Computes cores given a sqrt staffing model
 
@@ -357,11 +394,6 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     # (per_node_size_gib, node_count) -> (read_ios, write_ios)
     required_disk_ios: Callable[[float, int], Tuple[float, float]] = lambda size_gib,
     count: (0, 0),
-    required_disk_space: Callable[[float], float] = lambda size_gib: size_gib,
-    # The maximum amount of state we can hold per node in the database
-    # typically you don't want stateful systems going much higher than a
-    # few TiB so that recovery functions properly
-    max_local_disk_gib: float = 2048,
     # Some stateful clusters have sidecars that take memory
     reserve_memory: Callable[[float], float] = lambda x: 0,
     # How much write buffer we get per instance (usually a percentage of
@@ -373,14 +405,7 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     min_count: int = 0,
     adjusted_disk_io_needed: float = 0.0,
     read_write_ratio: float = 0.0,
-    # Max attached EBS volume size per node. Higher value here could allow
-    # for a lower instance count (allows more vertical scaling vs forcing horizontal)
-    max_attached_disk_gib: Optional[float] = None,
 ) -> ZoneClusterCapacity:
-    # Datastores often require disk headroom for e.g. compaction and such
-    if instance.drive is not None:
-        needed_disk_gib = math.ceil(required_disk_space(needed_disk_gib))
-
     # How many instances do we need for the CPU
     count = math.ceil(needed_cores / instance.cpu)
 
@@ -404,12 +429,8 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     count = max(count, math.ceil(needed_network_mbps / instance.net_mbps))
 
     # How many instances do we need for the disk
-    if (
-        instance.drive is not None
-        and instance.drive.size_gib > 0
-        and max_local_disk_gib > 0
-    ):
-        disk_per_node = min(max_local_disk_gib, instance.drive.size_gib)
+    if instance.drive is not None and instance.drive.size_gib > 0:
+        disk_per_node = instance.drive.size_gib
         count = max(count, math.ceil(needed_disk_gib / disk_per_node))
         if adjusted_disk_io_needed != 0.0:
             instance_read_iops = (
@@ -441,13 +462,13 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     cost = count * instance.annual_cost
 
     attached_drives = []
-    if instance.drive is None and required_disk_space(needed_disk_gib) > 0:
+    if instance.drive is None and needed_disk_gib > 0:
         # If we don't have disks attach the cloud drive with enough
         # space and IO for the requirement
 
         # Note that cloud drivers are provisioned _per node_ and must be chosen for
         # the max of space and IOS.
-        space_gib = max(1, math.ceil(required_disk_space(needed_disk_gib) / count))
+        space_gib = max(1, math.ceil(needed_disk_gib / count))
         read_io, write_io = required_disk_ios(space_gib, count)
         read_io, write_io = (
             utils.next_n(read_io, n=200),
@@ -463,9 +484,6 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
         # 1/3 the maximum volume size in one node (preferring more nodes
         # with smaller volumes)
         max_size = drive.max_size_gib / 3
-        if max_attached_disk_gib is not None:
-            max_size = max_attached_disk_gib
-
         if ebs_gib > max_size > 0:
             ratio = ebs_gib / max_size
             count = max(cluster_size(math.ceil(count * ratio)), min_count)
