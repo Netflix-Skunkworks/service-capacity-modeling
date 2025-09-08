@@ -1,5 +1,8 @@
 # pylint: disable=too-many-lines
 import logging
+from typing import Any
+
+from pydantic import TypeAdapter
 
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import AccessPattern
@@ -14,6 +17,7 @@ from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import DriveType
+from service_capacity_modeling.interface import ExcludeUnsetModel
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
@@ -1184,3 +1188,361 @@ def test_non_ebs_force_horizontal():
 
     for lr in cap_plan:
         print(lr.candidate_clusters.zonal[0])
+
+
+class PlanningInput(ExcludeUnsetModel):
+    regions: list[str]
+    desires: CapacityDesires
+    extra_model_arguments: dict[str, Any]
+    # Unused field for devs to understand how the request was constructed
+    context: dict[str, Any] | None = None
+
+    def plan(self):
+        return planner.plan_certain(
+            model_name="org.netflix.kafka",
+            region=self.regions[0],
+            num_results=3,
+            num_regions=4,
+            desires=self.desires,
+            extra_model_arguments=self.extra_model_arguments,
+        )
+
+
+test_blob = """
+{
+  "regions": [
+    "us-east-1"
+  ],
+  "desires": {
+    "service_tier": 1,
+    "query_pattern": {
+      "access_pattern": "latency",
+      "access_consistency": {
+        "same_region": {
+          "target_consistency": null,
+          "staleness_slo_sec": {
+            "low": 0,
+            "mid": 0.1,
+            "high": 1,
+            "confidence": 1,
+            "model_with": "beta",
+            "allow_simulate": false,
+            "minimum_value": null,
+            "maximum_value": null
+          }
+        },
+        "cross_region": {
+          "target_consistency": null,
+          "staleness_slo_sec": {
+            "low": 10,
+            "mid": 60,
+            "high": 600,
+            "confidence": 1,
+            "model_with": "beta",
+            "allow_simulate": false,
+            "minimum_value": null,
+            "maximum_value": null
+          }
+        }
+      },
+      "estimated_read_per_second": {
+        "low": 3.424604762980999,
+        "mid": 3.9231941764982463,
+        "high": 4,
+        "confidence": 1,
+        "model_with": "beta",
+        "allow_simulate": true,
+        "minimum_value": null,
+        "maximum_value": null
+      },
+      "estimated_write_per_second": {
+        "low": 1,
+        "mid": 1,
+        "high": 1,
+        "confidence": 0.98,
+        "model_with": "beta",
+        "allow_simulate": true,
+        "minimum_value": null,
+        "maximum_value": null
+      },
+      "estimated_mean_read_latency_ms": {
+        "low": 1,
+        "mid": 1,
+        "high": 1,
+        "confidence": 1,
+        "model_with": "beta",
+        "allow_simulate": true,
+        "minimum_value": null,
+        "maximum_value": null
+      },
+      "estimated_mean_write_latency_ms": {
+        "low": 1,
+        "mid": 1,
+        "high": 1,
+        "confidence": 1,
+        "model_with": "beta",
+        "allow_simulate": true,
+        "minimum_value": null,
+        "maximum_value": null
+      },
+      "estimated_mean_read_size_bytes": {
+        "low": 1024,
+        "mid": 1024,
+        "high": 1024,
+        "confidence": 1,
+        "model_with": "beta",
+        "allow_simulate": true,
+        "minimum_value": null,
+        "maximum_value": null
+      },
+      "estimated_mean_write_size_bytes": {
+        "low": 18500944.360506184,
+        "mid": 994809143.9717082,
+        "high": 1716676785.3169494,
+        "confidence": 0.98,
+        "model_with": "beta",
+        "allow_simulate": true,
+        "minimum_value": null,
+        "maximum_value": null
+      },
+      "estimated_read_parallelism": {
+        "low": 1,
+        "mid": 1,
+        "high": 1,
+        "confidence": 1,
+        "model_with": "beta",
+        "allow_simulate": true,
+        "minimum_value": null,
+        "maximum_value": null
+      },
+      "estimated_write_parallelism": {
+        "low": 1,
+        "mid": 1,
+        "high": 1,
+        "confidence": 1,
+        "model_with": "beta",
+        "allow_simulate": true,
+        "minimum_value": null,
+        "maximum_value": null
+      },
+      "read_latency_slo_ms": {
+        "low": 0.4,
+        "mid": 4,
+        "high": 10,
+        "confidence": 0.98,
+        "model_with": "beta",
+        "allow_simulate": false,
+        "minimum_value": null,
+        "maximum_value": null
+      },
+      "write_latency_slo_ms": {
+        "low": 0.4,
+        "mid": 4,
+        "high": 10,
+        "confidence": 0.98,
+        "model_with": "beta",
+        "allow_simulate": false,
+        "minimum_value": null,
+        "maximum_value": null
+      }
+    },
+    "data_shape": {
+      "estimated_state_size_gib": {
+        "low": 19648.113148752847,
+        "mid": 48897.53595507853,
+        "high": 59691.70344924928,
+        "confidence": 1,
+        "model_with": "beta",
+        "allow_simulate": false,
+        "minimum_value": null,
+        "maximum_value": null
+      },
+      "estimated_state_item_count": null,
+      "estimated_working_set_percent": null,
+      "estimated_compression_ratio": {
+        "low": 1,
+        "mid": 1,
+        "high": 1,
+        "confidence": 1,
+        "model_with": "beta",
+        "allow_simulate": true,
+        "minimum_value": null,
+        "maximum_value": null
+      },
+      "reserved_instance_app_mem_gib": 2,
+      "reserved_instance_system_mem_gib": 1,
+      "durability_slo_order": {
+        "low": 1000,
+        "mid": 10000,
+        "high": 100000,
+        "confidence": 0.98,
+        "model_with": "beta",
+        "allow_simulate": false,
+        "minimum_value": null,
+        "maximum_value": null
+      }
+    },
+    "current_clusters": {
+      "zonal": [
+        {
+          "cluster_instance_name": "r7a.2xlarge",
+          "cluster_instance": null,
+          "cluster_drive": {
+            "name": "gp3",
+            "drive_type": "attached-ssd",
+            "size_gib": 4350,
+            "read_io_per_s": null,
+            "write_io_per_s": null,
+            "throughput": null,
+            "single_tenant": true,
+            "max_scale_size_gib": 0,
+            "max_scale_io_per_s": 0,
+            "block_size_kib": 4,
+            "group_size_kib": 4,
+            "lifecycle": "stable",
+            "compatible_families": [],
+            "annual_cost_per_gib": 0,
+            "annual_cost_per_read_io": [],
+            "annual_cost_per_write_io": [],
+            "read_io_latency_ms": {
+              "low": 0.8,
+              "mid": 1,
+              "high": 2,
+              "confidence": 0.9,
+              "model_with": "beta",
+              "allow_simulate": false,
+              "minimum_value": null,
+              "maximum_value": null
+            },
+            "write_io_latency_ms": {
+              "low": 0.6,
+              "mid": 2,
+              "high": 3,
+              "confidence": 0.9,
+              "model_with": "beta",
+              "allow_simulate": false,
+              "minimum_value": null,
+              "maximum_value": null
+            },
+            "annual_cost": 0
+          },
+          "cluster_instance_count": {
+            "low": 23,
+            "mid": 23,
+            "high": 23,
+            "confidence": 1,
+            "model_with": "beta",
+            "allow_simulate": true,
+            "minimum_value": null,
+            "maximum_value": null
+          },
+          "cpu_utilization": {
+            "low": 5.075449556721986,
+            "mid": 9.885813697428473,
+            "high": 14.976325733265925,
+            "confidence": 1,
+            "model_with": "beta",
+            "allow_simulate": true,
+            "minimum_value": null,
+            "maximum_value": null
+          },
+          "memory_utilization_gib": {
+            "low": 0,
+            "mid": 0,
+            "high": 0,
+            "confidence": 1,
+            "model_with": "beta",
+            "allow_simulate": true,
+            "minimum_value": null,
+            "maximum_value": null
+          },
+          "network_utilization_mbps": {
+            "low": 302.65452242254446,
+            "mid": 687.4712410197809,
+            "high": 1119.570789256165,
+            "confidence": 1,
+            "model_with": "beta",
+            "allow_simulate": true,
+            "minimum_value": null,
+            "maximum_value": null
+          },
+          "disk_utilization_gib": {
+            "low": 389.99999661951597,
+            "mid": 626.6531370364696,
+            "high": 880.1773931084945,
+            "confidence": 1,
+            "model_with": "beta",
+            "allow_simulate": true,
+            "minimum_value": null,
+            "maximum_value": null
+          }
+        }
+      ],
+      "regional": [],
+      "services": []
+    },
+    "buffers": {
+      "default": {
+        "ratio": 1.5,
+        "intent": "desired",
+        "components": [
+          "compute"
+        ],
+        "sources": {}
+      },
+      "desired": {
+        "compute": {
+          "ratio": 2.5,
+          "intent": "desired",
+          "components": [
+            "compute"
+          ],
+          "sources": {}
+        },
+        "storage": {
+          "ratio": 2,
+          "intent": "desired",
+          "components": [
+            "storage"
+          ],
+          "sources": {}
+        }
+      },
+      "derived": {}
+    }
+  },
+  "extra_model_arguments": {
+    "cluster_type": "high-availability",
+    "retention": "PT8H",
+    "context": "fleet analysis from AG.kafka",
+    "context-memo": "fleet analysis from AG.kafka",
+    "nflx-sensitivedata": false,
+    "required_zone_size": 23,
+    "require_attached_disks": true
+  },
+  "allowed_lifecycles": [
+    "beta",
+    "stable"
+  ]
+}
+"""
+type_adapter = TypeAdapter(PlanningInput)
+test_input = type_adapter.validate_json(test_blob)
+scale = 1.35
+test_input.desires.buffers.derived = {
+    "scale_compute": Buffer(
+        ratio=scale, intent=BufferIntent.scale, components=[BufferComponent.compute]
+    ),
+    "scale_storage": Buffer(
+        ratio=scale, intent=BufferIntent.scale, components=[BufferComponent.storage]
+    ),
+}
+
+
+def test_my_node_density():
+    assert test_input is not None
+    plan = test_input.plan()
+    assert plan
+    result = plan[0].candidate_clusters.zonal[0]
+    assert result.count == 23
+    assert result.instance.name == "r7a.4xlarge"
