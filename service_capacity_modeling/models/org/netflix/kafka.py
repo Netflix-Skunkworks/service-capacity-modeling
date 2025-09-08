@@ -489,9 +489,22 @@ class NflxKafkaCapacityModel(CapacityModel):
 
         max_regional_size: int = extra_model_arguments.get("max_regional_size", 150)
         # Very large nodes are hard to cache warm
+
+        # Tier 1+ clusters have less buffer so they can run a little bit hotter per node
+        # For maintaining the same density:
+        # - tier0: 2TB/node * 2.5buffer = 5TB node density maximum.
+        # - tier1: 2.5TB/node * 2.0buffer = 5TB node density maximum
+        default_max_data_per_node_gib = (
+            1024 * 2 if desires.service_tier == 0 else 1024 * 2.5
+        )
         max_local_data_per_node_gib: int = extra_model_arguments.get(
             "max_local_data_per_node_gib",
-            extra_model_arguments.get("max_local_disk_gib", 1024 * 2),
+            extra_model_arguments.get(
+                "max_local_disk_gib", default_max_data_per_node_gib
+            ),
+        )
+        max_attached_data_per_node_gib: int = extra_model_arguments.get(
+            "max_attached_data_per_node_gib", default_max_data_per_node_gib
         )
         min_instance_cpu: int = extra_model_arguments.get("min_instance_cpu", 2)
         min_instance_memory_gib: int = extra_model_arguments.get(
@@ -525,6 +538,7 @@ class NflxKafkaCapacityModel(CapacityModel):
             required_zone_size=required_zone_size,
             max_regional_size=max_regional_size,
             max_local_data_per_node_gib=max_local_data_per_node_gib,
+            max_attached_data_per_node_gib=max_attached_data_per_node_gib,
             min_instance_cpu=min_instance_cpu,
             min_instance_memory_gib=min_instance_memory_gib,
             hot_retention_seconds=hot_retention_seconds,
