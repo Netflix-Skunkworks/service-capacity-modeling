@@ -6,6 +6,12 @@ from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.models.org.netflix.elasticsearch import (
+    NflxElasticsearchArguments,
+)
+from service_capacity_modeling.models.org.netflix.elasticsearch import (
+    NflxElasticsearchDataCapacityModel,
+)
 
 
 def test_es_increasing_qps_simple():
@@ -146,6 +152,78 @@ def test_es_simple_certain():
         )
         assert cluster_type_counts["elasticsearch-data"] >= 3, (
             "Expecting at least 3 data nodes"
+        )
+
+
+def test_es_simple_certain_state_size_only():
+    estimated_state_size_gib = 10_000
+    expected_allocated_disk_size_gib = (
+        NflxElasticsearchDataCapacityModel.default_buffers().default.ratio
+        * NflxElasticsearchArguments.model_fields.get("copies_per_region").default
+        * estimated_state_size_gib
+    )
+
+    simple = CapacityDesires(
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(
+                low=estimated_state_size_gib,
+                mid=estimated_state_size_gib,
+                high=estimated_state_size_gib,
+                confidence=1.0,
+            ),
+        ),
+    )
+
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.elasticsearch",
+        region="us-east-1",
+        desires=simple,
+    )
+
+    assert len(cap_plan) > 0, "Resulting cap_plan is empty"
+
+    for plan in cap_plan:
+        assert plan, "One or more plans is empty"
+        assert plan.candidate_clusters, "candidate_clusters is empty"
+        assert plan.candidate_clusters.zonal, "candidate_clusters.zonal is empty"
+        assert len(plan.candidate_clusters.zonal) == 9, (
+            "len(candidate_clusters.zonal) != 9"
+        )
+
+        cluster_type_counts = Counter(
+            zone.cluster_type for zone in plan.candidate_clusters.zonal
+        )
+
+        assert len(cluster_type_counts) == 3, "Expecting 3 cluster types"
+        assert cluster_type_counts["elasticsearch-search"] == 3, (
+            "Expecting exactly 3 search nodes"
+        )
+        assert cluster_type_counts["elasticsearch-master"] == 3, (
+            "Expecting exactly 3 master nodes"
+        )
+        assert cluster_type_counts["elasticsearch-data"] >= 3, (
+            "Expecting at least 3 data nodes"
+        )
+
+        # Verify total disk space for elasticsearch-data nodes
+        # exceeds expected_allocated_disk_size_gib
+        total_allocated_disk_gib = sum(
+            zone.count
+            * (
+                sum(dr.size_gib for dr in zone.attached_drives)
+                + (
+                    zone.instance.drive.size_gib
+                    if zone.instance.drive is not None
+                    else 0
+                )
+            )
+            for zone in plan.candidate_clusters.zonal
+            if zone.cluster_type == "elasticsearch-data"
+        )
+        assert total_allocated_disk_gib >= expected_allocated_disk_size_gib, (
+            f"Total disk space for elasticsearch-data nodes "
+            f"({total_allocated_disk_gib} GiB) must be greater than "
+            f"{expected_allocated_disk_size_gib} GiB"
         )
 
 
