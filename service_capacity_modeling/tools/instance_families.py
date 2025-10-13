@@ -1,9 +1,15 @@
 """Contains definitions for AWS instance families."""
+# These are _relative_ IPC values with Skylake as a baseline.
+# They are not targeted to a specific workload, but instead an average
+# typical value across a broad range of tests such as those used
+# in common online benchmarks.
 
 HSW_IPC = 0.85
 SKX_IPC = 1.0
-ICX_IPC = SKX_IPC * 1.15  # harshad says 1.15, chatgpt says 1.18
-SPR_IPC = ICX_IPC * 1.12  # harshad says 1.12, chatgpt says 1.19
+ICX_IPC = SKX_IPC * 1.15
+SPR_IPC = ICX_IPC * 1.12
+EMR_IPC = SPR_IPC * 1.03
+GNR_IPC = SPR_IPC * 1.10
 ROME_IPC = 1.03
 MILAN_IPC = SKX_IPC * 1.15
 GENOA_IPC = MILAN_IPC * 1.13
@@ -63,6 +69,13 @@ INSTANCE_TYPES = {
         "cpu_ipc_scale": SPR_IPC,
         "cpu_turbo_single_ghz": 3.8,
         "cpu_turbo_all_ghz": 3.2,
+    },
+    "c8i": {
+        "xl_iops": None,
+        "io_latency_curve": None,
+        "cpu_ipc_scale": GNR_IPC,
+        "cpu_turbo_single_ghz": 3.9,
+        "cpu_turbo_all_ghz": 3.9,
     },
     # "g4ad": {'xl_iops': None, 'io_latency_curve': 'ssd', 'cpu_ipc_scale': None},
     # "g4dn": {'xl_iops': None, 'io_latency_curve': 'ssd', 'cpu_ipc_scale': None},
@@ -168,6 +181,13 @@ INSTANCE_TYPES = {
         "cpu_turbo_single_ghz": 3.8,
         "cpu_turbo_all_ghz": 3.2,
     },
+    "m8i": {
+        "xl_iops": None,
+        "io_latency_curve": None,
+        "cpu_ipc_scale": GNR_IPC,
+        "cpu_turbo_single_ghz": 3.9,
+        "cpu_turbo_all_ghz": 3.9,
+    },
     # "mac2-m2pro": {'xl_iops': None, 'io_latency_curve': 'ssd', 'cpu_ipc_scale': None},
     # "p4d": {
     #     'xl_iops': None,
@@ -259,6 +279,13 @@ INSTANCE_TYPES = {
         "cpu_ipc_scale": SPR_IPC,
         "cpu_turbo_single_ghz": 3.8,
         "cpu_turbo_all_ghz": 3.2,
+    },
+    "r8i": {
+        "xl_iops": None,
+        "io_latency_curve": None,
+        "cpu_ipc_scale": GNR_IPC,
+        "cpu_turbo_single_ghz": 3.9,
+        "cpu_turbo_all_ghz": 3.9,
     },
     # "t3": {'xl_iops': None, 'io_latency_curve': 'ssd', 'cpu_ipc_scale': None},
     # "z1d": {'xl_iops': None, 'io_latency_curve': 'ssd', 'cpu_ipc_scale': None}

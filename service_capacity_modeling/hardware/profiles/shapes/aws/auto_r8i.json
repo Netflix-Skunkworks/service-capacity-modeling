@@ -1,0 +1,114 @@
+{
+  "instances": {
+    "r8i.large": {
+      "name": "r8i.large",
+      "cpu": 2,
+      "cpu_cores": 1,
+      "cpu_ghz": 3.9,
+      "cpu_ipc_scale": 1.42,
+      "ram_gib": 15.26,
+      "net_mbps": 937.0,
+      "drive": null
+    },
+    "r8i.xlarge": {
+      "name": "r8i.xlarge",
+      "cpu": 4,
+      "cpu_cores": 2,
+      "cpu_ghz": 3.9,
+      "cpu_ipc_scale": 1.42,
+      "ram_gib": 30.52,
+      "net_mbps": 1875.0,
+      "drive": null
+    },
+    "r8i.2xlarge": {
+      "name": "r8i.2xlarge",
+      "cpu": 8,
+      "cpu_cores": 4,
+      "cpu_ghz": 3.9,
+      "cpu_ipc_scale": 1.42,
+      "ram_gib": 61.04,
+      "net_mbps": 3750.0,
+      "drive": null
+    },
+    "r8i.4xlarge": {
+      "name": "r8i.4xlarge",
+      "cpu": 16,
+      "cpu_cores": 8,
+      "cpu_ghz": 3.9,
+      "cpu_ipc_scale": 1.42,
+      "ram_gib": 122.07,
+      "net_mbps": 7500.0,
+      "drive": null
+    },
+    "r8i.8xlarge": {
+      "name": "r8i.8xlarge",
+      "cpu": 32,
+      "cpu_cores": 16,
+      "cpu_ghz": 3.9,
+      "cpu_ipc_scale": 1.42,
+      "ram_gib": 244.14,
+      "net_mbps": 15000.0,
+      "drive": null
+    },
+    "r8i.12xlarge": {
+      "name": "r8i.12xlarge",
+      "cpu": 48,
+      "cpu_cores": 24,
+      "cpu_ghz": 3.9,
+      "cpu_ipc_scale": 1.42,
+      "ram_gib": 366.21,
+      "net_mbps": 22500.0,
+      "drive": null
+    },
+    "r8i.16xlarge": {
+      "name": "r8i.16xlarge",
+      "cpu": 64,
+      "cpu_cores": 32,
+      "cpu_ghz": 3.9,
+      "cpu_ipc_scale": 1.42,
+      "ram_gib": 488.28,
+      "net_mbps": 30000.0,
+      "drive": null
+    },
+    "r8i.24xlarge": {
+      "name": "r8i.24xlarge",
+      "cpu": 96,
+      "cpu_cores": 48,
+      "cpu_ghz": 3.9,
+      "cpu_ipc_scale": 1.42,
+      "ram_gib": 732.42,
+      "net_mbps": 40000.0,
+      "drive": null
+    },
+    "r8i.32xlarge": {
+      "name": "r8i.32xlarge",
+      "cpu": 128,
+      "cpu_cores": 64,
+      "cpu_ghz": 3.9,
+      "cpu_ipc_scale": 1.42,
+      "ram_gib": 976.56,
+      "net_mbps": 50000.0,
+      "drive": null
+    },
+    "r8i.48xlarge": {
+      "name": "r8i.48xlarge",
+      "cpu": 192,
+      "cpu_cores": 96,
+      "cpu_ghz": 3.9,
+      "cpu_ipc_scale": 1.42,
+      "ram_gib": 1464.84,
+      "net_mbps": 75000.0,
+      "drive": null
+    },
+    "r8i.96xlarge": {
+      "name": "r8i.96xlarge",
+      "cpu": 384,
+      "cpu_cores": 192,
+      "cpu_ghz": 3.9,
+      "cpu_ipc_scale": 1.42,
+      "ram_gib": 2929.69,
+      "net_mbps": 100000.0,
+      "drive": null
+    }
+  }
+}
