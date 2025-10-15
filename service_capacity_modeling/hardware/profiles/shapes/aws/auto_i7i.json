@@ -103,7 +103,7 @@
       "cpu_ghz": 2.4,
       "cpu_ipc_scale": 1.33,
       "ram_gib": 244.14,
-      "net_mbps": 12500.0,
+      "net_mbps": 15000.0,
       "drive": {
         "name": "ephem",
         "size_gib": 6985,
@@ -127,7 +127,7 @@
       "cpu_ghz": 2.4,
       "cpu_ipc_scale": 1.33,
       "ram_gib": 366.21,
-      "net_mbps": 14063.0,
+      "net_mbps": 22500.0,
       "drive": {
         "name": "ephem",
         "size_gib": 10477,
@@ -151,7 +151,7 @@
       "cpu_ghz": 2.4,
       "cpu_ipc_scale": 1.33,
       "ram_gib": 488.28,
-      "net_mbps": 18750.0,
+      "net_mbps": 30000.0,
       "drive": {
         "name": "ephem",
         "size_gib": 13970,
@@ -175,7 +175,7 @@
       "cpu_ghz": 2.4,
       "cpu_ipc_scale": 1.33,
       "ram_gib": 732.42,
-      "net_mbps": 28125.0,
+      "net_mbps": 45000.0,
       "drive": {
         "name": "ephem",
         "size_gib": 20955,
@@ -199,7 +199,7 @@
       "cpu_ghz": 2.4,
       "cpu_ipc_scale": 1.33,
       "ram_gib": 1464.84,
-      "net_mbps": 56250.0,
+      "net_mbps": 90000.0,
       "drive": {
         "name": "ephem",
         "size_gib": 41910,
