@@ -196,9 +196,9 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
     def default_desires(
         user_desires, extra_model_arguments: Dict[str, Any]
     ) -> CapacityDesires:
-        return CapacityDesires(
-            buffers=NflxElasticsearchDataCapacityModel.default_buffers()
-        )
+        desires = CapacityModel.default_desires(user_desires, extra_model_arguments)
+        desires.buffers = NflxElasticsearchDataCapacityModel.default_buffers()
+        return desires
 
     @staticmethod
     def capacity_plan(
