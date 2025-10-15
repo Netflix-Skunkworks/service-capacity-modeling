@@ -23,6 +23,14 @@ from service_capacity_modeling.interface import normalized_aws_size
 
 # Default latency curves from FIO testing per generation
 latency_curve_ms: Dict[str, FixedInterval] = {
+    "7th-gen-ephemeral": FixedInterval(
+        low=0.071,
+        mid=0.079,
+        high=0.258,
+        confidence=0.9,
+        minimum_value=0.026,
+        maximum_value=2.153,
+    ),
     "6th-gen-ssd": FixedInterval(
         low=0.1,
         mid=0.125,
@@ -60,10 +68,12 @@ aws_xlarge_iops = {
     "c6id": (67_083, 33_542),
     "c7gd": (67_083, 33_542),
     # Storage has more
+    # https://docs.aws.amazon.com/ec2/latest/instancetypes/so.html#so_instance-store
     "i3": (206_250, 70_000),
     "i3en": (85_000, 65_000),
     "i4g": (62_500, 50_000),
     "i4i": (100_000, 55_000),
+    "i7i": (150_000, 82_500),
     "i7ie": (108_333, 86_666),
     "i8g": (150_000, 82_500),
 }
