@@ -1,24 +1,27 @@
-"""Contains definitions for AWS instance families."""
+# Contains definitions for AWS instance families.
 # These are _relative_ IPC values with Skylake as a baseline.
 # They are not targeted to a specific workload, but instead an average
 # typical value across a broad range of tests such as those used
 # in common online benchmarks.
+#
+# Intel
+HASWELL_IPC = 0.85
+SKYLAKE_IPC = 1.0
+ICELAKE_IPC = SKYLAKE_IPC * 1.15
+SAPPHIRE_RAPIDS_IPC = ICELAKE_IPC * 1.12
+EMERALD_RAPIDS_IPC = SAPPHIRE_RAPIDS_IPC * 1.03
+GRANITE_RAPIDS_IPC = SAPPHIRE_RAPIDS_IPC * 1.10
 
-HSW_IPC = 0.85
-SKX_IPC = 1.0
-ICX_IPC = SKX_IPC * 1.15
-SPR_IPC = ICX_IPC * 1.12
-EMR_IPC = SPR_IPC * 1.03
-GNR_IPC = SPR_IPC * 1.10
+# AMD
 ROME_IPC = 1.03
-MILAN_IPC = SKX_IPC * 1.15
+MILAN_IPC = SKYLAKE_IPC * 1.15
 GENOA_IPC = MILAN_IPC * 1.13
 
 INSTANCE_TYPES = {
     "c5": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": SKX_IPC,
+        "cpu_ipc_scale": SKYLAKE_IPC,
         "cpu_turbo_single_ghz": 3.9,
         "cpu_turbo_all_ghz": 3.6,
     },
@@ -30,12 +33,12 @@ INSTANCE_TYPES = {
     "c5d": {
         "xl_iops": None,
         "io_latency_curve": "5th-gen-ssd",
-        "cpu_ipc_scale": SKX_IPC,
+        "cpu_ipc_scale": SKYLAKE_IPC,
     },  # no spinnaker
     "c5n": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": SKX_IPC,
+        "cpu_ipc_scale": SKYLAKE_IPC,
         "cpu_turbo_single_ghz": 3.5,
         "cpu_turbo_all_ghz": 3.4,
     },  # no spinnaker
@@ -47,14 +50,14 @@ INSTANCE_TYPES = {
     "c6i": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": ICX_IPC,
+        "cpu_ipc_scale": ICELAKE_IPC,
         "cpu_turbo_single_ghz": 3.5,
         "cpu_turbo_all_ghz": 3.5,
     },
     "c6id": {
         "xl_iops": None,
         "io_latency_curve": "6th-gen-ssd",
-        "cpu_ipc_scale": ICX_IPC,
+        "cpu_ipc_scale": ICELAKE_IPC,
     },  # no spinnaker
     "c7a": {
         "xl_iops": None,
@@ -66,14 +69,14 @@ INSTANCE_TYPES = {
     "c7i": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": SPR_IPC,
+        "cpu_ipc_scale": SAPPHIRE_RAPIDS_IPC,
         "cpu_turbo_single_ghz": 3.8,
         "cpu_turbo_all_ghz": 3.2,
     },
     "c8i": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": GNR_IPC,
+        "cpu_ipc_scale": GRANITE_RAPIDS_IPC,
         "cpu_turbo_single_ghz": 3.9,
         "cpu_turbo_all_ghz": 3.9,
     },
@@ -101,14 +104,14 @@ INSTANCE_TYPES = {
     "m4": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": HSW_IPC,
+        "cpu_ipc_scale": HASWELL_IPC,
         "cpu_turbo_single_ghz": 3.0,
         "cpu_turbo_all_ghz": 2.6,
     },  # all-core is a guess
     "m5": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": SKX_IPC,
+        "cpu_ipc_scale": SKYLAKE_IPC,
         "cpu_turbo_single_ghz": 3.5,
         "cpu_turbo_all_ghz": 3.1,
     },
@@ -116,21 +119,21 @@ INSTANCE_TYPES = {
     # "m5d": {
     #     'xl_iops': None,
     #     'io_latency_curve': '5th-gen-ssd',
-    #     'cpu_ipc_scale': SKX_IPC,
+    #     'cpu_ipc_scale': SKYLAKE_IPC,
     #     'cpu_turbo_single_ghz': 3.5,
     #     'cpu_turbo_all_ghz': 3.1
     # },
     # "m5dn": {
     #     'xl_iops': None,
     #     'io_latency_curve': '5th-gen-ssd',
-    #     'cpu_ipc_scale': SKX_IPC,
+    #     'cpu_ipc_scale': SKYLAKE_IPC,
     #     'cpu_turbo_single_ghz': 3.5,
     #     'cpu_turbo_all_ghz': 3.1
     # },
     "m5n": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": SKX_IPC,
+        "cpu_ipc_scale": SKYLAKE_IPC,
         "cpu_turbo_single_ghz": 3.5,
         "cpu_turbo_all_ghz": 3.1,
     },
@@ -149,21 +152,21 @@ INSTANCE_TYPES = {
     "m6i": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": ICX_IPC,
+        "cpu_ipc_scale": ICELAKE_IPC,
         "cpu_turbo_single_ghz": 3.5,
         "cpu_turbo_all_ghz": 3.5,
     },
     "m6id": {
         "xl_iops": None,
         "io_latency_curve": "6th-gen-ssd",
-        "cpu_ipc_scale": ICX_IPC,
+        "cpu_ipc_scale": ICELAKE_IPC,
         "cpu_turbo_single_ghz": 3.5,
         "cpu_turbo_all_ghz": 3.5,
     },
     "m6idn": {
         "xl_iops": None,
         "io_latency_curve": "6th-gen-ssd",
-        "cpu_ipc_scale": ICX_IPC,
+        "cpu_ipc_scale": ICELAKE_IPC,
         "cpu_turbo_single_ghz": 3.5,
         "cpu_turbo_all_ghz": 3.5,
     },
@@ -177,14 +180,14 @@ INSTANCE_TYPES = {
     "m7i": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": SPR_IPC,
+        "cpu_ipc_scale": SAPPHIRE_RAPIDS_IPC,
         "cpu_turbo_single_ghz": 3.8,
         "cpu_turbo_all_ghz": 3.2,
     },
     "m8i": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": GNR_IPC,
+        "cpu_ipc_scale": GRANITE_RAPIDS_IPC,
         "cpu_turbo_single_ghz": 3.9,
         "cpu_turbo_all_ghz": 3.9,
     },
@@ -212,14 +215,14 @@ INSTANCE_TYPES = {
     "r4": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": HSW_IPC,
+        "cpu_ipc_scale": HASWELL_IPC,
         "cpu_turbo_single_ghz": 3.0,
         "cpu_turbo_all_ghz": 2.6,
     },  # all-core is a guess
     "r5": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": SKX_IPC,
+        "cpu_ipc_scale": SKYLAKE_IPC,
         "cpu_turbo_single_ghz": 3.5,
         "cpu_turbo_all_ghz": 3.1,
     },
@@ -227,21 +230,21 @@ INSTANCE_TYPES = {
     # "r5d": {
     #     "xl_iops": None,
     #     "io_latency_curve": "5th-gen-ssd",
-    #     "cpu_ipc_scale": SKX_IPC,
+    #     "cpu_ipc_scale": SKYLAKE_IPC,
     #     "cpu_turbo_single_ghz": 3.5,
     #     "cpu_turbo_all_ghz": 3.1,
     # },
     # "r5dn": {
     #     "xl_iops": None,
     #     "io_latency_curve": "5th-gen-ssd",
-    #     "cpu_ipc_scale": SKX_IPC,
+    #     "cpu_ipc_scale": SKYLAKE_IPC,
     #     "cpu_turbo_single_ghz": 3.5,
     #     "cpu_turbo_all_ghz": 3.1,
     # },
     "r5n": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": SKX_IPC,
+        "cpu_ipc_scale": SKYLAKE_IPC,
         "cpu_turbo_single_ghz": 3.5,
         "cpu_turbo_all_ghz": 3.1,
     },
@@ -255,14 +258,14 @@ INSTANCE_TYPES = {
     "r6i": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": ICX_IPC,
+        "cpu_ipc_scale": ICELAKE_IPC,
         "cpu_turbo_single_ghz": 3.5,
         "cpu_turbo_all_ghz": 3.5,
     },
     "r6id": {
         "xl_iops": None,
         "io_latency_curve": "6th-gen-ssd",
-        "cpu_ipc_scale": ICX_IPC,
+        "cpu_ipc_scale": ICELAKE_IPC,
         "cpu_turbo_single_ghz": 3.5,
         "cpu_turbo_all_ghz": 3.5,
     },
@@ -276,14 +279,14 @@ INSTANCE_TYPES = {
     "r7i": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": SPR_IPC,
+        "cpu_ipc_scale": SAPPHIRE_RAPIDS_IPC,
         "cpu_turbo_single_ghz": 3.8,
         "cpu_turbo_all_ghz": 3.2,
     },
     "r8i": {
         "xl_iops": None,
         "io_latency_curve": None,
-        "cpu_ipc_scale": GNR_IPC,
+        "cpu_ipc_scale": GRANITE_RAPIDS_IPC,
         "cpu_turbo_single_ghz": 3.9,
         "cpu_turbo_all_ghz": 3.9,
     },
