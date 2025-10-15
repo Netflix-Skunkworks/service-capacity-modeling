@@ -29,7 +29,9 @@ def build_command(family: str, params: Dict[str, Any], output_path: Path) -> lis
         cmd.extend(["--io-latency-curve", params["io_latency_curve"]])
 
     if params.get("cpu_ipc_scale") is not None:
-        cmd.extend(["--cpu-ipc-scale", str(params["cpu_ipc_scale"])])
+        cpu_ipc_scale = float(params["cpu_ipc_scale"])
+        rounded_cpu_ipc_scale = float(f"{cpu_ipc_scale:.2f}")
+        cmd.extend(["--cpu-ipc-scale", str(rounded_cpu_ipc_scale)])
 
     # Add output path
     cmd.extend(["--output-path", str(output_path)])
