@@ -2,16 +2,16 @@ from collections import Counter
 from collections import defaultdict
 
 from service_capacity_modeling.capacity_planner import planner
+from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.org.netflix.elasticsearch import (
     NflxElasticsearchArguments,
 )
-from service_capacity_modeling.models.org.netflix.elasticsearch import (
-    NflxElasticsearchDataCapacityModel,
-)
+from tests.util import assert_similar_compute
 
 
 def test_es_increasing_qps_simple():
@@ -67,6 +67,45 @@ def test_es_increasing_qps_simple():
         assert disk[0] <= disk[-1], (
             f"disk for {cluster_type} going down as QPS went up?"
         )
+
+
+def test_es_data_nodes():
+    state_size_per_zonal = 32000
+    simple = CapacityDesires(
+        service_tier=1,
+        data_shape=DataShape(
+            estimated_state_size_gib=certain_int(state_size_per_zonal)
+        ),
+    )
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.elasticsearch",
+        region="us-east-1",
+        desires=simple,
+    )
+    data_nodes = [
+        req
+        for req in cap_plan[0].candidate_clusters.zonal
+        if "elasticsearch-data" in req.cluster_type
+    ]
+    expected_disk_buffer = 1.33
+    max_data_per_node = 8192
+    expected_shape = shapes.instance("i3en.xlarge")
+    expected_nodes = (
+        state_size_per_zonal / expected_shape.drive.size_gib * expected_disk_buffer
+    )
+    for dn in data_nodes:
+        assert_similar_compute(
+            expected_shape=expected_shape,
+            expected_count=expected_nodes,
+            actual_shape=dn.instance,
+            actual_count=dn.count,
+        )
+        actual_disk_per_zone = dn.count * dn.instance.drive.size_gib
+        assert actual_disk_per_zone >= state_size_per_zonal * expected_disk_buffer
+
+        # Verify no more than max_data_per_node GiB of state per node
+        average_state_per_node = dn.instance.drive.size_gib / expected_disk_buffer
+        assert average_state_per_node <= max_data_per_node
 
 
 def test_es_simple_mean_percentiles():
@@ -158,7 +197,7 @@ def test_es_simple_certain():
 def test_es_simple_certain_state_size_only():
     estimated_state_size_gib = 10_000
     expected_allocated_disk_size_gib = (
-        NflxElasticsearchDataCapacityModel.default_buffers().default.ratio
+        1.33
         * NflxElasticsearchArguments.model_fields.get("copies_per_region").default
         * estimated_state_size_gib
     )
