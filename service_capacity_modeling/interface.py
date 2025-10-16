@@ -264,14 +264,14 @@ class Drive(ExcludeUnsetModel):
         return max(self.block_size_kib, self.group_size_kib)
 
     @property
-    def max_size_gib(self):
+    def max_size_gib(self) -> int:
         if self.max_scale_size_gib != 0:
             return self.max_scale_size_gib
         else:
             return self.size_gib
 
     @property
-    def max_io_per_s(self):
+    def max_io_per_s(self) -> int:
         if self.max_scale_io_per_s != 0:
             return self.max_scale_io_per_s
         else:
@@ -792,9 +792,27 @@ class BufferIntent(str, Enum):
     desired = "desired"
     # ratio on top of existing buffers to ensure exists. Generally combined
     # with a different desired buffer to ensure we don't just scale needlessly
+    # This means we can scale up or down as as long as we meet the desired buffer.
     scale = "scale"
-    # Ignore model preferences, just preserve existing buffers
+
+    # DEPRECATED: Use scale_up/scale_down instead
+    # Ignores model preferences, just preserve existing buffers
+    # We rarely actually want to do this since it can cause severe over provisioning
     preserve = "preserve"
+
+    # Scale up if necessary to meet the desired buffer.
+    # If the existing resource is over-provisioned, do not reduce the requirement.
+    # If under-provisioned, the requirement can be increased to meet the desired buffer.
+    # Example: need 20 cores but have 10 → scale up to 20 cores.
+    # Example 2: need 20 cores but have 40 → do not scale down and require at
+    # least 40 cores
+    scale_up = "scale_up"
+    # Scale down if necessary to meet the desired buffer.
+    # If the existing resource is under-provisioned, do not increase the requirement.
+    # If over-provisioned, the requirement can be decreased to meet the desired buffer.
+    # Example: need 20 cores but have 10 → maintain buffer and do not scale up.
+    # Example 2: need 20 cores but have 40 → scale down to 20 cores.
+    scale_down = "scale_down"
 
 
 class Buffer(ExcludeUnsetModel):
@@ -819,7 +837,6 @@ class Buffers(ExcludeUnsetModel):
             "compute": Buffer(ratio: 1.5),
         }
     )
-
     And then models layer in their buffers, for example if a workload
     requires 10 CPU cores, but the operator of that workload  likes to build in
     2x buffer for background work (20 cores provisioned), they would express that
