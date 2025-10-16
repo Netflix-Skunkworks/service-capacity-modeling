@@ -1,3 +1,4 @@
+import math
 from collections import Counter
 from collections import defaultdict
 
@@ -70,12 +71,10 @@ def test_es_increasing_qps_simple():
 
 
 def test_es_data_nodes():
-    state_size_per_zonal = 32000
+    state_size_per_zone = 32000
     simple = CapacityDesires(
         service_tier=1,
-        data_shape=DataShape(
-            estimated_state_size_gib=certain_int(state_size_per_zonal)
-        ),
+        data_shape=DataShape(estimated_state_size_gib=certain_int(state_size_per_zone)),
     )
     cap_plan = planner.plan_certain(
         model_name="org.netflix.elasticsearch",
@@ -90,8 +89,11 @@ def test_es_data_nodes():
     expected_disk_buffer = 1.33
     max_data_per_node = 8192
     expected_shape = shapes.instance("i3en.xlarge")
-    expected_nodes = (
-        state_size_per_zonal / expected_shape.drive.size_gib * expected_disk_buffer
+    expected_drive_size_gib = (
+        expected_shape.drive.size_gib if expected_shape.drive else 0
+    )
+    expected_nodes = math.ceil(
+        state_size_per_zone / expected_drive_size_gib * expected_disk_buffer
     )
     for dn in data_nodes:
         assert_similar_compute(
@@ -100,11 +102,11 @@ def test_es_data_nodes():
             actual_shape=dn.instance,
             actual_count=dn.count,
         )
-        actual_disk_per_zone = dn.count * dn.instance.drive.size_gib
-        assert actual_disk_per_zone >= state_size_per_zonal * expected_disk_buffer
+        actual_drive_size_gib = dn.instance.drive.size_gib if dn.instance.drive else 0
+        actual_disk_per_zone = dn.count * actual_drive_size_gib
+        assert actual_disk_per_zone >= state_size_per_zone * expected_disk_buffer
 
-        # Verify no more than max_data_per_node GiB of state per node
-        average_state_per_node = dn.instance.drive.size_gib / expected_disk_buffer
+        average_state_per_node = actual_drive_size_gib / expected_disk_buffer
         assert average_state_per_node <= max_data_per_node
 
 
@@ -198,7 +200,7 @@ def test_es_simple_certain_state_size_only():
     estimated_state_size_gib = 10_000
     expected_allocated_disk_size_gib = (
         1.33
-        * NflxElasticsearchArguments.model_fields.get("copies_per_region").default
+        * NflxElasticsearchArguments.model_fields["copies_per_region"].default
         * estimated_state_size_gib
     )
 
