@@ -9,6 +9,8 @@ from fractions import Fraction
 from functools import lru_cache
 from typing import Any
 from typing import Dict
+from typing import get_args
+from typing import get_origin
 from typing import List
 from typing import Optional
 from typing import Sequence
@@ -873,6 +875,62 @@ class CapacityDesires(ExcludeUnsetModel):
     # Note if you pass current_clusters you can express "I need the status quo"
     # by setting the buffers you want to preserve in buffers.derived
     buffers: Buffers = Buffers()
+
+    def validate_required_fields_set(self):
+        """Validate that all required fields have been explicitly set
+
+        This ensures that default_desires implementations in models explicitly
+        set all required fields rather than relying on defaults.
+        """
+        # Fields to skip validation for (deprecated or allowed to use defaults)
+        SKIP_FIELDS = {"service_tier"}
+
+        # Model types that are leaf value objects and shouldn't be recursed into
+        # These are primitive types that if set at all is considered valid
+        SKIP_TYPES = {"Interval", "FixedInterval", "Buffers", "Consistency"}
+
+        def validate_base_model_dfs(model: BaseModel, path: List[str]):
+            """Recursively validate that all required fields are explicitly set"""
+            fields_set = model.model_fields_set
+            validation_suffix = (
+                f" is required and must be explicitly set for "
+                f"{model.__class__.__name__}"
+            )
+
+            for field_name, field_info in model.__class__.model_fields.items():
+                # Skip fields in deny list
+                if field_name in SKIP_FIELDS:
+                    continue
+
+                # Skip optional/nullable fields (fields with Optional[...] type)
+                # Use typing.get_origin and get_args to check for Union with None
+                annotation = field_info.annotation
+                origin = get_origin(annotation)
+                if origin is Union:
+                    args = get_args(annotation)
+                    if type(None) in args:
+                        # This is an Optional field, skip it
+                        continue
+
+                # Build full path for error messages
+                full_path = ".".join(path + [field_name])
+
+                # Check if field was explicitly set
+                if field_name not in fields_set:
+                    raise ValueError(f"{full_path}{validation_suffix}")
+
+                # Recursively validate nested models (but skip leaf value objects)
+                field_value = getattr(model, field_name)
+                if isinstance(field_value, BaseModel):
+                    if (
+                        field_value.__class__ is Buffers
+                        and "default" not in field_value.model_fields_set
+                    ):
+                        raise ValueError(f"{full_path}.default{validation_suffix}")
+                    if field_value.__class__.__name__ not in SKIP_TYPES:
+                        validate_base_model_dfs(field_value, path + [field_name])
+
+        validate_base_model_dfs(self, [])
 
     @property
     def reference_shape(self) -> Instance:

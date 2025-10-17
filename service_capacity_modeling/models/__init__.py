@@ -109,6 +109,17 @@ class CapacityModel:
         (_, _, _, _, _) = (instance, drive, context, desires, extra_model_arguments)
         return None
 
+    def validate_implementation(self):
+        """Validate the implementation of the model"""
+        desires = self.default_desires(CapacityDesires(), {})
+        model_name = self.__class__.__name__
+        try:
+            desires.validate_required_fields_set()
+        except ValueError as ve:
+            raise ValueError(
+                f"Model {model_name} has invalid default_desires: {ve}"
+            ) from ve
+
     @staticmethod
     def regret(
         regret_params: CapacityRegretParameters,
