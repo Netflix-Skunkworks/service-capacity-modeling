@@ -895,52 +895,39 @@ class CapacityDesires(ExcludeUnsetModel):
         return default_reference_shape
 
     def merge_with(self, defaults: "CapacityDesires") -> "CapacityDesires":
-        default_dict = defaults.model_dump()
+        # Now merge with the models default
         desires_dict = self.model_dump()
+        default_dict = defaults.model_dump()
 
-        # Start with shallow merge: defaults first, then desires override
-        merged_dict = {**default_dict, **desires_dict}
+        default_dict.get("query_pattern", {}).update(
+            desires_dict.pop("query_pattern", {})
+        )
+        default_dict.get("data_shape", {}).update(desires_dict.pop("data_shape", {}))
 
-        # Fix nested structures that need deep merging
-        merged_dict["query_pattern"] = {
-            **default_dict.get("query_pattern", {}),
-            **desires_dict.get("query_pattern", {}),
-        }
-        merged_dict["data_shape"] = {
-            **default_dict.get("data_shape", {}),
-            **desires_dict.get("data_shape", {}),
-        }
-
-        # Deep merge buffers
-        default_buffers = default_dict.get("buffers", {})
-        desired_buffers = desires_dict.get("buffers", {})
-
-        merged_buffers = {}
-
-        # Only include "default" if it exists in either dict
+        # Buffers has deep structure we want to deep merge on
+        if "buffers" not in default_dict:
+            default_dict["buffers"] = {}
+        default_buffers = default_dict["buffers"]
+        desired_buffers = desires_dict.pop("buffers", {})
         if "default" in desired_buffers:
-            merged_buffers["default"] = desired_buffers["default"]
-        elif "default" in default_buffers:
-            merged_buffers["default"] = default_buffers["default"]
+            default_buffers["default"] = desired_buffers["default"]
+        for k, v in desired_buffers.get("desired", {}).items():
+            default_buffers["desired"][k] = v
 
-        # Deep merge desired and derived
-        merged_buffers["desired"] = {
-            **default_buffers.get("desired", {}),
-            **desired_buffers.get("desired", {}),
-        }
-        merged_buffers["derived"] = {
-            **default_buffers.get("derived", {}),
-            **desired_buffers.get("derived", {}),
-        }
+        default_buffers.setdefault("derived", {})
+        for k, v in desired_buffers.get("derived", {}).items():
+            default_buffers["derived"][k] = v
 
-        merged_dict["buffers"] = merged_buffers
+        default_dict.update(desires_dict)
 
-        desires = CapacityDesires(**merged_dict)
+        desires = CapacityDesires(**default_dict)
 
         # If user gave state item count but not size or size but not count
         # calculate the missing one from the other
-        user_size = desires_dict.get("data_shape", {}).get(
-            "estimated_state_size_gib", None
+        user_size = (
+            self.model_dump()
+            .get("data_shape", {})
+            .get("estimated_state_size_gib", None)
         )
         user_count = self.data_shape.estimated_state_item_count
         item_size_bytes = desires.query_pattern.estimated_mean_write_size_bytes.mid
