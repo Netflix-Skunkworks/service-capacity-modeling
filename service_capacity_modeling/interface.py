@@ -9,6 +9,8 @@ from fractions import Fraction
 from functools import lru_cache
 from typing import Any
 from typing import Dict
+from typing import get_args
+from typing import get_origin
 from typing import List
 from typing import Optional
 from typing import Sequence
@@ -874,6 +876,62 @@ class CapacityDesires(ExcludeUnsetModel):
     # by setting the buffers you want to preserve in buffers.derived
     buffers: Buffers = Buffers()
 
+    def validate_required_fields_set(self):
+        """Validate that all required fields have been explicitly set
+
+        This ensures that default_desires implementations in models explicitly
+        set all required fields rather than relying on defaults.
+        """
+        # Fields to skip validation for (deprecated or allowed to use defaults)
+        SKIP_FIELDS = {"service_tier"}
+
+        # Model types that are leaf value objects and shouldn't be recursed into
+        # These are primitive types that if set at all is considered valid
+        SKIP_TYPES = {"Interval", "FixedInterval", "Buffers", "Consistency"}
+
+        def validate_base_model_dfs(model: BaseModel, path: List[str]):
+            """Recursively validate that all required fields are explicitly set"""
+            fields_set = model.model_fields_set
+            validation_suffix = (
+                f" is required and must be explicitly set for "
+                f"{model.__class__.__name__}"
+            )
+
+            for field_name, field_info in model.__class__.model_fields.items():
+                # Skip fields in deny list
+                if field_name in SKIP_FIELDS:
+                    continue
+
+                # Skip optional/nullable fields (fields with Optional[...] type)
+                # Use typing.get_origin and get_args to check for Union with None
+                annotation = field_info.annotation
+                origin = get_origin(annotation)
+                if origin is Union:
+                    args = get_args(annotation)
+                    if type(None) in args:
+                        # This is an Optional field, skip it
+                        continue
+
+                # Build full path for error messages
+                full_path = ".".join(path + [field_name])
+
+                # Check if field was explicitly set
+                if field_name not in fields_set:
+                    raise ValueError(f"{full_path}{validation_suffix}")
+
+                # Recursively validate nested models (but skip leaf value objects)
+                field_value = getattr(model, field_name)
+                if isinstance(field_value, BaseModel):
+                    if (
+                        field_value.__class__ is Buffers
+                        and "default" not in field_value.model_fields_set
+                    ):
+                        raise ValueError(f"{full_path}.default{validation_suffix}")
+                    if field_value.__class__.__name__ not in SKIP_TYPES:
+                        validate_base_model_dfs(field_value, path + [field_name])
+
+        validate_base_model_dfs(self, [])
+
     @property
     def reference_shape(self) -> Instance:
         if not self.current_clusters:
@@ -895,39 +953,52 @@ class CapacityDesires(ExcludeUnsetModel):
         return default_reference_shape
 
     def merge_with(self, defaults: "CapacityDesires") -> "CapacityDesires":
-        # Now merge with the models default
-        desires_dict = self.model_dump()
         default_dict = defaults.model_dump()
+        desires_dict = self.model_dump()
 
-        default_dict.get("query_pattern", {}).update(
-            desires_dict.pop("query_pattern", {})
-        )
-        default_dict.get("data_shape", {}).update(desires_dict.pop("data_shape", {}))
+        # Start with shallow merge: defaults first, then desires override
+        merged_dict = {**default_dict, **desires_dict}
 
-        # Buffers has deep structure we want to deep merge on
-        if "buffers" not in default_dict:
-            default_dict["buffers"] = {}
-        default_buffers = default_dict["buffers"]
-        desired_buffers = desires_dict.pop("buffers", {})
+        # Fix nested structures that need deep merging
+        merged_dict["query_pattern"] = {
+            **default_dict.get("query_pattern", {}),
+            **desires_dict.get("query_pattern", {}),
+        }
+        merged_dict["data_shape"] = {
+            **default_dict.get("data_shape", {}),
+            **desires_dict.get("data_shape", {}),
+        }
+
+        # Deep merge buffers
+        default_buffers = default_dict.get("buffers", {})
+        desired_buffers = desires_dict.get("buffers", {})
+
+        merged_buffers = {}
+
+        # Only include "default" if it exists in either dict
         if "default" in desired_buffers:
-            default_buffers["default"] = desired_buffers["default"]
-        for k, v in desired_buffers.get("desired", {}).items():
-            default_buffers["desired"][k] = v
+            merged_buffers["default"] = desired_buffers["default"]
+        elif "default" in default_buffers:
+            merged_buffers["default"] = default_buffers["default"]
 
-        default_buffers.setdefault("derived", {})
-        for k, v in desired_buffers.get("derived", {}).items():
-            default_buffers["derived"][k] = v
+        # Deep merge desired and derived
+        merged_buffers["desired"] = {
+            **default_buffers.get("desired", {}),
+            **desired_buffers.get("desired", {}),
+        }
+        merged_buffers["derived"] = {
+            **default_buffers.get("derived", {}),
+            **desired_buffers.get("derived", {}),
+        }
 
-        default_dict.update(desires_dict)
+        merged_dict["buffers"] = merged_buffers
 
-        desires = CapacityDesires(**default_dict)
+        desires = CapacityDesires(**merged_dict)
 
         # If user gave state item count but not size or size but not count
         # calculate the missing one from the other
-        user_size = (
-            self.model_dump()
-            .get("data_shape", {})
-            .get("estimated_state_size_gib", None)
+        user_size = desires_dict.get("data_shape", {}).get(
+            "estimated_state_size_gib", None
         )
         user_count = self.data_shape.estimated_state_item_count
         item_size_bytes = desires.query_pattern.estimated_mean_write_size_bytes.mid

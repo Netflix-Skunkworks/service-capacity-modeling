@@ -24,6 +24,7 @@ from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import fixed_float
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
@@ -837,6 +838,14 @@ class NflxCassandraCapacityModel(CapacityModel):
                             target_consistency=AccessConsistency.eventual,
                         ),
                     ),
+                    estimated_read_per_second=Interval(
+                        low=128, mid=1024, high=2048, confidence=0.95
+                    ),
+                    estimated_write_per_second=Interval(
+                        low=64, mid=256, high=1024, confidence=0.95
+                    ),
+                    estimated_read_parallelism=certain_int(1),
+                    estimated_write_parallelism=certain_int(1),
                     estimated_mean_read_size_bytes=Interval(
                         low=128, mid=1024, high=65536, confidence=0.95
                     ),
@@ -885,6 +894,8 @@ class NflxCassandraCapacityModel(CapacityModel):
                     # We dynamically allocate the C* JVM memory in the plan
                     # but account for the Priam sidecar here
                     reserved_instance_app_mem_gib=4,
+                    reserved_instance_system_mem_gib=12,
+                    durability_slo_order=fixed_float(10000),
                 ),
                 buffers=buffers,
             )
@@ -915,6 +926,14 @@ class NflxCassandraCapacityModel(CapacityModel):
                     estimated_mean_write_latency_ms=Interval(
                         low=0.2, mid=0.6, high=2, confidence=0.98
                     ),
+                    estimated_read_per_second=Interval(
+                        low=128, mid=1024, high=2048, confidence=0.95
+                    ),
+                    estimated_write_per_second=Interval(
+                        low=64, mid=256, high=1024, confidence=0.95
+                    ),
+                    estimated_read_parallelism=certain_int(1),
+                    estimated_write_parallelism=certain_int(1),
                     # Assume they're scanning -> slow reads
                     read_latency_slo_ms=FixedInterval(
                         minimum_value=1,
@@ -945,6 +964,8 @@ class NflxCassandraCapacityModel(CapacityModel):
                     # We dynamically allocate the C* JVM memory in the plan
                     # but account for the Priam sidecar here
                     reserved_instance_app_mem_gib=4,
+                    reserved_instance_system_mem_gib=12,
+                    durability_slo_order=fixed_float(10000),
                 ),
                 buffers=buffers,
             )
