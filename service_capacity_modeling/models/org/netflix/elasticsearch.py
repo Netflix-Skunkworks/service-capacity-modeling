@@ -82,6 +82,11 @@ def _estimate_elasticsearch_requirement(  # noqa: E501 pylint: disable=too-many-
     The input desires should be the **regional** desire, and this function will
     return the zonal capacity requirement
     """
+    # NOTE: ElasticSearch is only using buffers for disk but CPU and disk
+    # have hard coded values. In a follow-up change these values (1.5 and 2)
+    # should be converted to buffers as well to be idiomatic with the other
+    # stateful models (e.g. cassandra / EVCache, kafka)
+
     # Keep half of the cores free for background work (merging mostly)
     needed_cores = normalize_cores(
         core_count=math.ceil(sqrt_staffed_cores(desires) * 1.5),
@@ -191,9 +196,9 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
     def default_desires(
         user_desires, extra_model_arguments: Dict[str, Any]
     ) -> CapacityDesires:
-        return CapacityDesires(
-            buffers=NflxElasticsearchDataCapacityModel.default_buffers()
-        )
+        desires = CapacityModel.default_desires(user_desires, extra_model_arguments)
+        desires.buffers = NflxElasticsearchDataCapacityModel.default_buffers()
+        return desires
 
     @staticmethod
     def capacity_plan(
