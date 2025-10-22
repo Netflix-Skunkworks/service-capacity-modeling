@@ -34,7 +34,6 @@ from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
-from service_capacity_modeling.models.common import get_memory_from_current_capacity
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
@@ -111,14 +110,11 @@ def calculate_vitals_for_capacity_planner(
         target_shape=instance,
         reference_shape=current_capacity.cluster_instance,
     )
-    needed_network_mbps = requirements.network
+    needed_network_mbps = requirements.network_mbps
     needed_disk_gib = (
         requirements.disk_gib if current_capacity.cluster_drive is not None else 0.0
     )
-
-    needed_memory_gib = get_memory_from_current_capacity(
-        current_capacity, desires.buffers
-    )
+    needed_memory_gib = requirements.mem_gib
     return needed_cores, needed_network_mbps, needed_memory_gib, needed_disk_gib
 
 

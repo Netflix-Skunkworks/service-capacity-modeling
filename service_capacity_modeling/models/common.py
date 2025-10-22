@@ -7,6 +7,7 @@ from typing import Callable
 from typing import Dict
 from typing import List
 from typing import Optional
+from typing import Set
 from typing import Tuple
 
 from pydantic import BaseModel
@@ -261,6 +262,30 @@ _default_buffer_fallbacks: Dict[str, List[str]] = {
 }
 
 
+def _expand_components(
+    components: List[str],
+    component_fallbacks: Optional[Dict[str, List[str]]] = None,
+) -> Set[str]:
+    """Expand and dedupe components to include their fallbacks
+
+    Args:
+        components: List of component names to expand
+        component_fallbacks: Optional fallback mapping (uses default if None)
+
+    Returns:
+        Set of expanded component names including fallbacks
+    """
+    if component_fallbacks is None:
+        component_fallbacks = _default_buffer_fallbacks
+
+    expanded_components = set(components)
+    for component in components:
+        expanded_components = expanded_components | set(
+            component_fallbacks.get(component, [])
+        )
+    return expanded_components
+
+
 def buffer_for_components(
     buffers: Buffers,
     components: List[str],
@@ -279,14 +304,7 @@ def buffer_for_components(
         components: the components that ultimately matched after applying
         source: All the component buffers that made up the composite ratio
     """
-    if component_fallbacks is None:
-        component_fallbacks = _default_buffer_fallbacks
-
-    unique_components = set(components)
-    for component in components:
-        unique_components = unique_components | set(
-            component_fallbacks.get(component, [])
-        )
+    expanded_components = _expand_components(components, component_fallbacks)
 
     desired = {k: v.model_copy() for k, v in buffers.desired.items()}
     if current_capacity:
@@ -300,14 +318,14 @@ def buffer_for_components(
     ratio = 1.0
     sources = {}
     for name, buffer in desired.items():
-        if any(i in unique_components for i in buffer.components):
+        if expanded_components.intersection(buffer.components):
             sources[name] = buffer
             ratio = combine_buffer_ratios(ratio, buffer.ratio)
     if not sources:
         ratio = buffers.default.ratio
 
     return Buffer(
-        ratio=ratio, components=sorted(list(unique_components)), sources=sources
+        ratio=ratio, components=sorted(list(expanded_components)), sources=sources
     )
 
 
@@ -752,7 +770,7 @@ def merge_plan(
 
 
 class DerivedBuffers(BaseModel):
-    scale: Optional[float] = Field(default=None, gt=0)
+    scale: float = Field(default=1, gt=0)
     preserve: bool = False
     # When present, this is the maximum ratio of the current usage
     ceiling: Optional[float] = Field(
@@ -763,24 +781,34 @@ class DerivedBuffers(BaseModel):
     floor: Optional[float] = Field(default=None, gt=0)
 
     @staticmethod
-    def for_components(buffer: Dict[str, Buffer], components: List[str]):
+    def for_components(
+        buffer: Dict[str, Buffer],
+        components: List[str],
+        component_fallbacks: Optional[Dict[str, List[str]]] = None,
+    ):
+        expanded_components = _expand_components(components, component_fallbacks)
+
         scale = 1.0
         preserve = False
         ceiling = None
         floor = None
 
         for bfr in buffer.values():
-            if any(component in components for component in bfr.components):
-                if bfr.intent == BufferIntent.scale:
-                    scale = combine_buffer_ratios(scale, bfr.ratio)
-                if bfr.intent == BufferIntent.preserve:
-                    preserve = True
-                if bfr.intent == BufferIntent.scale_up:
-                    scale = combine_buffer_ratios(scale, bfr.ratio)
-                    floor = 1  # Create a floor of 1.0x the current usage
-                if bfr.intent == BufferIntent.scale_down:
-                    scale = combine_buffer_ratios(scale, bfr.ratio)
-                    ceiling = 1  # Create a ceiling of 1.0x the current usage
+            if not expanded_components.intersection(bfr.components):
+                continue
+
+            if bfr.intent in [
+                BufferIntent.scale,
+                BufferIntent.scale_up,
+                BufferIntent.scale_down,
+            ]:
+                scale = combine_buffer_ratios(scale, bfr.ratio)
+            if bfr.intent == BufferIntent.scale_up:
+                floor = 1  # Create a floor of 1.0x the current usage
+            if bfr.intent == BufferIntent.scale_down:
+                ceiling = 1  # Create a ceiling of 1.0x the current usage
+            if bfr.intent == BufferIntent.preserve:
+                preserve = True
 
         return DerivedBuffers(
             scale=scale, preserve=preserve, ceiling=ceiling, floor=floor
@@ -795,40 +823,13 @@ class DerivedBuffers(BaseModel):
         if self.preserve:
             return existing_capacity
 
-        if self.scale is None:
-            requirement = current_usage * desired_buffer_ratio
-        else:
-            requirement = self.scale * current_usage * desired_buffer_ratio
-
+        requirement = self.scale * current_usage * desired_buffer_ratio
         if self.ceiling is not None:
             requirement = min(requirement, self.ceiling * existing_capacity)
-
         if self.floor is not None:
             requirement = max(requirement, self.floor * existing_capacity)
+
         return requirement
-
-
-# DEPRECATED: Use DerivedBuffers.for_components instead. Currently only used
-# for memory which is being replaced
-def derived_buffer_for_component(buffer: Dict[str, Buffer], components: List[str]):
-    scale = 0.0
-    preserve = False
-
-    if not buffer:
-        return scale, preserve
-
-    for bfr in buffer.values():
-        if any(component in components for component in bfr.components):
-            if bfr.intent == BufferIntent.scale:
-                scale = max(scale, bfr.ratio)
-            if bfr.intent == BufferIntent.preserve:
-                preserve = True
-
-    # TODO: Implement new scaling intents:
-    # - BufferIntent.scale_up: Scale up to meet demand but don't scale down
-    # - BufferIntent.scale_down: Allow scaling down to meet demand
-
-    return scale, preserve
 
 
 class RequirementFromCurrentCapacity(BaseModel):
@@ -848,7 +849,7 @@ class RequirementFromCurrentCapacity(BaseModel):
         )
 
         derived_buffers = DerivedBuffers.for_components(
-            self.buffers.derived, ["compute", "cpu"]
+            self.buffers.derived, [BufferComponent.cpu]
         )
 
         # The ideal CPU% that accomodates the headroom + desired buffer, sometimes
@@ -858,12 +859,36 @@ class RequirementFromCurrentCapacity(BaseModel):
         # > 1: scale up, < 1: scale down, = 1: no change needed
         used_cpu = (current_cpu_util / target_cpu_util) * current_total_cpu
         return math.ceil(
+            # Desired buffer is omitted because the cpu_headroom already
+            # includes it
             derived_buffers.calculate_requirement(
                 current_usage=used_cpu,
                 existing_capacity=current_total_cpu,
-                # Desired buffer is omitted because the cpu_headroom already
-                # takes it into account
             )
+        )
+
+    @property
+    def mem_gib(self) -> float:
+        current_memory_utilization = (
+            self.current_capacity.memory_utilization_gib.mid
+            * self.current_capacity.cluster_instance_count.mid
+        )
+        zonal_ram_allocated = (
+            self.current_instance.ram_gib
+            * self.current_capacity.cluster_instance_count.mid
+        )
+
+        desired_buffer = buffer_for_components(
+            buffers=self.buffers, components=[BufferComponent.memory]
+        )
+        derived_buffer = DerivedBuffers.for_components(
+            self.buffers.derived, [BufferComponent.memory]
+        )
+
+        return derived_buffer.calculate_requirement(
+            current_usage=current_memory_utilization,
+            existing_capacity=zonal_ram_allocated,
+            desired_buffer_ratio=desired_buffer.ratio,
         )
 
     @property
@@ -891,7 +916,7 @@ class RequirementFromCurrentCapacity(BaseModel):
         )
 
         derived_buffer = DerivedBuffers.for_components(
-            self.buffers.derived, ["storage", "disk"]
+            self.buffers.derived, [BufferComponent.disk]
         )
         required_disk = derived_buffer.calculate_requirement(
             current_usage=current_cluster_disk_util_gib,
@@ -901,7 +926,7 @@ class RequirementFromCurrentCapacity(BaseModel):
         return math.ceil(required_disk)
 
     @property
-    def network(self) -> int:
+    def network_mbps(self) -> int:
         current_network_utilization = (
             self.current_capacity.network_utilization_mbps.mid
             * self.current_capacity.cluster_instance_count.mid
@@ -916,7 +941,7 @@ class RequirementFromCurrentCapacity(BaseModel):
             buffers=self.buffers, components=[BufferComponent.network]
         )
         derived_buffer = DerivedBuffers.for_components(
-            self.buffers.derived, ["compute", "network"]
+            self.buffers.derived, [BufferComponent.network]
         )
 
         return math.ceil(
@@ -928,56 +953,11 @@ class RequirementFromCurrentCapacity(BaseModel):
         )
 
 
-def get_memory_from_current_capacity(
-    current_capacity: CurrentClusterCapacity, buffers: Buffers
-):
-    # compute memory required per zone
-    current_memory_utilization = (
-        current_capacity.memory_utilization_gib.mid
-        * current_capacity.cluster_instance_count.mid
-    )
-
-    if current_capacity.cluster_instance is None:
-        cluster_instance = shapes.instance(current_capacity.cluster_instance_name)
-    else:
-        cluster_instance = current_capacity.cluster_instance
-
-    zonal_ram_allocated = (
-        cluster_instance.ram_gib * current_capacity.cluster_instance_count.mid
-    )
-
-    # These are the desired buffers
-    memory_buffer = buffer_for_components(
-        buffers=buffers, components=[BufferComponent.memory]
-    )
-
-    # TODO: Replace with DerivedBuffers implementation which supports
-    #  scale_up / scale_down
-    scale, preserve = derived_buffer_for_component(
-        buffers.derived, ["memory", "storage"]
-    )
-    # Scale and preserve for the same component should not be passed together.
-    # If user passes it, then scale will be preferred over preserve.
-    if scale > 0:
-        # if the new required memory is less than the current,
-        # then take no action and return the current ram
-        return max(
-            current_memory_utilization * scale * memory_buffer.ratio,
-            zonal_ram_allocated,
-        )
-
-    if preserve:
-        return zonal_ram_allocated
-
-    return current_memory_utilization * memory_buffer.ratio
-
-
 def zonal_requirements_from_current(
     current_cluster: CurrentClusters,
     buffers: Buffers,
     instance: Instance,
     reference_shape: Instance,
-    max_disk_size_gib: float = float("inf"),
 ) -> CapacityRequirement:
     if current_cluster is not None and current_cluster.zonal[0] is not None:
         current_capacity: CurrentClusterCapacity = current_cluster.zonal[0]
@@ -986,8 +966,6 @@ def zonal_requirements_from_current(
         requirement = RequirementFromCurrentCapacity(
             current_capacity=current_capacity,
             buffers=buffers,
-            instance_candidate=instance,
-            max_size_gib=max_disk_size_gib,
         )
         normalized_cpu = _normalize_cpu(
             requirement.cpu(instance),
@@ -995,14 +973,9 @@ def zonal_requirements_from_current(
             reference_shape,
         )
 
-        needed_network_mbps = requirement.network
+        needed_network_mbps = requirement.network_mbps
         needed_disk_gib = requirement.disk_gib
-
-        # TODO: Memory should also be calculated via the requirement class
-        # so that it handles scale_up and scale_down. But since the memory
-        # calculation is not using the current utilization, this method is left
-        # as-is
-        needed_memory_gib = get_memory_from_current_capacity(current_capacity, buffers)
+        needed_memory_gib = requirement.mem_gib
 
         return CapacityRequirement(
             requirement_type="zonal-capacity",

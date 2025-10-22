@@ -35,7 +35,7 @@ from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
-from service_capacity_modeling.models.common import derived_buffer_for_component
+from service_capacity_modeling.models.common import DerivedBuffers
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
@@ -189,7 +189,6 @@ def _estimate_cassandra_requirement(
     working_set: float,
     reads_per_second: float,
     max_rps_to_disk: int,
-    max_local_disk_gib: float,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
 ) -> CapacityRequirement:
@@ -212,19 +211,18 @@ def _estimate_cassandra_requirement(
             desires.buffers,
             instance,
             reference_shape,
-            max_local_disk_gib,
         )
-        disk_scale, _ = derived_buffer_for_component(
-            desires.buffers.derived, ["storage", "disk"]
+        disk_derived_buffer = DerivedBuffers.for_components(
+            desires.buffers.derived, [BufferComponent.disk]
         )
         disk_used_gib = (
             current_capacity.disk_utilization_gib.mid
             * current_capacity.cluster_instance_count.mid
-            * (disk_scale or 1)
+            * disk_derived_buffer.scale
         )
-        _, memory_preserve = derived_buffer_for_component(
-            desires.buffers.derived, ["storage", "memory"]
-        )
+        memory_preserve = DerivedBuffers.for_components(
+            desires.buffers.derived, [BufferComponent.memory]
+        ).preserve
     else:
         # If the cluster is not yet provisioned
         capacity_requirement = _zonal_requirement_for_new_cluster(
@@ -440,7 +438,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         working_set=working_set,
         reads_per_second=rps,
         max_rps_to_disk=max_rps_to_disk,
-        max_local_disk_gib=max_local_data_per_node_gib,
         zones_per_region=zones_per_region,
         copies_per_region=copies_per_region,
     )

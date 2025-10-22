@@ -153,3 +153,77 @@ def test_precise_buffers():
         components=["memory", "storage"],
         sources={"custom-memory": buffers.desired["custom-memory"]},
     )
+
+
+def test_compute_cpu_and_network_multiply():
+    buffers = Buffers(
+        desired={
+            "compute": Buffer(ratio=3, components=[BufferComponent.compute]),
+            "cpu": Buffer(ratio=5, components=[BufferComponent.cpu]),
+            "network": Buffer(ratio=7, components=[BufferComponent.network]),
+        }
+    )
+
+    assert buffer_for_components(buffers, [BufferComponent.cpu]) == Buffer(
+        ratio=15,
+        components=["compute", "cpu"],
+        sources={
+            "compute": buffers.desired["compute"],
+            "cpu": buffers.desired["cpu"],
+        },
+    )
+
+    assert buffer_for_components(buffers, [BufferComponent.network]) == Buffer(
+        ratio=21,
+        components=["compute", "network"],
+        sources={
+            "compute": buffers.desired["compute"],
+            "network": buffers.desired["network"],
+        },
+    )
+
+    assert buffer_for_components(buffers, [BufferComponent.compute]) == Buffer(
+        ratio=15,
+        components=["compute", "cpu"],
+        sources={
+            "compute": buffers.desired["compute"],
+            "cpu": buffers.desired["cpu"],
+        },
+    )
+
+
+def test_storage_disk_memory_multiply():
+    buffers = Buffers(
+        desired={
+            "storage": Buffer(ratio=2, components=[BufferComponent.storage]),
+            "disk": Buffer(ratio=3, components=[BufferComponent.disk]),
+            "memory": Buffer(ratio=5, components=[BufferComponent.memory]),
+        }
+    )
+
+    assert buffer_for_components(buffers, [BufferComponent.disk]) == Buffer(
+        ratio=6,
+        components=["disk", "storage"],
+        sources={
+            "storage": buffers.desired["storage"],
+            "disk": buffers.desired["disk"],
+        },
+    )
+
+    assert buffer_for_components(buffers, [BufferComponent.memory]) == Buffer(
+        ratio=10,
+        components=["memory", "storage"],
+        sources={
+            "storage": buffers.desired["storage"],
+            "memory": buffers.desired["memory"],
+        },
+    )
+
+    assert buffer_for_components(buffers, [BufferComponent.storage]) == Buffer(
+        ratio=6,
+        components=["disk", "storage"],
+        sources={
+            "storage": buffers.desired["storage"],
+            "disk": buffers.desired["disk"],
+        },
+    )
