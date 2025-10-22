@@ -1,0 +1,172 @@
+{
+  "instances": {
+    "i3en.large": {
+      "name": "i3en.large",
+      "cpu": 2,
+      "cpu_cores": 1,
+      "cpu_ghz": 3.1,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 15.26,
+      "net_mbps": 2100.0,
+      "drive": {
+        "name": "ephem",
+        "size_gib": 1164,
+        "read_io_per_s": 42500,
+        "write_io_per_s": 32500,
+        "single_tenant": false,
+        "read_io_latency_ms": {
+          "low": 0.08,
+          "mid": 0.125,
+          "high": 0.2,
+          "confidence": 0.9,
+          "minimum_value": 0.07,
+          "maximum_value": 2.0
+        }
+      }
+    },
+    "i3en.xlarge": {
+      "name": "i3en.xlarge",
+      "cpu": 4,
+      "cpu_cores": 2,
+      "cpu_ghz": 3.1,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 30.52,
+      "net_mbps": 4200.0,
+      "drive": {
+        "name": "ephem",
+        "size_gib": 2328,
+        "read_io_per_s": 85000,
+        "write_io_per_s": 65000,
+        "single_tenant": false,
+        "read_io_latency_ms": {
+          "low": 0.08,
+          "mid": 0.125,
+          "high": 0.2,
+          "confidence": 0.9,
+          "minimum_value": 0.07,
+          "maximum_value": 2.0
+        }
+      }
+    },
+    "i3en.2xlarge": {
+      "name": "i3en.2xlarge",
+      "cpu": 8,
+      "cpu_cores": 4,
+      "cpu_ghz": 3.1,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 61.04,
+      "net_mbps": 8400.0,
+      "drive": {
+        "name": "ephem",
+        "size_gib": 4657,
+        "read_io_per_s": 170000,
+        "write_io_per_s": 130000,
+        "single_tenant": false,
+        "read_io_latency_ms": {
+          "low": 0.08,
+          "mid": 0.125,
+          "high": 0.2,
+          "confidence": 0.9,
+          "minimum_value": 0.07,
+          "maximum_value": 2.0
+        }
+      }
+    },
+    "i3en.3xlarge": {
+      "name": "i3en.3xlarge",
+      "cpu": 12,
+      "cpu_cores": 6,
+      "cpu_ghz": 3.1,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 91.55,
+      "net_mbps": 12500.0,
+      "drive": {
+        "name": "ephem",
+        "size_gib": 6985,
+        "read_io_per_s": 255000,
+        "write_io_per_s": 195000,
+        "single_tenant": true,
+        "read_io_latency_ms": {
+          "low": 0.08,
+          "mid": 0.125,
+          "high": 0.2,
+          "confidence": 0.9,
+          "minimum_value": 0.07,
+          "maximum_value": 2.0
+        }
+      }
+    },
+    "i3en.6xlarge": {
+      "name": "i3en.6xlarge",
+      "cpu": 24,
+      "cpu_cores": 12,
+      "cpu_ghz": 3.1,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 183.11,
+      "net_mbps": 25000.0,
+      "drive": {
+        "name": "ephem",
+        "size_gib": 13970,
+        "read_io_per_s": 510000,
+        "write_io_per_s": 390000,
+        "single_tenant": true,
+        "read_io_latency_ms": {
+          "low": 0.08,
+          "mid": 0.125,
+          "high": 0.2,
+          "confidence": 0.9,
+          "minimum_value": 0.07,
+          "maximum_value": 2.0
+        }
+      }
+    },
+    "i3en.12xlarge": {
+      "name": "i3en.12xlarge",
+      "cpu": 48,
+      "cpu_cores": 24,
+      "cpu_ghz": 3.1,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 366.21,
+      "net_mbps": 50000.0,
+      "drive": {
+        "name": "ephem",
+        "size_gib": 27940,
+        "read_io_per_s": 1020000,
+        "write_io_per_s": 780000,
+        "single_tenant": true,
+        "read_io_latency_ms": {
+          "low": 0.08,
+          "mid": 0.125,
+          "high": 0.2,
+          "confidence": 0.9,
+          "minimum_value": 0.07,
+          "maximum_value": 2.0
+        }
+      }
+    },
+    "i3en.24xlarge": {
+      "name": "i3en.24xlarge",
+      "cpu": 96,
+      "cpu_cores": 48,
+      "cpu_ghz": 3.1,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 732.42,
+      "net_mbps": 100000.0,
+      "drive": {
+        "name": "ephem",
+        "size_gib": 55879,
+        "read_io_per_s": 2040000,
+        "write_io_per_s": 1560000,
+        "single_tenant": true,
+        "read_io_latency_ms": {
+          "low": 0.08,
+          "mid": 0.125,
+          "high": 0.2,
+          "confidence": 0.9,
+          "minimum_value": 0.07,
+          "maximum_value": 2.0
+        }
+      }
+    }
+  }
+}

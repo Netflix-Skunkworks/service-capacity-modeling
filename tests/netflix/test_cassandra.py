@@ -544,7 +544,7 @@ class TestCassandraCurrentCapacity:
             cluster_instance_count=fixed_float(3),
             cpu_utilization=certain_float(80),
             memory_utilization_gib=certain_float(32.0),
-            disk_utilization_gib=certain_float(1024),
+            disk_utilization_gib=certain_float(2048),
             network_utilization_mbps=certain_float(128.0),
         )
         desires = CapacityDesires(
