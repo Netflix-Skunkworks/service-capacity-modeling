@@ -11,6 +11,7 @@ from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import Instance
@@ -37,11 +38,19 @@ def total_ipc_per_second(instance: Instance, count: int) -> float:
     return instance.cpu * instance.cpu_ghz * instance.cpu_ipc_scale * count
 
 
-def get_drive_size_gib(instance: Instance) -> int:
-    """Safely get the drive size in GiB, raising an error if no drive exists."""
-    if instance.drive is None:
-        raise ValueError(f"Instance {instance.name} has no drive")
-    return instance.drive.size_gib
+def get_drive_size_gib(cluster: ClusterCapacity) -> int:
+    """Safely get drive size in GiB from attached or instance drives."""
+    # Check attached_drives first (for EBS)
+    if cluster.attached_drives:
+        return cluster.attached_drives[0].size_gib
+
+    # Fall back to checking the instance's built-in drive
+    if cluster.instance.drive is not None:
+        return cluster.instance.drive.size_gib
+
+    raise ValueError(
+        f"Instance {cluster.instance.name} has no drive or attached drives"
+    )
 
 
 class ResourceTargets:
@@ -76,7 +85,11 @@ class I4i4xlarge:
         self.ram_gib_per_instance = self.instance.ram_gib
         assert self.ram_gib_per_instance == 122.07
 
-        self.disk_gib_per_instance = get_drive_size_gib(self.instance)
+        # i4i instances have built-in NVMe storage
+        assert self.instance.drive is not None, (
+            f"Instance {self.instance_name} has no drive"
+        )
+        self.disk_gib_per_instance = self.instance.drive.size_gib
         assert self.disk_gib_per_instance == 3492
 
     @property
@@ -219,7 +232,7 @@ class TestStorageScalingConstraints:
             desires=desires,
         )
         result = cap_plan[0].candidate_clusters.zonal[0]
-        result_storage = result.count * get_drive_size_gib(result.instance)
+        result_storage = result.count * get_drive_size_gib(result)
 
         # Storage should scale up to meet 4x buffer requirement
         expected_storage = (
@@ -248,7 +261,7 @@ class TestStorageScalingConstraints:
         )
         result = cap_plan[0].candidate_clusters.zonal[0]
 
-        result_storage = result.count * get_drive_size_gib(result.instance)
+        result_storage = result.count * get_drive_size_gib(result)
 
         # Storage should not scale down from current over-provisioned level
         # It's acceptable to be within a 5% margin of current storage because
@@ -274,7 +287,7 @@ class TestStorageScalingConstraints:
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
 
-        result_storage = result.count * get_drive_size_gib(result.instance)
+        result_storage = result.count * get_drive_size_gib(result)
 
         # scale_up should prevent scaling down below current levels
         # Even if demand is low, we should maintain at least current storage capacity
@@ -323,7 +336,7 @@ class TestStorageScalingConstraints:
             f"assertions in this test "
         )
 
-        result_storage = result.count * get_drive_size_gib(result.instance)
+        result_storage = result.count * get_drive_size_gib(result)
         # scale_down should scale down below current levels
         assert result.annual_cost <= current_cost
         assert result_storage <= CLUSTER.total_disk_gib
@@ -384,10 +397,12 @@ class TestCPUScalingConstraints:
 
         if cluster_capacity.cluster_instance is None:
             raise ValueError("cluster_instance cannot be None")
+
+        # It's likely to suggest to a large EBS if we are compute bound
         assert_similar_compute(
-            cluster_capacity.cluster_instance,
+            shapes.instance("c6a.8xlarge"),
             result.instance,
-            int(cluster_capacity.cluster_instance_count.mid),
+            int(cluster_capacity.cluster_instance_count.mid) // 2,
             result.count,
         )
 
@@ -467,7 +482,7 @@ class TestCPUScalingConstraints:
 
         # CPU should scale down to meet 1.5x buffer requirement
         assert_similar_compute(
-            shapes.instance("i4i.4xlarge"), result.instance, CLUSTER_SIZE, result.count
+            shapes.instance("c6a.4xlarge"), result.instance, CLUSTER_SIZE, result.count
         )
         assert result_cores <= CLUSTER.total_vcpu
 
@@ -559,16 +574,15 @@ class TestStorageAndCPUIntegration:
             region="us-east-1",
             desires=desires,
             num_results=20,
-            max_results_per_family=4,
         )
         result = cap_plan[0].candidate_clusters.zonal[0]
 
         result_cores = result.count * result.instance.cpu
-        result_storage = result.count * get_drive_size_gib(result.instance)
+        result_storage = result.count * get_drive_size_gib(result)
 
-        # Double the compute capacity and have double the scale
+        # With EBS, planner selects compute-optimized instances with attached storage
         assert_similar_compute(
-            shapes.instance("i3en.6xlarge"),
+            shapes.instance("m7i.4xlarge"),
             result.instance,
             CLUSTER_SIZE * 4,
             result.count,
@@ -614,7 +628,7 @@ class TestStorageAndCPUIntegration:
             result.count,
         )
 
-        result_storage = result.count * get_drive_size_gib(result.instance)
+        result_storage = result.count * get_drive_size_gib(result)
         assert result_storage == approx(CLUSTER.total_disk_gib, 0.05)
 
     def test_cpu_scale_up_disk_scale_down(self):
@@ -632,7 +646,7 @@ class TestStorageAndCPUIntegration:
         )
         result = cap_plan[0].candidate_clusters.zonal[0]
         result_cores = result.count * result.instance.cpu
-        result_storage = result.count * get_drive_size_gib(result.instance)
+        result_storage = result.count * get_drive_size_gib(result)
         assert_similar_compute(
             shapes.instance("m6id.8xlarge"), result.instance, 8, result.count
         )
@@ -656,7 +670,7 @@ class TestStorageAndCPUIntegration:
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
         result_cores = result.count * result.instance.cpu
-        result_storage = result.count * get_drive_size_gib(result.instance)
+        result_storage = result.count * get_drive_size_gib(result)
         # CPU should not exceed current capacity * scale factor (2)
         assert result_cores <= CLUSTER.total_vcpu * 2, (
             f"CPU should not exceed current "
