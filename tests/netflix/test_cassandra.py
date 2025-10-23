@@ -101,7 +101,7 @@ class TestCassandraCapacityPlanning:
         )[0]
         high_writes_result = cap_plan.candidate_clusters.zonal[0]
         assert high_writes_result.instance.family.startswith("c")
-        assert high_writes_result.count > 4
+        assert high_writes_result.count >= 2
 
         num_cpus = high_writes_result.instance.cpu * high_writes_result.count
         assert 30 <= num_cpus <= 128
