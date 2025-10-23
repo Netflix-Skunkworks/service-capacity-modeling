@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Callable
 from typing import Sequence
 from typing import Tuple
 
@@ -24,7 +25,9 @@ EPSILON = 0.001
 # Gamma distribution G(alpha, beta) with mean alpha * beta
 
 
-def _gamma_fn_from_params(low, mid, high, confidence):
+def _gamma_fn_from_params(
+    low: float, mid: float, high: float, confidence: float
+) -> Callable[[float], float]:
     assert 0 < low <= mid <= high
     confidence = min(confidence, 0.99)
     confidence = max(confidence, 0.01)
@@ -40,9 +43,9 @@ def _gamma_fn_from_params(low, mid, high, confidence):
     #
     # Then we can use numeric methods to solve for the remaining shape parameter
 
-    def f(k):
+    def f(k: float) -> float:
         zero = high / low
-        return gammaf(k, high_p * k / mid) / gammaf(k, low_p * k / mid) - zero
+        return float(gammaf(k, high_p * k / mid) / gammaf(k, low_p * k / mid) - zero)
 
     return f
 
@@ -89,7 +92,9 @@ def gamma_for_interval(interval: Interval, seed: int = 0xCAFE) -> rv_continuous:
 # Beta distribution B(alpha, beta) with mean alpha / (alpha + beta)
 
 
-def _beta_cost_fn_from_params(low, mid, high, confidence):
+def _beta_cost_fn_from_params(
+    low: float, mid: float, high: float, confidence: float
+) -> Callable[[float], float]:
     assert low <= mid <= high < 1.0
     assert mid > 0
 
@@ -100,14 +105,14 @@ def _beta_cost_fn_from_params(low, mid, high, confidence):
     low_p = 0.0 + (1 - confidence) / 2.0
     high_p = 1.0 - (1 - confidence) / 2.0
 
-    def cost(alpha):
+    def cost(alpha: float) -> float:
         beta = alpha / mid - alpha
         if alpha == 0 or beta == 0:
             return float("inf")
 
-        cost = (beta_dist.cdf(low, alpha, beta) - low_p) ** 2
-        cost += (beta_dist.cdf(high, alpha, beta) - high_p) ** 2
-        return cost
+        cost_val: float = (beta_dist.cdf(low, alpha, beta) - low_p) ** 2
+        cost_val += (beta_dist.cdf(high, alpha, beta) - high_p) ** 2
+        return cost_val
 
     return cost
 
@@ -156,10 +161,8 @@ def beta_for_interval(interval: Interval, seed: int = 0xCAFE) -> rv_continuous:
 def dist_for_interval(interval: Interval, seed: int = 0xCAFE) -> rv_continuous:
     if interval.model_with == IntervalModel.beta:
         result = beta_for_interval(interval=interval, seed=seed)
-    elif interval.model_with == IntervalModel.gamma:
+    else:  # IntervalModel.gamma
         result = gamma_for_interval(interval=interval, seed=seed)
-    else:
-        result = beta_for_interval(interval=interval, seed=seed)
     return result
 
 

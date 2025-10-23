@@ -81,7 +81,7 @@ class NflxCounterCapacityModel(CapacityModel):
         return counter_app
 
     @staticmethod
-    def description():
+    def description() -> str:
         return "Netflix Streaming Counter Model"
 
     @staticmethod
@@ -129,7 +129,9 @@ class NflxCounterCapacityModel(CapacityModel):
         return tuple(stores)
 
     @staticmethod
-    def default_desires(user_desires, extra_model_arguments):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(

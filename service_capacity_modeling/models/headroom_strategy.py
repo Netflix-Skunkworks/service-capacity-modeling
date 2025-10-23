@@ -19,4 +19,5 @@ class QueuingBasedHeadroomStrategy(HeadroomStrategy):
     """
 
     def calculate_reserved_headroom(self, effective_cpu: float) -> float:
-        return 0.712 / (effective_cpu**0.448)
+        result: float = 0.712 / (effective_cpu**0.448)
+        return result

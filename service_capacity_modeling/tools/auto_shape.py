@@ -4,6 +4,7 @@ import re
 import sys
 from fractions import Fraction
 from pathlib import Path
+from typing import Any
 from typing import Dict
 from typing import Optional
 from typing import Sequence
@@ -110,7 +111,10 @@ def _gb_to_gib(inp: float) -> int:
 
 
 def _drive(
-    drive_type: DriveType, io_perf: Optional[IOPerformance], scale: Fraction, data: Dict
+    drive_type: DriveType,
+    io_perf: Optional[IOPerformance],
+    scale: Fraction,
+    data: Dict[str, Any],
 ) -> Optional[Drive]:
     if drive_type.name.startswith("attached") or io_perf is None:
         return None
@@ -133,7 +137,7 @@ def _drive(
 
 
 def pull_family(
-    ec2_client,
+    ec2_client: Any,
     family: str,
     cpu_perf: Optional[CPUPerformance] = None,
     io_perf: Optional[IOPerformance] = None,
@@ -167,7 +171,7 @@ def pull_family(
         ],
     }
 
-    def debug_log(msg: str):
+    def debug_log(msg: str) -> None:
         if debug:
             print(msg, file=sys.stderr)
 
@@ -256,7 +260,7 @@ def pull_family(
     return results
 
 
-def parse_iops(inp: str) -> Optional[Tuple[int, int]]:
+def parse_iops(inp: Optional[str]) -> Optional[Tuple[int, int]]:
     """Parses strings like 100,000/50,000 to (100000, 50000)"""
     if inp is None:
         return None
@@ -342,7 +346,7 @@ def deduce_cpu_perf(
     return CPUPerformance()
 
 
-def main(args) -> int:
+def main(args: Any) -> int:
     for family in args.families:
         io_perf = deduce_io_perf(
             family=family, curve=args.io_latency_curve, iops=args.xl_iops
@@ -361,7 +365,7 @@ def main(args) -> int:
             io_perf=io_perf,
             debug=args.debug,
         )
-        json_shapes: Dict[str, Dict[str, Instance]] = {"instances": {}}
+        json_shapes: Dict[str, Dict[str, Any]] = {"instances": {}}
         for shape in family_shapes:
             model_dict = shape.model_dump(exclude_unset=True)
             # Hardware shouldn't have costs

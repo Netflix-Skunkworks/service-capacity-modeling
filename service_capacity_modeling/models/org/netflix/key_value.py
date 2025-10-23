@@ -48,7 +48,7 @@ class NflxKeyValueCapacityModel(CapacityModel):
         return kv_app
 
     @staticmethod
-    def description():
+    def description() -> str:
         return "Netflix Streaming Key-Value Model"
 
     @staticmethod
@@ -119,7 +119,9 @@ class NflxKeyValueCapacityModel(CapacityModel):
             return (("org.netflix.cassandra", lambda x: x),)
 
     @staticmethod
-    def default_desires(user_desires, extra_model_arguments):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(

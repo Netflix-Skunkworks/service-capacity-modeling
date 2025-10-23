@@ -20,6 +20,25 @@ from service_capacity_modeling.interface import Platform
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 
+__all__ = [
+    "AccessConsistency",
+    "AccessPattern",
+    "CapacityDesires",
+    "CapacityPlan",
+    "CapacityRegretParameters",
+    "certain_float",
+    "Consistency",
+    "DataShape",
+    "Drive",
+    "FixedInterval",
+    "GlobalConsistency",
+    "Instance",
+    "Platform",
+    "QueryPattern",
+    "RegionContext",
+    "CapacityModel",
+]
+
 __common_regrets__ = frozenset(("spend", "disk", "mem"))
 
 
@@ -85,7 +104,7 @@ class CapacityModel:
 
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     @staticmethod
@@ -270,7 +289,7 @@ class CapacityModel:
     @staticmethod
     def default_desires(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
-    ):
+    ) -> CapacityDesires:
         """Optional defaults to apply given a user desires
 
         Often users do not know what the on-cpu time of their queries

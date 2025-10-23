@@ -1,11 +1,15 @@
 import argparse
 import json
 import os
+from typing import Any
+from typing import Dict
+from typing import Optional
+from typing import Union
 
 import boto3
 
 
-def extract_3yr_upfront_price(price_data):
+def extract_3yr_upfront_price(price_data: Dict[str, Any]) -> Optional[float]:
     instance_type = price_data["product"]["attributes"]["instanceType"]
 
     # Look through Reserved terms
@@ -34,7 +38,7 @@ def extract_3yr_upfront_price(price_data):
     return None
 
 
-def fetch_pricing(region: str):
+def fetch_pricing(region: str) -> None:
     # Initialize pricing client
     pricing_client = boto3.client("pricing", region_name=region)
 
@@ -71,9 +75,12 @@ def fetch_pricing(region: str):
 
             annual_cost = extract_3yr_upfront_price(price_data)
             if annual_cost:
-                instances[instance_type] = {"annual_cost": annual_cost}
-                if "deprecated" in instance_type.lower():
-                    instances[instance_type]["lifecycle"] = "deprecated"
+                instance_info: Dict[str, Union[float, str]] = {
+                    "annual_cost": annual_cost
+                }
+                if "deprecated" in str(instance_type).lower():
+                    instance_info["lifecycle"] = "deprecated"
+                instances[instance_type] = instance_info
 
     # Create final output structure
     # we bolt on the other info, as a hack until we can improve prior layers
@@ -104,7 +111,7 @@ def fetch_pricing(region: str):
     print(f"Pricing data written to {output_file}")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Fetch EC2 Reserved Instance pricing data."
     )

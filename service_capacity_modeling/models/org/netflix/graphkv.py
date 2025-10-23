@@ -45,7 +45,7 @@ class NflxGraphKVCapacityModel(CapacityModel):
         return graphkv_app
 
     @staticmethod
-    def description():
+    def description() -> str:
         return "Netflix Streaming Graph Abstraction"
 
     @staticmethod
@@ -89,7 +89,7 @@ class NflxGraphKVCapacityModel(CapacityModel):
                         / 1024**3
                     )
                 else:
-                    item_size_gib = 1 / 1024**2
+                    item_size_gib = 1 / 1024**2  # type: ignore[unreachable]
                 item_count = user_desires.data_shape.estimated_state_size_gib.scale(
                     1 / item_size_gib
                 )
@@ -102,7 +102,9 @@ class NflxGraphKVCapacityModel(CapacityModel):
         return (("org.netflix.key-value", _modify_kv_desires),)
 
     @staticmethod
-    def default_desires(user_desires, extra_model_arguments):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(

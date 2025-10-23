@@ -4,6 +4,9 @@
 # typical value across a broad range of tests such as those used
 # in common online benchmarks.
 #
+from typing import Any
+from typing import Dict
+
 # Intel
 HASWELL_IPC = 0.85
 SKYLAKE_IPC = 1.0
@@ -17,7 +20,7 @@ ROME_IPC = 1.03
 MILAN_IPC = SKYLAKE_IPC * 1.15
 GENOA_IPC = MILAN_IPC * 1.13
 
-INSTANCE_TYPES = {
+INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
     "c5": {
         "xl_iops": None,
         "io_latency_curve": None,

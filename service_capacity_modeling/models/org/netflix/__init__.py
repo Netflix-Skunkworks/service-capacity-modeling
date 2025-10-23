@@ -1,3 +1,6 @@
+from typing import Any
+from typing import Dict
+
 from .aurora import nflx_aurora_capacity_model
 from .cassandra import nflx_cassandra_capacity_model
 from .counter import nflx_counter_capacity_model
@@ -20,7 +23,7 @@ from .wal import nflx_wal_capacity_model
 from .zookeeper import nflx_zookeeper_capacity_model
 
 
-def models():
+def models() -> Dict[str, Any]:
     return {
         "org.netflix.cassandra": nflx_cassandra_capacity_model,
         "org.netflix.stateless-java": nflx_java_app_capacity_model,
