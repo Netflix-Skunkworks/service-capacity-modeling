@@ -348,6 +348,7 @@ class CapacityPlanner:
             self.register_model(name, model)
 
     def register_model(self, name: str, capacity_model: CapacityModel):
+        capacity_model.validate_implementation()
         self._models[name] = capacity_model
 
     @property
