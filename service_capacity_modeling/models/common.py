@@ -253,8 +253,6 @@ def cpu_headroom_target(instance: Instance, buffers: Optional[Buffers] = None) -
 # When someone asks for the key, return any buffers that
 # influence the component in the value
 _default_buffer_fallbacks: Dict[str, List[str]] = {
-    BufferComponent.compute: [BufferComponent.cpu],
-    BufferComponent.storage: [BufferComponent.disk],
     BufferComponent.cpu: [BufferComponent.compute],
     BufferComponent.network: [BufferComponent.compute],
     BufferComponent.memory: [BufferComponent.storage],
@@ -275,6 +273,20 @@ def _expand_components(
     Returns:
         Set of expanded component names including fallbacks
     """
+
+    # Semantically it does not make sense to fetch buffers for the generic category
+    generic_components = [c for c in components if BufferComponent.is_generic(c)]
+    if generic_components:
+        all_specific_components = [
+            c for c in BufferComponent if BufferComponent.is_specific(c)
+        ]
+        raise ValueError(
+            f"Only specific components allowed. Generic components found: "
+            f"{', '.join(str(c) for c in generic_components)}. "
+            f"Use specific components instead: "
+            f"{', '.join(str(c) for c in all_specific_components)}"
+        )
+
     if component_fallbacks is None:
         component_fallbacks = _default_buffer_fallbacks
 
