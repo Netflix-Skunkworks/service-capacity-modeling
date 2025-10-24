@@ -779,12 +779,19 @@ class BufferComponent(str, Enum):
     compute = "compute"
     # [Data Shape]    a.k.a. "Dataset" related buffers, e.g. Disk and Memory
     storage = "storage"
-
     # Resource specific component
     cpu = "cpu"
     network = "network"
     disk = "disk"
     memory = "memory"
+
+    @staticmethod
+    def is_generic(component: str) -> bool:
+        return component in {BufferComponent.compute, BufferComponent.storage}
+
+    @staticmethod
+    def is_specific(component: str) -> bool:
+        return not BufferComponent.is_generic(component)
 
 
 class BufferIntent(str, Enum):
