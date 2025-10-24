@@ -1,3 +1,4 @@
+import pytest
 from pytest import approx
 
 from service_capacity_modeling.capacity_planner import planner
@@ -7,6 +8,7 @@ from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import cpu_headroom_target
+from service_capacity_modeling.models.common import DerivedBuffers
 
 
 def test_m5_same_headroom_as_r5():
@@ -84,6 +86,8 @@ def test_2xl_headroom_with_buffer_no_hyperthreading():
 def test_default_buffer():
     buffers = Buffers(default=Buffer(ratio=4, sources={"default": Buffer(ratio=4)}))
     for component in BufferComponent:
+        if BufferComponent.is_generic(component):
+            continue
         result = buffer_for_components(buffers, [component])
         assert result.ratio == 4
         assert component in result.components
@@ -153,3 +157,118 @@ def test_precise_buffers():
         components=["memory", "storage"],
         sources={"custom-memory": buffers.desired["custom-memory"]},
     )
+
+
+def test_compute_cpu_and_network_multiply():
+    buffers = Buffers(
+        desired={
+            "compute": Buffer(ratio=3, components=[BufferComponent.compute]),
+            "cpu": Buffer(ratio=5, components=[BufferComponent.cpu]),
+            "network": Buffer(ratio=7, components=[BufferComponent.network]),
+        }
+    )
+
+    assert buffer_for_components(buffers, [BufferComponent.cpu]) == Buffer(
+        ratio=15,
+        components=["compute", "cpu"],
+        sources={
+            "compute": buffers.desired["compute"],
+            "cpu": buffers.desired["cpu"],
+        },
+    )
+
+    assert buffer_for_components(buffers, [BufferComponent.network]) == Buffer(
+        ratio=21,
+        components=["compute", "network"],
+        sources={
+            "compute": buffers.desired["compute"],
+            "network": buffers.desired["network"],
+        },
+    )
+
+    # Querying for generic component should raise error
+    with pytest.raises(ValueError):
+        buffer_for_components(buffers, [BufferComponent.compute])
+
+
+def test_storage_disk_memory_multiply():
+    buffers = Buffers(
+        desired={
+            "storage": Buffer(ratio=2, components=[BufferComponent.storage]),
+            "disk": Buffer(ratio=3, components=[BufferComponent.disk]),
+            "memory": Buffer(ratio=5, components=[BufferComponent.memory]),
+        }
+    )
+
+    assert buffer_for_components(buffers, [BufferComponent.disk]) == Buffer(
+        ratio=6,
+        components=["disk", "storage"],
+        sources={
+            "storage": buffers.desired["storage"],
+            "disk": buffers.desired["disk"],
+        },
+    )
+
+    assert buffer_for_components(buffers, [BufferComponent.memory]) == Buffer(
+        ratio=10,
+        components=["memory", "storage"],
+        sources={
+            "storage": buffers.desired["storage"],
+            "memory": buffers.desired["memory"],
+        },
+    )
+
+    # Querying for generic component should raise error
+    with pytest.raises(ValueError):
+        buffer_for_components(buffers, [BufferComponent.storage])
+
+
+def test_component_validation():
+    """Test that buffer_for_components rejects generic components"""
+    buffers = Buffers(
+        desired={
+            "cpu": Buffer(ratio=2.0, components=[BufferComponent.cpu]),
+            "compute": Buffer(ratio=3.0, components=[BufferComponent.compute]),
+            "storage": Buffer(ratio=4.0, components=[BufferComponent.storage]),
+        }
+    )
+
+    # Specific components should work fine
+    buffer_for_components(buffers, [BufferComponent.cpu])
+    buffer_for_components(buffers, [BufferComponent.disk])
+    buffer_for_components(buffers, [BufferComponent.memory])
+    buffer_for_components(buffers, [BufferComponent.network])
+
+    # Generic components should raise ValueError
+    with pytest.raises(ValueError):
+        buffer_for_components(buffers, [BufferComponent.compute])
+
+    with pytest.raises(ValueError):
+        buffer_for_components(buffers, [BufferComponent.storage])
+
+    # Multiple generic components should also raise ValueError
+    with pytest.raises(ValueError):
+        buffer_for_components(
+            buffers, [BufferComponent.compute, BufferComponent.storage]
+        )
+
+
+def test_derived_buffer_validation():
+    """Test that DerivedBuffers.for_components rejects generic components"""
+    derived_buffers = {
+        "cpu": Buffer(ratio=2.0, components=[BufferComponent.cpu]),
+        "compute": Buffer(ratio=3.0, components=[BufferComponent.compute]),
+    }
+
+    # Specific components should work fine
+    DerivedBuffers.for_components(derived_buffers, [BufferComponent.cpu])
+    DerivedBuffers.for_components(derived_buffers, [BufferComponent.disk])
+    DerivedBuffers.for_components(derived_buffers, [BufferComponent.memory])
+    DerivedBuffers.for_components(derived_buffers, [BufferComponent.network])
+
+    # Generic components should raise ValueError
+    with pytest.raises(ValueError):
+        DerivedBuffers.for_components(derived_buffers, [BufferComponent.compute])
+
+    with pytest.raises(ValueError):
+        DerivedBuffers.for_components(derived_buffers, [BufferComponent.storage])

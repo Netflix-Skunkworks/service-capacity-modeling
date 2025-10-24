@@ -35,7 +35,7 @@ from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
-from service_capacity_modeling.models.common import derived_buffer_for_component
+from service_capacity_modeling.models.common import DerivedBuffers
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
@@ -181,7 +181,9 @@ def _zonal_requirement_for_new_cluster(
     )
 
 
-def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-arguments
+# pylint: disable=too-many-locals
+# pylint: disable=too-many-positional-arguments
+def _estimate_cassandra_requirement(
     instance: Instance,
     desires: CapacityDesires,
     working_set: float,
@@ -205,19 +207,22 @@ def _estimate_cassandra_requirement(  # pylint: disable=too-many-positional-argu
     # If the cluster is already provisioned
     if current_capacity and desires.current_clusters is not None:
         capacity_requirement = zonal_requirements_from_current(
-            desires.current_clusters, desires.buffers, instance, reference_shape
+            desires.current_clusters,
+            desires.buffers,
+            instance,
+            reference_shape,
         )
-        disk_scale, _ = derived_buffer_for_component(
-            desires.buffers.derived, ["storage", "disk"]
+        disk_derived_buffer = DerivedBuffers.for_components(
+            desires.buffers.derived, [BufferComponent.disk]
         )
         disk_used_gib = (
             current_capacity.disk_utilization_gib.mid
             * current_capacity.cluster_instance_count.mid
-            * (disk_scale or 1)
+            * disk_derived_buffer.scale
         )
-        _, memory_preserve = derived_buffer_for_component(
-            desires.buffers.derived, ["storage", "memory"]
-        )
+        memory_preserve = DerivedBuffers.for_components(
+            desires.buffers.derived, [BufferComponent.memory]
+        ).preserve
     else:
         # If the cluster is not yet provisioned
         capacity_requirement = _zonal_requirement_for_new_cluster(
