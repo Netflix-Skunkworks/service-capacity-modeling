@@ -7,12 +7,12 @@ setuptools.setup(
     versioning="distance",
     setup_requires="setupmeta",
     description="Contains utilities for modeling capacity for pluggable workloads",
+    python_requires=">=3.9,<3.12",
     packages=setuptools.find_packages(exclude=("tests*", "notebooks*")),
     install_requires=[
         "pydantic>2.0",
         "scipy",
         "numpy",
-        'importlib_resources; python_version < "3.7"',
         "isodate",
     ],
     extras_require={
@@ -20,6 +20,9 @@ setuptools.setup(
     },
     classifiers=[
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
         "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
     ],
