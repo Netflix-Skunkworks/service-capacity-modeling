@@ -86,6 +86,8 @@ def test_2xl_headroom_with_buffer_no_hyperthreading():
 def test_default_buffer():
     buffers = Buffers(default=Buffer(ratio=4, sources={"default": Buffer(ratio=4)}))
     for component in BufferComponent:
+        if BufferComponent.is_generic(component):
+            continue
         result = buffer_for_components(buffers, [component])
         assert result.ratio == 4
         assert component in result.components

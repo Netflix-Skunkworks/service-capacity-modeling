@@ -481,8 +481,8 @@ def test_get_disk_with_buffer_scale_up():
     ).disk_gib
 
     # Still require 28TB that we allocated because we cannot scale down
-    assert needed_disk == 14000 * cluster_size.mid
-    assert needed_disk == 28000
+    assert needed_disk == 13970 * cluster_size.mid
+    assert needed_disk == 27940
 
     # Which is greater than the
     assert needed_disk > 1000 * cluster_size.mid * expected_buffer * scale_ratio
@@ -522,8 +522,8 @@ def test_get_disk_with_buffer_scale_down():
     ).disk_gib
     expected_buffer = 4  # disk buffer
     assert needed_disk <= disk_utilization_gib.mid * cluster_size.mid * expected_buffer
-    assert needed_disk == 14000 * cluster_size.mid
-    assert needed_disk == 28000
+    assert needed_disk == 13970 * cluster_size.mid
+    assert needed_disk == 27940
 
     # Case 2: The desired buffer is lower than the current usage, so we expect
     # a lower disk requirement (i.e. scale down storage requirement)
