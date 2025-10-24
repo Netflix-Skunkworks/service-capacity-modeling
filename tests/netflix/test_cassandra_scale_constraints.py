@@ -74,7 +74,7 @@ class I4i4xlarge:
         assert self.vcpu_per_instance == 16
 
         self.ram_gib_per_instance = self.instance.ram_gib
-        assert self.ram_gib_per_instance == 123.82
+        assert self.ram_gib_per_instance == 122.07
 
         self.disk_gib_per_instance = get_drive_size_gib(self.instance)
         assert self.disk_gib_per_instance == 3492
