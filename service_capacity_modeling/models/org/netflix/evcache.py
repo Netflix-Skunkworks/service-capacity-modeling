@@ -69,7 +69,9 @@ def calculate_read_cpu_time_evcache_ms(read_size_bytes: float) -> float:
     return max(read_latency_ms, 0.005)
 
 
-def calculate_spread_cost(cluster_size: int, max_cost=100000, min_cost=0.0) -> float:
+def calculate_spread_cost(
+    cluster_size: int, max_cost: float = 100000, min_cost: float = 0.0
+) -> float:
     if cluster_size > 10:
         return min_cost
     if cluster_size < 2:
@@ -82,14 +84,14 @@ def calculate_vitals_for_capacity_planner(
     instance: Instance,
     current_memory_gib: float,
     current_disk_gib: float,
-):
+) -> Tuple[float, float, float, float]:
     # First calculate assuming new deployment
     needed_cores = normalize_cores(
         core_count=sqrt_staffed_cores(desires),
         target_shape=instance,
         reference_shape=desires.reference_shape,
     )
-    needed_network_mbps = simple_network_mbps(desires)
+    needed_network_mbps = float(simple_network_mbps(desires))
     needed_memory_gib = current_memory_gib
     needed_disk_gib = current_disk_gib
 
@@ -110,8 +112,8 @@ def calculate_vitals_for_capacity_planner(
         target_shape=instance,
         reference_shape=current_capacity.cluster_instance,
     )
-    needed_network_mbps = requirements.network_mbps
-    needed_disk_gib = (
+    needed_network_mbps = float(requirements.network_mbps)
+    needed_disk_gib = float(
         requirements.disk_gib if current_capacity.cluster_drive is not None else 0.0
     )
     needed_memory_gib = requirements.mem_gib
@@ -196,7 +198,7 @@ def _estimate_evcache_requirement(
     )
 
 
-def _upsert_params(cluster, params):
+def _upsert_params(cluster: Any, params: Dict[str, Any]) -> None:
     if cluster.cluster_params:
         cluster.cluster_params.update(params)
     else:
@@ -263,7 +265,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     # larger to account for additional overhead. Note that the
     # reserved_instance_system_mem_gib has a base of 1 GiB OSMEM so this
     # just represents the variable component
-    def reserve_memory(instance_mem_gib):
+    def reserve_memory(instance_mem_gib: float) -> float:
         # (Joey) From the chart it appears to be about a 3% overhead for
         # OS memory.
         variable_os = int(instance_mem_gib * 0.03)
@@ -439,7 +441,7 @@ class NflxEVCacheCapacityModel(CapacityModel):
         )
 
     @staticmethod
-    def description():
+    def description() -> str:
         return "Netflix Streaming EVCache (memcached) Model"
 
     @staticmethod
@@ -447,7 +449,9 @@ class NflxEVCacheCapacityModel(CapacityModel):
         return NflxEVCacheArguments.model_json_schema()
 
     @staticmethod
-    def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
         acceptable_consistency = {
             AccessConsistency.best_effort,
             AccessConsistency.never,

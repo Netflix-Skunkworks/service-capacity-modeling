@@ -4,8 +4,9 @@ import sys
 from pathlib import Path
 from typing import Any
 from typing import Dict
+from typing import List
 
-from instance_families import INSTANCE_TYPES  # pylint: disable=import-error
+from service_capacity_modeling.tools.instance_families import INSTANCE_TYPES
 
 print("Loaded instance family count =", len(INSTANCE_TYPES))
 
@@ -16,7 +17,7 @@ def get_auto_shape_path() -> Path:
     return current_dir / "auto_shape.py"
 
 
-def build_command(family: str, params: Dict[str, Any], output_path: Path) -> list:
+def build_command(family: str, params: Dict[str, Any], output_path: Path) -> List[str]:
     """Build the command to run auto_shape.py with the appropriate parameters"""
     auto_shape_path = get_auto_shape_path()
     cmd = [sys.executable, str(auto_shape_path)]
@@ -42,7 +43,7 @@ def build_command(family: str, params: Dict[str, Any], output_path: Path) -> lis
     return cmd
 
 
-def main(debug: bool = True, execute: bool = False, force: bool = False):
+def main(debug: bool = True, execute: bool = False, force: bool = False) -> None:
     expected_path = (
         Path(__file__).resolve().parent.parent / "hardware/profiles/shapes/aws"
     )

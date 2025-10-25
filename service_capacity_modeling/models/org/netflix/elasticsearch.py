@@ -58,7 +58,7 @@ def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
 # segments of 512 megs per
 # https://lucene.apache.org/core/8_1_0/core/org/apache/lucene/index/TieredMergePolicy.html#setSegmentsPerTier(double)
 # (FIXME) Verify what elastic merge actually does
-def _es_io_per_read(node_size_gib, segment_size_mb=512):
+def _es_io_per_read(node_size_gib: float, segment_size_mb: int = 512) -> int:
     size_mib = node_size_gib * 1024
     segments = max(1, size_mib // segment_size_mb)
     # 10 segments per tier, plus 1 for L0 (avg)
@@ -75,7 +75,7 @@ def _estimate_elasticsearch_requirement(  # noqa: E501 pylint: disable=too-many-
     max_rps_to_disk: int,
     zones_in_region: int = 3,
     copies_per_region: int = 3,
-    jvm_memory_overhead=1.2,
+    jvm_memory_overhead: float = 1.2,
 ) -> CapacityRequirement:
     """Estimate the capacity required for one zone given a regional desire
 
@@ -153,7 +153,7 @@ def _estimate_elasticsearch_requirement(  # noqa: E501 pylint: disable=too-many-
     )
 
 
-def _upsert_params(cluster, params):
+def _upsert_params(cluster: ZoneClusterCapacity, params: Dict[str, Any]) -> None:
     if cluster.cluster_params:
         cluster.cluster_params.update(params)
     else:
@@ -194,7 +194,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
 
     @staticmethod
     def default_desires(
-        user_desires, extra_model_arguments: Dict[str, Any]
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> CapacityDesires:
         desires = CapacityModel.default_desires(user_desires, extra_model_arguments)
         desires.buffers = NflxElasticsearchDataCapacityModel.default_buffers()
@@ -452,7 +452,7 @@ class NflxElasticsearchCapacityModel(CapacityModel):
         return None
 
     @staticmethod
-    def description():
+    def description() -> str:
         return "Netflix Streaming Elasticsearch Model"
 
     @staticmethod
@@ -482,7 +482,9 @@ class NflxElasticsearchCapacityModel(CapacityModel):
         return NflxElasticsearchArguments.model_json_schema()
 
     @staticmethod
-    def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
         acceptable_consistency = {
             AccessConsistency.best_effort,
             AccessConsistency.eventual,

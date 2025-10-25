@@ -45,7 +45,7 @@ class NflxPostgresCapacityModel(CapacityModel):
         return plan
 
     @staticmethod
-    def description():
+    def description() -> str:
         return "Netflix Postgres Model"
 
     @staticmethod
@@ -53,7 +53,9 @@ class NflxPostgresCapacityModel(CapacityModel):
         return Platform.aurora_postgres, Platform.amd64
 
     @staticmethod
-    def default_desires(user_desires, extra_model_arguments):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
         return CapacityDesires(
             query_pattern=QueryPattern(
                 access_pattern=AccessPattern.latency,

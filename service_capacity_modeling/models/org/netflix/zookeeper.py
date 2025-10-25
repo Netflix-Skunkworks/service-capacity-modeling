@@ -106,7 +106,7 @@ class NflxZookeeperCapacityModel(CapacityModel):
             return None
 
         # We have a viable instance, now either make 3 or 5 depending on tier
-        def soln(n) -> ZoneClusterCapacity:
+        def soln(n: int) -> ZoneClusterCapacity:
             return ZoneClusterCapacity(
                 cluster_type="zk-zonal",
                 count=n,
@@ -140,7 +140,7 @@ class NflxZookeeperCapacityModel(CapacityModel):
         )
 
     @staticmethod
-    def description():
+    def description() -> str:
         return "Netflix Zookeeper Coordination Cluster Model"
 
     @staticmethod
@@ -148,7 +148,9 @@ class NflxZookeeperCapacityModel(CapacityModel):
         return NflxZookeeperArguments.model_json_schema()
 
     @staticmethod
-    def default_desires(user_desires, extra_model_arguments):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
         return CapacityDesires(
             query_pattern=QueryPattern(
                 access_pattern=AccessPattern.latency,

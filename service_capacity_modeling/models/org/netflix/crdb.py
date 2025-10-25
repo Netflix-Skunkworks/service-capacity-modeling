@@ -29,6 +29,7 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
@@ -44,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 # Pebble does Leveled compaction with tieres of size??
 # (FIXME) What does pebble actually do
-def _crdb_io_per_read(node_size_gib, sstable_size_mb=1000):
+def _crdb_io_per_read(node_size_gib: float, sstable_size_mb: int = 1000) -> int:
     gb = node_size_gib * 1024
     sstables = max(1, gb // sstable_size_mb)
     # 10 sstables per level, plus 1 for L0 (avg)
@@ -128,7 +129,7 @@ def _estimate_cockroachdb_requirement(  # noqa=E501 pylint: disable=too-many-pos
     )
 
 
-def _upsert_params(cluster, params):
+def _upsert_params(cluster: ZoneClusterCapacity, params: Dict[str, Any]) -> None:
     if cluster.cluster_params:
         cluster.cluster_params.update(params)
     else:
@@ -329,7 +330,7 @@ class NflxCockroachDBCapacityModel(CapacityModel):
         )
 
     @staticmethod
-    def description():
+    def description() -> str:
         return "Netflix Streaming CockroachDB Model"
 
     @staticmethod
@@ -337,7 +338,9 @@ class NflxCockroachDBCapacityModel(CapacityModel):
         return NflxCockroachDBArguments.model_json_schema()
 
     @staticmethod
-    def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
         acceptable_consistency = {
             None,
             AccessConsistency.linearizable,

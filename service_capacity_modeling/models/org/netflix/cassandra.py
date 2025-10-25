@@ -79,7 +79,7 @@ def _write_buffer_gib_zone(
     return float(write_buffer_gib) / zones_per_region
 
 
-def _get_cores_from_desires(desires, instance):
+def _get_cores_from_desires(desires: CapacityDesires, instance: Instance) -> int:
     cpu_buffer = buffer_for_components(
         buffers=desires.buffers, components=[BACKGROUND_BUFFER]
     )
@@ -97,7 +97,7 @@ def _get_cores_from_desires(desires, instance):
     return needed_cores
 
 
-def _get_disk_from_desires(desires, copies_per_region):
+def _get_disk_from_desires(desires: CapacityDesires, copies_per_region: int) -> int:
     disk_buffer = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     )
@@ -116,7 +116,7 @@ def _get_min_count(
     needed_disk_gib: float,
     disk_per_node_gib: float,
     cluster_size_lambda: Callable[[int], int],
-):
+) -> int:
     """
     Compute the minimum number of nodes required for a zone.
 
@@ -158,7 +158,10 @@ def _get_min_count(
 
 
 def _zonal_requirement_for_new_cluster(
-    desires, instance, copies_per_region, zones_per_region
+    desires: CapacityDesires,
+    instance: Instance,
+    copies_per_region: int,
+    zones_per_region: int,
 ) -> CapacityRequirement:
     needed_cores = _get_cores_from_desires(desires, instance)
     needed_disk = _get_disk_from_desires(desires, copies_per_region)
@@ -325,14 +328,14 @@ def _estimate_cassandra_requirement(
     )
 
 
-def _get_current_cluster_size(desires) -> int:
+def _get_current_cluster_size(desires: CapacityDesires) -> int:
     current_capacity = _get_current_capacity(desires)
     if current_capacity is None:
         return 0
     return math.ceil(current_capacity.cluster_instance_count.mid)
 
 
-def _get_current_capacity(desires) -> Optional[CurrentClusterCapacity]:
+def _get_current_capacity(desires: CapacityDesires) -> Optional[CurrentClusterCapacity]:
     current_capacity = (
         None
         if desires.current_clusters is None
@@ -345,7 +348,7 @@ def _get_current_capacity(desires) -> Optional[CurrentClusterCapacity]:
     return current_capacity
 
 
-def _upsert_params(cluster, params):
+def _upsert_params(cluster: Any, params: Dict[str, Any]) -> None:
     if cluster.cluster_params:
         cluster.cluster_params.update(params)
     else:
@@ -575,7 +578,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
 
 
 # C* LCS has 160 MiB sstables by default and 10 sstables per level
-def _cass_io_per_read(node_size_gib, sstable_size_mb=160):
+def _cass_io_per_read(node_size_gib: float, sstable_size_mb: int = 160) -> int:
     gb = node_size_gib * 1024
     sstables = max(1, gb // sstable_size_mb)
     # 10 sstables per level, plus 1 for L0 (avg)
@@ -585,7 +588,7 @@ def _cass_io_per_read(node_size_gib, sstable_size_mb=160):
     return 2 * levels
 
 
-def _get_base_memory(desires: CapacityDesires):
+def _get_base_memory(desires: CapacityDesires) -> float:
     return (
         desires.data_shape.reserved_instance_app_mem_gib
         + desires.data_shape.reserved_instance_system_mem_gib
@@ -679,8 +682,13 @@ class NflxCassandraArguments(BaseModel):
 
 
 class NflxCassandraCapacityModel(CapacityModel):
+    def __init__(self) -> None:
+        pass
+
     @staticmethod
-    def get_required_cluster_size(tier, extra_model_arguments):
+    def get_required_cluster_size(
+        tier: int, extra_model_arguments: Dict[str, Any]
+    ) -> Optional[int]:
         required_cluster_size: Optional[int] = (
             math.ceil(extra_model_arguments["required_cluster_size"])
             if "required_cluster_size" in extra_model_arguments
@@ -775,7 +783,7 @@ class NflxCassandraCapacityModel(CapacityModel):
         )
 
     @staticmethod
-    def description():
+    def description() -> str:
         return "Netflix Streaming Cassandra Model"
 
     @staticmethod
@@ -803,7 +811,9 @@ class NflxCassandraCapacityModel(CapacityModel):
         )
 
     @staticmethod
-    def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
         acceptable_consistency = {
             None,
             AccessConsistency.best_effort,

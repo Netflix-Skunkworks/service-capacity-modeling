@@ -3,6 +3,7 @@ import logging
 import math
 import random
 from decimal import Decimal
+from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import List
@@ -552,7 +553,7 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
             ratio = ebs_gib / max_size
             count = max(cluster_size(math.ceil(count * ratio)), min_count)
             cost = count * instance.annual_cost
-            ebs_gib = max_size
+            ebs_gib = int(max_size)
 
         read_io, write_io = required_disk_ios(space_gib, count)
         read_io, write_io = (
@@ -597,27 +598,27 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
 
 
 # AWS GP2 gives 3 IOS / gb stored.
-def gp2_gib_for_io(read_ios) -> int:
+def gp2_gib_for_io(read_ios: float) -> int:
     return int(max(1, read_ios // 3))
 
 
-def cloud_gib_for_io(drive, total_ios, space_gib) -> int:
+def cloud_gib_for_io(drive: Drive, total_ios: float, space_gib: float) -> int:
     if drive.name == "gp2":
         return gp2_gib_for_io(total_ios)
     else:
-        return space_gib
+        return int(space_gib)
 
 
 class WorkingSetEstimator:
-    def __init__(self):
-        self._cache = {}
+    def __init__(self) -> None:
+        self._cache: Dict[Any, Interval] = {}
 
     def working_set_percent(
         self,
         # latency distributions of the read SLOs versus the drives
         # expressed as scipy rv_continuous objects
-        drive_read_latency_dist,
-        read_slo_latency_dist,
+        drive_read_latency_dist: Any,
+        read_slo_latency_dist: Any,
         # what percentile of disk latency should we target for keeping in
         # memory. Not as this is _increased_ more memory will be reserved
         target_percentile: float = 0.90,
@@ -655,8 +656,8 @@ _working_set_estimator = WorkingSetEstimator()
 def working_set_from_drive_and_slo(
     # latency distributions of the read SLOs versus the drives
     # expressed as scipy rv_continuous objects
-    drive_read_latency_dist,
-    read_slo_latency_dist,
+    drive_read_latency_dist: Any,
+    read_slo_latency_dist: Any,
     estimated_working_set: Optional[Interval] = None,
     # what percentile of disk latency should we target for keeping in
     # memory. Not as this is _increased_ more memory will be reserved
@@ -797,7 +798,7 @@ class DerivedBuffers(BaseModel):
         buffer: Dict[str, Buffer],
         components: List[str],
         component_fallbacks: Optional[Dict[str, List[str]]] = None,
-    ):
+    ) -> "DerivedBuffers":
         expanded_components = _expand_components(components, component_fallbacks)
 
         scale = 1.0
@@ -856,7 +857,7 @@ class RequirementFromCurrentCapacity(BaseModel):
 
     def cpu(self, instance_candidate: Instance) -> int:
         current_cpu_util = self.current_capacity.cpu_utilization.mid / 100
-        current_total_cpu = (
+        current_total_cpu = float(
             self.current_instance.cpu * self.current_capacity.cluster_instance_count.mid
         )
 
@@ -881,11 +882,11 @@ class RequirementFromCurrentCapacity(BaseModel):
 
     @property
     def mem_gib(self) -> float:
-        current_memory_utilization = (
+        current_memory_utilization = float(
             self.current_capacity.memory_utilization_gib.mid
             * self.current_capacity.cluster_instance_count.mid
         )
-        zonal_ram_allocated = (
+        zonal_ram_allocated = float(
             self.current_instance.ram_gib
             * self.current_capacity.cluster_instance_count.mid
         )
@@ -905,11 +906,11 @@ class RequirementFromCurrentCapacity(BaseModel):
 
     @property
     def disk_gib(self) -> int:
-        current_cluster_disk_util_gib = (
+        current_cluster_disk_util_gib = float(
             self.current_capacity.disk_utilization_gib.mid
             * self.current_capacity.cluster_instance_count.mid
         )
-        current_node_disk_gib = (
+        current_node_disk_gib = float(
             self.current_instance.drive.max_size_gib
             if self.current_instance.drive is not None
             else (
@@ -919,7 +920,7 @@ class RequirementFromCurrentCapacity(BaseModel):
             )
         )
 
-        zonal_disk_allocated = (
+        zonal_disk_allocated = float(
             current_node_disk_gib * self.current_capacity.cluster_instance_count.mid
         )
         # These are the desired buffers
@@ -939,11 +940,11 @@ class RequirementFromCurrentCapacity(BaseModel):
 
     @property
     def network_mbps(self) -> int:
-        current_network_utilization = (
+        current_network_utilization = float(
             self.current_capacity.network_utilization_mbps.mid
             * self.current_capacity.cluster_instance_count.mid
         )
-        zonal_network_allocated = (
+        zonal_network_allocated = float(
             self.current_instance.net_mbps
             * self.current_capacity.cluster_instance_count.mid
         )

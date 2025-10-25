@@ -5,6 +5,8 @@ import logging
 import os
 from functools import reduce
 from pathlib import Path
+from typing import Any
+from typing import cast
 from typing import Dict
 from typing import List
 from typing import Optional
@@ -20,11 +22,11 @@ from service_capacity_modeling.interface import Service
 logger = logging.getLogger(__name__)
 
 
-def load_pricing(pricing: Dict) -> Pricing:
+def load_pricing(pricing: Dict[str, Any]) -> Pricing:
     return Pricing(regions=pricing)
 
 
-def load_hardware(hardware: Dict) -> Hardware:
+def load_hardware(hardware: Dict[str, Any]) -> Hardware:
     return Hardware(**hardware)
 
 
@@ -103,7 +105,9 @@ def merge_hardware(existing: Hardware, override: Hardware) -> Hardware:
             merged[key] = override_obj.get(key)
         elif isinstance(existing_field, Dict):
             override_field = override_obj.get(key)
-            merged_field = merged.setdefault(key, {})
+            if override_field is None:
+                override_field = {}
+            merged_field = cast(Dict[str, Any], merged.setdefault(key, {}))
 
             existing_keys = existing_field.keys()
             override_keys = override_obj.get(key, {}).keys()
@@ -119,7 +123,7 @@ def merge_hardware(existing: Hardware, override: Hardware) -> Hardware:
     return Hardware(**merged)
 
 
-def merge_pricing(existing: Dict, override: Dict) -> Dict:
+def merge_pricing(existing: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     merged = existing.copy()
     for region, override_pricing in override.items():
         if region not in merged:
@@ -165,7 +169,7 @@ def load_hardware_from_disk(
     if shape_paths is None:
         shape_paths = []
 
-    combined_pricing: Dict = {}
+    combined_pricing: Dict[str, Any] = {}
 
     logger.debug("Loading pricing from: %s", price_paths)
     for price_path in price_paths:
@@ -185,7 +189,7 @@ def load_hardware_from_disk(
     return price_hardware(hardware=hardware, pricing=pricing)
 
 
-def load_hardware_from_s3(bucket, path) -> GlobalHardware:
+def load_hardware_from_s3(bucket: str, path: str) -> GlobalHardware:
     try:
         # boto is a heavy dependency so we only want to take it if
         # someone will be using it ...
@@ -205,7 +209,7 @@ def load_hardware_from_s3(bucket, path) -> GlobalHardware:
 
 
 class HardwareShapes:
-    def __init__(self):
+    def __init__(self) -> None:
         self._hardware: Optional[GlobalHardware] = None
 
     def load(self, new_hardware: GlobalHardware) -> None:

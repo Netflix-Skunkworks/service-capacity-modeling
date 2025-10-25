@@ -176,7 +176,7 @@ class NflxJavaAppCapacityModel(CapacityModel):
         )
 
     @staticmethod
-    def description():
+    def description() -> str:
         return "Netflix Streaming Java App Model"
 
     @staticmethod
@@ -196,7 +196,9 @@ class NflxJavaAppCapacityModel(CapacityModel):
         return regret
 
     @staticmethod
-    def default_desires(user_desires, extra_model_arguments):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(

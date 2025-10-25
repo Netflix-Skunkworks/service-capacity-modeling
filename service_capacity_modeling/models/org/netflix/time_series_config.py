@@ -60,12 +60,12 @@ class TimeSeriesConfiguration:
         extra_model_arguments: Dict[str, Any], retention_duration: str
     ) -> str:
         if "ts.accept-limit" in extra_model_arguments:
-            return _iso_to_proto_duration(extra_model_arguments["ts.accept-limit"])
+            return str(_iso_to_proto_duration(extra_model_arguments["ts.accept-limit"]))
         elif retention_duration == "unlimited":
             # For "all-time" tables we have to let them read and write anywhere
             return "0s"
         else:
-            return _iso_to_proto_duration("PT10M")
+            return str(_iso_to_proto_duration("PT10M"))
 
     @staticmethod
     def __get_buckets_per_id(
@@ -162,7 +162,7 @@ class TimeSeriesConfiguration:
 
     @staticmethod
     def __get_consistency_target(extra_model_arguments: Dict[str, Any]) -> str:
-        val = extra_model_arguments.get("ts.read-consistency", "eventual").lower()
+        val = str(extra_model_arguments.get("ts.read-consistency", "eventual")).lower()
         if val in ("best-effort", "eventual"):
             return val
         else:

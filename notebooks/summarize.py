@@ -5,7 +5,7 @@ import json
 import numpy as np
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Summarize measurements to an interval.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -34,7 +34,7 @@ def parse_args():
     return args
 
 
-def main():
+def main() -> None:
     args = parse_args()
 
     confidence = args.confidence

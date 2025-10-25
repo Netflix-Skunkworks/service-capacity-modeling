@@ -24,6 +24,19 @@ repos:
     rev: v1.9.0
     hooks:
       - id: reorder-python-imports
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.14.0
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - pydantic
+          - types-setuptools
+          - boto3-stubs
+          - numpy
+          - importlib-resources
+        args:
+          - --config-file=.mypy.ini
+        exclude: ^tests/
   - repo: local
     hooks:
       - id: pylint

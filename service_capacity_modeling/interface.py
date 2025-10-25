@@ -27,12 +27,12 @@ MEGABIT_IN_BYTES = (1000 * 1000) / 8
 
 
 class ExcludeUnsetModel(BaseModel):
-    def model_dump(self, *args, **kwargs):
+    def model_dump(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         if "exclude_unset" not in kwargs:
             kwargs["exclude_unset"] = True
         return super().model_dump(*args, **kwargs)
 
-    def model_dump_json(self, *args, **kwargs):
+    def model_dump_json(self, *args: Any, **kwargs: Any) -> str:
         if "exclude_unset" not in kwargs:
             kwargs["exclude_unset"] = True
         return super().model_dump_json(*args, **kwargs)
@@ -44,10 +44,10 @@ class ExcludeUnsetModel(BaseModel):
 
 
 class IntervalModel(str, Enum):
-    def __str__(self):
+    def __str__(self) -> str:
         return str(self.value)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"D({self.value})"
 
     gamma = "gamma"
@@ -71,11 +71,11 @@ class Interval(ExcludeUnsetModel):
     model_config = ConfigDict(frozen=True, protected_namespaces=())
 
     @property
-    def can_simulate(self):
+    def can_simulate(self) -> bool:
         return self.confidence <= 0.99 and self.allow_simulate
 
     @property
-    def minimum(self):
+    def minimum(self) -> float:
         if self.minimum_value is None:
             if self.confidence == 1.0:
                 return self.low * 0.999
@@ -84,17 +84,19 @@ class Interval(ExcludeUnsetModel):
         return self.minimum_value
 
     @property
-    def maximum(self):
+    def maximum(self) -> float:
         if self.maximum_value is None:
             if self.confidence == 1.0:
                 return self.high * 1.001
             return self.high * 2
         return self.maximum_value
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((type(self),) + tuple(self.__dict__.values()))
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Interval):
+            return False
         return self.__hash__() == other.__hash__()
 
     def scale(self, factor: float) -> Interval:
@@ -264,7 +266,7 @@ class Drive(ExcludeUnsetModel):
         return max(self.block_size_kib, self.group_size_kib)
 
     @property
-    def max_size_gib(self) -> int:
+    def max_size_gib(self) -> float:
         if self.max_scale_size_gib != 0:
             return self.max_scale_size_gib
         else:
@@ -279,7 +281,7 @@ class Drive(ExcludeUnsetModel):
 
     @computed_field(return_type=float)  # type: ignore
     @property
-    def annual_cost(self):
+    def annual_cost(self) -> float:
         size = self.size_gib or 0
         r_ios = self.read_io_per_s or 0
         w_ios = self.write_io_per_s or 0
@@ -382,15 +384,15 @@ class Instance(ExcludeUnsetModel):
     family_separator: str = "."
 
     @property
-    def family(self):
+    def family(self) -> str:
         return self.name.rsplit(self.family_separator, 1)[0]
 
     @property
-    def size(self):
+    def size(self) -> str:
         return self.name.rsplit(self.family_separator, 1)[1]
 
     @property
-    def cores(self):
+    def cores(self) -> int:
         if self.cpu_cores is not None:
             return self.cpu_cores
         return self.cpu // 2
@@ -456,7 +458,7 @@ class Service(ExcludeUnsetModel):
         low=1, mid=10, high=50, confidence=0.9
     )
 
-    def annual_cost_gib(self, data_gib: float = 0):
+    def annual_cost_gib(self, data_gib: float = 0) -> float:
         if isinstance(self.annual_cost_per_gib, float):
             return self.annual_cost_per_gib * data_gib
         else:
@@ -979,7 +981,7 @@ class CapacityRequirement(ExcludeUnsetModel):
     network_mbps: Interval = certain_int(0)
     disk_gib: Interval = certain_int(0)
 
-    context: Dict = {}
+    context: Dict[str, Any] = {}
 
 
 class ClusterCapacity(ExcludeUnsetModel):
@@ -992,7 +994,7 @@ class ClusterCapacity(ExcludeUnsetModel):
     # When provisioning services we might need to signal they
     # should have certain configuration, for example flags that
     # affect durability shut off
-    cluster_params: Dict = {}
+    cluster_params: Dict[str, Any] = {}
 
 
 class ServiceCapacity(ExcludeUnsetModel):
@@ -1003,7 +1005,7 @@ class ServiceCapacity(ExcludeUnsetModel):
     regret_cost: bool = False
     # Often while provisioning cloud services we need to represent
     # parameters to the cloud APIs, use this to inject those from models
-    service_params: Dict = {}
+    service_params: Dict[str, Any] = {}
 
 
 # For services that are provisioned by zone (e.g. Cassandra, EVCache)

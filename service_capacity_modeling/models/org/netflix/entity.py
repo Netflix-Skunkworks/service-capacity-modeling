@@ -48,7 +48,7 @@ class NflxEntityCapacityModel(CapacityModel):
         return entity_app
 
     @staticmethod
-    def description():
+    def description() -> str:
         return "Netflix Streaming Entity Model"
 
     @staticmethod
@@ -76,7 +76,7 @@ class NflxEntityCapacityModel(CapacityModel):
                         / 1024**3
                     )
                 else:
-                    item_size_gib = 10 / 1024**2
+                    item_size_gib = 10 / 1024**2  # type: ignore[unreachable]
                 item_count = user_desires.data_shape.estimated_state_size_gib.scale(
                     1 / item_size_gib
                 )
@@ -102,7 +102,9 @@ class NflxEntityCapacityModel(CapacityModel):
         )
 
     @staticmethod
-    def default_desires(user_desires, extra_model_arguments):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(

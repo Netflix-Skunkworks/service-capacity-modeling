@@ -45,7 +45,7 @@ class NflxWALCapacityModel(CapacityModel):
         return wal_app
 
     @staticmethod
-    def description():
+    def description() -> str:
         return "Netflix Streaming WAL Model"
 
     @staticmethod
@@ -63,7 +63,9 @@ class NflxWALCapacityModel(CapacityModel):
             return ()
 
     @staticmethod
-    def default_desires(user_desires, extra_model_arguments):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
         return CapacityDesires(
             query_pattern=QueryPattern(
                 access_pattern=AccessPattern.latency,

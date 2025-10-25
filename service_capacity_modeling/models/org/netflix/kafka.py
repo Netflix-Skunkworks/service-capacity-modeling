@@ -64,7 +64,9 @@ def _get_current_zonal_cluster(
     )
 
 
-def _is_same_instance_family(cluster, target_family):
+def _is_same_instance_family(
+    cluster: Optional[CurrentZoneClusterCapacity], target_family: str
+) -> bool:
     """Check if cluster has a different instance family than the target."""
     if not cluster or not cluster.cluster_instance:
         return False
@@ -213,14 +215,16 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
     )
 
 
-def _upsert_params(cluster, params):
+def _upsert_params(cluster: Any, params: Dict[str, Any]) -> None:
     if cluster.cluster_params:
         cluster.cluster_params.update(params)
     else:
         cluster.cluster_params = params
 
 
-def _kafka_read_io(rps, io_size_kib, size_gib, recovery_seconds: int) -> float:
+def _kafka_read_io(
+    rps: float, io_size_kib: float, size_gib: float, recovery_seconds: int
+) -> float:
     # Get enough disk read IO capacity for some reads
     # In practice we have cache reducing this by 99% or more
     read_ios = rps * 0.05
@@ -229,7 +233,7 @@ def _kafka_read_io(rps, io_size_kib, size_gib, recovery_seconds: int) -> float:
     size_kib = size_gib * 0.5 * (1024 * 1024)
     recovery_ios = max(1, size_kib / io_size_kib) / recovery_seconds
     # Leave 50% headroom for read IOs since generally we will hit cache
-    return (read_ios + int(round(recovery_ios))) * 1.5
+    return float((read_ios + int(round(recovery_ios))) * 1.5)
 
 
 # pylint: disable=too-many-locals
@@ -239,7 +243,7 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     instance: Instance,
     drive: Drive,
     desires: CapacityDesires,
-    hot_retention_seconds,
+    hot_retention_seconds: float,
     zones_per_region: int = 3,
     copies_per_region: int = 2,
     require_local_disks: bool = False,
@@ -532,7 +536,7 @@ class NflxKafkaCapacityModel(CapacityModel):
         )
 
     @staticmethod
-    def description():
+    def description() -> str:
         return "Netflix Streaming Kafka Model"
 
     @staticmethod
@@ -545,7 +549,9 @@ class NflxKafkaCapacityModel(CapacityModel):
         return ("gp3",)
 
     @staticmethod
-    def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
         # Default to 10MiB/s and a single reader
         concurrent_readers = max(
             1, int(user_desires.query_pattern.estimated_read_per_second.mid)

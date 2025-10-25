@@ -139,11 +139,12 @@ def _get_read_consistency_percentages(
     )
     if total_percent == 0:
         access_consistency = desires.query_pattern.access_consistency.same_region
-        if access_consistency == AccessConsistency.serializable:
+        target_consistency = access_consistency.target_consistency
+        if target_consistency == AccessConsistency.serializable:
             transactional_read_percent = 1.0
             eventual_read_percent = 0.0
             strong_read_percent = 0.0
-        elif access_consistency in (
+        elif target_consistency in (
             AccessConsistency.read_your_writes,
             AccessConsistency.linearizable,
         ):
@@ -184,7 +185,8 @@ def _get_write_consistency_percentages(
     total_percent = transactional_write_percent + non_transactional_write_percent
     if total_percent == 0:
         access_consistency = desires.query_pattern.access_consistency.same_region
-        if access_consistency == AccessConsistency.serializable:
+        target_consistency = access_consistency.target_consistency
+        if target_consistency == AccessConsistency.serializable:
             transactional_write_percent = 1.0
             non_transactional_write_percent = 0.0
         else:
@@ -547,7 +549,7 @@ class NflxDynamoDBCapacityModel(CapacityModel):
         )
 
     @staticmethod
-    def description():
+    def description() -> str:
         return "Netflix Streaming DynamoDB Model"
 
     @staticmethod
@@ -559,7 +561,9 @@ class NflxDynamoDBCapacityModel(CapacityModel):
         return False
 
     @staticmethod
-    def default_desires(user_desires, extra_model_arguments: Dict[str, Any]):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
         acceptable_consistency = {
             "same_region": {
                 None,

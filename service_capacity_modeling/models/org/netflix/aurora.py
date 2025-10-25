@@ -1,6 +1,7 @@
 import logging
 import math
 from typing import Any
+from typing import Callable
 from typing import Dict
 from typing import Optional
 from typing import Tuple
@@ -86,7 +87,9 @@ def _estimate_aurora_requirement(
 
 # MySQL default block size is 16KiB, PostGreSQL is 8KiB Number of reads for B-Tree
 # are given by log of total pages to the base of B-Tree fan out factor
-def _rds_required_disk_ios(disk_size_gib: int, db_type: str, btree_fan_out: int = 100):
+def _rds_required_disk_ios(
+    disk_size_gib: int, db_type: str, btree_fan_out: int = 100
+) -> float:
     disk_size_kb = disk_size_gib * 1024 * 1024
     if db_type == "postgres":
         default_block_size = 8  # KiB
@@ -100,11 +103,11 @@ def _rds_required_disk_ios(disk_size_gib: int, db_type: str, btree_fan_out: int 
 # This is a start, we should iterate based on the actual work load
 def _estimate_io_cost(
     db_type: str,
-    desires,
+    desires: CapacityDesires,
     read_io_price: float,
     write_io_price: float,
     cache_hit_rate: float = 0.8,
-):
+) -> float:
     if db_type == "postgres":
         read_byte_per_io = 8192
     else:
@@ -134,8 +137,8 @@ def _compute_aurora_region(  # pylint: disable=too-many-positional-arguments
     needed_disk_gib: int,
     needed_memory_gib: int,
     needed_network_mbps: float,
-    required_disk_ios,
-    required_disk_space,
+    required_disk_ios: Callable[[int], float],
+    required_disk_space: Callable[[int], float],
     db_type: str,
     desires: CapacityDesires,
 ) -> Optional[RegionClusterCapacity]:
@@ -295,7 +298,7 @@ class NflxAuroraCapacityModel(CapacityModel):
         )
 
     @staticmethod
-    def description():
+    def description() -> str:
         return "Netflix Aurora Cluster Model"
 
     @staticmethod
@@ -307,7 +310,9 @@ class NflxAuroraCapacityModel(CapacityModel):
         return Platform.aurora_mysql, Platform.aurora_mysql
 
     @staticmethod
-    def default_desires(user_desires, extra_model_arguments):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
         return CapacityDesires(
             query_pattern=QueryPattern(
                 access_pattern=AccessPattern.latency,

@@ -1,6 +1,7 @@
 import logging
 import math
 from typing import Any
+from typing import Callable
 from typing import Dict
 from typing import Optional
 
@@ -83,7 +84,9 @@ def _estimate_rds_requirement(
 
 # MySQL default block size is 16KiB, PostGreSQL is 8KiB Number of reads for B-Tree
 # are given by log of total pages to the base of B-Tree fan out factor
-def _rds_required_disk_ios(disk_size_gib: int, db_type: str, btree_fan_out: int = 100):
+def _rds_required_disk_ios(
+    disk_size_gib: int, db_type: str, btree_fan_out: int = 100
+) -> float:
     disk_size_kb = disk_size_gib * 1024 * 1024
     if db_type == "postgres":
         default_block_size = 8  # KiB
@@ -101,8 +104,8 @@ def _compute_rds_region(  # pylint: disable=too-many-positional-arguments
     needed_disk_gib: int,
     needed_memory_gib: int,
     needed_network_mbps: float,
-    required_disk_ios,
-    required_disk_space,
+    required_disk_ios: Callable[[int], float],
+    required_disk_space: Callable[[int], int],
     reference_shape: Instance,
 ) -> Optional[RegionClusterCapacity]:
     """Computes a regional cluster of a RDS service
@@ -239,7 +242,7 @@ class NflxRDSCapacityModel(CapacityModel):
         )
 
     @staticmethod
-    def description():
+    def description() -> str:
         return "Netflix RDS Cluster Model"
 
     @staticmethod
@@ -247,7 +250,9 @@ class NflxRDSCapacityModel(CapacityModel):
         return NflxRDSArguments.model_json_schema()
 
     @staticmethod
-    def default_desires(user_desires, extra_model_arguments):
+    def default_desires(
+        user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> CapacityDesires:
         return CapacityDesires(
             query_pattern=QueryPattern(
                 access_pattern=AccessPattern.latency,

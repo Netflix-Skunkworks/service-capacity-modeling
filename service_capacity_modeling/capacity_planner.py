@@ -190,7 +190,7 @@ def model_desires_percentiles(
 def _set_instance_objects(
     desires: CapacityDesires,
     hardware: Hardware,
-):
+) -> None:
     if desires.current_clusters:
         for zonal_cluster_capacity in desires.current_clusters.zonal:
             if zonal_cluster_capacity.cluster_instance_name in hardware.instances:
@@ -290,7 +290,9 @@ def _regret(
     return plans_by_regret
 
 
-def _add_requirement(requirement, accum):
+def _add_requirement(
+    requirement: CapacityRequirement, accum: Dict[str, Dict[str, List[Interval]]]
+) -> None:
     if requirement.requirement_type not in accum:
         accum[requirement.requirement_type] = {}
 
@@ -305,7 +307,11 @@ def _add_requirement(requirement, accum):
                 requirements[field].append(d)
 
 
-def _merge_models(plans_by_model, zonal_requirements, regional_requirements):
+def _merge_models(
+    plans_by_model: List[List[CapacityPlan]],
+    zonal_requirements: Dict[str, Dict[str, List[Interval]]],
+    regional_requirements: Dict[str, Dict[str, List[Interval]]],
+) -> List[CapacityPlan]:
     capacity_plans = []
     for composed in zip(*filter(lambda x: x, plans_by_model)):
         merged_plans = [functools.reduce(merge_plan, composed)]
@@ -331,10 +337,10 @@ def _in_allowed(inp: str, allowed: Sequence[str]) -> bool:
 class CapacityPlanner:
     def __init__(
         self,
-        default_num_simulations=128,
-        default_num_results=2,
-        default_lifecycles=(Lifecycle.stable, Lifecycle.beta),
-    ):
+        default_num_simulations: int = 128,
+        default_num_results: int = 2,
+        default_lifecycles: Tuple[Lifecycle, ...] = (Lifecycle.stable, Lifecycle.beta),
+    ) -> None:
         self._shapes: HardwareShapes = shapes
         self._models: Dict[str, CapacityModel] = {}
 
@@ -343,11 +349,11 @@ class CapacityPlanner:
         self._default_regret_params = CapacityRegretParameters()
         self._default_lifecycles = default_lifecycles
 
-    def register_group(self, group: Callable[[], Dict[str, CapacityModel]]):
+    def register_group(self, group: Callable[[], Dict[str, CapacityModel]]) -> None:
         for name, model in group().items():
             self.register_model(name, model)
 
-    def register_model(self, name: str, capacity_model: CapacityModel):
+    def register_model(self, name: str, capacity_model: CapacityModel) -> None:
         self._models[name] = capacity_model
 
     @property
@@ -429,16 +435,16 @@ class CapacityPlanner:
 
     def _group_plans_by_percentile(  # pylint: disable=too-many-positional-arguments
         self,
-        drives,
-        extra_model_arguments,
-        instance_families,
-        lifecycles,
-        num_regions,
-        num_results,
-        region,
-        model_percentile_desires,
-        sorted_percentiles,
-    ):
+        drives: Optional[Sequence[str]],
+        extra_model_arguments: Dict[str, Any],
+        instance_families: Optional[Sequence[str]],
+        lifecycles: Sequence[Lifecycle],
+        num_regions: int,
+        num_results: Optional[int],
+        region: str,
+        model_percentile_desires: Any,
+        sorted_percentiles: List[int],
+    ) -> Dict[int, Sequence[CapacityPlan]]:
         percentile_plans = {}
         for index, percentile in enumerate(sorted_percentiles):
             percentile_plan = []
@@ -470,15 +476,15 @@ class CapacityPlanner:
 
     def _mean_plan(  # pylint: disable=too-many-positional-arguments
         self,
-        drives,
-        extra_model_arguments,
-        instance_families,
-        lifecycles,
-        num_regions,
-        num_results,
-        region,
-        model_mean_desires,
-    ):
+        drives: Optional[Sequence[str]],
+        extra_model_arguments: Dict[str, Any],
+        instance_families: Optional[Sequence[str]],
+        lifecycles: Sequence[Lifecycle],
+        num_regions: int,
+        num_results: Optional[int],
+        region: str,
+        model_mean_desires: Dict[str, CapacityDesires],
+    ) -> Sequence[CapacityPlan]:
         mean_plans = []
         for mean_sub_model, mean_sub_desire in model_mean_desires.items():
             mean_sub_plan = self._plan_certain(
@@ -585,7 +591,7 @@ class CapacityPlanner:
         ]
 
     # Calculates the minimum cpu, memory, and network requirements based on desires.
-    def _per_instance_requirements(self, desires) -> Tuple[int, float]:
+    def _per_instance_requirements(self, desires: CapacityDesires) -> Tuple[int, float]:
         # Applications often set fixed reservations of heap or OS memory
         per_instance_mem = (
             desires.data_shape.reserved_instance_app_mem_gib
@@ -621,14 +627,14 @@ class CapacityPlanner:
 
     def generate_scenarios(  # pylint: disable=too-many-positional-arguments
         self,
-        model,
-        region,
-        desires,
-        num_regions,
-        lifecycles,
-        instance_families,
-        drives,
-    ):
+        model: CapacityModel,
+        region: str,
+        desires: CapacityDesires,
+        num_regions: int,
+        lifecycles: Optional[Sequence[Lifecycle]],
+        instance_families: Optional[Sequence[str]],
+        drives: Optional[Sequence[str]],
+    ) -> Generator[Tuple[Instance, Drive, RegionContext], None, None]:
         lifecycles = lifecycles or self._default_lifecycles
         instance_families = instance_families or []
         drives = drives or []
@@ -718,8 +724,8 @@ class CapacityPlanner:
         lifecycles = lifecycles or self._default_lifecycles
 
         # requirement types -> values
-        zonal_requirements: Dict[str, Dict] = {}
-        regional_requirements: Dict[str, Dict] = {}
+        zonal_requirements: Dict[str, Dict[str, List[Interval]]] = {}
+        regional_requirements: Dict[str, Dict[str, List[Interval]]] = {}
 
         regret_clusters_by_model: Dict[
             str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]
@@ -836,7 +842,7 @@ class CapacityPlanner:
         model_name: str,
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
-    ):
+    ) -> Generator[Tuple[str, CapacityDesires], None, None]:
         queue: List[Tuple[CapacityDesires, str]] = [(desires, model_name)]
         models_used = []
 
