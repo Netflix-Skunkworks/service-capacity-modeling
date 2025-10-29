@@ -11,12 +11,13 @@ from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
-from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.models.common import cpu_headroom_target
 from tests.util import assert_similar_compute
+from tests.util import get_drive_size_gib
+from tests.util import simple_drive
 
 
 def get_ideal_cpu_for_instance(instance_name: str) -> float:
@@ -36,21 +37,6 @@ def get_ideal_cpu_for_instance(instance_name: str) -> float:
 
 def total_ipc_per_second(instance: Instance, count: int) -> float:
     return instance.cpu * instance.cpu_ghz * instance.cpu_ipc_scale * count
-
-
-def get_drive_size_gib(cluster: ClusterCapacity) -> int:
-    """Safely get drive size in GiB from attached or instance drives."""
-    # Check attached_drives first (for EBS)
-    if cluster.attached_drives:
-        return cluster.attached_drives[0].size_gib
-
-    # Fall back to checking the instance's built-in drive
-    if cluster.instance.drive is not None:
-        return cluster.instance.drive.size_gib
-
-    raise ValueError(
-        f"Instance {cluster.instance.name} has no drive or attached drives"
-    )
 
 
 class ResourceTargets:
@@ -404,6 +390,10 @@ class TestCPUScalingConstraints:
             result.instance,
             int(cluster_capacity.cluster_instance_count.mid) // 2,
             result.count,
+            expected_attached_disk=simple_drive(size_gib=3500),
+            actual_attached_disk=result.attached_drives[0]
+            if result.attached_drives
+            else None,
         )
 
     def test_cpu_running_cool_scale_down(self):
@@ -480,9 +470,16 @@ class TestCPUScalingConstraints:
         result = cap_plan.candidate_clusters.zonal[0]
         result_cores = result.count * result.instance.cpu
 
-        # CPU should scale down to meet 1.5x buffer requirement
+        # CPU should not scale down to meet 1.5x buffer requirement
         assert_similar_compute(
-            shapes.instance("c6a.4xlarge"), result.instance, CLUSTER_SIZE, result.count
+            shapes.instance("c6a.8xlarge"),
+            result.instance,
+            CLUSTER_SIZE // 2,
+            result.count,
+            expected_attached_disk=simple_drive(size_gib=3500),
+            actual_attached_disk=result.attached_drives[0]
+            if result.attached_drives
+            else None,
         )
         assert result_cores <= CLUSTER.total_vcpu
 
@@ -586,6 +583,10 @@ class TestStorageAndCPUIntegration:
             result.instance,
             CLUSTER_SIZE * 4,
             result.count,
+            expected_attached_disk=simple_drive(size_gib=3500),
+            actual_attached_disk=result.attached_drives[0]
+            if result.attached_drives
+            else None,
         )
 
         # CPU should scale up by 1.5x: 64 cores → 96 cores

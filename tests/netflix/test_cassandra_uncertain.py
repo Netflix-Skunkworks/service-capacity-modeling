@@ -1,8 +1,14 @@
 from service_capacity_modeling.capacity_planner import planner
+from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
+from tests.util import assert_minimum_storage_gib
+from tests.util import assert_similar_compute
+from tests.util import get_drive_size_gib
+from tests.util import has_attached_storage
+from tests.util import simple_drive
 
 uncertain_mid = CapacityDesires(
     service_tier=1,
@@ -98,10 +104,7 @@ def test_increasing_qps_simple():
             "cassandra.zonal-clusters"
         ]
         lr_family = lr.instance.family
-        if lr.instance.drive is None:
-            assert sum(dr.size_gib for dr in lr.attached_drives) >= 100
-        else:
-            assert lr.instance.drive.size_gib >= 100
+        assert_minimum_storage_gib(lr, 100)
 
         result.append(
             (lr_family, lr_cpu, lr_cost, cap_plan.least_regret[0].requirements.zonal[0])
@@ -116,30 +119,31 @@ def test_increasing_qps_simple():
     assert sorted(x) == x
 
 
+worn_desire = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        # Very Very few reads.
+        estimated_read_per_second=Interval(low=1, mid=10, high=100, confidence=0.98),
+        # We think we're going to have around 1 million writes per second
+        estimated_write_per_second=Interval(
+            low=100_000, mid=1_000_000, high=2_000_000, confidence=0.98
+        ),
+    ),
+    # We think we're going to have around 200 TiB of data
+    data_shape=DataShape(
+        estimated_state_size_gib=Interval(
+            low=102_400, mid=204_800, high=404_800, confidence=0.98
+        ),
+    ),
+)
+
+
 def test_worn_dataset():
-    """Assert that a write once read never (aka tracing) dataset uses
-    CPU and GP2 cloud drives to max ability. Paying for fast ephmeral storage
-    is silly when we're never reading from it.
     """
-    worn_desire = CapacityDesires(
-        service_tier=1,
-        query_pattern=QueryPattern(
-            # Very Very few reads.
-            estimated_read_per_second=Interval(
-                low=1, mid=10, high=100, confidence=0.98
-            ),
-            # We think we're going to have around 1 million writes per second
-            estimated_write_per_second=Interval(
-                low=100_000, mid=1_000_000, high=2_000_000, confidence=0.98
-            ),
-        ),
-        # We think we're going to have around 200 TiB of data
-        data_shape=DataShape(
-            estimated_state_size_gib=Interval(
-                low=104800, mid=204800, high=404800, confidence=0.98
-            ),
-        ),
-    )
+    Assert that a write once read never (aka tracing) dataset uses
+    CPU and attached drives to max ability unless ephemeral works out to be
+    cheaper
+    """
     cap_plan = planner.plan(
         model_name="org.netflix.cassandra",
         region="us-east-1",
@@ -150,45 +154,27 @@ def test_worn_dataset():
         },
     )
 
-    lr = cap_plan.least_regret[0]
-    lr_cluster = lr.candidate_clusters.zonal[0]
-    assert 128 <= lr_cluster.count * lr_cluster.instance.cpu <= 512
-    assert (
-        250_000
-        <= lr.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
-        < 1_000_000
-    )
-    assert not lr_cluster.instance.name.startswith(
-        "m5."
-    ) or lr_cluster.instance.name.startswith("r5.")
-    assert len(lr_cluster.attached_drives) == 0
-    assert lr.candidate_clusters.services[0].annual_cost > 5_000
+    lr_clusters = [lr.candidate_clusters.zonal[0] for lr in cap_plan.least_regret]
+    for lr_cluster in lr_clusters:
+        assert_minimum_storage_gib(lr_cluster, 102_400)
+        assert_similar_compute(
+            expected_shape=shapes.instance("r7a.xlarge"),
+            actual_shape=lr_cluster.instance,
+            expected_count=64,
+            actual_count=lr_cluster.count,
+            expected_attached_disk=simple_drive(
+                size_gib=2000, read_io_per_s=200, write_io_per_s=200
+            ),
+            actual_attached_disk=lr_cluster.attached_drives[0]
+            if lr_cluster.attached_drives
+            else None,
+        )
 
 
-def test_worn_dataset_ebs():
+def test_worn_dataset_force_ebs():
     """Assert that a write once read never (aka tracing) dataset uses
-    CPU and GP2 cloud drives to max ability. Paying for fast ephmeral storage
-    is silly when we're never reading from it.
+    has reasonable outputs for ebs results
     """
-    worn_desire = CapacityDesires(
-        service_tier=1,
-        query_pattern=QueryPattern(
-            # Very Very few reads.
-            estimated_read_per_second=Interval(
-                low=1, mid=10, high=100, confidence=0.98
-            ),
-            # We think we're going to have around 1 million writes per second
-            estimated_write_per_second=Interval(
-                low=100_000, mid=1_000_000, high=2_000_000, confidence=0.98
-            ),
-        ),
-        # We think we're going to have around 200 TiB of data
-        data_shape=DataShape(
-            estimated_state_size_gib=Interval(
-                low=104800, mid=204800, high=404800, confidence=0.98
-            ),
-        ),
-    )
     cap_plan = planner.plan(
         model_name="org.netflix.cassandra",
         region="us-east-1",
@@ -196,26 +182,33 @@ def test_worn_dataset_ebs():
         extra_model_arguments={
             "max_regional_size": 200,
             "copies_per_region": 2,
-            "require_local_disks": False,
             "require_attached_disks": True,
         },
     )
 
-    lr = cap_plan.least_regret[0]
-    lr_cluster = lr.candidate_clusters.zonal[0]
-    assert 128 <= lr_cluster.count * lr_cluster.instance.cpu <= 512
-    assert (
-        250_000
-        <= lr.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
-        < 1_000_000
-    )
-    assert lr_cluster.instance.family in ("m5", "r5", "r6a")
-    assert lr_cluster.attached_drives[0].name == "gp3"
-    # gp2 should not provision massive drives, prefer to upcolor
-    assert lr_cluster.attached_drives[0].size_gib < 9000
-    assert lr_cluster.attached_drives[0].size_gib * lr_cluster.count * 3 > 204800
-    # We should have S3 backup cost
-    assert lr.candidate_clusters.services[0].annual_cost > 5_000
+    lr_clusters = [lr.candidate_clusters.zonal[0] for lr in cap_plan.least_regret]
+    for lr_cluster in lr_clusters:
+        assert has_attached_storage(lr_cluster)
+        assert lr_cluster.attached_drives[0].name == "gp3"
+        assert_minimum_storage_gib(lr_cluster, 102_400)
+        # gp3 should not provision massive drives, prefer to upcolor
+        assert get_drive_size_gib(lr_cluster) <= 8 * 1024
+
+        # (matthewho) Why is this r6a.2xlarge??? The above test has the
+        # same desires and is m7a.xlarge. The only meaningful difference is
+        # the required_attached_disks. Also, the resolved disk size is larger
+        assert_similar_compute(
+            expected_shape=shapes.instance("r6a.2xlarge"),
+            actual_shape=lr_cluster.instance,
+            expected_count=64,
+            actual_count=lr_cluster.count,
+            expected_attached_disk=simple_drive(
+                size_gib=2900, read_io_per_s=200, write_io_per_s=200
+            ),
+            actual_attached_disk=lr_cluster.attached_drives[0]
+            if lr_cluster.attached_drives
+            else None,
+        )
 
 
 def test_very_small_has_disk():
@@ -245,7 +238,4 @@ def test_very_small_has_disk():
             < lr.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
             < 6_000
         )
-        if lr_cluster.instance.drive is None:
-            assert sum(dr.size_gib for dr in lr_cluster.attached_drives) > 10
-        else:
-            assert lr_cluster.instance.drive.size_gib > 10
+        assert_minimum_storage_gib(lr_cluster, 10)

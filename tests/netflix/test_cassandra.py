@@ -23,7 +23,10 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.org.netflix.cassandra import (
     NflxCassandraCapacityModel,
 )
+from tests.util import assert_minimum_storage_gib
 from tests.util import assert_similar_compute
+from tests.util import get_total_storage_gib
+from tests.util import has_local_storage
 
 small_but_high_qps = CapacityDesires(
     service_tier=1,
@@ -81,13 +84,8 @@ class TestCassandraCapacityPlanning:
             cores = small_result.count * small_result.instance.cpu
             assert 30 <= cores <= 80
             # Even though it's a small dataset we need IOs so should end up
-            # with lots of ebs_gp2 to handle the read IOs
-            if small_result.attached_drives:
-                assert (
-                    small_result.count
-                    * sum(d.size_gib for d in small_result.attached_drives)
-                    > 1000
-                )
+            # with lots of storage to handle the read IOs
+            assert_minimum_storage_gib(small_result, 1000)
 
             assert small_result.cluster_params["cassandra.heap.write.percent"] == 0.25
             assert small_result.cluster_params["cassandra.heap.table.percent"] == 0.11
@@ -105,19 +103,8 @@ class TestCassandraCapacityPlanning:
 
         num_cpus = high_writes_result.instance.cpu * high_writes_result.count
         assert 30 <= num_cpus <= 128
-        if high_writes_result.attached_drives:
-            assert (
-                high_writes_result.count
-                * high_writes_result.attached_drives[0].size_gib
-                >= 400
-            )
-        elif high_writes_result.instance.drive is not None:
-            assert (
-                high_writes_result.count * high_writes_result.instance.drive.size_gib
-                >= 400
-            )
-        else:
-            raise AssertionError("Should have drives")
+        # Storage should be sufficient for the data (300 GiB with buffer)
+        assert_minimum_storage_gib(high_writes_result, 400)
         assert (
             cap_plan.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
             < 40_000
@@ -165,7 +152,10 @@ class TestCassandraCapacityPlanning:
 
         result = cap_plan.candidate_clusters.zonal[0]
         assert result.count == 12
-        assert result.instance.name.startswith("i")
+        # With require_local_disks=True, should get local storage instances
+        assert has_local_storage(result), (
+            "Expected local storage with require_local_disks=True"
+        )
 
 
 class TestCassandraStorage:
@@ -194,7 +184,10 @@ class TestCassandraStorage:
 
         cores = result.count * result.instance.cpu
         assert 64 <= cores <= 128
-        # Should get gp3
+        # Should get attached storage since we explicitly requested it
+        assert result.attached_drives, (
+            "Expected attached drives with require_attached_disks=True"
+        )
         assert result.attached_drives[0].name == "gp3"
         # 1TiB / ~32 nodes
         assert result.attached_drives[0].read_io_per_s is not None
@@ -227,7 +220,10 @@ class TestCassandraStorage:
 
         cores = result.count * result.instance.cpu
         assert 128 <= cores <= 512
-        # Should get gp3
+        # Should get attached storage since we explicitly requested it
+        assert result.attached_drives, (
+            "Expected attached drives with require_attached_disks=True"
+        )
         assert result.attached_drives[0].name == "gp3"
         # 1TiB / ~32 nodes
         assert result.attached_drives[0].read_io_per_s is not None
@@ -243,6 +239,7 @@ class TestCassandraStorage:
 
 
 def test_capacity_high_writes():
+    """Test high write workload capacity planning (standalone function)."""
     cap_plan = planner.plan_certain(
         model_name="org.netflix.cassandra",
         region="us-east-1",
@@ -254,17 +251,8 @@ def test_capacity_high_writes():
 
     num_cpus = high_writes_result.instance.cpu * high_writes_result.count
     assert 30 <= num_cpus <= 128
-    if high_writes_result.attached_drives:
-        assert (
-            high_writes_result.count * high_writes_result.attached_drives[0].size_gib
-            >= 400
-        )
-    elif high_writes_result.instance.drive is not None:
-        assert (
-            high_writes_result.count * high_writes_result.instance.drive.size_gib >= 400
-        )
-    else:
-        raise AssertionError("Should have drives")
+    # Storage should be sufficient for the data (300 GiB with buffer)
+    assert_minimum_storage_gib(high_writes_result, 400)
     assert cap_plan.candidate_clusters.annual_costs["cassandra.zonal-clusters"] < 40_000
 
 
@@ -331,15 +319,17 @@ class TestCassandraThroughput:
         )[0]
         high_writes_result = cap_plan.candidate_clusters.zonal[0]
 
+        # With attached disks requested, should get general-purpose instances
         assert high_writes_result.instance.family[0] in ("m", "r")
         assert high_writes_result.count > 32
 
-        assert high_writes_result.attached_drives[0].size_gib >= 400
-        assert (
-            300_000
-            > high_writes_result.count * high_writes_result.attached_drives[0].size_gib
-            >= 100_000
+        # Should have attached storage since we explicitly requested it
+        assert high_writes_result.attached_drives, (
+            "Expected attached drives with require_attached_disks=True"
         )
+        assert high_writes_result.attached_drives[0].size_gib >= 400
+        total_storage = get_total_storage_gib(high_writes_result)
+        assert 100_000 <= total_storage < 300_000
 
         cluster_cost = cap_plan.candidate_clusters.annual_costs[
             "cassandra.zonal-clusters"

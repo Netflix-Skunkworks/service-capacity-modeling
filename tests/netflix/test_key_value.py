@@ -144,23 +144,18 @@ def test_kv_increasing_qps_compare_working_sets():
         zlr_small = cap_plan_small.least_regret[0].candidate_clusters.zonal[0]
         zlr_small_cpu = zlr_small.count * zlr_small.instance.cpu
         zlr_small_memory = zlr_small.count * zlr_small.instance.ram_gib
-        zlr_small_cost = cap_plan_small.least_regret[
-            0
-        ].candidate_clusters.total_annual_cost
 
         zlr_large = cap_plan_large.least_regret[0].candidate_clusters.zonal[0]
         zlr_large_cpu = zlr_large.count * zlr_large.instance.cpu
         zlr_large_memory = zlr_large.count * zlr_large.instance.ram_gib
-        zlr_large_cost = cap_plan_large.least_regret[
-            0
-        ].candidate_clusters.total_annual_cost
 
         # For smaller qps, cost should be less for smaller working set
         # (due to needing to keep less in memory). This tilts to c/m instead of
-        # m/r. But, they should be at least cheaper than the heavy
-        # working set instances.
-        assert zlr_small_cost <= zlr_large_cost
-        assert zlr_small_cpu <= zlr_large_cpu or zlr_small_memory <= zlr_large_memory
+        # m/r. NOTE: more memory is not always more expensive when combining
+        # EBS with r instances. For example, a r6a.2xlarge in some configurations
+        # can be cheaper than the m6id.2xlarge due to cheaper EBS costs.
+        assert zlr_small_cpu <= zlr_large_cpu
+        assert zlr_small_memory <= zlr_large_memory
 
         # We should generally want cheap CPUs for Cassandra
         assert all(
