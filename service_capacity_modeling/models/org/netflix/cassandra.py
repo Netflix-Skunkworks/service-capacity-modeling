@@ -377,7 +377,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     desires: CapacityDesires,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
-    require_local_disks: bool = True,
+    require_local_disks: bool = False,
     require_attached_disks: bool = False,
     required_cluster_size: Optional[int] = None,
     max_rps_to_disk: int = 500,
@@ -644,7 +644,7 @@ class NflxCassandraArguments(BaseModel):
         " this will be deduced from durability and consistency desires",
     )
     require_local_disks: bool = Field(
-        default=True,
+        default=False,
         description="If local (ephemeral) drives are required",
     )
     require_attached_disks: bool = Field(
@@ -732,7 +732,7 @@ class NflxCassandraCapacityModel(CapacityModel):
             desires, extra_model_arguments.get("copies_per_region", None)
         )
         require_local_disks: bool = extra_model_arguments.get(
-            "require_local_disks", True
+            "require_local_disks", False
         )
         require_attached_disks: bool = extra_model_arguments.get(
             "require_attached_disks", False
