@@ -27,6 +27,7 @@ from tests.util import assert_minimum_storage_gib
 from tests.util import assert_similar_compute
 from tests.util import get_total_storage_gib
 from tests.util import has_local_storage
+from tests.util import simple_drive
 
 small_but_high_qps = CapacityDesires(
     service_tier=1,
@@ -45,7 +46,7 @@ high_writes = CapacityDesires(
     service_tier=1,
     query_pattern=QueryPattern(
         estimated_read_per_second=certain_int(10_000),
-        estimated_write_per_second=certain_int(100_000),
+        estimated_write_per_second=certain_int(500_000),
     ),
     data_shape=DataShape(
         estimated_state_size_gib=certain_int(300),
@@ -85,7 +86,13 @@ class TestCassandraCapacityPlanning:
             assert 30 <= cores <= 80
             # Even though it's a small dataset we need IOs so should end up
             # with lots of storage to handle the read IOs
-            assert_minimum_storage_gib(small_result, 1000)
+            assert 1000 <= get_total_storage_gib(small_result) <= 2000
+
+            # Data per node is a finicky assertion because it can vary heavily
+            # baesd on generational improvements. If this breaks from a
+            # generational improvement, remove or change this assertion
+            node_density = get_total_storage_gib(small_result) / small_result.count
+            assert 100 < node_density < 300
 
             assert small_result.cluster_params["cassandra.heap.write.percent"] == 0.25
             assert small_result.cluster_params["cassandra.heap.table.percent"] == 0.11
@@ -99,15 +106,17 @@ class TestCassandraCapacityPlanning:
         )[0]
         high_writes_result = cap_plan.candidate_clusters.zonal[0]
         assert high_writes_result.instance.family.startswith("c")
-        assert high_writes_result.count >= 2
 
-        num_cpus = high_writes_result.instance.cpu * high_writes_result.count
-        assert 30 <= num_cpus <= 128
         # Storage should be sufficient for the data (300 GiB with buffer)
         assert_minimum_storage_gib(high_writes_result, 400)
-        assert (
-            cap_plan.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
-            < 40_000
+        assert_similar_compute(
+            shapes.instance("c7a.4xlarge"),
+            high_writes_result.instance,
+            expected_count=8,
+            actual_count=high_writes_result.count,
+            expected_attached_disk=simple_drive(
+                size_gib=100, read_io_per_s=3400, write_io_per_s=200
+            ),
         )
 
     def test_capacity_large_footprint(self):
@@ -156,6 +165,7 @@ class TestCassandraCapacityPlanning:
         assert has_local_storage(result), (
             "Expected local storage with require_local_disks=True"
         )
+        assert result.instance.name.startswith("i")
 
 
 class TestCassandraStorage:
@@ -236,24 +246,6 @@ class TestCassandraStorage:
         assert 20_000 < read_ios < 60_000
         # 33k wps * 8KiB  / 256KiB write IO size = 16.5k / s * 4 for compaction = 6.4k
         assert 4_000 < write_ios < 7_000
-
-
-def test_capacity_high_writes():
-    """Test high write workload capacity planning (standalone function)."""
-    cap_plan = planner.plan_certain(
-        model_name="org.netflix.cassandra",
-        region="us-east-1",
-        desires=high_writes,
-        extra_model_arguments={"copies_per_region": 2},
-    )[0]
-    high_writes_result = cap_plan.candidate_clusters.zonal[0]
-    assert high_writes_result.instance.family.startswith("c")
-
-    num_cpus = high_writes_result.instance.cpu * high_writes_result.count
-    assert 30 <= num_cpus <= 128
-    # Storage should be sufficient for the data (300 GiB with buffer)
-    assert_minimum_storage_gib(high_writes_result, 400)
-    assert cap_plan.candidate_clusters.annual_costs["cassandra.zonal-clusters"] < 40_000
 
 
 class TestCassandraThroughput:
