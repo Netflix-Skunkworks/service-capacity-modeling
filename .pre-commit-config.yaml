@@ -20,10 +20,6 @@ repos:
         args:
           - --fix
           - lf
-  - repo: https://github.com/asottile/reorder_python_imports
-    rev: v1.9.0
-    hooks:
-      - id: reorder-python-imports
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.14.0
     hooks:

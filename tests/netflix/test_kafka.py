@@ -20,6 +20,20 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.org.netflix.kafka import ClusterType
 
+# Property test configuration for Kafka model.
+# See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
+# Kafka is excluded from universal property tests because it requires
+# throughput-based workload patterns (estimated_mean_write_size_bytes)
+# rather than simple QPS-based patterns. It has 12 comprehensive
+# dedicated tests that cover its unique requirements.
+PROPERTY_TEST_CONFIG = {
+    "org.netflix.kafka": {
+        "extra_model_arguments": {"cluster_type": "strong", "retention": "PT4H"},
+        # Exclude from universal QPS-based property tests
+        "exclude_from_universal_tests": True,
+    },
+}
+
 logger = logging.getLogger(__name__)
 
 logging.basicConfig(

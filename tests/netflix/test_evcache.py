@@ -9,6 +9,14 @@ from service_capacity_modeling.models.org.netflix.evcache import (
     calculate_read_cpu_time_evcache_ms,
 )
 
+# Property test configuration for EVCache model.
+# See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
+PROPERTY_TEST_CONFIG = {
+    # "org.netflix.evcache": {
+    #     "extra_model_arguments": {},
+    # },
+}
+
 
 def test_evcache_read_latency():
     # 256 bits = 32 bytes 10

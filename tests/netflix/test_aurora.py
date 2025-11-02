@@ -10,6 +10,20 @@ from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 
+# Property test configuration for Aurora model.
+# See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
+PROPERTY_TEST_CONFIG = {
+    "org.netflix.aurora": {
+        "extra_model_arguments": {"num_regions": 1},
+        # Note: Property tests use same QPS for reads+writes, so total = 2x this value
+        "qps_range": (50, 250),
+        "data_range_gib": (10, 50),
+        # Aurora doesn't support tier 0, so test tier 1 vs tier 2 instead
+        # (tier 0 support is inferred from tier_range[0] > 0)
+        "tier_range": (1, 2),
+    },
+}
+
 tier_0 = CapacityDesires(
     service_tier=0,
     query_pattern=QueryPattern(

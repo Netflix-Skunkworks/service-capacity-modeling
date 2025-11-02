@@ -45,7 +45,11 @@ def _gamma_fn_from_params(
 
     def f(k: float) -> float:
         zero = high / low
-        return float(gammaf(k, high_p * k / mid) / gammaf(k, low_p * k / mid) - zero)
+        high_x = high_p * k / mid
+        low_x = low_p * k / mid
+        result = gammaf(k, high_x) / gammaf(k, low_x) - zero
+        # Use .item() to convert NumPy scalar to Python float
+        return result.item() if hasattr(result, "item") else float(result)
 
     return f
 

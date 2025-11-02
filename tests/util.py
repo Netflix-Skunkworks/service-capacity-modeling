@@ -205,7 +205,7 @@ def assert_similar_compute(
         ), msg
 
 
-def get_drive_size_gib(cluster: ClusterCapacity) -> int:
+def get_drive_size_gib(cluster: ClusterCapacity) -> Optional[int]:
     """
     Get drive size in GiB from a cluster (attached or local storage).
 
@@ -217,10 +217,7 @@ def get_drive_size_gib(cluster: ClusterCapacity) -> int:
         cluster: The cluster capacity to inspect
 
     Returns:
-        The size of the drive in GiB
-
-    Raises:
-        ValueError: If the cluster has neither attached nor instance drives
+        The size of the drive in GiB, or None if no drives
     """
     # Check attached_drives first
     if cluster.attached_drives:
@@ -230,12 +227,11 @@ def get_drive_size_gib(cluster: ClusterCapacity) -> int:
     if cluster.instance.drive is not None:
         return cluster.instance.drive.size_gib
 
-    raise ValueError(
-        f"Instance {cluster.instance.name} has no drive or attached drives"
-    )
+    # Some instances have no storage (e.g., compute-optimized without drives)
+    return None
 
 
-def get_total_storage_gib(cluster: ClusterCapacity) -> int:
+def get_total_storage_gib(cluster: ClusterCapacity) -> Optional[int]:
     """
     Get the total storage in GiB across all instances in a cluster.
 
@@ -243,9 +239,12 @@ def get_total_storage_gib(cluster: ClusterCapacity) -> int:
         cluster: The cluster capacity to inspect
 
     Returns:
-        Total storage in GiB (count * drive_size_gib)
+        Total storage in GiB (count * drive_size_gib), or 0 if no drives
     """
-    return cluster.count * get_drive_size_gib(cluster)
+    drive_size = get_drive_size_gib(cluster)
+    if drive_size is None:
+        return None
+    return cluster.count * drive_size
 
 
 def has_attached_storage(cluster: ClusterCapacity) -> bool:
@@ -287,6 +286,7 @@ def assert_minimum_storage_gib(cluster: ClusterCapacity, min_storage_gib: int) -
         AssertionError: If storage is less than the minimum
     """
     total_storage = get_total_storage_gib(cluster)
+    assert total_storage is not None
     storage_type = "attached" if has_attached_storage(cluster) else "local"
     assert total_storage >= min_storage_gib, (
         f"Expected at least {min_storage_gib} GiB of storage, "

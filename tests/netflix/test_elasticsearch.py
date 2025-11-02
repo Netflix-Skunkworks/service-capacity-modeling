@@ -14,6 +14,14 @@ from service_capacity_modeling.models.org.netflix.elasticsearch import (
 )
 from tests.util import assert_similar_compute
 
+# Property test configuration for ElasticSearch model.
+# See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
+PROPERTY_TEST_CONFIG = {
+    # "org.netflix.elasticsearch": {
+    #     "extra_model_arguments": {},
+    # },
+}
+
 
 def test_es_increasing_qps_simple():
     qps_values = (100, 1000, 10_000, 100_000)
@@ -40,7 +48,6 @@ def test_es_increasing_qps_simple():
             model_name="org.netflix.elasticsearch",
             region="us-east-1",
             desires=simple,
-            simulations=256,
         )
 
         # Check the ES cluster
@@ -132,7 +139,6 @@ def test_es_simple_mean_percentiles():
         model_name="org.netflix.elasticsearch",
         region="us-east-1",
         desires=simple,
-        simulations=256,
     )
 
     assert len(cap_plan.mean) > 0, "mean is empty"
