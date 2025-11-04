@@ -92,33 +92,52 @@ class NflxCounterCapacityModel(CapacityModel):
     def compose_with(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
-        stores = [("org.netflix.evcache", lambda x: x)]
-        if extra_model_arguments["counter.mode"] != NflxCounterMode.best_effort.value:
+        stores = []
 
+        if extra_model_arguments["counter.mode"] == NflxCounterMode.best_effort.value:
+            stores.append(("org.netflix.evcache", lambda x: x))
+        else:
+            # Shared evcache cluster is used for eventual and exact counters
             def _modify_cassandra_desires(
                 user_desires: CapacityDesires,
             ) -> CapacityDesires:
                 modified = user_desires.model_copy(deep=True)
+                counter_cardinality = extra_model_arguments["counter.cardinality"]
 
                 # counts per second
-                cps = user_desires.query_pattern.estimated_write_per_second
+                counter_deltas_per_second = (
+                    user_desires.query_pattern.estimated_write_per_second
+                )
 
-                # rollups happen once every 10 seconds after a write
-                rps = cps.scale(0.1)
-                modified.query_pattern.estimated_read_per_second = rps
+                # low cardinality : rollups happen once every 100 seconds
+                # medium cardinality : rollups happen once every 50 seconds
+                # high cardinality : rollups happen once every 10 seconds
+                if counter_cardinality == NflxCounterCardinality.low.value:
+                    rollups_per_second = counter_deltas_per_second.scale(0.01)
+                elif counter_cardinality == NflxCounterCardinality.medium.value:
+                    rollups_per_second = counter_deltas_per_second.scale(0.02)
+                else:
+                    rollups_per_second = counter_deltas_per_second.scale(0.1)
+
+                modified.query_pattern.estimated_read_per_second = rollups_per_second
 
                 # storage size fix
                 event_size = 128  # bytes
                 count_size = 64  # bytes
                 GiB = 1024 * 1024 * 1024
-                retention = timedelta(days=1).total_seconds()
+
+                # Events can be discarded as soon as rollup is complete
+                # TODO: Reduce retention once iceberg exports are available
+                retention = timedelta(hours=24).total_seconds()
                 cardinality = {
                     "low": 1_000,
                     "medium": 10_000,
                     "high": 100_000,
                 }[extra_model_arguments["counter.cardinality"]]
 
-                event_store = cps.scale(count_size * retention / GiB)
+                event_store = counter_deltas_per_second.scale(
+                    count_size * retention / GiB
+                )
                 count_store = event_size * cardinality / GiB
                 store = event_store.offset(count_store)
                 modified.data_shape.estimated_state_size_gib = store
