@@ -104,18 +104,17 @@ class NflxCounterCapacityModel(CapacityModel):
                 modified = user_desires.model_copy(deep=True)
                 counter_cardinality = extra_model_arguments["counter.cardinality"]
 
-                # counts per second
                 counter_deltas_per_second = (
                     user_desires.query_pattern.estimated_write_per_second
                 )
 
-                # low cardinality : rollups happen once every 100 seconds
-                # medium cardinality : rollups happen once every 50 seconds
+                # low cardinality : rollups happen once every 60 seconds
+                # medium cardinality : rollups happen once every 30 seconds
                 # high cardinality : rollups happen once every 10 seconds
                 if counter_cardinality == NflxCounterCardinality.low.value:
-                    rollups_per_second = counter_deltas_per_second.scale(0.01)
+                    rollups_per_second = counter_deltas_per_second.scale(0.0167)
                 elif counter_cardinality == NflxCounterCardinality.medium.value:
-                    rollups_per_second = counter_deltas_per_second.scale(0.02)
+                    rollups_per_second = counter_deltas_per_second.scale(0.0333)
                 else:
                     rollups_per_second = counter_deltas_per_second.scale(0.1)
 
