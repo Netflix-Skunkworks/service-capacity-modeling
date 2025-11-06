@@ -46,7 +46,8 @@ class NflxCounterArguments(NflxJavaAppArguments):
     )
     counter_cardinality: NflxCounterCardinality = Field(
         alias="counter.cardinality",
-        description="Low means < 1,000, medium (1,000—100,000), high means > 100,000.",
+        description="Low means < 10,000, medium (10,000—100,000), high means "
+        "> 100,000.",
     )
     counter_mode: NflxCounterMode = Field(
         alias="counter.mode",
@@ -111,6 +112,8 @@ class NflxCounterCapacityModel(CapacityModel):
                 # low cardinality : rollups happen once every 60 seconds
                 # medium cardinality : rollups happen once every 30 seconds
                 # high cardinality : rollups happen once every 10 seconds
+                # TODO: Account for read amplification from time slice configs
+                #       for better model accuracy
                 if counter_cardinality == NflxCounterCardinality.low.value:
                     rollups_per_second = counter_deltas_per_second.scale(0.0167)
                 elif counter_cardinality == NflxCounterCardinality.medium.value:
@@ -121,25 +124,26 @@ class NflxCounterCapacityModel(CapacityModel):
                 modified.query_pattern.estimated_read_per_second = rollups_per_second
 
                 # storage size fix
-                event_size = 128  # bytes
-                count_size = 64  # bytes
+                delta_event_size = 256  # bytes
+                rolled_up_count_size = 128  # bytes
                 GiB = 1024 * 1024 * 1024
 
                 # Events can be discarded as soon as rollup is complete
-                # TODO: Reduce retention once iceberg exports are available
-                retention = timedelta(hours=24).total_seconds()
+                # We default to a 1 day slice with 2 day retention
+                retention = timedelta(days=2).total_seconds()
+
                 cardinality = {
-                    "low": 1_000,
-                    "medium": 10_000,
-                    "high": 100_000,
+                    "low": 10_000,
+                    "medium": 100_000,
+                    "high": 1_000_000,
                 }[extra_model_arguments["counter.cardinality"]]
 
-                event_store = counter_deltas_per_second.scale(
-                    count_size * retention / GiB
+                event_storage_size = counter_deltas_per_second.scale(
+                    delta_event_size * retention / GiB
                 )
-                count_store = event_size * cardinality / GiB
-                store = event_store.offset(count_store)
-                modified.data_shape.estimated_state_size_gib = store
+                rollup_storage_size = rolled_up_count_size * cardinality / GiB
+                total_store_size = event_storage_size.offset(rollup_storage_size)
+                modified.data_shape.estimated_state_size_gib = total_store_size
 
                 return modified
 
