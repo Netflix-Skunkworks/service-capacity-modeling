@@ -46,8 +46,8 @@ class NflxCounterArguments(NflxJavaAppArguments):
     )
     counter_cardinality: NflxCounterCardinality = Field(
         alias="counter.cardinality",
-        description="Low means < 10,000, medium (10,000—100,000), high means "
-        "> 100,000.",
+        description="Low means < 10,000, medium (10,000—1,000,000), high means "
+        "> 1,000,000.",
     )
     counter_mode: NflxCounterMode = Field(
         alias="counter.mode",
