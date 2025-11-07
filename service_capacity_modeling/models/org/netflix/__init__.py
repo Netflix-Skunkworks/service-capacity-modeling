@@ -3,6 +3,7 @@ from typing import Dict
 
 from .aurora import nflx_aurora_capacity_model
 from .cassandra import nflx_cassandra_capacity_model
+from .control import nflx_control_capacity_model
 from .counter import nflx_counter_capacity_model
 from .crdb import nflx_cockroachdb_capacity_model
 from .ddb import nflx_ddb_capacity_model
@@ -38,6 +39,7 @@ def models() -> Dict[str, Any]:
         "org.netflix.elasticsearch.master": nflx_elasticsearch_master_capacity_model,
         "org.netflix.elasticsearch.search": nflx_elasticsearch_search_capacity_model,
         "org.netflix.entity": nflx_entity_capacity_model,
+        "org.netflix.control": nflx_control_capacity_model,
         "org.netflix.cockroachdb": nflx_cockroachdb_capacity_model,
         "org.netflix.aurora": nflx_aurora_capacity_model,
         "org.netflix.postgres": nflx_postgres_capacity_model,

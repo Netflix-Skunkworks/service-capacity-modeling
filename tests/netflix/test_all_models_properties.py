@@ -128,16 +128,39 @@ def test_all_models_scale_cpu_with_qps(model_name, data):
     # Get model's valid QPS range
     from tests.netflix.property_test_utils import _get_model_config
 
+    # Check for separate read/write QPS ranges (for models with asymmetric workloads)
+    read_qps_range = _get_model_config(model_name, "read_qps_range")
+    write_qps_range = _get_model_config(model_name, "write_qps_range")
     qps_range = _get_model_config(model_name, "qps_range")
-    if qps_range:
-        min_qps, max_qps = qps_range
+
+    if read_qps_range and write_qps_range:
+        # Use separate ranges for reads and writes
+        min_read_qps, max_read_qps = read_qps_range
+        min_write_qps, max_write_qps = write_qps_range
+    elif qps_range:
+        # Use same range for both reads and writes
+        min_read_qps, max_read_qps = qps_range
+        min_write_qps, max_write_qps = qps_range
     else:
-        min_qps, max_qps = 1000, 50_000
+        # Default range
+        min_read_qps, max_read_qps = 1000, 50_000
+        min_write_qps, max_write_qps = 1000, 50_000
 
     # Generate low QPS in the lower half of the range (ensuring 2x fits)
     # Generate high QPS as at least 2x low QPS
-    low_qps = data.draw(st.integers(min_value=min_qps, max_value=max_qps // 2))
-    high_qps = data.draw(st.integers(min_value=low_qps * 2, max_value=max_qps))
+    low_read_qps = data.draw(
+        st.integers(min_value=min_read_qps, max_value=max_read_qps // 2)
+    )
+    high_read_qps = data.draw(
+        st.integers(min_value=low_read_qps * 2, max_value=max_read_qps)
+    )
+
+    low_write_qps = data.draw(
+        st.integers(min_value=min_write_qps, max_value=max_write_qps // 2)
+    )
+    high_write_qps = data.draw(
+        st.integers(min_value=low_write_qps * 2, max_value=max_write_qps)
+    )
 
     # Generate desires with same data size but different QPS
     data_gib_range = _get_model_config(model_name, "data_range_gib", default=(100, 100))
@@ -146,8 +169,8 @@ def test_all_models_scale_cpu_with_qps(model_name, data):
     low_qps_desires = CapacityDesires(
         service_tier=1,
         query_pattern=QueryPattern(
-            estimated_read_per_second=certain_int(low_qps),
-            estimated_write_per_second=certain_int(low_qps),
+            estimated_read_per_second=certain_int(low_read_qps),
+            estimated_write_per_second=certain_int(low_write_qps),
         ),
         data_shape=DataShape(estimated_state_size_gib=certain_int(data_gib)),
     )
@@ -155,8 +178,8 @@ def test_all_models_scale_cpu_with_qps(model_name, data):
     high_qps_desires = CapacityDesires(
         service_tier=1,
         query_pattern=QueryPattern(
-            estimated_read_per_second=certain_int(high_qps),
-            estimated_write_per_second=certain_int(high_qps),
+            estimated_read_per_second=certain_int(high_read_qps),
+            estimated_write_per_second=certain_int(high_write_qps),
         ),
         data_shape=DataShape(estimated_state_size_gib=certain_int(data_gib)),
     )
@@ -170,13 +193,18 @@ def test_all_models_scale_cpu_with_qps(model_name, data):
     low_cpu = get_total_cpu(low_plan)
     high_cpu = get_total_cpu(high_plan)
 
-    multiplier = high_qps / low_qps
+    read_multiplier = high_read_qps / low_read_qps
+    write_multiplier = high_write_qps / low_write_qps
 
     # Higher QPS should require at least as much CPU (allow equal for over-provisioning)
     assert high_cpu >= low_cpu, (
-        f"{model_name}: {multiplier:.1f}x QPS should require >= CPU\n"
-        f"\nLow QPS ({low_qps}) plan:\n{plan_summary(low_plan)}\n"
-        f"\nHigh QPS ({high_qps}) plan:\n{plan_summary(high_plan)}"
+        f"{model_name}: Higher QPS should require >= CPU\n"
+        f"Read multiplier: {read_multiplier:.1f}x, "
+        f"Write multiplier: {write_multiplier:.1f}x\n"
+        f"\nLow QPS (R:{low_read_qps} W:{low_write_qps}) plan:\n"
+        f"{plan_summary(low_plan)}\n"
+        f"\nHigh QPS (R:{high_read_qps} W:{high_write_qps}) plan:\n"
+        f"{plan_summary(high_plan)}"
     )
 
 
@@ -210,13 +238,23 @@ def test_all_models_tier_capacity_relationship(model_name, data):
     from tests.netflix.property_test_utils import _get_model_config
 
     # Get model's valid ranges
+    read_qps_range = _get_model_config(model_name, "read_qps_range")
+    write_qps_range = _get_model_config(model_name, "write_qps_range")
     qps_range = _get_model_config(model_name, "qps_range")
     data_range_gib = _get_model_config(model_name, "data_range_gib")
 
-    if qps_range:
-        min_qps, max_qps = qps_range
+    if read_qps_range and write_qps_range:
+        # Use separate ranges for reads and writes
+        min_read_qps, max_read_qps = read_qps_range
+        min_write_qps, max_write_qps = write_qps_range
+    elif qps_range:
+        # Use same range for both reads and writes
+        min_read_qps, max_read_qps = qps_range
+        min_write_qps, max_write_qps = qps_range
     else:
-        min_qps, max_qps = 1000, 50_000
+        # Default range
+        min_read_qps, max_read_qps = 1000, 50_000
+        min_write_qps, max_write_qps = 1000, 50_000
 
     if data_range_gib:
         min_data, max_data = data_range_gib
@@ -228,14 +266,15 @@ def test_all_models_tier_capacity_relationship(model_name, data):
     min_tier, max_tier = tier_range
 
     # Generate workload within model's valid range
-    qps = data.draw(st.integers(min_value=min_qps, max_value=max_qps))
+    read_qps = data.draw(st.integers(min_value=min_read_qps, max_value=max_read_qps))
+    write_qps = data.draw(st.integers(min_value=min_write_qps, max_value=max_write_qps))
     data_gib = data.draw(st.integers(min_value=min_data, max_value=max_data))
 
     critical_desires = CapacityDesires(
         service_tier=min_tier,  # More critical tier
         query_pattern=QueryPattern(
-            estimated_read_per_second=certain_int(qps),
-            estimated_write_per_second=certain_int(qps),
+            estimated_read_per_second=certain_int(read_qps),
+            estimated_write_per_second=certain_int(write_qps),
         ),
         data_shape=DataShape(estimated_state_size_gib=certain_int(data_gib)),
     )
@@ -243,8 +282,8 @@ def test_all_models_tier_capacity_relationship(model_name, data):
     noncritical_desires = CapacityDesires(
         service_tier=max_tier,  # Less critical tier
         query_pattern=QueryPattern(
-            estimated_read_per_second=certain_int(qps),
-            estimated_write_per_second=certain_int(qps),
+            estimated_read_per_second=certain_int(read_qps),
+            estimated_write_per_second=certain_int(write_qps),
         ),
         data_shape=DataShape(estimated_state_size_gib=certain_int(data_gib)),
     )
@@ -280,7 +319,7 @@ def test_all_models_tier_capacity_relationship(model_name, data):
     assert has_more_cpu or has_more_memory or has_more_storage or has_more_cost, (
         f"{model_name}: Tier {min_tier} (more critical) should have >= "
         f"capacity/cost in at least one dimension vs Tier {max_tier}\n"
-        f"Workload: {qps} QPS, {data_gib} GiB\n"
+        f"Workload: R:{read_qps} W:{write_qps} QPS, {data_gib} GiB\n"
         f"\nTier {min_tier} plan:\n{plan_summary(critical_plan)}\n"
         f"\nTier {max_tier} plan:\n{plan_summary(noncritical_plan)}"
     )
