@@ -10,6 +10,15 @@ from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 
+
+# Property test configuration for DynamoDB model.
+# See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
+PROPERTY_TEST_CONFIG = {
+    # "org.netflix.ddb": {
+    #     "extra_model_arguments": {},
+    # },
+}
+
 storage_only_desires = CapacityDesires(
     service_tier=0,
     query_pattern=QueryPattern(

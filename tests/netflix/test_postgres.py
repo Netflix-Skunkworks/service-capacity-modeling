@@ -8,6 +8,23 @@ from service_capacity_modeling.interface import QueryPattern
 from tests.util import assert_similar_compute
 from tests.util import shape
 
+# Property test configuration for PostgreSQL model.
+# See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
+PROPERTY_TEST_CONFIG = {
+    "org.netflix.postgres": {
+        # PostgreSQL requires num_regions parameter
+        "extra_model_arguments": {"num_regions": 1},
+        # PostgreSQL has restrictive limits: max ~500 QPS total, max ~50 GiB
+        # These limits are based on Aurora's capabilities as the underlying service
+        # Note: Property tests use same QPS for reads+writes, so total = 2x this value
+        "qps_range": (50, 250),
+        "data_range_gib": (10, 50),
+        # PostgreSQL doesn't support tier 0, so test tier 1 vs tier 2 instead
+        # (tier 0 support is inferred from tier_range[0] > 0)
+        "tier_range": (1, 2),
+    },
+}
+
 tier_0 = CapacityDesires(
     service_tier=0,
     query_pattern=QueryPattern(
@@ -112,7 +129,6 @@ def test_small_footprint_plan_uncertain():
         region="us-east-1",
         desires=small_footprint,
         num_regions=1,
-        simulations=256,
     )
     plan_a = cap_plan.least_regret[0]
 

@@ -14,6 +14,15 @@ from tests.util import assert_similar_compute
 from tests.util import PlanVariance
 from tests.util import shape
 
+
+# Property test configuration for Java Server model.
+# See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
+PROPERTY_TEST_CONFIG = {
+    # "org.netflix.java_app": {
+    #     "extra_model_arguments": {},
+    # },
+}
+
 small_but_high_qps = CapacityDesires(
     service_tier=1,
     query_pattern=QueryPattern(

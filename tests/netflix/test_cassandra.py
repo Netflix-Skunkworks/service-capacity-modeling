@@ -29,6 +29,14 @@ from tests.util import get_total_storage_gib
 from tests.util import has_local_storage
 from tests.util import simple_drive
 
+# Property test configuration for Cassandra model.
+# See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
+PROPERTY_TEST_CONFIG = {
+    # "org.netflix.cassandra": {
+    #     "extra_model_arguments": {},
+    # },
+}
+
 small_but_high_qps = CapacityDesires(
     service_tier=1,
     query_pattern=QueryPattern(
