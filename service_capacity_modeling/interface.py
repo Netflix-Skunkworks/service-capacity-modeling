@@ -833,6 +833,9 @@ class Buffer(ExcludeUnsetModel):
     components: List[str] = [BufferComponent.compute]
     # If this buffer was made up of other buffers, what contributed
     sources: Dict[str, Buffer] = {}
+    # An optional breadcrumb / context for why this buffer exists.
+    # E.g. "Background processing" or "bursty workload"
+    explanation: str = ""
 
 
 class Buffers(ExcludeUnsetModel):
