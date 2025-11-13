@@ -100,7 +100,7 @@ class TestCassandraCapacityPlanning:
             # baesd on generational improvements. If this breaks from a
             # generational improvement, remove or change this assertion
             node_density = get_total_storage_gib(small_result) / small_result.count
-            assert 100 < node_density < 300
+            assert 300 < node_density < 400
 
             assert small_result.cluster_params["cassandra.heap.write.percent"] == 0.25
             assert small_result.cluster_params["cassandra.heap.table.percent"] == 0.11
