@@ -429,3 +429,47 @@ def test_evcache_zero_item_count():
             assert (
                 total_ram > zero_item_count_rps.data_shape.estimated_state_size_gib.mid
             )
+
+
+def test_evcache_string_arguments_coercion():
+    simple_desires = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=Interval(
+                low=100000, mid=200000, high=240000, confidence=1.0
+            ),
+            estimated_write_per_second=Interval(
+                low=10000, mid=20000, high=24000, confidence=1.0
+            ),
+            estimated_mean_write_size_bytes=Interval(
+                low=100, mid=200, high=240, confidence=1.0
+            ),
+            estimated_mean_read_size_bytes=Interval(
+                low=100, mid=200, high=240, confidence=1.0
+            ),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(low=10, mid=20, high=30, confidence=1.0),
+            estimated_state_item_count=Interval(
+                low=1000000, mid=2000000, high=2400000, confidence=1.0
+            ),
+        ),
+    )
+
+    plan = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=simple_desires,
+        extra_model_arguments={
+            # All of these are supposed to be int
+            "copies_per_region": "3",
+            "max_regional_size": "10000",
+            "max_local_disk_gib": "2048",
+            "min_instance_memory_gib": "12",
+        },
+    )
+
+    assert len(plan) > 0, "Should generate at least one plan"
+
+    for candidate in plan:
+        assert len(candidate.candidate_clusters.zonal) > 0
