@@ -410,20 +410,20 @@ class NflxEVCacheCapacityModel(CapacityModel):
     ) -> Optional[CapacityPlan]:
         # (Arun) EVCache defaults to RF=3 for tier 0 and tier 1
         default_copies = context.zones_in_region
-        copies_per_region: int = extra_model_arguments.get(
+        copies_per_region: int = int(extra_model_arguments.get(
             "copies_per_region", default_copies
-        )
-        max_regional_size: int = extra_model_arguments.get("max_regional_size", 10000)
+        ))
+        max_regional_size: int = int(extra_model_arguments.get("max_regional_size", 10000))
         # Very large nodes are hard to cache warm
-        max_local_data_per_node_gib: int = extra_model_arguments.get(
+        max_local_data_per_node_gib: int = int(extra_model_arguments.get(
             "max_local_data_per_node_gib",
             extra_model_arguments.get("max_local_disk_gib", 1024 * 5),
-        )
+        ))
         # Very small nodes are hard to run memcache on
         # (Arun) We do not deploy to less than 12 GiB
-        min_instance_memory_gib: int = extra_model_arguments.get(
+        min_instance_memory_gib: int = int(extra_model_arguments.get(
             "min_instance_memory_gib", 12
-        )
+        ))
         cross_region_replication = Replication(
             extra_model_arguments.get("cross_region_replication", "none")
         )
