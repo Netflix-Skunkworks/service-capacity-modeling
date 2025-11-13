@@ -408,24 +408,18 @@ class NflxEVCacheCapacityModel(CapacityModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
+        args = NflxEVCacheArguments(**extra_model_arguments)
+
         # (Arun) EVCache defaults to RF=3 for tier 0 and tier 1
         default_copies = context.zones_in_region
-        copies_per_region: int = extra_model_arguments.get(
-            "copies_per_region", default_copies
+        copies_per_region = (
+            args.copies_per_region
+            if "copies_per_region" in extra_model_arguments
+            else default_copies
         )
-        max_regional_size: int = extra_model_arguments.get("max_regional_size", 10000)
         # Very large nodes are hard to cache warm
-        max_local_data_per_node_gib: int = extra_model_arguments.get(
-            "max_local_data_per_node_gib",
-            extra_model_arguments.get("max_local_disk_gib", 1024 * 5),
-        )
-        # Very small nodes are hard to run memcache on
-        # (Arun) We do not deploy to less than 12 GiB
-        min_instance_memory_gib: int = extra_model_arguments.get(
-            "min_instance_memory_gib", 12
-        )
-        cross_region_replication = Replication(
-            extra_model_arguments.get("cross_region_replication", "none")
+        max_local_data_per_node_gib = extra_model_arguments.get(
+            "max_local_data_per_node_gib", args.max_local_disk_gib
         )
 
         return _estimate_evcache_cluster_zonal(
@@ -433,10 +427,10 @@ class NflxEVCacheCapacityModel(CapacityModel):
             drive=drive,
             desires=desires,
             copies_per_region=copies_per_region,
-            max_regional_size=max_regional_size,
+            max_regional_size=args.max_regional_size,
             max_local_data_per_node_gib=max_local_data_per_node_gib,
-            min_instance_memory_gib=min_instance_memory_gib,
-            cross_region_replication=cross_region_replication,
+            min_instance_memory_gib=args.min_instance_memory_gib,
+            cross_region_replication=args.cross_region_replication,
             context=context,
         )
 
