@@ -21,6 +21,8 @@ from pydantic import computed_field
 from pydantic import ConfigDict
 from pydantic import Field
 
+from service_capacity_modeling.enum_utils import enum_docstrings
+
 GIB_IN_BYTES = 1024 * 1024 * 1024
 MIB_IN_BYTES = 1024 * 1024
 MEGABIT_IN_BYTES = (1000 * 1000) / 8
@@ -43,7 +45,14 @@ class ExcludeUnsetModel(BaseModel):
 ###############################################################################
 
 
+@enum_docstrings
 class IntervalModel(str, Enum):
+    """Statistical distribution models for approximating intervals
+
+    When we have uncertainty intervals (low, mid, high), we need to choose
+    a probability distribution to model that uncertainty for simulation purposes.
+    """
+
     def __str__(self) -> str:
         return str(self.value)
 
@@ -51,20 +60,29 @@ class IntervalModel(str, Enum):
         return f"D({self.value})"
 
     gamma = "gamma"
+    """Gamma distribution - used for modeling right-skewed data"""
+
     beta = "beta"
+    """Beta distribution - bounded to [0,1], good for modeling proportions
+    and probabilities"""
 
 
 class Interval(ExcludeUnsetModel):
+    """Represents an uncertainty interval with confidence bounds"""
+
     low: float
     mid: float
     high: float
-    # How confident are we of this interval
+
     confidence: float = 1.0
-    # How to approximate this interval (e.g. with a beta distribution)
+    """How confident are we of this interval (0.0 to 1.0)"""
+
     model_with: IntervalModel = IntervalModel.beta
-    # If we should allow simulation of this interval, some models might not
-    # be able to simulate or some properties might not want to
+    """How to approximate this interval for simulation (e.g. beta distribution)"""
+
     allow_simulate: bool = True
+    """Whether to allow simulation of this interval. Some models might not support
+    simulation or some properties might not want probabilistic treatment."""
 
     minimum_value: Optional[float] = None
     maximum_value: Optional[float] = None
@@ -204,13 +222,29 @@ class Lifecycle(str, Enum):
     end_of_life = "end-of-life"
 
 
+@enum_docstrings
 class DriveType(str, Enum):
-    """Represents the type of drive"""
+    """Represents the type and attachment model of storage drives
+
+    Drives can be either local (ephemeral, instance-attached) or network-attached
+    (persistent, e.g., EBS), and can use SSD or HDD storage media.
+    """
 
     local_ssd = "local-ssd"
+    """Local SSD storage - ephemeral, physically attached to instance,
+    highest performance"""
+
     local_hdd = "local-hdd"
+    """Local HDD storage - ephemeral, physically attached to instance,
+    lower cost than SSD"""
+
     attached_ssd = "attached-ssd"
+    """Network-attached SSD (e.g., EBS gp3) - persistent, survives
+    instance termination"""
+
     attached_hdd = "attached-hhd"
+    """Network-attached HDD (e.g., EBS st1) - persistent, cost-optimized
+    """
 
 
 class Drive(ExcludeUnsetModel):
@@ -225,37 +259,52 @@ class Drive(ExcludeUnsetModel):
     read_io_per_s: Optional[int] = None
     write_io_per_s: Optional[int] = None
     throughput: Optional[int] = None
-    # If this drive has single tenant IO capacity, for example a single
-    # physical drive versus a virtualised drive
+
     single_tenant: bool = True
-    # If this drive can scale, how large can it scale to
+    """Whether this drive has single tenant IO capacity (e.g. physical
+    drive vs virtualized drive)"""
+
     max_scale_size_gib: int = 0
-    # If this drive can scale IO, how large can it scale to
+    """Maximum size this drive can scale to (in GiB)"""
+
     max_scale_io_per_s: int = 0
-    # How large is an "IO" against this device
+    """Maximum IOPS this drive can scale to"""
+
     block_size_kib: int = 4
-    # When sequential how much IO is grouped into a single "IO"
-    # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-io-characteristics.html
-    # Some cloud drives can group sequential ops together and DBs take advantage
+    """Size of a single IO operation against this device (in KiB)"""
+
     group_size_kib: int = 4
+    """When sequential, how much IO is grouped into a single operation
+    (in KiB). Some cloud drives (e.g. EBS) can group sequential ops
+    together and DBs take advantage.
+    See: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/
+    ebs-io-characteristics.html"""
 
     lifecycle: Lifecycle = Lifecycle.stable
     compatible_families: List[str] = []
 
     annual_cost_per_gib: float = 0
-    # Tuples of [max_size, annual cost]
-    # [32000, 0.78], ...
-    annual_cost_per_read_io: List[Tuple[float, float]] = []
-    annual_cost_per_write_io: List[Tuple[float, float]] = []
 
-    # These defaults are assuming a cloud SSD like a gp2 volume
-    # If you disagree please change them in your hardware description
+    annual_cost_per_read_io: List[Tuple[float, float]] = []
+    """Tiered pricing for read IOPS: list of (max_iops, annual_cost)
+    tuples. Example: [(32000, 0.78), (160000, 0.384)]"""
+
+    annual_cost_per_write_io: List[Tuple[float, float]] = []
+    """Tiered pricing for write IOPS: list of (max_iops, annual_cost)
+    tuples. Example for io2: [(32000, 0.78), (64000, 0.552), (256000, 0.432)]
+    Note: gp3 doesn't distinguish read/write IOPS, so this would be empty for gp3."""
+
     read_io_latency_ms: FixedInterval = FixedInterval(
         low=0.8, mid=1, high=2, confidence=0.9
     )
+    """Default read latency assumes cloud SSD (e.g. EBS gp2).
+    Override in hardware description if different."""
     write_io_latency_ms: FixedInterval = FixedInterval(
         low=0.6, mid=2, high=3, confidence=0.9
     )
+    """Default write latency assumes cloud SSD (e.g. EBS gp2).
+    Writes are typically faster than reads due to write buffering.
+    Override in hardware description if different."""
 
     @property
     def rand_io_size_kib(self) -> int:
@@ -316,21 +365,28 @@ class Drive(ExcludeUnsetModel):
         return Drive(name="managed")
 
 
+@enum_docstrings
 class Platform(str, Enum):
-    """Represents the platform of the hardware
+    """Represents the CPU architecture or managed service platform
 
-    For example a particular hardware type might offer x86_64, arm, or be a managed
-    instance type that only works with managed RDBMS like Aurora Postgres.
+    Hardware can run on different CPU architectures (x86_64, ARM) or be a fully
+    managed service platform (e.g., Aurora). The platform choice affects performance
+    characteristics, cost, and compatibility.
     """
 
-    # Most Intel and AMD instance types
     amd64 = "amd64"
-    # Graviton and other ARM based instance types
+    """x86-64 architecture - most Intel and AMD instance types (e.g., m5,
+    c5, r5)"""
+
     arm64 = "arm64"
-    # Special purpose aurora type
+    """ARM64 architecture - Graviton and other ARM-based instances (e.g.,
+    m6g, c7g)"""
+
     aurora_mysql = "Aurora MySQL"
-    # Special purpose aurora type
+    """AWS Aurora MySQL-compatible managed database platform"""
+
     aurora_postgres = "Aurora PostgreSQL"
+    """AWS Aurora PostgreSQL-compatible managed database platform"""
 
 
 class Instance(ExcludeUnsetModel):
@@ -378,8 +434,11 @@ class Instance(ExcludeUnsetModel):
     drive: Optional[Drive] = None
     annual_cost: float = 0
     lifecycle: Lifecycle = Lifecycle.stable
-    # Typically hardware has a single platform, but sometimes they can act in multiple
+
     platforms: List[Platform] = [Platform.amd64]
+    """CPU platforms this instance supports. Typically hardware has a
+    single platform, but sometimes instances can run on multiple platforms
+    (e.g. amd64 and arm64)."""
 
     family_separator: str = "."
 
@@ -494,14 +553,20 @@ class Hardware(ExcludeUnsetModel):
         services: service type -> Service(name, params, cost, etc ...)
     """
 
-    # How many zones of compute exist in this region of compute
     zones_in_region: int = 3
-    # Per instance shape information e.g. cpu, ram, cpu etc ...
+    """Number of availability zones of compute in this region"""
+
     instances: Dict[str, Instance] = {}
-    # Per drive type information and cost
+    """Instance shapes available (e.g. instance type -> Instance with cpu,
+    ram, cost, etc.)"""
+
     drives: Dict[str, Drive] = {}
-    # Per service information and cost
+    """Drive types available (e.g. EBS type -> Drive with cost per
+    GiB/year, etc.)"""
+
     services: Dict[str, Service] = {}
+    """Managed services available (e.g. service name -> Service with
+    params, cost, etc.)"""
 
 
 class GlobalHardware(ExcludeUnsetModel):
@@ -551,49 +616,68 @@ class Pricing(ExcludeUnsetModel):
 ###############################################################################
 
 
+@enum_docstrings
 class AccessPattern(str, Enum):
+    """The access pattern determines capacity planning priorities: latency-sensitive
+    services target low P99 latency, while throughput-oriented services optimize
+    for maximum requests per second.
+    """
+
     latency = "latency"
+    """Latency-sensitive - optimize for low P99 latency, typical for
+    user-facing services"""
+
     throughput = "throughput"
+    """Throughput-oriented - optimize for maximum RPS/bandwidth, typical
+    for batch processing"""
 
 
+@enum_docstrings
 class AccessConsistency(str, Enum):
-    """See https://jepsen.io/consistency
-
+    """
     Generally speaking consistency is expensive, so models need to know what
     kind of consistency will be required in order to estimate CPU usage
     within a factor of 4-5x correctly.
+
+    See: https://jepsen.io/consistency for detailed consistency model definitions.
+
+    Ordered from weakest (cheapest) to strongest (most expensive) consistency:
+    - never, best_effort, eventual, read_your_writes (single-item consistency)
+    - linearizable, linearizable_stale (single-item with ordering)
+    - serializable, serializable_stale (multi-item transactional)
     """
 
-    # You cannot read writes ever
     never = "never"
+    """No read guarantees - writes may never be visible (e.g.,
+    fire-and-forget logging)"""
 
-    #
-    # Single item consistency (most services)
-    #
-
-    # Best Effort: we might lose writes or reads might be stale or missing.
-    #              Most caches offer this level of consistency.
-    # Eventual: We will eventually reflect the latest successful write but
-    #           there is some (often large) time bound on that eventuality.
-    # Read-Your-Writes: The first "consistent" offering.
     best_effort = "best-effort"
+    """Best effort - writes/reads may be lost or stale, no guarantees
+    (e.g., most caches)"""
+
     eventual = "eventual"
+    """Eventual consistency - writes eventually visible with unbounded time
+    delay (e.g., DNS, S3)"""
+
     read_your_writes = "read-your-writes"
-    # Fully lineralizable, writes and reads
+    """Read-your-writes - clients see their own writes immediately (e.g.,
+    DynamoDB consistent reads)"""
+
     linearizable = "linearizable"
-    # Writes are linerizable but stale reads are possible (e.g. ZK)
+    """Linearizable - all operations appear atomic and in real-time order
+    (e.g., etcd, Consul)"""
+
     linearizable_stale = "linearizable-stale"
+    """Linearizable writes, stale reads allowed - writes ordered, reads may
+    lag (e.g., ZooKeeper)"""
 
-    #
-    # Multiple item consistency (often "transactional" or "acid" services)
-    #
-
-    # All operations are serializable.
-    # (e.g. CRDB in default settings)
     serializable = "serializable"
-    # Writes are serializable but stale reads are possible
-    # (e.g. CRDB with stale reads enabled, MySQL with read replicas, etc ...)
+    """Serializable transactions - multi-item ACID transactions (e.g.,
+    CockroachDB default, Spanner)"""
+
     serializable_stale = "serializable-stale"
+    """Serializable writes, stale reads - ACID writes with lagging reads
+    (e.g., CRDB stale reads, MySQL replicas)"""
 
 
 AVG_ITEM_SIZE_BYTES: int = 1024
@@ -712,20 +796,17 @@ class DataShape(ExcludeUnsetModel):
         ),
     )
 
-    # How compressible is this dataset. Note that databases might offer
-    # better or worse compression strategies that will impact this
-    #   Note that the ratio here is the forward ratio, e.g.
-    #   A ratio of 2 means 2:1 compression (0.5 on disk size)
-    #   A ratio of 5 means 5:1 compression (0.2 on disk size)
     estimated_compression_ratio: Interval = certain_float(1)
+    """Data compression ratio (forward ratio). Examples:
+    - 2 means 2:1 compression (0.5x on-disk size)
+    - 5 means 5:1 compression (0.2x on-disk size)
+    Note: databases may have different compression strategies affecting this."""
 
-    # How much fixed memory must be provisioned per instance for the
-    # application (e.g. for process heap memory)
     reserved_instance_app_mem_gib: float = 2
+    """Fixed memory per instance for application (e.g. process heap memory)"""
 
-    # How much fixed memory must be provisioned per instance for the
-    # system (e.g. for kernel and other system processes)
     reserved_instance_system_mem_gib: float = 1
+    """Fixed memory per instance for system (e.g. kernel and system processes)"""
 
     # How durable does this dataset need to be. We want to provision
     # sufficient replication and backups of data to achieve the target
@@ -769,6 +850,7 @@ class CurrentClusters(ExcludeUnsetModel):
     services: Sequence[ServiceCapacity] = []
 
 
+@enum_docstrings
 class BufferComponent(str, Enum):
     """Represents well known buffer components such as compute and storage
 
@@ -777,15 +859,23 @@ class BufferComponent(str, Enum):
     the Buffers interface itself (should be str).
     """
 
-    # [Query Pattern] a.k.a. "Traffic" related buffers, e.g. CPU and Network
     compute = "compute"
-    # [Data Shape]    a.k.a. "Dataset" related buffers, e.g. Disk and Memory
+    """[Query Pattern] a.k.a. "Traffic" related buffers, e.g. CPU and Network"""
+
     storage = "storage"
-    # Resource specific component
+    """[Data Shape] a.k.a. "Dataset" related buffers, e.g. Disk and Memory"""
+
     cpu = "cpu"
+    """Resource specific component - CPU"""
+
     network = "network"
+    """Resource specific component - Network"""
+
     disk = "disk"
+    """Resource specific component - Disk"""
+
     memory = "memory"
+    """Resource specific component - Memory"""
 
     @staticmethod
     def is_generic(component: str) -> bool:
@@ -796,46 +886,64 @@ class BufferComponent(str, Enum):
         return not BufferComponent.is_generic(component)
 
 
+@enum_docstrings
 class BufferIntent(str, Enum):
-    # Most buffers show "desired" buffer, this is the default
+    """Defines the intent of buffer directives for capacity planning"""
+
     desired = "desired"
-    # ratio on top of existing buffers to ensure exists. Generally combined
-    # with a different desired buffer to ensure we don't just scale needlessly
-    # This means we can scale up or down as as long as we meet the desired buffer.
+    """Most buffers show "desired" buffer, this is the default"""
+
     scale = "scale"
+    """Ratio on top of existing buffers to ensure exists. Generally combined with a
+    different desired buffer to ensure we don't just scale needlessly. This means we
+    can scale up or down as long as we meet the desired buffer."""
 
-    # DEPRECATED: Use scale_up/scale_down instead
-    # Ignores model preferences, just preserve existing buffers
-    # We rarely actually want to do this since it can cause severe over provisioning
     preserve = "preserve"
+    """DEPRECATED - Use scale_up/scale_down instead. Ignores model preferences, just
+    preserve existing buffers. We rarely actually want to do this since it can cause
+    severe over provisioning."""
 
-    # Scale up if necessary to meet the desired buffer.
-    # If the existing resource is over-provisioned, do not reduce the requirement.
-    # If under-provisioned, the requirement can be increased to meet the desired buffer.
-    # Example: need 20 cores but have 10 → scale up to 20 cores.
-    # Example 2: need 20 cores but have 40 → do not scale down and require at
-    # least 40 cores
     scale_up = "scale_up"
-    # Scale down if necessary to meet the desired buffer.
-    # If the existing resource is under-provisioned, do not increase the requirement.
-    # If over-provisioned, the requirement can be decreased to meet the desired buffer.
-    # Example: need 20 cores but have 10 → maintain buffer and do not scale up.
-    # Example 2: need 20 cores but have 40 → scale down to 20 cores.
+    """Scale up if necessary to meet the desired buffer. If the existing resource is
+    over-provisioned, do not reduce the requirement. If under-provisioned, the
+    requirement can be increased to meet the desired buffer.
+
+    Example: need 20 cores but have 10 → scale up to 20 cores.
+
+    Example 2: need 20 cores but have 40 → do not scale down and require
+    at least 40 cores."""
+
     scale_down = "scale_down"
+    """Scale down if necessary to meet the desired buffer. If the existing resource is
+    under-provisioned, do not increase the requirement. If over-provisioned, the
+    requirement can be decreased to meet the desired buffer.
+
+    Example: need 20 cores but have 10 → maintain buffer and do not scale up.
+
+    Example 2: need 20 cores but have 40 → scale down to 20 cores."""
 
 
 class Buffer(ExcludeUnsetModel):
-    # The value of the buffer expressed as a ratio over "normal" load e.g. 1.5x
+    """Represents a buffer (headroom) directive for capacity planning"""
+
     ratio: float = 1.0
-    # What is the intent of this buffer directive, almost always is desired
+    """The buffer value expressed as a ratio over normal load (e.g. 1.5 =
+    50% headroom)"""
+
     intent: BufferIntent = BufferIntent.desired
-    # The components of buffer this influences, almost always is "compute" (IPC success)
+    """The intent of this buffer directive (almost always 'desired')"""
+
     components: List[str] = [BufferComponent.compute]
-    # If this buffer was made up of other buffers, what contributed
+    """The capacity components this buffer influences (almost always
+    'compute' for IPC success)"""
+
     sources: Dict[str, Buffer] = {}
-    # An optional breadcrumb / context for why this buffer exists.
-    # E.g. "Background processing" or "bursty workload"
+    """If this buffer was composed from other buffers, what
+    contributed"""
+
     explanation: str = ""
+    """Optional context for why this buffer exists (e.g. 'background
+    processing', 'bursty workload')"""
 
 
 class Buffers(ExcludeUnsetModel):
