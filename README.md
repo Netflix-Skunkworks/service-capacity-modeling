@@ -13,10 +13,10 @@ remember this repository is public when making changes to it.
 Run the tests:
 ```bash
 # Test the capacity planner on included netflix models
-$ tox -e py39
+$ tox -e py310
 
 # Run a single test with a debugger attached if the test fails
-$ .tox/py39/bin/pytest -n0 -k test_java_heap_heavy --pdb --pdbcls=IPython.terminal.debugger:Pdb
+$ .tox/py310/bin/pytest -n0 -k test_java_heap_heavy --pdb --pdbcls=IPython.terminal.debugger:Pdb
 
 # Verify all type contracts
 $ tox -e mypy
@@ -217,7 +217,7 @@ To contribute to this project:
 2. Write a unit test using `pytest` in the `tests` folder.
 3. Ensure your tests pass via `tox` or debug them with:
 ```
-tox -e py39 -- -k test_<your_functionality> --pdb --pdbcls=IPython.terminal.debugger:Pdb
+tox -e py310 -- -k test_<your_functionality> --pdb --pdbcls=IPython.terminal.debugger:Pdb
 ```
 
 ### Pre-commit / Linting
