@@ -1,17 +1,19 @@
 """Utilities for working with enums, particularly for adding
 runtime-accessible docstrings.
 
-See: https://stackoverflow.com/questions/19330460/how-do-i-put-docstrings-on-enums
 """
-
-from __future__ import annotations
 
 import ast
 import inspect
+from enum import Enum
 from functools import partial
 from operator import is_
+from typing import Any
+from typing import cast
 from typing import TypeVar
-from enum import Enum
+
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import CoreSchema
 
 
 E = TypeVar("E", bound=Enum)
@@ -50,7 +52,7 @@ def enum_docstrings(enum: type[E]) -> type[E]:
 
     Credit:
         Based on Martijn Pieters' StackOverflow answer:
-        https://stackoverflow.com/a/79348803
+        https://stackoverflow.com/a/79229811
 
     See also:
         https://stackoverflow.com/questions/19330460/how-do-i-put-docstrings-on-enums
@@ -85,5 +87,27 @@ def enum_docstrings(enum: type[E]) -> type[E]:
                     pass
 
             member = None
+
+    # Add Pydantic JSON schema support for member docstrings
+    def __get_pydantic_json_schema__(
+        cls: type[E],
+        core_schema: CoreSchema,
+        handler: Any,
+    ) -> JsonSchemaValue:
+        """Generate JSON schema with per-member descriptions using oneOf"""
+        json_schema = cast(JsonSchemaValue, handler(core_schema))
+        json_schema["oneOf"] = [
+            {
+                "const": member.value,
+                "title": member.name,
+                "description": member.__doc__,
+            }
+            for member in cls
+        ]
+        return json_schema
+
+    setattr(
+        enum, "__get_pydantic_json_schema__", classmethod(__get_pydantic_json_schema__)
+    )
 
     return enum
