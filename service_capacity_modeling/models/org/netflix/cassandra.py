@@ -388,7 +388,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     max_table_buffer_percent: float = 0.11,
 ) -> Optional[CapacityPlan]:
     # Netflix Cassandra doesn't like to deploy on really small instances
-    if instance.cpu < 2 or instance.ram_gib < 14:
+    if instance.cpu < 2 or instance.ram_gib <= 16:
         return None
 
     # if we're not allowed to use gp2, skip EBS only types
