@@ -80,7 +80,7 @@ def test_multiple_options_diversify_with_more_simulations():
     # These values happen to work today but may not work in the future with
     # changes to the CP inputs (instances, costs, performance).
     # Feel free to change the numbers as long as it fits the below assertion
-    arbitrary_num_results = 8
+    arbitrary_num_results = 12
     arbitrary_small_number = 12
     arbitrary_large_number = 1024
     assert arbitrary_small_number < arbitrary_large_number
