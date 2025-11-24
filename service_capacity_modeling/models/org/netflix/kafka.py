@@ -79,7 +79,6 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
     copies_per_region: int,
     hot_retention_seconds: float,
     zones_per_region: int = 3,
-    required_zone_size: Optional[int] = None,
 ) -> Tuple[CapacityRequirement, Tuple[str, ...]]:
     """Estimate the capacity required for one zone given a regional desire
 
@@ -119,7 +118,6 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
     if (
         current_zonal_capacity
         and current_zonal_capacity.cluster_instance
-        and required_zone_size is not None
         and desires.current_clusters is not None
     ):
         # zonal_requirements_from_current uses the midpoint utilization of the
@@ -287,7 +285,6 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
         zones_per_region=zones_per_region,
         copies_per_region=copies_per_region,
         hot_retention_seconds=hot_retention_seconds,
-        required_zone_size=required_zone_size,
     )
 
     # Account for sidecars and base system memory
