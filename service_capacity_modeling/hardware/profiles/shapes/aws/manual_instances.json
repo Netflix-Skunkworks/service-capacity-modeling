@@ -378,7 +378,7 @@
       "cpu": 64,
       "cpu_ghz": 3.1,
       "ram_gib": 512,
-      "net_mbps": 13600,
+      "net_mbps": 20000,
       "drive": null,
       "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
     },
@@ -387,7 +387,295 @@
       "cpu": 96,
       "cpu_ghz": 3.1,
       "ram_gib": 768,
-      "net_mbps": 19000,
+      "net_mbps": 25000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r6i.large": {
+      "name": "db.r6i.large",
+      "cpu": 2,
+      "cpu_ghz": 3.5,
+      "ram_gib": 16,
+      "net_mbps": 500,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r6i.xlarge": {
+      "name": "db.r6i.xlarge",
+      "cpu": 4,
+      "cpu_ghz": 3.5,
+      "ram_gib": 32,
+      "net_mbps": 1000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r6i.2xlarge": {
+      "name": "db.r6i.2xlarge",
+      "cpu": 8,
+      "cpu_ghz": 3.5,
+      "ram_gib": 64,
+      "net_mbps": 2000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r6i.4xlarge": {
+      "name": "db.r6i.4xlarge",
+      "cpu": 16,
+      "cpu_ghz": 3.5,
+      "ram_gib": 128,
+      "net_mbps": 4000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r6i.8xlarge": {
+      "name": "db.r6i.8xlarge",
+      "cpu": 32,
+      "cpu_ghz": 3.5,
+      "ram_gib": 256,
+      "net_mbps": 10000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r6i.12xlarge": {
+      "name": "db.r6i.12xlarge",
+      "cpu": 48,
+      "cpu_ghz": 3.5,
+      "ram_gib": 384,
+      "net_mbps": 20000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r6i.16xlarge": {
+      "name": "db.r6i.16xlarge",
+      "cpu": 64,
+      "cpu_ghz": 3.5,
+      "ram_gib": 512,
+      "net_mbps": 25000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r6i.24xlarge": {
+      "name": "db.r6i.24xlarge",
+      "cpu": 96,
+      "cpu_ghz": 3.5,
+      "ram_gib": 768,
+      "net_mbps": 37500,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r6i.32xlarge": {
+      "name": "db.r6i.32xlarge",
+      "cpu": 128,
+      "cpu_ghz": 3.5,
+      "ram_gib": 1024,
+      "net_mbps": 50000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r6g.large": {
+      "name": "db.r6g.large",
+      "cpu": 2,
+      "cpu_ghz": 2.5,
+      "ram_gib": 16,
+      "net_mbps": 500,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r6g.xlarge": {
+      "name": "db.r6g.xlarge",
+      "cpu": 4,
+      "cpu_ghz": 2.5,
+      "ram_gib": 32,
+      "net_mbps": 1000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r6g.2xlarge": {
+      "name": "db.r6g.2xlarge",
+      "cpu": 8,
+      "cpu_ghz": 2.5,
+      "ram_gib": 64,
+      "net_mbps": 2000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r6g.4xlarge": {
+      "name": "db.r6g.4xlarge",
+      "cpu": 16,
+      "cpu_ghz": 2.5,
+      "ram_gib": 128,
+      "net_mbps": 3000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r6g.8xlarge": {
+      "name": "db.r6g.8xlarge",
+      "cpu": 32,
+      "cpu_ghz": 2.5,
+      "ram_gib": 256,
+      "net_mbps": 10000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r6g.12xlarge": {
+      "name": "db.r6g.12xlarge",
+      "cpu": 48,
+      "cpu_ghz": 2.5,
+      "ram_gib": 384,
+      "net_mbps": 20000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r6g.16xlarge": {
+      "name": "db.r6g.16xlarge",
+      "cpu": 64,
+      "cpu_ghz": 2.5,
+      "ram_gib": 512,
+      "net_mbps": 25000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r7i.large": {
+      "name": "db.r7i.large",
+      "cpu": 2,
+      "cpu_ghz": 3.2,
+      "ram_gib": 16,
+      "net_mbps": 1000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r7i.xlarge": {
+      "name": "db.r7i.xlarge",
+      "cpu": 4,
+      "cpu_ghz": 3.2,
+      "ram_gib": 32,
+      "net_mbps": 1000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r7i.2xlarge": {
+      "name": "db.r7i.2xlarge",
+      "cpu": 8,
+      "cpu_ghz": 3.2,
+      "ram_gib": 64,
+      "net_mbps": 2000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r7i.4xlarge": {
+      "name": "db.r7i.4xlarge",
+      "cpu": 16,
+      "cpu_ghz": 3.2,
+      "ram_gib": 128,
+      "net_mbps": 4000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r7i.8xlarge": {
+      "name": "db.r7i.8xlarge",
+      "cpu": 32,
+      "cpu_ghz": 3.2,
+      "ram_gib": 256,
+      "net_mbps": 12500,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r7i.12xlarge": {
+      "name": "db.r7i.12xlarge",
+      "cpu": 48,
+      "cpu_ghz": 3.2,
+      "ram_gib": 384,
+      "net_mbps": 18750,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r7i.16xlarge": {
+      "name": "db.r7i.16xlarge",
+      "cpu": 64,
+      "cpu_ghz": 3.2,
+      "ram_gib": 512,
+      "net_mbps": 25000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r7i.24xlarge": {
+      "name": "db.r7i.24xlarge",
+      "cpu": 96,
+      "cpu_ghz": 3.2,
+      "ram_gib": 768,
+      "net_mbps": 37500,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r7i.48xlarge": {
+      "name": "db.r7i.48xlarge",
+      "cpu": 192,
+      "cpu_ghz": 3.2,
+      "ram_gib": 1536,
+      "net_mbps": 50000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r7g.large": {
+      "name": "db.r7g.large",
+      "cpu": 2,
+      "cpu_ghz": 2.6,
+      "ram_gib": 16,
+      "net_mbps": 1000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r7g.xlarge": {
+      "name": "db.r7g.xlarge",
+      "cpu": 4,
+      "cpu_ghz": 2.6,
+      "ram_gib": 32,
+      "net_mbps": 1000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r7g.2xlarge": {
+      "name": "db.r7g.2xlarge",
+      "cpu": 8,
+      "cpu_ghz": 2.6,
+      "ram_gib": 64,
+      "net_mbps": 2000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r7g.4xlarge": {
+      "name": "db.r7g.4xlarge",
+      "cpu": 16,
+      "cpu_ghz": 2.6,
+      "ram_gib": 128,
+      "net_mbps": 4000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r7g.8xlarge": {
+      "name": "db.r7g.8xlarge",
+      "cpu": 32,
+      "cpu_ghz": 2.6,
+      "ram_gib": 256,
+      "net_mbps": 15000,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r7g.12xlarge": {
+      "name": "db.r7g.12xlarge",
+      "cpu": 48,
+      "cpu_ghz": 2.6,
+      "ram_gib": 384,
+      "net_mbps": 22500,
+      "drive": null,
+      "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
+    },
+    "db.r7g.16xlarge": {
+      "name": "db.r7g.16xlarge",
+      "cpu": 64,
+      "cpu_ghz": 2.6,
+      "ram_gib": 512,
+      "net_mbps": 30000,
       "drive": null,
       "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
     }
