@@ -1,0 +1,95 @@
+{
+  "instances": {
+    "db.r6g.large": {
+      "name": "db.r6g.large",
+      "cpu": 2,
+      "cpu_cores": 2,
+      "cpu_ghz": 2.5,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 15.26,
+      "net_mbps": 750.0,
+      "drive": null,
+      "platforms": [
+        "Aurora PostgreSQL"
+      ]
+    },
+    "db.r6g.xlarge": {
+      "name": "db.r6g.xlarge",
+      "cpu": 4,
+      "cpu_cores": 4,
+      "cpu_ghz": 2.5,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 30.52,
+      "net_mbps": 1250.0,
+      "drive": null,
+      "platforms": [
+        "Aurora PostgreSQL"
+      ]
+    },
+    "db.r6g.2xlarge": {
+      "name": "db.r6g.2xlarge",
+      "cpu": 8,
+      "cpu_cores": 8,
+      "cpu_ghz": 2.5,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 61.04,
+      "net_mbps": 2500.0,
+      "drive": null,
+      "platforms": [
+        "Aurora PostgreSQL"
+      ]
+    },
+    "db.r6g.4xlarge": {
+      "name": "db.r6g.4xlarge",
+      "cpu": 16,
+      "cpu_cores": 16,
+      "cpu_ghz": 2.5,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 122.07,
+      "net_mbps": 5000.0,
+      "drive": null,
+      "platforms": [
+        "Aurora PostgreSQL"
+      ]
+    },
+    "db.r6g.8xlarge": {
+      "name": "db.r6g.8xlarge",
+      "cpu": 32,
+      "cpu_cores": 32,
+      "cpu_ghz": 2.5,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 244.14,
+      "net_mbps": 12000.0,
+      "drive": null,
+      "platforms": [
+        "Aurora PostgreSQL"
+      ]
+    },
+    "db.r6g.12xlarge": {
+      "name": "db.r6g.12xlarge",
+      "cpu": 48,
+      "cpu_cores": 48,
+      "cpu_ghz": 2.5,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 366.21,
+      "net_mbps": 20000.0,
+      "drive": null,
+      "platforms": [
+        "Aurora PostgreSQL"
+      ]
+    },
+    "db.r6g.16xlarge": {
+      "name": "db.r6g.16xlarge",
+      "cpu": 64,
+      "cpu_cores": 64,
+      "cpu_ghz": 2.5,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 488.28,
+      "net_mbps": 25000.0,
+      "drive": null,
+      "platforms": [
+        "Aurora PostgreSQL"
+      ]
+    }
+  }
+}

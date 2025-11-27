@@ -1,0 +1,121 @@
+{
+  "instances": {
+    "db.r6i.large": {
+      "name": "db.r6i.large",
+      "cpu": 2,
+      "cpu_cores": 1,
+      "cpu_ghz": 3.5,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 15.26,
+      "net_mbps": 781.0,
+      "drive": null,
+      "platforms": [
+        "Aurora PostgreSQL"
+      ]
+    },
+    "db.r6i.xlarge": {
+      "name": "db.r6i.xlarge",
+      "cpu": 4,
+      "cpu_cores": 2,
+      "cpu_ghz": 3.5,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 30.52,
+      "net_mbps": 1562.0,
+      "drive": null,
+      "platforms": [
+        "Aurora PostgreSQL"
+      ]
+    },
+    "db.r6i.2xlarge": {
+      "name": "db.r6i.2xlarge",
+      "cpu": 8,
+      "cpu_cores": 4,
+      "cpu_ghz": 3.5,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 61.04,
+      "net_mbps": 3125.0,
+      "drive": null,
+      "platforms": [
+        "Aurora PostgreSQL"
+      ]
+    },
+    "db.r6i.4xlarge": {
+      "name": "db.r6i.4xlarge",
+      "cpu": 16,
+      "cpu_cores": 8,
+      "cpu_ghz": 3.5,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 122.07,
+      "net_mbps": 6250.0,
+      "drive": null,
+      "platforms": [
+        "Aurora PostgreSQL"
+      ]
+    },
+    "db.r6i.8xlarge": {
+      "name": "db.r6i.8xlarge",
+      "cpu": 32,
+      "cpu_cores": 16,
+      "cpu_ghz": 3.5,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 244.14,
+      "net_mbps": 12500.0,
+      "drive": null,
+      "platforms": [
+        "Aurora PostgreSQL"
+      ]
+    },
+    "db.r6i.12xlarge": {
+      "name": "db.r6i.12xlarge",
+      "cpu": 48,
+      "cpu_cores": 24,
+      "cpu_ghz": 3.5,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 366.21,
+      "net_mbps": 18750.0,
+      "drive": null,
+      "platforms": [
+        "Aurora PostgreSQL"
+      ]
+    },
+    "db.r6i.16xlarge": {
+      "name": "db.r6i.16xlarge",
+      "cpu": 64,
+      "cpu_cores": 32,
+      "cpu_ghz": 3.5,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 488.28,
+      "net_mbps": 25000.0,
+      "drive": null,
+      "platforms": [
+        "Aurora PostgreSQL"
+      ]
+    },
+    "db.r6i.24xlarge": {
+      "name": "db.r6i.24xlarge",
+      "cpu": 96,
+      "cpu_cores": 48,
+      "cpu_ghz": 3.5,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 732.42,
+      "net_mbps": 37500.0,
+      "drive": null,
+      "platforms": [
+        "Aurora PostgreSQL"
+      ]
+    },
+    "db.r6i.32xlarge": {
+      "name": "db.r6i.32xlarge",
+      "cpu": 128,
+      "cpu_cores": 64,
+      "cpu_ghz": 3.5,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 976.56,
+      "net_mbps": 50000.0,
+      "drive": null,
+      "platforms": [
+        "Aurora PostgreSQL"
+      ]
+    }
+  }
+}
