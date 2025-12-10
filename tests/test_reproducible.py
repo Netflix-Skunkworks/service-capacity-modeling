@@ -38,6 +38,17 @@ def test_repeated_plans():
 
 
 def test_compositional():
+    """Test that key-value composition produces identical Cassandra plans.
+
+    The key-value model composes with Cassandra via `lambda x: x` (identity),
+    meaning the Cassandra sub-model must receive identical inputs and produce
+    byte-for-byte identical outputs. This is the strictest possible test of
+    compositional correctness.
+
+    Note: The final least_regret results may differ due to reduce_by_family()
+    filtering across both regional and zonal dimensions, but that is a
+    presentation concern - the underlying Cassandra planning must be identical.
+    """
     direct_result = planner.plan(
         model_name="org.netflix.cassandra",
         region="us-east-1",
@@ -53,20 +64,29 @@ def test_compositional():
         explain=True,
     )
 
-    count = len(direct_result.least_regret)
-    direct_clusters = []
-    for i in range(count):
-        direct_cluster = direct_result.least_regret[i].candidate_clusters.zonal[0]
-        direct_clusters.append(direct_cluster)
-        # FIXME(josephl): It appears that since we are now zipping the
-        # regional and zonal clusters we can get repeats in the zonal.
-        # This is odd to me but not related to the 6th gen instances
-        composed_cluster = composed_result.least_regret[i].candidate_clusters.zonal[0]
-        assert composed_cluster in direct_clusters
+    # Strictest test: Cassandra regret clusters must be EXACTLY identical
+    # (same plans, same regrets, same order) since key-value uses `lambda x: x`
+    direct_cass = direct_result.explanation.regret_clusters_by_model[
+        "org.netflix.cassandra"
+    ]
+    composed_cass = composed_result.explanation.regret_clusters_by_model[
+        "org.netflix.cassandra"
+    ]
+    assert len(direct_cass) == len(composed_cass)
+    for i, ((d_plan, _, d_regret), (c_plan, _, c_regret)) in enumerate(
+        zip(direct_cass, composed_cass)
+    ):
+        assert d_plan == c_plan, f"Plan {i} differs"
+        assert d_regret == c_regret, f"Regret {i} differs: {d_regret} vs {c_regret}"
 
-        java = composed_result.least_regret[i].candidate_clusters.regional[0]
+    # Verify the composed results have the expected structure
+    for lr in composed_result.least_regret:
+        # Zonal cluster should be Cassandra
+        assert lr.candidate_clusters.zonal[0].cluster_type == "cassandra"
+        # Regional cluster should be the key-value Java app
+        java = lr.candidate_clusters.regional[0]
         assert java.cluster_type == "dgwkv"
-        # usually like 15 * 4 = ~50
+        # Sanity check on Java app sizing (usually ~50 total CPUs)
         assert 100 > java.count * java.instance.cpu > 20
 
 
