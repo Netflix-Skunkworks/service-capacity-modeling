@@ -38,11 +38,7 @@ def extract_3yr_upfront_price(price_data: Dict[str, Any]) -> Optional[float]:
     return None
 
 
-def fetch_pricing(region: str) -> None:
-    # Initialize pricing client
-    pricing_client = boto3.client("pricing", region_name=region)
-
-    # Get all EC2 pricing for Reserved Instances
+def fetch_ec2_pricing(pricing_client: Any) -> Dict[str, Dict[str, Union[float, str]]]:
     paginator = pricing_client.get_paginator("get_products")
 
     instances = {}
@@ -81,39 +77,105 @@ def fetch_pricing(region: str) -> None:
                 if "deprecated" in str(instance_type).lower():
                     instance_info["lifecycle"] = "deprecated"
                 instances[instance_type] = instance_info
+    return instances
 
-    # Create final output structure
-    # we bolt on the other info, as a hack until we can improve prior layers
-    output = {
-        "us-east-1": {
-            "instances": instances,
-            "drives": {},
-            "services": {},
-            "zones_in_region": 3,
-        }
+
+def fetch_rds_pricing(pricing_client: Any) -> Dict[str, Dict[str, Union[float, str]]]:
+    paginator = pricing_client.get_paginator("get_products")
+
+    instances = {}
+
+    filter_params = {
+        "ServiceCode": "AmazonRDS",
+        "Filters": [
+            {
+                "Type": "TERM_MATCH",
+                "Field": "location",
+                "Value": "US East (N. Virginia)",
+            },
+            {
+                "Type": "TERM_MATCH",
+                "Field": "databaseEngine",
+                "Value": "Aurora PostgreSQL",
+            },
+            {"Type": "TERM_MATCH", "Field": "deploymentOption", "Value": "Single-AZ"},
+        ],
     }
 
-    # Write to JSON file
+    for page in paginator.paginate(**filter_params):
+        for price_item in page["PriceList"]:
+            price_data = json.loads(price_item)
+
+            # Extract instance type
+            attributes = price_data.get("product", {}).get("attributes", {})
+            instance_type = attributes.get("instanceType")
+
+            if not instance_type:
+                continue
+
+            annual_cost = extract_3yr_upfront_price(price_data)
+            if annual_cost:
+                instance_info: Dict[str, Union[float, str]] = {
+                    "annual_cost": annual_cost
+                }
+                if "deprecated" in str(instance_type).lower():
+                    instance_info["lifecycle"] = "deprecated"
+                instances[instance_type] = instance_info
+    return instances
+
+
+def fetch_pricing(region: str) -> None:
+    pricing_client = boto3.client("pricing", region_name=region)
+    ec2_instances = fetch_ec2_pricing(pricing_client)
+    rds_instances = fetch_rds_pricing(pricing_client)
+
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    output_file = os.path.join(
+    ec2_output_file = os.path.join(
         project_root,
-        "service_capacity_modeling",
         "hardware",
         "profiles",
         "pricing",
         "aws",
         "3yr-reserved_ec2.json",
     )
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(output, f, indent=2, sort_keys=True)
+    # we bolt on the other info, as a hack until we can improve prior layers
+    ec2_output = {
+        "us-east-1": {
+            "instances": ec2_instances,
+            "drives": {},
+            "services": {},
+            "zones_in_region": 3,
+        }
+    }
+    with open(ec2_output_file, "w", encoding="utf-8") as f:
+        json.dump(ec2_output, f, indent=2, sort_keys=True)
         f.write("\n")
-
-    print(f"Pricing data written to {output_file}")
+    print(f"\nEC2 pricing data written to {ec2_output_file}")
+    rds_output_file = os.path.join(
+        project_root,
+        "hardware",
+        "profiles",
+        "pricing",
+        "aws",
+        "3yr-reserved_rds.json",
+    )
+    rds_output = {
+        "us-east-1": {
+            "instances": rds_instances,
+            "drives": {},
+            "services": {},
+            "zones_in_region": 3,
+        }
+    }
+    with open(rds_output_file, "w", encoding="utf-8") as f:
+        json.dump(rds_output, f, indent=2, sort_keys=True)
+        f.write("\n")
+    print(f"RDS pricing data written to {rds_output_file}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Fetch EC2 Reserved Instance pricing data."
+        description="Fetch EC2 and RDS Reserved Instance pricing data."
     )
     parser.add_argument(
         "--region",

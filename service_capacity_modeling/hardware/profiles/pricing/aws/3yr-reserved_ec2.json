@@ -632,15 +632,6 @@
       "dl1.24xlarge": {
         "annual_cost": 43178.0
       },
-      "f1.16xlarge": {
-        "annual_cost": 50230.0
-      },
-      "f1.2xlarge": {
-        "annual_cost": 6278.67
-      },
-      "f1.4xlarge": {
-        "annual_cost": 12557.33
-      },
       "g4ad.16xlarge": {
         "annual_cost": 13331.67
       },
@@ -1574,26 +1565,20 @@
       "m8g.xlarge": {
         "annual_cost": 621.0
       },
-      "p3.16xlarge": {
-        "annual_cost": 69054.67
-      },
-      "p3.2xlarge": {
-        "annual_cost": 8631.67
-      },
-      "p3.8xlarge": {
-        "annual_cost": 34527.33
-      },
       "p3dn.24xlarge": {
         "annual_cost": 79416.67
       },
       "p4d.24xlarge": {
-        "annual_cost": 95297.67
+        "annual_cost": 71473.33
       },
       "p4de.24xlarge": {
-        "annual_cost": 119122.0
+        "annual_cost": 89341.67
       },
       "p5.48xlarge": {
-        "annual_cost": 329048.33
+        "annual_cost": 181288.67
+      },
+      "p5.4xlarge": {
+        "annual_cost": 22661.0
       },
       "r3.2xlarge": {
         "annual_cost": 2043.33
@@ -2303,15 +2288,6 @@
       "trn1n.32xlarge": {
         "annual_cost": 70804.67
       },
-      "u-12tb1.112xlarge": {
-        "annual_cost": 267960.67
-      },
-      "u-18tb1.112xlarge": {
-        "annual_cost": 401266.33
-      },
-      "u-24tb1.112xlarge": {
-        "annual_cost": 535022.0
-      },
       "u-3tb1.56xlarge": {
         "annual_cost": 66877.67
       },
@@ -2321,20 +2297,17 @@
       "u-6tb1.56xlarge": {
         "annual_cost": 113677.33
       },
-      "u-9tb1.112xlarge": {
-        "annual_cost": 200970.33
-      },
       "u7i-12tb.224xlarge": {
-        "annual_cost": 375144.67
+        "annual_cost": 308159.0
       },
       "u7in-16tb.224xlarge": {
-        "annual_cost": 499353.67
+        "annual_cost": 442117.0
       },
       "u7in-24tb.224xlarge": {
-        "annual_cost": 749030.67
+        "annual_cost": 663219.67
       },
       "u7in-32tb.224xlarge": {
-        "annual_cost": 998707.67
+        "annual_cost": 884322.0
       },
       "vt1.24xlarge": {
         "annual_cost": 17127.67
