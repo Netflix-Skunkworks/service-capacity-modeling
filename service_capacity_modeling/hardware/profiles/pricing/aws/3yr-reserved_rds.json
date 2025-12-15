@@ -1,0 +1,159 @@
+{
+  "us-east-1": {
+    "drives": {},
+    "instances": {
+      "db.r5.12xlarge": {
+        "annual_cost": 21258.0
+      },
+      "db.r5.16xlarge": {
+        "annual_cost": 28344.0
+      },
+      "db.r5.24xlarge": {
+        "annual_cost": 42516.0
+      },
+      "db.r5.2xlarge": {
+        "annual_cost": 3543.0
+      },
+      "db.r5.4xlarge": {
+        "annual_cost": 7086.0
+      },
+      "db.r5.8xlarge": {
+        "annual_cost": 14172.0
+      },
+      "db.r5.large": {
+        "annual_cost": 885.67
+      },
+      "db.r5.xlarge": {
+        "annual_cost": 1771.33
+      },
+      "db.r6g.12xlarge": {
+        "annual_cost": 19024.0
+      },
+      "db.r6g.16xlarge": {
+        "annual_cost": 25365.33
+      },
+      "db.r6g.2xlarge": {
+        "annual_cost": 3170.67
+      },
+      "db.r6g.4xlarge": {
+        "annual_cost": 6341.33
+      },
+      "db.r6g.8xlarge": {
+        "annual_cost": 12682.67
+      },
+      "db.r6g.large": {
+        "annual_cost": 792.67
+      },
+      "db.r6g.xlarge": {
+        "annual_cost": 1585.33
+      },
+      "db.r6gd.12xlarge": {
+        "annual_cost": 34765.33
+      },
+      "db.r6gd.16xlarge": {
+        "annual_cost": 46353.67
+      },
+      "db.r6gd.2xlarge": {
+        "annual_cost": 5794.33
+      },
+      "db.r6gd.4xlarge": {
+        "annual_cost": 11588.33
+      },
+      "db.r6gd.8xlarge": {
+        "annual_cost": 23177.0
+      },
+      "db.r6gd.xlarge": {
+        "annual_cost": 2897.0
+      },
+      "db.r6i.12xlarge": {
+        "annual_cost": 21256.0
+      },
+      "db.r6i.16xlarge": {
+        "annual_cost": 28341.33
+      },
+      "db.r6i.24xlarge": {
+        "annual_cost": 42512.0
+      },
+      "db.r6i.2xlarge": {
+        "annual_cost": 3542.67
+      },
+      "db.r6i.32xlarge": {
+        "annual_cost": 56682.67
+      },
+      "db.r6i.4xlarge": {
+        "annual_cost": 7085.33
+      },
+      "db.r6i.8xlarge": {
+        "annual_cost": 14170.67
+      },
+      "db.r6i.large": {
+        "annual_cost": 885.67
+      },
+      "db.r6i.xlarge": {
+        "annual_cost": 1771.33
+      },
+      "db.r6id.24xlarge": {
+        "annual_cost": 77553.33
+      },
+      "db.r6id.32xlarge": {
+        "annual_cost": 103404.33
+      },
+      "db.r7g.12xlarge": {
+        "annual_cost": 30796.33
+      },
+      "db.r7g.16xlarge": {
+        "annual_cost": 41061.67
+      },
+      "db.r7g.2xlarge": {
+        "annual_cost": 5132.67
+      },
+      "db.r7g.4xlarge": {
+        "annual_cost": 10265.33
+      },
+      "db.r7g.8xlarge": {
+        "annual_cost": 20530.67
+      },
+      "db.r7g.large": {
+        "annual_cost": 1283.33
+      },
+      "db.r7g.xlarge": {
+        "annual_cost": 2566.33
+      },
+      "db.t3.large": {
+        "annual_cost": 622.67
+      },
+      "db.t3.medium": {
+        "annual_cost": 311.33
+      },
+      "db.t4g.large": {
+        "annual_cost": 550.0
+      },
+      "db.t4g.medium": {
+        "annual_cost": 275.0
+      },
+      "db.x2g.12xlarge": {
+        "annual_cost": 27726.33
+      },
+      "db.x2g.16xlarge": {
+        "annual_cost": 36968.67
+      },
+      "db.x2g.2xlarge": {
+        "annual_cost": 4621.0
+      },
+      "db.x2g.4xlarge": {
+        "annual_cost": 9242.0
+      },
+      "db.x2g.8xlarge": {
+        "annual_cost": 18484.33
+      },
+      "db.x2g.large": {
+        "annual_cost": 1155.33
+      },
+      "db.x2g.xlarge": {
+        "annual_cost": 2310.67
+      }
+    },
+    "services": {},
+    "zones_in_region": 3
+  }
+}
