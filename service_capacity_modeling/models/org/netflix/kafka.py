@@ -1,6 +1,5 @@
 import logging
 import math
-from enum import Enum
 from typing import Any
 from typing import Dict
 from typing import Optional
@@ -9,6 +8,7 @@ from typing import Tuple
 from pydantic import BaseModel
 from pydantic import Field
 
+from service_capacity_modeling.enum_utils import StrEnum
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
@@ -45,7 +45,7 @@ from service_capacity_modeling.models.org.netflix.iso_date_math import iso_to_se
 logger = logging.getLogger(__name__)
 
 
-class ClusterType(str, Enum):
+class ClusterType(StrEnum):
     strong = "strong"
     ha = "high-availability"
 

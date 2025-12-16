@@ -1,5 +1,4 @@
 from datetime import timedelta
-from enum import Enum
 from typing import Any
 from typing import Callable
 from typing import Dict
@@ -10,6 +9,7 @@ from pydantic import Field
 
 from .stateless_java import nflx_java_app_capacity_model
 from .stateless_java import NflxJavaAppArguments
+from service_capacity_modeling.enum_utils import StrEnum
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
@@ -26,13 +26,13 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models import CapacityModel
 
 
-class NflxCounterCardinality(Enum):
+class NflxCounterCardinality(StrEnum):
     low = "low"
     medium = "medium"
     high = "high"
 
 
-class NflxCounterMode(Enum):
+class NflxCounterMode(StrEnum):
     best_effort = "best-effort"
     eventual = "eventual"
     exact = "exact"
@@ -95,7 +95,7 @@ class NflxCounterCapacityModel(CapacityModel):
     ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
         stores = []
 
-        if extra_model_arguments["counter.mode"] == NflxCounterMode.best_effort.value:
+        if extra_model_arguments["counter.mode"] == NflxCounterMode.best_effort:
             stores.append(("org.netflix.evcache", lambda x: x))
         else:
             # Shared evcache cluster is used for eventual and exact counters
@@ -114,9 +114,9 @@ class NflxCounterCapacityModel(CapacityModel):
                 # high cardinality : rollups happen once every 10 seconds
                 # TODO: Account for read amplification from time slice configs
                 #       for better model accuracy
-                if counter_cardinality == NflxCounterCardinality.low.value:
+                if counter_cardinality == NflxCounterCardinality.low:
                     rollups_per_second = counter_deltas_per_second.scale(0.0167)
-                elif counter_cardinality == NflxCounterCardinality.medium.value:
+                elif counter_cardinality == NflxCounterCardinality.medium:
                     rollups_per_second = counter_deltas_per_second.scale(0.0333)
                 else:
                     rollups_per_second = counter_deltas_per_second.scale(0.1)

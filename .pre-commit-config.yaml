@@ -42,4 +42,10 @@ repos:
         language: system
         types: [python]
         verbose: true
+      - id: no-str-enum-pattern
+        name: forbid (str, Enum) pattern - use StrEnum instead
+        entry: python -c "import sys; import re; content=open(sys.argv[1]).read(); match=re.search(r'class\s+\w+\(str,\s*Enum\)', content); sys.exit(1 if match and 'enum_utils' not in sys.argv[1] else 0)"
+        language: system
+        types: [python]
+        exclude: ^tests/
 fail_fast: true
