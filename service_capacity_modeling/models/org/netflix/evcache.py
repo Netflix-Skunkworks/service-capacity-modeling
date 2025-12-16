@@ -1,6 +1,5 @@
 import logging
 import math
-from enum import Enum
 from typing import Any
 from typing import Dict
 from typing import Optional
@@ -9,6 +8,7 @@ from typing import Tuple
 from pydantic import BaseModel
 from pydantic import Field
 
+from service_capacity_modeling.enum_utils import StrEnum
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
@@ -45,7 +45,7 @@ from service_capacity_modeling.stats import dist_for_interval
 logger = logging.getLogger(__name__)
 
 
-class Replication(str, Enum):
+class Replication(StrEnum):
     none = "none"
     sets = "sets"
     evicts = "evicts"

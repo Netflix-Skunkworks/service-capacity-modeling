@@ -4,7 +4,6 @@ from __future__ import annotations
 import re
 import sys
 from decimal import Decimal
-from enum import Enum
 from fractions import Fraction
 from functools import lru_cache
 from typing import Any
@@ -22,6 +21,7 @@ from pydantic import ConfigDict
 from pydantic import Field
 
 from service_capacity_modeling.enum_utils import enum_docstrings
+from service_capacity_modeling.enum_utils import StrEnum
 
 GIB_IN_BYTES = 1024 * 1024 * 1024
 MIB_IN_BYTES = 1024 * 1024
@@ -46,15 +46,12 @@ class ExcludeUnsetModel(BaseModel):
 
 
 @enum_docstrings
-class IntervalModel(str, Enum):
+class IntervalModel(StrEnum):
     """Statistical distribution models for approximating intervals
 
     When we have uncertainty intervals (low, mid, high), we need to choose
     a probability distribution to model that uncertainty for simulation purposes.
     """
-
-    def __str__(self) -> str:
-        return str(self.value)
 
     def __repr__(self) -> str:
         return f"D({self.value})"
@@ -204,7 +201,7 @@ def normalized_aws_size(name: str) -> Fraction:
 ###############################################################################
 
 
-class Lifecycle(str, Enum):
+class Lifecycle(StrEnum):
     """Represents the lifecycle of hardware from initial preview
     to end-of-life.
 
@@ -223,7 +220,7 @@ class Lifecycle(str, Enum):
 
 
 @enum_docstrings
-class DriveType(str, Enum):
+class DriveType(StrEnum):
     """Represents the type and attachment model of storage drives
 
     Drives can be either local (ephemeral, instance-attached) or network-attached
@@ -366,7 +363,7 @@ class Drive(ExcludeUnsetModel):
 
 
 @enum_docstrings
-class Platform(str, Enum):
+class Platform(StrEnum):
     """Represents the CPU architecture or managed service platform
 
     Hardware can run on different CPU architectures (x86_64, ARM) or be a fully
@@ -617,7 +614,7 @@ class Pricing(ExcludeUnsetModel):
 
 
 @enum_docstrings
-class AccessPattern(str, Enum):
+class AccessPattern(StrEnum):
     """The access pattern determines capacity planning priorities: latency-sensitive
     services target low P99 latency, while throughput-oriented services optimize
     for maximum requests per second.
@@ -633,7 +630,7 @@ class AccessPattern(str, Enum):
 
 
 @enum_docstrings
-class AccessConsistency(str, Enum):
+class AccessConsistency(StrEnum):
     """
     Generally speaking consistency is expensive, so models need to know what
     kind of consistency will be required in order to estimate CPU usage
@@ -851,7 +848,7 @@ class CurrentClusters(ExcludeUnsetModel):
 
 
 @enum_docstrings
-class BufferComponent(str, Enum):
+class BufferComponent(StrEnum):
     """Represents well known buffer components such as compute and storage
 
     Note that while these are common and defined here for models to share,
@@ -887,7 +884,7 @@ class BufferComponent(str, Enum):
 
 
 @enum_docstrings
-class BufferIntent(str, Enum):
+class BufferIntent(StrEnum):
     """Defines the intent of buffer directives for capacity planning"""
 
     desired = "desired"

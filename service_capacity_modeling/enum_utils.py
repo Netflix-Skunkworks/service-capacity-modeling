@@ -5,6 +5,7 @@ runtime-accessible docstrings.
 
 import ast
 import inspect
+import sys
 from enum import Enum
 from functools import partial
 from operator import is_
@@ -14,6 +15,47 @@ from typing import TypeVar
 
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import CoreSchema
+
+
+__all__ = ["StrEnum", "enum_docstrings"]
+
+# StrEnum backport for Python 3.10 compatibility
+# On Python 3.11+, use the stdlib version
+if sys.version_info >= (3, 11):
+    from enum import StrEnum  # noqa: F401  # re-exported
+else:
+
+    class StrEnum(str, Enum):
+        """Backport of Python 3.11 StrEnum.
+
+        Provides consistent string behavior across all Python versions:
+        - f"{x}" returns the value (not "Foo.BAR")
+        - str(x) returns the value (not "Foo.BAR")
+        - x == "value" returns True (string comparison works)
+
+        This addresses PEP 663 which changed str(Enum) behavior in Python 3.11,
+        making (str, Enum) return "Foo.BAR" in f-strings instead of the value.
+        """
+
+        def __new__(cls, value: str, *args: Any, **kwargs: Any) -> "StrEnum":
+            if not isinstance(value, str):
+                raise TypeError(f"{value!r} is not a string")
+            member = str.__new__(cls, value)
+            member._value_ = value
+            return member
+
+        def __str__(self) -> str:
+            return str(self.value)
+
+        def __format__(self, format_spec: str) -> str:
+            # Ensures f-strings return value, not "Foo.BAR"
+            return str(self.value).__format__(format_spec)
+
+        @staticmethod
+        def _generate_next_value_(
+            name: str, start: int, count: int, last_values: list[str]
+        ) -> str:
+            return name.lower()
 
 
 E = TypeVar("E", bound=Enum)
