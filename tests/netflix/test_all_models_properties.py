@@ -4,8 +4,6 @@ Universal property-based tests that apply to ALL Netflix capacity models.
 These tests verify fundamental properties that should hold for every model,
 such as determinism, feasibility, and basic scaling behavior.
 """
-# pylint: disable=unreachable
-# Note: Pylint incorrectly flags code after hypothesis.assume() as unreachable
 
 import hypothesis.strategies as st
 from hypothesis import assume
