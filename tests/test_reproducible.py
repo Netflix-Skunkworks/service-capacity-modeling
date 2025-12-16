@@ -86,7 +86,8 @@ def test_compositional():
         # Regional cluster should be the key-value Java app
         java = lr.candidate_clusters.regional[0]
         assert java.cluster_type == "dgwkv"
-        # Sanity check on Java app sizing (usually ~50 total CPUs)
+        # Sanity check on Java app sizing (~48 total CPUs: 6 x 8 vCPU instances,
+        # but may vary with CPU architecture or pricing improvements)
         assert 100 > java.count * java.instance.cpu > 20
 
 
