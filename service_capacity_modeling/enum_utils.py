@@ -22,7 +22,7 @@ __all__ = ["StrEnum", "enum_docstrings"]
 # StrEnum backport for Python 3.10 compatibility
 # On Python 3.11+, use the stdlib version
 if sys.version_info >= (3, 11):
-    from enum import StrEnum  # noqa: F401  # re-exported
+    from enum import StrEnum as StrEnum  # pylint: disable=useless-import-alias
 else:
 
     class StrEnum(str, Enum):
