@@ -8,6 +8,7 @@
 .setupmeta.version
 .tox
 .venv*
+.hypothesis
 
 .idea/
 .vscode/
