@@ -650,7 +650,7 @@ class NflxCassandraArguments(BaseModel):
         " this will be deduced from durability and consistency desires",
     )
     require_local_disks: bool = Field(
-        default=False,
+        default=True,
         description="If local (ephemeral) drives are required",
     )
     require_attached_disks: bool = Field(
