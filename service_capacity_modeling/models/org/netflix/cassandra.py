@@ -638,8 +638,14 @@ def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
 
 
 class NflxCassandraArguments(BaseModel):
-    copies_per_region: int = Field(
-        default=3,
+    """Configuration arguments for the Netflix Cassandra capacity model.
+
+    This model centralizes all tunable parameters with their defaults.
+    Use `from_extra_model_arguments()` to parse a dict into a validated instance.
+    """
+
+    copies_per_region: Optional[int] = Field(
+        default=None,
         description="How many copies of the data will exist e.g. RF=3. If unsupplied"
         " this will be deduced from durability and consistency desires",
     )
@@ -663,9 +669,13 @@ class NflxCassandraArguments(BaseModel):
         default=192,
         description="What is the maximum size of a cluster in this region",
     )
-    max_local_disk_gib: int = Field(
-        default=5120,
-        description="The maximum amount of data we store per machine",
+    max_local_data_per_node_gib: int = Field(
+        default=1280,
+        description="Maximum data per node for local disk instances (GiB)",
+    )
+    max_attached_data_per_node_gib: int = Field(
+        default=2048,
+        description="Maximum data per node for attached disk instances (GiB)",
     )
     max_write_buffer_percent: float = Field(
         default=0.25,
@@ -679,6 +689,26 @@ class NflxCassandraArguments(BaseModel):
         "Note that if there are more than 100k writes this will "
         "automatically adjust to 0.2",
     )
+
+    @classmethod
+    def from_extra_model_arguments(
+        cls, extra_model_arguments: Dict[str, Any]
+    ) -> "NflxCassandraArguments":
+        """Parse extra_model_arguments dict into a validated NflxCassandraArguments.
+
+        This centralizes default values - any field not in extra_model_arguments
+        will use the default defined in this model.
+
+        Handles legacy field name mappings:
+        - max_local_disk_gib -> max_local_data_per_node_gib (if not explicitly set)
+        """
+        # Handle legacy field name: max_local_disk_gib -> max_local_data_per_node_gib
+        args = dict(extra_model_arguments)
+        if "max_local_data_per_node_gib" not in args and "max_local_disk_gib" in args:
+            args["max_local_data_per_node_gib"] = args["max_local_disk_gib"]
+
+        # Pydantic will use defaults for any missing fields
+        return cls.model_validate(args)
 
 
 class NflxCassandraCapacityModel(CapacityModel):
@@ -722,40 +752,22 @@ class NflxCassandraCapacityModel(CapacityModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
-        # TODO: Standardize these extra model argument defaults in a single
-        # place. Many of them are defined here and as default values in the
-        # downstream method but only these ones are used which is confusing for
-        # readability
+        # Parse extra_model_arguments into a validated model with centralized defaults
+        args = NflxCassandraArguments.from_extra_model_arguments(extra_model_arguments)
 
-        # Use durabiliy and consistency to compute RF.
-        copies_per_region = _target_rf(
-            desires, extra_model_arguments.get("copies_per_region", None)
-        )
-        require_local_disks: bool = extra_model_arguments.get(
-            "require_local_disks", False
-        )
-        require_attached_disks: bool = extra_model_arguments.get(
-            "require_attached_disks", False
-        )
+        # Use durability and consistency to compute RF if not explicitly set
+        copies_per_region = _target_rf(desires, args.copies_per_region)
+
+        # Validate required_cluster_size for critical tiers
         required_cluster_size: Optional[int] = (
             NflxCassandraCapacityModel.get_required_cluster_size(
                 desires.service_tier, extra_model_arguments
             )
         )
 
-        max_rps_to_disk: int = extra_model_arguments.get("max_rps_to_disk", 500)
-        max_regional_size: int = extra_model_arguments.get("max_regional_size", 192)
-        max_local_data_per_node_gib: int = extra_model_arguments.get(
-            "max_local_data_per_node_gib",
-            extra_model_arguments.get("max_local_disk_gib", 1280),
-        )
-
-        max_write_buffer_percent: float = min(
-            0.5, extra_model_arguments.get("max_write_buffer_percent", 0.25)
-        )
-        max_table_buffer_percent: float = min(
-            0.5, extra_model_arguments.get("max_table_buffer_percent", 0.11)
-        )
+        # Apply caps to buffer percentages
+        max_write_buffer_percent = min(0.5, args.max_write_buffer_percent)
+        max_table_buffer_percent = min(0.5, args.max_table_buffer_percent)
 
         # Adjust heap defaults for high write clusters
         if (
@@ -772,12 +784,12 @@ class NflxCassandraCapacityModel(CapacityModel):
             desires=desires,
             zones_per_region=context.zones_in_region,
             copies_per_region=copies_per_region,
-            require_local_disks=require_local_disks,
-            require_attached_disks=require_attached_disks,
+            require_local_disks=args.require_local_disks,
+            require_attached_disks=args.require_attached_disks,
             required_cluster_size=required_cluster_size,
-            max_rps_to_disk=max_rps_to_disk,
-            max_regional_size=max_regional_size,
-            max_local_data_per_node_gib=max_local_data_per_node_gib,
+            max_rps_to_disk=args.max_rps_to_disk,
+            max_regional_size=args.max_regional_size,
+            max_local_data_per_node_gib=args.max_local_data_per_node_gib,
             max_write_buffer_percent=max_write_buffer_percent,
             max_table_buffer_percent=max_table_buffer_percent,
         )
