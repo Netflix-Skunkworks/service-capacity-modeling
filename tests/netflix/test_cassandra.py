@@ -29,6 +29,11 @@ from tests.util import get_total_storage_gib
 from tests.util import has_local_storage
 from tests.util import simple_drive
 
+# TODO(homatthew): This is a workaround since EBS is disabled broadly for new
+# provisionings (require_local_disks=True by default), but we still want to test
+# with both local and attached disks in unit tests.
+EXTRA_MODEL_ARGS = {"require_local_disks": False}
+
 # Property test configuration for Cassandra model.
 # See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
 PROPERTY_TEST_CONFIG = {
@@ -110,7 +115,7 @@ class TestCassandraCapacityPlanning:
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=high_writes,
-            extra_model_arguments={"copies_per_region": 2},
+            extra_model_arguments={**EXTRA_MODEL_ARGS, "copies_per_region": 2},
         )[0]
         high_writes_result = cap_plan.candidate_clusters.zonal[0]
         assert high_writes_result.instance.family.startswith("c")
@@ -277,7 +282,7 @@ class TestCassandraThroughput:
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=desires,
-            extra_model_arguments={"max_regional_size": 96 * 2},
+            extra_model_arguments={**EXTRA_MODEL_ARGS, "max_regional_size": 96 * 2},
         )[0]
         high_writes_result = cap_plan.candidate_clusters.zonal[0]
         assert high_writes_result.instance.family not in ("m5", "r5")
@@ -378,12 +383,14 @@ class TestCassandraDurability:
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=expensive,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
         )[0]
 
         cheap_plan = planner.plan_certain(
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=cheaper,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
         )[0]
 
         assert cheap_plan.candidate_clusters.total_annual_cost < (
@@ -472,9 +479,7 @@ class TestCassandraCurrentCapacity:
             num_results=3,
             num_regions=4,
             desires=worn_desire,
-            extra_model_arguments={
-                "required_cluster_size": 8,
-            },
+            extra_model_arguments={**EXTRA_MODEL_ARGS, "required_cluster_size": 8},
         )
 
         # Use a similar number of CPU cores but allocate less disk
@@ -522,9 +527,7 @@ class TestCassandraCurrentCapacity:
             num_results=3,
             num_regions=4,
             desires=worn_desire,
-            extra_model_arguments={
-                "required_cluster_size": 2,
-            },
+            extra_model_arguments={**EXTRA_MODEL_ARGS, "required_cluster_size": 2},
         )
 
         lr_clusters = cap_plan[0].candidate_clusters.zonal[0]

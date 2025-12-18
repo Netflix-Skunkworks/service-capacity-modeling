@@ -19,6 +19,11 @@ from tests.util import assert_similar_compute
 from tests.util import get_drive_size_gib
 from tests.util import simple_drive
 
+# TODO(homatthew): This is a workaround since EBS is disabled broadly for new
+# provisionings (require_local_disks=True by default), but we still want to test
+# with both local and attached disks in unit tests.
+EXTRA_MODEL_ARGS = {"require_local_disks": False}
+
 
 def get_ideal_cpu_for_instance(instance_name: str) -> float:
     """
@@ -216,6 +221,7 @@ class TestStorageScalingConstraints:
             region="us-east-1",
             num_results=20,
             desires=desires,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
         )
         result = cap_plan[0].candidate_clusters.zonal[0]
         result_storage = result.count * get_drive_size_gib(result)
@@ -244,6 +250,7 @@ class TestStorageScalingConstraints:
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=desires,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
         )
         result = cap_plan[0].candidate_clusters.zonal[0]
 
@@ -270,6 +277,7 @@ class TestStorageScalingConstraints:
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=desires,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
 
@@ -302,6 +310,7 @@ class TestStorageScalingConstraints:
             region="us-east-1",
             num_results=20,
             desires=desires,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
         )
         result = cap_plan[0].candidate_clusters.zonal[0]
 
@@ -378,6 +387,7 @@ class TestCPUScalingConstraints:
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=desires,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
         )
         result = cap_plan[0].candidate_clusters.zonal[0]
 
@@ -410,6 +420,7 @@ class TestCPUScalingConstraints:
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=desires,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
         )
         result = cap_plan[0].candidate_clusters.zonal[0]
         # CPU should scale down from current over-provisioned level
@@ -434,6 +445,7 @@ class TestCPUScalingConstraints:
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=desires,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
 
@@ -466,6 +478,7 @@ class TestCPUScalingConstraints:
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=desires,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
         result_cores = result.count * result.instance.cpu
@@ -571,6 +584,7 @@ class TestStorageAndCPUIntegration:
             region="us-east-1",
             desires=desires,
             num_results=20,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
         )
         result = cap_plan[0].candidate_clusters.zonal[0]
 
@@ -617,6 +631,7 @@ class TestStorageAndCPUIntegration:
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=desires,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
 
@@ -644,6 +659,7 @@ class TestStorageAndCPUIntegration:
             region="us-east-1",
             desires=desires,
             num_results=20,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
         )
         result = cap_plan[0].candidate_clusters.zonal[0]
         result_cores = result.count * result.instance.cpu
@@ -668,6 +684,7 @@ class TestStorageAndCPUIntegration:
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=desires,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
         result_cores = result.count * result.instance.cpu
