@@ -14,7 +14,6 @@ from service_capacity_modeling.models.org.netflix.counter import NflxCounterCard
 from service_capacity_modeling.models.org.netflix.counter import NflxCounterMode
 from service_capacity_modeling.models.org.netflix.evcache import Replication
 from service_capacity_modeling.models.org.netflix.kafka import ClusterType
-from service_capacity_modeling.models.plan_comparison import ComparisonResult
 from service_capacity_modeling.models.plan_comparison import ResourceType
 
 # List of all enums that should have per-member docstrings
@@ -27,7 +26,6 @@ DOCUMENTED_ENUMS = [
     BufferComponent,
     BufferIntent,
     ResourceType,
-    ComparisonResult,
 ]
 
 
@@ -182,7 +180,6 @@ STRENUM_CLASSES = [
     Replication,
     ClusterType,
     ResourceType,
-    ComparisonResult,
 ]
 
 

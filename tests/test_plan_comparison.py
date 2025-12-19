@@ -24,7 +24,6 @@ from service_capacity_modeling.interface import (
 from service_capacity_modeling.models.plan_comparison import (
     allow_over_provisioning,
     compare_plans,
-    ComparisonResult,
     extract_baseline_plan,
     ignore_resource,
     ResourceTolerances,
@@ -193,47 +192,32 @@ class TestResourceTolerances:
 
     def test_default_fallback(self):
         """get_tolerance falls back to default when not specified"""
-        tolerances = ResourceTolerances(cpu=symmetric_tolerance(0.05))
-        default = symmetric_tolerance(0.10)
+        tolerances = ResourceTolerances(
+            default=symmetric_tolerance(0.10),
+            cpu=symmetric_tolerance(0.05),
+        )
 
         # CPU has specific tolerance
-        assert tolerances.get_tolerance(ResourceType.cpus, default).lower == -0.05
+        assert tolerances.get_tolerance(ResourceType.cpus).lower == -0.05
         # Memory falls back to default
-        assert tolerances.get_tolerance(ResourceType.mem_gib, default).lower == -0.10
+        assert tolerances.get_tolerance(ResourceType.mem_gib).lower == -0.10
 
     def test_all_resources_configurable(self):
         """All resource types can be configured"""
         tolerances = ResourceTolerances(
+            default=strict_tolerance(),
             cost=tolerance(-0.01, 0.01),
             cpu=tolerance(-0.02, 0.02),
             memory=tolerance(-0.03, 0.03),
             disk=tolerance(-0.04, 0.04),
             network=tolerance(-0.05, 0.05),
         )
-        default = strict_tolerance()
 
-        assert tolerances.get_tolerance(ResourceType.cost, default).lower == -0.01
-        assert tolerances.get_tolerance(ResourceType.cpus, default).lower == -0.02
-        assert tolerances.get_tolerance(ResourceType.mem_gib, default).lower == -0.03
-        assert tolerances.get_tolerance(ResourceType.disk_gib, default).lower == -0.04
-        assert (
-            tolerances.get_tolerance(ResourceType.network_mbps, default).lower == -0.05
-        )
-
-
-# -----------------------------------------------------------------------------
-# ComparisonResult tests
-# -----------------------------------------------------------------------------
-
-
-class TestComparisonResult:
-    """Tests for ComparisonResult enum"""
-
-    def test_comparison_result_values(self):
-        """ComparisonResult should have expected values"""
-        assert ComparisonResult.gt.value == "gt"
-        assert ComparisonResult.lt.value == "lt"
-        assert ComparisonResult.equivalent.value == "equivalent"
+        assert tolerances.get_tolerance(ResourceType.cost).lower == -0.01
+        assert tolerances.get_tolerance(ResourceType.cpus).lower == -0.02
+        assert tolerances.get_tolerance(ResourceType.mem_gib).lower == -0.03
+        assert tolerances.get_tolerance(ResourceType.disk_gib).lower == -0.04
+        assert tolerances.get_tolerance(ResourceType.network_mbps).lower == -0.05
 
 
 # -----------------------------------------------------------------------------
@@ -250,7 +234,7 @@ class TestComparePlansEquivalent:
         result = compare_plans(plan, plan)
         assert result.is_equivalent
         # All differences should be within tolerance
-        assert all(d.is_equivalent for d in result.differences)
+        assert all(d.is_equivalent for d in result.differences.values())
 
     def test_within_default_tolerance(self):
         """Plans within default tolerance (unlimited under, 10% over) are equivalent"""
@@ -260,38 +244,41 @@ class TestComparePlansEquivalent:
         assert result.is_equivalent
 
     def test_under_provisioned_default(self):
-        """Under-provisioned (baseline bigger) should be okay with default tolerance"""
-        baseline = _create_plan(cpu_cores=100, mem_gib=200)
-        comparison = _create_plan(cpu_cores=50, mem_gib=100)  # 50% lower - OK
+        """Under-provisioned (baseline smaller) is allowed with default tolerance"""
+        baseline = _create_plan(cpu_cores=50, mem_gib=100)
+        comparison = _create_plan(cpu_cores=100, mem_gib=200)  # need 100% more
         result = compare_plans(baseline, comparison)
+        # Default tolerance allows unlimited under-provisioning
         assert result.is_equivalent
 
     def test_within_symmetric_tolerance(self):
         """Plans within symmetric tolerance should be equivalent"""
-        baseline = _create_plan(cpu_cores=100)
-        comparison = _create_plan(cpu_cores=105)  # 5% higher
+        baseline = _create_plan(cpu_cores=105)
+        comparison = _create_plan(cpu_cores=100)  # 5% over-provisioned
         result = compare_plans(
-            baseline, comparison, default_tolerance=symmetric_tolerance(0.10)
+            baseline,
+            comparison,
+            tolerances=ResourceTolerances(default=symmetric_tolerance(0.10)),
         )
         assert result.is_equivalent
 
     def test_at_upper_boundary(self):
         """Exactly at upper boundary (10% over) should be equivalent"""
-        baseline = _create_plan(cpu_cores=100)
-        comparison = _create_plan(cpu_cores=110)  # Exactly 10% over
+        baseline = _create_plan(cpu_cores=110)
+        comparison = _create_plan(cpu_cores=100)  # Exactly 10% over-provisioned
         result = compare_plans(baseline, comparison)
         assert result.is_equivalent
 
     def test_all_resources_within_tolerance(self):
-        """Multiple resources slightly different but all within tolerance"""
+        """Multiple resources slightly over-provisioned but within tolerance"""
         baseline = _create_plan(
-            cpu_cores=100, mem_gib=200, disk_gib=1000, network_mbps=5000
+            cpu_cores=105, mem_gib=210, disk_gib=1050, network_mbps=5250
         )
         comparison = _create_plan(
-            cpu_cores=105,
-            mem_gib=210,
-            disk_gib=1050,
-            network_mbps=5250,  # All ~5% over (within 10% limit)
+            cpu_cores=100,
+            mem_gib=200,
+            disk_gib=1000,
+            network_mbps=5000,  # All ~5% over-provisioned (within 10% limit)
         )
         result = compare_plans(baseline, comparison)
         assert result.is_equivalent
@@ -307,75 +294,77 @@ class TestCompareplansDifferent:
 
     def test_over_provisioned_cpu(self):
         """Over-provisioned CPU beyond 10% tolerance should be flagged"""
-        baseline = _create_plan(cpu_cores=100)
-        comparison = _create_plan(cpu_cores=120)  # 20% over
+        baseline = _create_plan(cpu_cores=120)  # Current has 20% more than needed
+        comparison = _create_plan(cpu_cores=100)
         result = compare_plans(baseline, comparison)
 
         assert not result.is_equivalent
-        assert result.cpu.comparison_result == ComparisonResult.gt
+        assert result.cpu.is_over_provisioned
         assert not result.cpu.is_equivalent
 
     def test_over_provisioned_memory(self):
         """Over-provisioned memory beyond 10% should be flagged"""
-        baseline = _create_plan(mem_gib=200)
-        comparison = _create_plan(mem_gib=250)  # 25% over
+        baseline = _create_plan(mem_gib=250)  # Current has 25% more than needed
+        comparison = _create_plan(mem_gib=200)
         result = compare_plans(baseline, comparison)
 
         assert not result.is_equivalent
-        assert result.memory.comparison_result == ComparisonResult.gt
+        assert result.memory.is_over_provisioned
 
     def test_over_provisioned_disk(self):
         """Over-provisioned disk beyond 10% should be flagged"""
-        baseline = _create_plan(disk_gib=1000)
-        comparison = _create_plan(disk_gib=1200)  # 20% over
+        baseline = _create_plan(disk_gib=1200)  # Current has 20% more than needed
+        comparison = _create_plan(disk_gib=1000)
         result = compare_plans(baseline, comparison)
 
         assert not result.is_equivalent
-        assert result.disk.comparison_result == ComparisonResult.gt
+        assert result.disk.is_over_provisioned
 
     def test_over_provisioned_network(self):
         """Over-provisioned network beyond 10% should be flagged"""
-        baseline = _create_plan(network_mbps=5000)
-        comparison = _create_plan(network_mbps=7000)  # 40% over
+        baseline = _create_plan(network_mbps=7000)  # Current has 40% more than needed
+        comparison = _create_plan(network_mbps=5000)
         result = compare_plans(baseline, comparison)
 
         assert not result.is_equivalent
-        assert result.network.comparison_result == ComparisonResult.gt
+        assert result.network.is_over_provisioned
 
     def test_over_provisioned_cost(self):
         """Higher cost beyond 10% tolerance should be flagged"""
-        baseline = _create_plan(annual_cost=10000)
-        comparison = _create_plan(annual_cost=13000)  # 30% higher cost
+        baseline = _create_plan(annual_cost=13000)  # Current costs 30% more
+        comparison = _create_plan(annual_cost=10000)
         result = compare_plans(baseline, comparison)
 
         assert not result.is_equivalent
-        assert result.cost.comparison_result == ComparisonResult.gt
+        assert result.cost.is_over_provisioned
 
     def test_under_provisioned_with_symmetric_tolerance(self):
         """Under-provisioned should be flagged with symmetric tolerance"""
-        baseline = _create_plan(cpu_cores=100)
-        comparison = _create_plan(cpu_cores=50)  # 50% lower
+        baseline = _create_plan(cpu_cores=50)  # Current has 50% less than needed
+        comparison = _create_plan(cpu_cores=100)
         result = compare_plans(
-            baseline, comparison, default_tolerance=symmetric_tolerance(0.10)
+            baseline,
+            comparison,
+            tolerances=ResourceTolerances(default=symmetric_tolerance(0.10)),
         )
 
         assert not result.is_equivalent
-        assert result.cpu.comparison_result == ComparisonResult.lt
+        assert result.cpu.is_under_provisioned
 
     def test_multiple_out_of_tolerance(self):
         """Multiple resources out of tolerance should all be flagged"""
-        baseline = _create_plan(cpu_cores=100, mem_gib=200, disk_gib=1000)
+        baseline = _create_plan(cpu_cores=130, mem_gib=260, disk_gib=1300)
         comparison = _create_plan(
-            cpu_cores=130, mem_gib=260, disk_gib=1300
-        )  # All 30% over
+            cpu_cores=100, mem_gib=200, disk_gib=1000
+        )  # All 30% over-provisioned
         result = compare_plans(baseline, comparison)
         assert not result.is_equivalent
         assert len(result.get_out_of_tolerance()) >= 3
 
     def test_get_out_of_tolerance(self):
         """get_out_of_tolerance() should return only problematic resources"""
-        baseline = _create_plan(cpu_cores=100, mem_gib=200)
-        comparison = _create_plan(cpu_cores=120, mem_gib=200)  # Only CPU over
+        baseline = _create_plan(cpu_cores=120, mem_gib=200)  # Only CPU over
+        comparison = _create_plan(cpu_cores=100, mem_gib=200)
         result = compare_plans(baseline, comparison)
 
         out_of_tolerance = result.get_out_of_tolerance()
@@ -410,20 +399,21 @@ class TestPerResourceTolerances:
 
     def test_strict_cpu_lenient_cost(self):
         """Strict CPU tolerance with lenient cost tolerance"""
-        baseline = _create_plan(cpu_cores=100, annual_cost=10000)
-        comparison = _create_plan(
+        baseline = _create_plan(
             cpu_cores=103, annual_cost=8000
-        )  # 3% more CPU, 20% less cost
+        )  # 3% over CPU, 20% less cost
+        comparison = _create_plan(cpu_cores=100, annual_cost=10000)
 
         tolerances = ResourceTolerances(
             cpu=symmetric_tolerance(0.02),  # Only 2% allowed
-            cost=allow_over_provisioning(0.05),  # Baseline can be huge, 5% over allowed
+            cost=allow_over_provisioning(0.05),  # Up to 5% over-provisioning allowed
         )
         result = compare_plans(baseline, comparison, tolerances=tolerances)
 
         # CPU should be out of tolerance (3% over, only 2% allowed)
         assert not result.cpu.is_equivalent
-        # Cost should be within tolerance (under is always allowed)
+        assert result.cpu.is_over_provisioned
+        # Cost is 20% under (recommendation costs more), which is always OK
         assert result.cost.is_equivalent
 
 
@@ -437,62 +427,47 @@ class TestComparePlansExplanations:
 
     def test_explanation_contains_direction(self):
         """Explanation should indicate under or over provisioned"""
-        baseline = _create_plan(cpu_cores=100)
-        comparison = _create_plan(cpu_cores=130)  # 30% over
-        result = compare_plans(baseline, comparison)
+        baseline = _create_plan(cpu_cores=130)  # 30% over-provisioned
+        comparison = _create_plan(cpu_cores=100)
+        result = compare_plans(
+            baseline,
+            comparison,
+            tolerances=ResourceTolerances(default=symmetric_tolerance(0.10)),
+        )
 
         assert "over" in str(result.cpu)
 
     def test_explanation_contains_percentage(self):
         """Explanation should contain the percentage difference"""
-        baseline = _create_plan(cpu_cores=100)
-        comparison = _create_plan(cpu_cores=130)  # 30% higher
-        result = compare_plans(baseline, comparison)
+        baseline = _create_plan(cpu_cores=130)  # 30% over
+        comparison = _create_plan(cpu_cores=100)
+        result = compare_plans(
+            baseline,
+            comparison,
+            tolerances=ResourceTolerances(default=symmetric_tolerance(0.10)),
+        )
 
         assert "30.0%" in str(result.cpu)
 
     def test_explanation_within_tolerance(self):
         """Explanation for within-tolerance should indicate that"""
-        baseline = _create_plan(cpu_cores=100)
-        comparison = _create_plan(cpu_cores=95)  # 5% lower, within tolerance
+        baseline = _create_plan(cpu_cores=105)  # 5% over, within tolerance
+        comparison = _create_plan(cpu_cores=100)
         result = compare_plans(baseline, comparison)
 
         assert "within tolerance" in str(result.cpu)
 
     def test_explanation_over_provisioned(self):
         """Explanation should indicate over-provisioned when appropriate"""
-        baseline = _create_plan(cpu_cores=100)
-        comparison = _create_plan(cpu_cores=150)  # 50% higher
+        baseline = _create_plan(cpu_cores=150)  # 50% over-provisioned
+        comparison = _create_plan(cpu_cores=100)
         result = compare_plans(
-            baseline, comparison, default_tolerance=symmetric_tolerance(0.10)
+            baseline,
+            comparison,
+            tolerances=ResourceTolerances(default=symmetric_tolerance(0.10)),
         )
 
         assert "over" in str(result.cpu)
-
-
-# -----------------------------------------------------------------------------
-# Context tests
-# -----------------------------------------------------------------------------
-
-
-class TestComparePlansContext:
-    """Test context information in results"""
-
-    def test_context_contains_default_tolerance(self):
-        """Context should include the default tolerance used"""
-        tol = symmetric_tolerance(0.15)
-        result = compare_plans(_create_plan(), _create_plan(), default_tolerance=tol)
-        assert result.context["default_tolerance"]["lower"] == -0.15
-        assert result.context["default_tolerance"]["upper"] == 0.15
-
-    def test_context_contains_costs(self):
-        """Context should include baseline and comparison costs"""
-        result = compare_plans(
-            _create_plan(annual_cost=10000),
-            _create_plan(annual_cost=12000),
-        )
-        assert result.context["baseline_cost"] == 10000
-        assert result.context["comparison_cost"] == 12000
 
 
 # -----------------------------------------------------------------------------
@@ -503,15 +478,16 @@ class TestComparePlansContext:
 class TestComparePlansEdgeCases:
     """Test edge cases and boundary conditions"""
 
-    def test_zero_baseline_resource_over(self):
-        """Zero baseline with comparison over should be gt and out of tolerance"""
+    def test_zero_baseline_resource(self):
+        """Zero baseline with non-zero comparison is within default tolerance"""
         baseline = _create_plan(network_mbps=0)
         comparison = _create_plan(network_mbps=1000)
         result = compare_plans(baseline, comparison)
 
-        # With default allow_over_provisioning, infinite over is out of tolerance
-        assert result.network.comparison_result == ComparisonResult.gt
-        assert not result.network.is_equivalent
+        # Current has 0, recommendation says 1000 → under-provisioned by 100%
+        # But default tolerance allows unlimited under-provisioning, so it's OK
+        assert result.network.is_equivalent
+        assert not result.network.is_under_provisioned  # Within tolerance
 
     def test_zero_both_resources(self):
         """Both zero should be equivalent"""
@@ -519,7 +495,8 @@ class TestComparePlansEdgeCases:
         comparison = _create_plan(network_mbps=0)
         result = compare_plans(baseline, comparison)
 
-        assert result.network.comparison_result == ComparisonResult.equivalent
+        assert not result.network.is_over_provisioned
+        assert not result.network.is_under_provisioned
         assert result.network.is_equivalent
 
     def test_strict_tolerance_catches_small_differences(self):
@@ -527,7 +504,9 @@ class TestComparePlansEdgeCases:
         baseline = _create_plan(cpu_cores=100)
         comparison = _create_plan(cpu_cores=99)  # 1% lower
         result = compare_plans(
-            baseline, comparison, default_tolerance=strict_tolerance()
+            baseline,
+            comparison,
+            tolerances=ResourceTolerances(default=strict_tolerance()),
         )
         assert not result.is_equivalent
 
@@ -536,17 +515,20 @@ class TestComparePlansEdgeCases:
         baseline = _create_plan(cpu_cores=100)
         comparison = _create_plan(cpu_cores=80)  # 20% lower
         result = compare_plans(
-            baseline, comparison, default_tolerance=symmetric_tolerance(0.25)
+            baseline,
+            comparison,
+            tolerances=ResourceTolerances(default=symmetric_tolerance(0.25)),
         )
         assert result.is_equivalent
 
     def test_difference_percent_calculation(self):
         """Verify difference percentage is calculated correctly"""
         baseline = _create_plan(cpu_cores=100)
-        comparison = _create_plan(cpu_cores=75)  # 25% lower
+        comparison = _create_plan(cpu_cores=75)
         result = compare_plans(baseline, comparison)
 
-        assert result.cpu.difference_percent == pytest.approx(-0.25, rel=0.01)
+        # diff = (baseline - comparison) / comparison = (100 - 75) / 75 = +33.3%
+        assert result.cpu.difference_percent == pytest.approx(0.333, rel=0.01)
         assert result.cpu.baseline_value == 100
         assert result.cpu.comparison_value == 75
 
@@ -555,8 +537,7 @@ class TestComparePlansEdgeCases:
         result = compare_plans(_create_plan(), _create_plan())
         # Should have 5 differences: cost, cpus, mem_gib, disk_gib, network_mbps
         assert len(result.differences) == 5
-        resources = {d.resource for d in result.differences}
-        assert resources == {
+        assert set(result.differences.keys()) == {
             ResourceType.cost,
             ResourceType.cpus,
             ResourceType.mem_gib,
@@ -566,23 +547,24 @@ class TestComparePlansEdgeCases:
 
     def test_tolerance_with_unusual_bounds(self):
         """Tolerance can require over-provisioning"""
-        baseline = _create_plan(cpu_cores=100)
-        comparison = _create_plan(cpu_cores=115)  # 15% over
+        baseline = _create_plan(cpu_cores=115)  # Current has 15% more
+        comparison = _create_plan(cpu_cores=100)
 
         # Require 10-20% over-provisioning for CPU only
         tolerances = ResourceTolerances(cpu=tolerance(0.10, 0.20))
         result = compare_plans(baseline, comparison, tolerances=tolerances)
 
-        # CPU should be within its unusual tolerance
+        # CPU should be within its unusual tolerance (15% is in 10-20% range)
         assert result.cpu.is_equivalent
-        assert (
-            result.cpu.comparison_result == ComparisonResult.gt
-        )  # It's over-provisioned
+        # When within tolerance, not flagged as over/under
+        assert not result.cpu.is_over_provisioned
+        assert not result.cpu.is_under_provisioned
 
-        # 5% over should fail for this unusual tolerance
-        comparison_low = _create_plan(cpu_cores=105)
-        result_low = compare_plans(baseline, comparison_low, tolerances=tolerances)
-        assert not result_low.cpu.is_equivalent  # 5% is below required 10%
+        # 5% over should fail for this unusual tolerance (below 10% minimum)
+        baseline_low = _create_plan(cpu_cores=105)  # Only 5% over
+        result_low = compare_plans(baseline_low, comparison, tolerances=tolerances)
+        assert not result_low.cpu.is_equivalent
+        assert result_low.cpu.is_under_provisioned  # Below lower bound of tolerance
 
 
 # -----------------------------------------------------------------------------
@@ -866,13 +848,13 @@ class TestExtractBaselinePlan:
         desires = CapacityDesires(current_clusters=CurrentClusters(zonal=[current]))
 
         # Recommended: slightly more CPU, same memory, similar disk
-        # Baseline cost: $2500 * 8 = $20,000
+        # Baseline (current): $2500 * 8 = $20,000
         recommended = _create_plan(
-            cpu_cores=35,  # vs 32 current (9% more)
-            mem_gib=250,  # vs 244 current (2.5% more)
-            disk_gib=7500,  # vs 7600 current (1.3% less)
-            network_mbps=85000,  # vs 80000 current (6% more)
-            annual_cost=21000,  # vs 20000 current (5% more)
+            cpu_cores=35,  # vs ~34 current normalized (need ~3% more)
+            mem_gib=250,  # vs 244 current (need 2.5% more)
+            disk_gib=7500,  # vs 7600 current (have 1.3% excess)
+            network_mbps=85000,  # vs 80000 current (need 6% more)
+            annual_cost=21000,  # vs 20000 current (need 5% more)
         )
 
         baseline = extract_baseline_plan(desires, region="us-east-1")
@@ -883,12 +865,12 @@ class TestExtractBaselinePlan:
         # Should be equivalent with default tolerances
         assert result.is_equivalent
 
-        # Verify comparison result is correct for resources
-        assert result.cpu.comparison_result == ComparisonResult.gt  # More CPU
-        assert (
-            result.disk.comparison_result == ComparisonResult.lt
-        )  # Slightly less disk
-        assert result.cost.comparison_result == ComparisonResult.gt  # Higher cost
+        # When within tolerance, resources are not flagged as over/under
+        assert not result.cpu.is_over_provisioned
+        assert not result.cpu.is_under_provisioned
+        # Verify the difference directions (positive = over, negative = under)
+        assert result.disk.difference_percent > 0  # Have excess disk
+        assert result.cpu.difference_percent < 0  # Need more CPU
 
     def test_integration_with_custom_tolerances(self):
         """Integration test with strict tolerances should detect differences"""
@@ -903,9 +885,9 @@ class TestExtractBaselinePlan:
         desires = CapacityDesires(current_clusters=CurrentClusters(zonal=[current]))
 
         # Recommended with significantly different CPU
-        # Baseline: 32 raw cores → 34 normalized cores
+        # Baseline: 32 raw cores → ~34 normalized cores
         # Recommended: 40 cores
-        # Difference: (40 - 34) / 34 = 17.6%
+        # Difference: (34 - 40) / 40 = -15% (under-provisioned)
         recommended = _create_plan(
             cpu_cores=40,
             mem_gib=244,  # Same as current
@@ -913,12 +895,12 @@ class TestExtractBaselinePlan:
 
         baseline = extract_baseline_plan(desires, region="us-east-1")
 
-        # With strict 10% tolerance, the 17.6% CPU increase should be flagged
+        # With strict 10% tolerance, the 15% CPU shortfall should be flagged
         tolerances = ResourceTolerances(cpu=symmetric_tolerance(0.10))
         result = compare_plans(baseline, recommended, tolerances=tolerances)
 
         assert not result.is_equivalent
         assert not result.cpu.is_equivalent
-        assert result.cpu.comparison_result == ComparisonResult.gt
-        # Difference is now based on normalized baseline (34 cores, not 32)
-        assert result.cpu.difference_percent == pytest.approx(0.176, rel=0.01)
+        assert result.cpu.is_under_provisioned  # Need more CPU
+        # Difference is now (baseline - comparison) / comparison
+        assert result.cpu.difference_percent == pytest.approx(-0.15, rel=0.05)

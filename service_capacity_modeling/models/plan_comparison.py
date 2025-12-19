@@ -7,7 +7,6 @@ if they are roughly equivalent, with detailed explanations of any differences.
 from decimal import Decimal
 from functools import lru_cache
 from itertools import chain
-from typing import Any, Dict, List, Optional
 
 from pydantic import ConfigDict
 
@@ -50,21 +49,7 @@ class ResourceType(StrEnum):
     """Network bandwidth in Mbps"""
 
 
-@enum_docstrings
-class ComparisonResult(StrEnum):
-    """Result of comparing current deployment to recommendation."""
-
-    gt = "gt"
-    """Current > recommendation (over-provisioned, excess capacity)"""
-
-    lt = "lt"
-    """Current < recommendation (under-provisioned, needs more)"""
-
-    equivalent = "equivalent"
-    """Current ≈ recommendation (within floating-point tolerance)"""
-
-
-# Tolerance for floating-point comparisons when determining ordering
+# Tolerance for floating-point comparisons (e.g., strict_tolerance)
 _FLOAT_TOLERANCE = 1e-9
 
 
@@ -161,8 +146,8 @@ def ignore_resource() -> Tolerance:
 class ResourceTolerances(ExcludeUnsetModel):
     """Per-resource tolerance configuration for plan comparison.
 
-    All tolerances default to None, meaning the default tolerance will be used.
     Set specific tolerances to override for individual resources.
+    Unset resources fall back to `default`.
 
     Example:
         >>> tolerances = ResourceTolerances(
@@ -171,34 +156,37 @@ class ResourceTolerances(ExcludeUnsetModel):
         ... )
     """
 
-    cost: Optional[Tolerance] = None
+    default: Tolerance = allow_over_provisioning(0.10)
+    """Default tolerance for resources not explicitly configured"""
+
+    cost: Tolerance | None = None
     """Tolerance for annual cost comparison"""
 
-    cpu: Optional[Tolerance] = None
+    cpu: Tolerance | None = None
     """Tolerance for CPU cores comparison"""
 
-    memory: Optional[Tolerance] = None
+    memory: Tolerance | None = None
     """Tolerance for memory (GiB) comparison"""
 
-    disk: Optional[Tolerance] = None
+    disk: Tolerance | None = None
     """Tolerance for disk (GiB) comparison"""
 
-    network: Optional[Tolerance] = None
+    network: Tolerance | None = None
     """Tolerance for network (Mbps) comparison"""
 
-    def get_tolerance(self, resource: ResourceType, default: Tolerance) -> Tolerance:
+    def get_tolerance(self, resource: ResourceType) -> Tolerance:
         """Get tolerance for a resource type, falling back to default."""
         match resource:
             case ResourceType.cost:
-                return self.cost or default
+                return self.cost or self.default
             case ResourceType.cpus:
-                return self.cpu or default
+                return self.cpu or self.default
             case ResourceType.mem_gib:
-                return self.memory or default
+                return self.memory or self.default
             case ResourceType.disk_gib:
-                return self.disk or default
+                return self.disk or self.default
             case ResourceType.network_mbps:
-                return self.network or default
+                return self.network or self.default
             case _:
                 raise ValueError(f"Unknown resource type: {resource}")
 
@@ -224,20 +212,16 @@ class ResourceDifference(ExcludeUnsetModel):
 
     @property
     def difference_percent(self) -> float:
-        """Percentage difference: (comparison - baseline) / baseline."""
-        if self.baseline_value == 0:
-            if self.comparison_value == 0:
-                return 0.0
-            return float("inf") if self.comparison_value > 0 else float("-inf")
-        return (self.comparison_value - self.baseline_value) / self.baseline_value
+        """Percentage difference: (baseline - comparison) / comparison.
 
-    @property
-    def comparison_result(self) -> ComparisonResult:
-        """Result: gt (over-provisioned), lt (under-provisioned), or equivalent."""
-        diff = self.difference_percent
-        if abs(diff) < _FLOAT_TOLERANCE:
-            return ComparisonResult.equivalent
-        return ComparisonResult.gt if diff > 0 else ComparisonResult.lt
+        Positive means baseline exceeds comparison (over-provisioned).
+        Negative means baseline is below comparison (under-provisioned).
+        """
+        if self.comparison_value == 0:
+            if self.baseline_value == 0:
+                return 0.0
+            return float("inf") if self.baseline_value > 0 else float("-inf")
+        return (self.baseline_value - self.comparison_value) / self.comparison_value
 
     @property
     def is_equivalent(self) -> bool:
@@ -246,13 +230,13 @@ class ResourceDifference(ExcludeUnsetModel):
 
     @property
     def is_over_provisioned(self) -> bool:
-        """True if current > recommendation (excess capacity)."""
-        return self.comparison_result == ComparisonResult.gt
+        """True if over-provisioned beyond tolerance (diff exceeds upper bound)."""
+        return self.difference_percent > self.tolerance.upper
 
     @property
     def is_under_provisioned(self) -> bool:
-        """True if current < recommendation (needs more)."""
-        return self.comparison_result == ComparisonResult.lt
+        """True if under-provisioned beyond tolerance (diff below lower bound)."""
+        return self.difference_percent < self.tolerance.lower
 
     def __str__(self) -> str:
         """Human-readable explanation of the difference."""
@@ -286,66 +270,42 @@ class PlanComparisonResult(ExcludeUnsetModel):
     is_equivalent: bool
     """True if plans are within tolerance, False if significant differences"""
 
-    context: Dict[str, Any] = {}
-    """Additional context about the comparison (default tolerance, costs, etc.)"""
-
-    differences: List[ResourceDifference] = []
-    """List of resource differences for ALL resources compared"""
-
-    def _get_diff(self, resource: ResourceType) -> ResourceDifference:
-        """Get the difference for a specific resource type.
-
-        Args:
-            resource: The resource type to look up
-
-        Returns:
-            ResourceDifference for the specified resource
-
-        Raises:
-            KeyError: If resource not in comparison results
-        """
-        for d in self.differences:
-            if d.resource == resource:
-                return d
-        raise KeyError(f"Resource {resource} not in comparison results")
+    differences: dict[ResourceType, ResourceDifference] = {}
+    """Resource differences keyed by resource type"""
 
     @property
     def cpu(self) -> ResourceDifference:
         """Get CPU comparison result."""
-        return self._get_diff(ResourceType.cpus)
+        return self.differences[ResourceType.cpus]
 
     @property
     def memory(self) -> ResourceDifference:
         """Get memory comparison result."""
-        return self._get_diff(ResourceType.mem_gib)
+        return self.differences[ResourceType.mem_gib]
 
     @property
     def disk(self) -> ResourceDifference:
         """Get disk comparison result."""
-        return self._get_diff(ResourceType.disk_gib)
+        return self.differences[ResourceType.disk_gib]
 
     @property
     def network(self) -> ResourceDifference:
         """Get network comparison result."""
-        return self._get_diff(ResourceType.network_mbps)
+        return self.differences[ResourceType.network_mbps]
 
     @property
     def cost(self) -> ResourceDifference:
         """Get cost comparison result."""
-        return self._get_diff(ResourceType.cost)
+        return self.differences[ResourceType.cost]
 
-    def get_out_of_tolerance(self) -> List[ResourceDifference]:
-        """Get only differences that exceed tolerance bounds.
-
-        Returns:
-            List of ResourceDifference where is_equivalent is False
-        """
-        return [d for d in self.differences if not d.is_equivalent]
+    def get_out_of_tolerance(self) -> list[ResourceDifference]:
+        """Get only differences that exceed tolerance bounds."""
+        return [d for d in self.differences.values() if not d.is_equivalent]
 
 
-def _aggregate_resources(plan: CapacityPlan) -> Dict[ResourceType, float]:
+def _aggregate_resources(plan: CapacityPlan) -> dict[ResourceType, float]:
     """Aggregate resource requirements from all zonal and regional requirements."""
-    totals: Dict[ResourceType, float] = {
+    totals: dict[ResourceType, float] = {
         ResourceType.cpus: 0.0,
         ResourceType.mem_gib: 0.0,
         ResourceType.disk_gib: 0.0,
@@ -362,8 +322,7 @@ def _aggregate_resources(plan: CapacityPlan) -> Dict[ResourceType, float]:
 def compare_plans(
     baseline: CapacityPlan,
     comparison: CapacityPlan,
-    tolerances: Optional[ResourceTolerances] = None,
-    default_tolerance: Optional[Tolerance] = None,
+    tolerances: ResourceTolerances | None = None,
 ) -> PlanComparisonResult:
     """Compare two capacity plans to determine if they are roughly equivalent.
 
@@ -374,16 +333,12 @@ def compare_plans(
     Args:
         baseline: The reference plan (e.g., current production deployment)
         comparison: The plan to compare against baseline (e.g., new recommendation)
-        tolerances: Per-resource tolerance configuration. If None, uses
-            default_tolerance for all resources.
-        default_tolerance: Default tolerance for resources not specified in
-            tolerances. Defaults to allow_over_provisioning(0.10) if not specified.
+        tolerances: Per-resource tolerance configuration. If None, uses defaults.
 
     Returns:
         PlanComparisonResult containing:
         - is_equivalent: True if all resources within tolerance, False otherwise
-        - context: Metadata about the comparison (default tolerance, costs)
-        - differences: List of ResourceDifference for ALL resources (use
+        - differences: Dict of ResourceDifference for ALL resources (use
           get_out_of_tolerance() to filter to only problematic ones)
 
     Example:
@@ -393,8 +348,6 @@ def compare_plans(
         >>> for diff in result.get_out_of_tolerance():
         ...     print(diff)  # Human-readable explanation
     """
-    if default_tolerance is None:
-        default_tolerance = allow_over_provisioning(0.10)
     if tolerances is None:
         tolerances = ResourceTolerances()
 
@@ -403,42 +356,42 @@ def compare_plans(
     baseline_resources = _aggregate_resources(baseline)
     comparison_resources = _aggregate_resources(comparison)
 
-    # Cost comes from candidate_clusters, handled separately
-    differences = [
-        ResourceDifference(
-            resource=ResourceType.cost,
-            baseline_value=baseline_cost,
-            comparison_value=comparison_cost,
-            tolerance=tolerances.get_tolerance(ResourceType.cost, default_tolerance),
+    def make_diff(
+        resource: ResourceType, baseline_val: float, comparison_val: float
+    ) -> ResourceDifference:
+        return ResourceDifference(
+            resource=resource,
+            baseline_value=baseline_val,
+            comparison_value=comparison_val,
+            tolerance=tolerances.get_tolerance(resource),
         )
-    ]
 
-    # Other resources come from aggregated requirements
-    for resource in [
-        ResourceType.cpus,
-        ResourceType.mem_gib,
-        ResourceType.disk_gib,
-        ResourceType.network_mbps,
-    ]:
-        differences.append(
-            ResourceDifference(
-                resource=resource,
-                baseline_value=baseline_resources[resource],
-                comparison_value=comparison_resources[resource],
-                tolerance=tolerances.get_tolerance(resource, default_tolerance),
-            )
-        )
+    differences = {
+        ResourceType.cost: make_diff(ResourceType.cost, baseline_cost, comparison_cost),
+        ResourceType.cpus: make_diff(
+            ResourceType.cpus,
+            baseline_resources[ResourceType.cpus],
+            comparison_resources[ResourceType.cpus],
+        ),
+        ResourceType.mem_gib: make_diff(
+            ResourceType.mem_gib,
+            baseline_resources[ResourceType.mem_gib],
+            comparison_resources[ResourceType.mem_gib],
+        ),
+        ResourceType.disk_gib: make_diff(
+            ResourceType.disk_gib,
+            baseline_resources[ResourceType.disk_gib],
+            comparison_resources[ResourceType.disk_gib],
+        ),
+        ResourceType.network_mbps: make_diff(
+            ResourceType.network_mbps,
+            baseline_resources[ResourceType.network_mbps],
+            comparison_resources[ResourceType.network_mbps],
+        ),
+    }
 
     return PlanComparisonResult(
-        is_equivalent=all(d.is_equivalent for d in differences),
-        context={
-            "default_tolerance": {
-                "lower": default_tolerance.lower,
-                "upper": default_tolerance.upper,
-            },
-            "baseline_cost": baseline_cost,
-            "comparison_cost": comparison_cost,
-        },
+        is_equivalent=all(d.is_equivalent for d in differences.values()),
         differences=differences,
     )
 
@@ -478,6 +431,7 @@ def _create_plan_from_current_cluster(
     cluster: CurrentClusterCapacity,
     is_zonal: bool,
     region: str,
+    requirement_type: str,
 ) -> CapacityPlan:
     """Create a synthetic CapacityPlan from a CurrentClusterCapacity.
 
@@ -488,6 +442,7 @@ def _create_plan_from_current_cluster(
         cluster: The current cluster capacity
         is_zonal: True if this is a zonal cluster, False for regional
         region: AWS region for looking up drive pricing
+        requirement_type: Label for the capacity requirement (e.g., "cassandra")
 
     Returns:
         A CapacityPlan representing the current deployment with cost calculated
@@ -512,7 +467,7 @@ def _create_plan_from_current_cluster(
 
     # Build requirements from instance specs * count
     requirement = CapacityRequirement(
-        requirement_type="current",
+        requirement_type=requirement_type,
         reference_shape=default_reference_shape,
         cpu_cores=certain_float(normalized_cpu),
         mem_gib=certain_float(instance.ram_gib * count),
@@ -581,12 +536,15 @@ def _create_plan_from_current_cluster(
     )
 
 
-def extract_baseline_plan(desires: CapacityDesires, region: str) -> CapacityPlan:
+def extract_baseline_plan(
+    desires: CapacityDesires, region: str, requirement_type: str = "baseline"
+) -> CapacityPlan:
     """Extract baseline plan from current clusters in desires.
 
     Args:
         desires: The capacity desires (must contain current_clusters)
         region: AWS region for looking up drive pricing from hardware shapes
+        requirement_type: Label for the capacity requirement (default: "baseline")
 
     Returns:
         CapacityPlan representing the current deployment
@@ -617,8 +575,13 @@ def extract_baseline_plan(desires: CapacityDesires, region: str) -> CapacityPlan
         )
 
     if zonal:
-        return _create_plan_from_current_cluster(zonal[0], is_zonal=True, region=region)
+        return _create_plan_from_current_cluster(
+            zonal[0], is_zonal=True, region=region, requirement_type=requirement_type
+        )
     else:
         return _create_plan_from_current_cluster(
-            regional[0], is_zonal=False, region=region
+            regional[0],
+            is_zonal=False,
+            region=region,
+            requirement_type=requirement_type,
         )
