@@ -148,13 +148,11 @@ def allow_over_provisioning(under_percent: float = 0.10) -> Tolerance:
     return tolerance(float("-inf"), under_percent)
 
 
-@lru_cache(maxsize=None)
 def strict_tolerance() -> Tolerance:
-    """Create a tolerance requiring exact match (no variance allowed)."""
-    return tolerance(0.0, 0.0)
+    """Create a tolerance requiring near-exact match (float epsilon only)."""
+    return tolerance(-_FLOAT_TOLERANCE, _FLOAT_TOLERANCE)
 
 
-@lru_cache(maxsize=None)
 def ignore_resource() -> Tolerance:
     """Create a tolerance that ignores a resource (any value acceptable)."""
     return tolerance(float("-inf"), float("inf"))
@@ -344,16 +342,6 @@ class PlanComparisonResult(ExcludeUnsetModel):
         """
         return [d for d in self.differences if not d.is_equivalent]
 
-    @property
-    def out_of_tolerance_resources(self) -> List[ResourceType]:
-        """Get list of resource types that are out of tolerance."""
-        return [d.resource for d in self.get_out_of_tolerance()]
-
-
-# -----------------------------------------------------------------------------
-# Internal helpers
-# -----------------------------------------------------------------------------
-
 
 def _aggregate_resources(plan: CapacityPlan) -> Dict[ResourceType, float]:
     """Aggregate resource requirements from all zonal and regional requirements."""
@@ -369,31 +357,6 @@ def _aggregate_resources(plan: CapacityPlan) -> Dict[ResourceType, float]:
         totals[ResourceType.disk_gib] += req.disk_gib.mid
         totals[ResourceType.network_mbps] += req.network_mbps.mid
     return totals
-
-
-def _compare_resource(
-    resource: ResourceType,
-    baseline_value: float,
-    comparison_value: float,
-    tolerance: Tolerance,
-) -> ResourceDifference:
-    """Compare a single resource dimension and return detailed difference.
-
-    Args:
-        resource: The resource type being compared
-        baseline_value: Value from baseline plan
-        comparison_value: Value from comparison plan
-        tolerance: Tolerance bounds for this comparison
-
-    Returns:
-        ResourceDifference with computed properties for ordering and tolerance
-    """
-    return ResourceDifference(
-        resource=resource,
-        baseline_value=baseline_value,
-        comparison_value=comparison_value,
-        tolerance=tolerance,
-    )
 
 
 def compare_plans(
@@ -424,75 +387,58 @@ def compare_plans(
           get_out_of_tolerance() to filter to only problematic ones)
 
     Example:
-        >>> # Simple: use defaults (10% under allowed, unlimited over)
         >>> result = compare_plans(baseline, recommended)
-        >>> if result.is_equivalent:
-        ...     print("Plans match")
-        >>>
-        >>> # Custom per-resource tolerances
-        >>> tolerances = ResourceTolerances(
-        ...     cpu=tolerance(-0.05, 0.30),      # 5% under, 30% over
-        ...     cost=symmetric_tolerance(0.15),  # +/- 15%
-        ... )
-        >>> result = compare_plans(baseline, recommended, tolerances=tolerances)
+        >>> if result.cpu.is_over_provisioned:
+        ...     print("Current has excess CPU capacity")
         >>> for diff in result.get_out_of_tolerance():
-        ...     print(f"{diff.resource}: {diff.ordering} by {diff.difference_percent}")
+        ...     print(diff)  # Human-readable explanation
     """
-    # Set up defaults
     if default_tolerance is None:
         default_tolerance = allow_over_provisioning(0.10)
     if tolerances is None:
         tolerances = ResourceTolerances()
 
-    differences: List[ResourceDifference] = []
-
-    # Compare cost
     baseline_cost = float(baseline.candidate_clusters.total_annual_cost)
     comparison_cost = float(comparison.candidate_clusters.total_annual_cost)
-
-    cost_tolerance = tolerances.get_tolerance(ResourceType.cost, default_tolerance)
-    cost_diff = _compare_resource(
-        resource=ResourceType.cost,
-        baseline_value=baseline_cost,
-        comparison_value=comparison_cost,
-        tolerance=cost_tolerance,
-    )
-    differences.append(cost_diff)
-
-    # Compare resource dimensions
     baseline_resources = _aggregate_resources(baseline)
     comparison_resources = _aggregate_resources(comparison)
 
+    # Cost comes from candidate_clusters, handled separately
+    differences = [
+        ResourceDifference(
+            resource=ResourceType.cost,
+            baseline_value=baseline_cost,
+            comparison_value=comparison_cost,
+            tolerance=tolerances.get_tolerance(ResourceType.cost, default_tolerance),
+        )
+    ]
+
+    # Other resources come from aggregated requirements
     for resource in [
         ResourceType.cpus,
         ResourceType.mem_gib,
         ResourceType.disk_gib,
         ResourceType.network_mbps,
     ]:
-        resource_tolerance = tolerances.get_tolerance(resource, default_tolerance)
-        resource_diff = _compare_resource(
-            resource=resource,
-            baseline_value=baseline_resources.get(resource, 0),
-            comparison_value=comparison_resources.get(resource, 0),
-            tolerance=resource_tolerance,
+        differences.append(
+            ResourceDifference(
+                resource=resource,
+                baseline_value=baseline_resources[resource],
+                comparison_value=comparison_resources[resource],
+                tolerance=tolerances.get_tolerance(resource, default_tolerance),
+            )
         )
-        differences.append(resource_diff)
-
-    # Determine overall result - equivalent if all resources are within tolerance
-    is_equivalent = all(d.is_equivalent for d in differences)
-
-    context: Dict[str, Any] = {
-        "default_tolerance": {
-            "lower": default_tolerance.lower,
-            "upper": default_tolerance.upper,
-        },
-        "baseline_cost": baseline_cost,
-        "comparison_cost": comparison_cost,
-    }
 
     return PlanComparisonResult(
-        is_equivalent=is_equivalent,
-        context=context,
+        is_equivalent=all(d.is_equivalent for d in differences),
+        context={
+            "default_tolerance": {
+                "lower": default_tolerance.lower,
+                "upper": default_tolerance.upper,
+            },
+            "baseline_cost": baseline_cost,
+            "comparison_cost": comparison_cost,
+        },
         differences=differences,
     )
 

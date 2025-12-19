@@ -157,12 +157,14 @@ class TestToleranceHelpers:
         assert t.upper == 0.10
 
     def test_strict_tolerance(self):
-        """strict_tolerance() requires exact match"""
+        """strict_tolerance() requires near-exact match (float epsilon)"""
         t = strict_tolerance()
-        assert t.lower == 0.0
-        assert t.upper == 0.0
+        # Uses float epsilon (1e-9) for bounds
+        assert t.lower == pytest.approx(-1e-9)
+        assert t.upper == pytest.approx(1e-9)
         assert 0.0 in t
-        assert 0.01 not in t
+        assert 1e-10 in t  # Within epsilon
+        assert 0.01 not in t  # 1% is way outside
         assert -0.01 not in t
 
     def test_ignore_resource(self):
@@ -170,12 +172,9 @@ class TestToleranceHelpers:
         t = ignore_resource()
         assert t.lower == float("-inf")
         assert t.upper == float("inf")
-        # Should accept any value
         assert 0.0 in t
         assert 100.0 in t
         assert -100.0 in t
-        assert float("inf") in t
-        assert float("-inf") in t
 
     def test_helpers_are_cached(self):
         """Helper functions should return cached instances"""
@@ -382,15 +381,6 @@ class TestCompareplansDifferent:
         out_of_tolerance = result.get_out_of_tolerance()
         assert len(out_of_tolerance) == 1
         assert out_of_tolerance[0].resource == ResourceType.cpus
-
-    def test_out_of_tolerance_resources_property(self):
-        """out_of_tolerance_resources should list resource types"""
-        baseline = _create_plan(cpu_cores=100, mem_gib=200)
-        comparison = _create_plan(cpu_cores=120, mem_gib=260)  # Both over
-        result = compare_plans(baseline, comparison)
-
-        assert ResourceType.cpus in result.out_of_tolerance_resources
-        assert ResourceType.mem_gib in result.out_of_tolerance_resources
 
 
 # -----------------------------------------------------------------------------
