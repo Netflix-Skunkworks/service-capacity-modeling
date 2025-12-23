@@ -5,7 +5,7 @@ setuptools.setup(
     author="Joseph Lynch",
     author_email="josephl@netflix.com",
     versioning="distance",
-    setup_requires="setupmeta",
+    setup_requires=["setupmeta"],
     description="Contains utilities for modeling capacity for pluggable workloads",
     python_requires=">=3.10,<3.13",
     packages=setuptools.find_packages(exclude=("tests*", "notebooks*")),
