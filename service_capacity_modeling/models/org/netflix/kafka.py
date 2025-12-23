@@ -494,6 +494,10 @@ class NflxKafkaCapacityModel(CapacityModel):
             "max_local_data_per_node_gib",
             extra_model_arguments.get("max_local_disk_gib", 1024 * 2),
         )
+        max_attached_data_per_node_gib: int = extra_model_arguments.get(
+            "max_attached_data_per_node_gib",
+            extra_model_arguments.get("max_attached_disk_gib", 1024 * 2),
+        )
         min_instance_cpu: int = extra_model_arguments.get("min_instance_cpu", 2)
         min_instance_memory_gib: int = extra_model_arguments.get(
             "min_instance_memory_gib", 12
@@ -526,6 +530,7 @@ class NflxKafkaCapacityModel(CapacityModel):
             required_zone_size=required_zone_size,
             max_regional_size=max_regional_size,
             max_local_data_per_node_gib=max_local_data_per_node_gib,
+            max_attached_data_per_node_gib=max_attached_data_per_node_gib,
             min_instance_cpu=min_instance_cpu,
             min_instance_memory_gib=min_instance_memory_gib,
             hot_retention_seconds=hot_retention_seconds,
