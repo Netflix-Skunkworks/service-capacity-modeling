@@ -378,7 +378,7 @@
       "cpu": 64,
       "cpu_ghz": 3.1,
       "ram_gib": 512,
-      "net_mbps": 13600,
+      "net_mbps": 20000,
       "drive": null,
       "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
     },
@@ -387,7 +387,7 @@
       "cpu": 96,
       "cpu_ghz": 3.1,
       "ram_gib": 768,
-      "net_mbps": 19000,
+      "net_mbps": 25000,
       "drive": null,
       "platforms": ["Aurora MySQL","Aurora PostgreSQL"]
     }

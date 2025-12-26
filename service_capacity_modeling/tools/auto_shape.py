@@ -110,6 +110,42 @@ def _gb_to_gib(inp: float) -> int:
     return int(round((inp * 10**9) / 2.0**30))
 
 
+def deduce_cpu_ipc_scale(
+    vcpu_count: int,
+    cpu_cores: int,
+    cpu_perf: Optional[CPUPerformance] = None,
+) -> float:
+    """
+    Deduce CPU IPC scale factor from vCPU and core counts.
+    If all vCPUs are full cores (no SMT), use 1.5, otherwise 1.0.
+    """
+    if cpu_perf is not None and cpu_perf.ipc_scale_factor is not None:
+        return cpu_perf.ipc_scale_factor
+    if vcpu_count == cpu_cores:
+        return 1.5
+    return 1.0
+
+
+def convert_mib_to_gib(size_mib: float) -> float:
+    """Convert AWS MiB memory size to GiB."""
+    return round(size_mib * 10**6 / 2.0**30, 2)
+
+
+def convert_gbps_to_mbps(bandwidth_gbps: float) -> float:
+    """Convert AWS Gbps network bandwidth to Mbps."""
+    return round(bandwidth_gbps * 1000)
+
+
+def _engine_to_platform(engine: str) -> str:
+    """
+    Map RDS engine name to Platform enum value.
+    Currently only supports aurora-postgresql.
+    """
+    if engine == "aurora-postgresql":
+        return "aurora_postgres"
+    raise ValueError(f"Engine '{engine}' is not supported")
+
+
 def _drive(
     drive_type: DriveType,
     io_perf: Optional[IOPerformance],
@@ -233,30 +269,143 @@ def pull_family(
             print(name)
 
         drive = _drive(disk_type, io_perf, scale=normalized_size, data=data)
-        if cpu_perf is not None and cpu_perf.ipc_scale_factor is not None:
-            cpu_ipc_scale_factor = cpu_perf.ipc_scale_factor
-        else:
-            if data["VCpuInfo"].get("DefaultThreadsPerCore", 2) == 1:
-                cpu_ipc_scale_factor = 1.5
-            else:
-                cpu_ipc_scale_factor = 1.0
+        vcpu_count = data["VCpuInfo"]["DefaultVCpus"]
+        cpu_cores = data["VCpuInfo"]["DefaultCores"]
+        cpu_ipc_scale_factor = deduce_cpu_ipc_scale(vcpu_count, cpu_cores, cpu_perf)
 
         new_shape = Instance(
             name=data["InstanceType"],
-            cpu=data["VCpuInfo"]["DefaultVCpus"],
-            cpu_cores=data["VCpuInfo"]["DefaultCores"],
+            cpu=vcpu_count,
+            cpu_cores=cpu_cores,
             cpu_ghz=data["ProcessorInfo"]["SustainedClockSpeedInGhz"],
             cpu_ipc_scale=cpu_ipc_scale_factor,
-            ram_gib=round(data["MemoryInfo"]["SizeInMiB"] * 10**6 / 2.0**30, 2),
-            net_mbps=round(
+            ram_gib=convert_mib_to_gib(data["MemoryInfo"]["SizeInMiB"]),
+            net_mbps=convert_gbps_to_mbps(
                 data["NetworkInfo"]["NetworkCards"][0]["BaselineBandwidthInGbps"]
-                * 10**3
             ),
             drive=drive,
         )
 
         results.append(new_shape)
     results = sorted(results, key=lambda i: normalized_aws_size(i.name))
+    return results
+
+
+def lookup_ec2_instance_specs(
+    ec2_client: Any,
+    instance_type: str,
+    debug: bool = False,
+) -> Tuple[int, int, float, float, float]:
+    """
+    Look up EC2 instance specifications.
+    Returns: (vcpu_count, cpu_cores, cpu_ghz, ram_gib, net_mbps)
+    Returns zeros/defaults if lookup fails.
+    """
+    try:
+        ec2_response = ec2_client.describe_instance_types(InstanceTypes=[instance_type])
+        if ec2_response["InstanceTypes"]:
+            ec2_data = ec2_response["InstanceTypes"][0]
+            vcpu_count = ec2_data["VCpuInfo"]["DefaultVCpus"]
+            cpu_cores = ec2_data["VCpuInfo"]["DefaultCores"]
+            cpu_ghz = ec2_data["ProcessorInfo"]["SustainedClockSpeedInGhz"]
+            ram_gib = convert_mib_to_gib(ec2_data["MemoryInfo"]["SizeInMiB"])
+            net_mbps = convert_gbps_to_mbps(
+                ec2_data["NetworkInfo"]["NetworkCards"][0]["BaselineBandwidthInGbps"]
+            )
+            if debug:
+                print(
+                    f"Looked up {instance_type} -> {vcpu_count} vCPUs, "
+                    f"{cpu_cores} cores, {cpu_ghz} GHz, {ram_gib} GiB, {net_mbps} Mbps",
+                    file=sys.stderr,
+                )
+            return vcpu_count, cpu_cores, cpu_ghz, ram_gib, net_mbps
+        else:
+            raise RuntimeError("No EC2 instance types returned")
+    except (botocore.exceptions.ClientError, botocore.exceptions.BotoCoreError) as e:
+        if debug:
+            print(
+                f"WARNING: Could not look up {instance_type}: {e}. Using defaults.",
+                file=sys.stderr,
+            )
+        return 0, 0, 2.5, 0.0, 1000.0
+
+
+def pull_rds_family(  # pylint: disable=too-many-locals
+    rds_client: Any,
+    family: str,
+    db_engines: Sequence[str],
+    cpu_perf: Optional[CPUPerformance] = None,
+    debug: bool = False,
+) -> Sequence[Instance]:
+    """
+    Pull RDS Instance shapes from AWS RDS APIs.
+    Queries describe_orderable_db_instance_options for the specified engines
+    and family, then constructs Instance objects with appropriate platform tags.
+    Returns a list of Instance for hardware shapes.
+    """
+
+    def debug_log(msg: str) -> None:
+        if debug:
+            print(msg, file=sys.stderr)
+
+    ec2_client = boto3.client("ec2", region_name=rds_client.meta.region_name)
+    instance_data_map = {}
+    for engine in db_engines:
+        debug_log(f"Querying RDS API for engine={engine}, family=db.{family}.*")
+        paginator = rds_client.get_paginator("describe_orderable_db_instance_options")
+        page_iterator = paginator.paginate(Engine=engine)
+        for page in page_iterator:
+            for option in page["OrderableDBInstanceOptions"]:
+                db_instance_class = option["DBInstanceClass"]
+                if not db_instance_class.startswith(f"db.{family}."):
+                    continue
+                if db_instance_class not in instance_data_map:
+                    instance_data_map[db_instance_class] = {
+                        "data": option,
+                        "platforms": set(),
+                    }
+                platform = _engine_to_platform(engine)
+                instance_data_map[db_instance_class]["platforms"].add(platform)
+    if not instance_data_map:
+        print(
+            f"ERROR: No RDS instances found for family 'db.{family}' "
+            f"with engines {db_engines}",
+            file=sys.stderr,
+        )
+        return []
+    debug_log(f"Found {len(instance_data_map)} unique instance classes")
+    results = []
+    for db_instance_class, info in instance_data_map.items():
+        option = info["data"]
+        platforms = sorted(info["platforms"])
+        _, size = db_instance_class.rsplit(".", 1)
+        ec2_instance_type = f"{family}.{size}"
+        vcpu_count, cpu_cores, cpu_ghz, ram_gib, net_mbps = lookup_ec2_instance_specs(
+            ec2_client, ec2_instance_type, debug
+        )
+        cpu_ipc_scale_factor = deduce_cpu_ipc_scale(vcpu_count, cpu_cores, cpu_perf)
+        debug_log(
+            f"{db_instance_class}: cpu={vcpu_count}, cores={cpu_cores}, "
+            f"ghz={cpu_ghz}, ram={ram_gib} GiB, net={net_mbps} Mbps, "
+            f"platforms={platforms}"
+        )
+        from service_capacity_modeling.interface import Platform
+
+        new_instance = Instance(
+            name=db_instance_class,
+            cpu=vcpu_count,
+            cpu_cores=cpu_cores,
+            cpu_ghz=cpu_ghz,
+            cpu_ipc_scale=cpu_ipc_scale_factor,
+            ram_gib=ram_gib,
+            net_mbps=net_mbps,
+            drive=None,
+            platforms=[Platform[p] for p in platforms],
+        )
+        results.append(new_instance)
+    results = sorted(
+        results, key=lambda i: normalized_aws_size(i.name.replace("db.", ""))
+    )
     return results
 
 
@@ -276,6 +425,19 @@ def parse_iops(inp: Optional[str]) -> Optional[Tuple[int, int]]:
             "xlarge IOPS should be given in <random read>/<write> format. "
             "For example r5d.xlarge would be 59000/29000."
         )
+
+
+def parse_db_engines(engines_str: str) -> Sequence[str]:
+    """Parse comma-separated database engines. Currently only aurora-postgresql is supported."""
+    engines = [e.strip() for e in engines_str.split(",")]
+    supported_engines = {"aurora-postgresql"}
+    for engine in engines:
+        if engine not in supported_engines:
+            raise argparse.ArgumentTypeError(
+                f"Database engine '{engine}' is not implemented yet. "
+                f"Currently supported: {', '.join(sorted(supported_engines))}"
+            )
+    return engines
 
 
 def _parse_family(family: str) -> Tuple[str, int, str]:
@@ -348,23 +510,53 @@ def deduce_cpu_perf(
 
 def main(args: Any) -> int:
     for family in args.families:
-        io_perf = deduce_io_perf(
-            family=family, curve=args.io_latency_curve, iops=args.xl_iops
-        )
-
-        cpu_perf = deduce_cpu_perf(
-            family=family,
-            ipc_scale_factor=args.cpu_ipc_scale,
-        )
-
-        ec2_client = boto3.client("ec2", region_name=args.region)
-        family_shapes = pull_family(
-            ec2_client=ec2_client,
-            family=family,
-            cpu_perf=cpu_perf,
-            io_perf=io_perf,
-            debug=args.debug,
-        )
+        is_rds = family.startswith("db.")
+        if is_rds:
+            rds_family = family[3:]
+            if not args.db_engines:
+                print(
+                    f"ERROR: Family '{family}' appears to be RDS (starts with 'db.'), "
+                    "but --db-engines was not specified. Please provide "
+                    "--db-engines with comma-separated list like 'aurora-postgresql'",
+                    file=sys.stderr,
+                )
+                return 1
+            if args.xl_iops or args.io_latency_curve != "ssd":
+                print(
+                    "WARNING: --xl-iops and --io-latency-curve are ignored for RDS "
+                    "instances (db.* families) as they use managed storage.",
+                    file=sys.stderr,
+                )
+            cpu_perf = deduce_cpu_perf(
+                family=rds_family,
+                ipc_scale_factor=args.cpu_ipc_scale,
+            )
+            rds_client = boto3.client("rds", region_name=args.region)
+            family_shapes = pull_rds_family(
+                rds_client=rds_client,
+                family=rds_family,
+                db_engines=args.db_engines,
+                cpu_perf=cpu_perf,
+                debug=args.debug,
+            )
+            output_filename = f"auto_db_{rds_family}.json"
+        else:
+            io_perf = deduce_io_perf(
+                family=family, curve=args.io_latency_curve, iops=args.xl_iops
+            )
+            cpu_perf = deduce_cpu_perf(
+                family=family,
+                ipc_scale_factor=args.cpu_ipc_scale,
+            )
+            ec2_client = boto3.client("ec2", region_name=args.region)
+            family_shapes = pull_family(
+                ec2_client=ec2_client,
+                family=family,
+                cpu_perf=cpu_perf,
+                io_perf=io_perf,
+                debug=args.debug,
+            )
+            output_filename = f"auto_{family}.json"
         json_shapes: Dict[str, Dict[str, Any]] = {"instances": {}}
         for shape in family_shapes:
             model_dict = shape.model_dump(exclude_unset=True)
@@ -377,23 +569,19 @@ def main(args: Any) -> int:
                 and "annual_cost" in model_dict["drive"]
             ):
                 del model_dict["drive"]["annual_cost"]
-
             json_shapes["instances"][shape.name] = model_dict
-
         print(f"[{family}] Hardware Shapes", file=sys.stderr)
         print(json.dumps(json_shapes, indent=2))
-
         # Write to JSON file if requested
         if args.output_path is not None:
             path: Path = args.output_path
             if path.is_dir():
-                output_path = Path(path, f"auto_{family}.json")
+                output_path = Path(path, output_filename)
             else:
                 output_path = path
             with open(output_path, "wt", encoding="utf-8") as fd:
                 json.dump(json_shapes, fd, indent=2)
                 fd.write("\n")
-
     return 0
 
 
@@ -416,6 +604,21 @@ if __name__ == "__main__":
     offerings = result["InstanceTypeOfferings"]
     for offering in offerings:
         families.add(offering["InstanceType"].rsplit(".", 1)[0])
+
+    try:
+        rds_client = boto3.client("rds", region_name="us-east-1")
+        paginator = rds_client.get_paginator("describe_orderable_db_instance_options")
+        page_iterator = paginator.paginate(Engine="aurora-postgresql")
+        for page in page_iterator:
+            for option in page["OrderableDBInstanceOptions"]:
+                db_instance_class = option["DBInstanceClass"]
+                families.add(db_instance_class.rsplit(".", 1)[0])
+    except botocore.exceptions.ClientError:
+        print(
+            "Unable to connect to RDS. Do you have AWS credentials refreshed?",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     parser = argparse.ArgumentParser(
         prog="Project shapes from instance family filter",
@@ -443,6 +646,16 @@ if __name__ == "__main__":
             "If the clock frequency is not a good measure of performance, scale it by "
             "this much. Note that by default this will be 1, unless the cores are all "
             "full cores (not threads) in which case it will be 1.5 by default."
+        ),
+    )
+    parser.add_argument(
+        "--db-engines",
+        type=parse_db_engines,
+        default=None,
+        help=(
+            "Comma-separated list of database engines for RDS instances. "
+            "Required when family starts with 'db.'. "
+            "Currently supported: aurora-postgresql"
         ),
     )
     parser.add_argument("--region", choices=regions, default="us-east-1")
