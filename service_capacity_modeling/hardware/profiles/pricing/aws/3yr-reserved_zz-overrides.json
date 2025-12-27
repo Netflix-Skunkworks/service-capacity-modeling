@@ -3,15 +3,7 @@
     "instances": {
       "f5.large.deprecated": {"annual_cost": 300.0, "lifecycle": "deprecated"},
       "m6id.4xlarge":  {"annual_cost": 3126.64},
-      "m6id.xlarge":   {"annual_cost": 781.66},
-      "db.r5.large":     {"annual_cost": 885.7},
-      "db.r5.xlarge":    {"annual_cost": 1771.3},
-      "db.r5.2xlarge":   {"annual_cost": 3543},
-      "db.r5.4xlarge":   {"annual_cost": 7086},
-      "db.r5.8xlarge":   {"annual_cost": 14171.7},
-      "db.r5.12xlarge":   {"annual_cost": 21258},
-      "db.r5.16xlarge":   {"annual_cost": 28343.3},
-      "db.r5.24xlarge":   {"annual_cost": 42516}
+      "m6id.xlarge":   {"annual_cost": 781.66}
     },
     "drives": {
       "gp2": {"annual_cost_per_gib": 1.2},
