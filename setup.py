@@ -15,7 +15,8 @@ setuptools.setup(
         "numpy",
         "isodate",
     ],
-    extras_require={
+    # https://github.com/python/typeshed/issues/15220
+    extras_require={  # type: ignore[arg-type]
         "aws": ["boto3"],
     },
     classifiers=[
@@ -33,7 +34,8 @@ setuptools.setup(
         ]
     },
     include_package_data=True,
-    package_data={
+    # https://github.com/python/typeshed/issues/15220
+    package_data={  # type: ignore[arg-type]
         "": [
             "hardware/profiles/profiles.txt",
             "hardware/profiles/shapes/**/*.json",
