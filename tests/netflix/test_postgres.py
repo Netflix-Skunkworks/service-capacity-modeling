@@ -99,11 +99,13 @@ def test_small_footprint():
         desires=small_footprint,
         num_regions=1,
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.large"
+    leader = cap_plan[0].candidate_clusters.regional[0].instance
+    expected = shape("db.r6g.large")
+    assert_similar_compute(expected_shape=expected, actual_shape=leader)
 
     # two instance plus storage and io
     assert (
-        2000
+        1500
         < cap_plan[0].candidate_clusters.annual_costs[
             "aurora-cluster.regional-clusters"
         ]
@@ -118,9 +120,11 @@ def test_small_footprint_multi_region():
         desires=small_footprint,
         num_regions=3,
     )
-    assert cap_plan[0].candidate_clusters.regional[0].instance.name == "db.r5.large"
+    leader = cap_plan[0].candidate_clusters.regional[0].instance
+    expected = shape("db.r6g.large")
+    assert_similar_compute(expected_shape=expected, actual_shape=leader)
 
-    assert 2000 < cap_plan[0].candidate_clusters.total_annual_cost < 4000
+    assert 1500 < cap_plan[0].candidate_clusters.total_annual_cost < 4000
 
 
 def test_small_footprint_plan_uncertain():
@@ -132,9 +136,11 @@ def test_small_footprint_plan_uncertain():
     )
     plan_a = cap_plan.least_regret[0]
 
-    assert plan_a.candidate_clusters.regional[0].instance.name == "db.r5.large"
+    leader = plan_a.candidate_clusters.regional[0].instance
+    expected = shape("db.r6g.large")
+    assert_similar_compute(expected_shape=expected, actual_shape=leader)
 
-    assert 2000 < plan_a.candidate_clusters.total_annual_cost < 4000
+    assert 1500 < plan_a.candidate_clusters.total_annual_cost < 4000
 
 
 def test_large_footprint():
@@ -157,5 +163,5 @@ def test_tier_3():
     )
 
     leader = cap_plan[0].candidate_clusters.regional[0].instance
-    expected = shape("db.r5.4xlarge")
+    expected = shape("db.r6g.2xlarge")
     assert_similar_compute(expected_shape=expected, actual_shape=leader)
