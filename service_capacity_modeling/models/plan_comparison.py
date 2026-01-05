@@ -228,11 +228,13 @@ class ResourceTolerances(ExcludeUnsetModel):
                 raise ValueError(f"Unknown resource type: {resource}")
 
 
-class ResourceDifference(ExcludeUnsetModel):
-    """Represents a difference in a specific resource dimension between two plans.
+class ResourceComparison(ExcludeUnsetModel):
+    """Represents a comparison of a resource between baseline and comparison plans.
 
-    Only stores the base values; all derived values (ratio, is_equivalent)
-    are computed from these.
+    Properties:
+    - is_equivalent: ratio is within tolerance bounds
+    - exceeds_upper_bound: ratio > upper bound (need more than tolerance allows)
+    - exceeds_lower_bound: ratio < lower bound (have more extra than tolerance allows)
     """
 
     resource: ResourceType
@@ -271,23 +273,17 @@ class ResourceDifference(ExcludeUnsetModel):
         return self.ratio in self.tolerance
 
     @property
-    def is_over_provisioned(self) -> bool:
-        """True if over-provisioned beyond tolerance (have too much extra capacity).
-
-        ratio < lower bound means comparison << baseline (too much extra)
-        """
+    def exceeds_lower_bound(self) -> bool:
+        """True if ratio < lower bound (too much extra capacity)."""
         return self.ratio < self.tolerance.lower
 
     @property
-    def is_under_provisioned(self) -> bool:
-        """True if under-provisioned beyond tolerance (requirement exceeds too much).
-
-        ratio > upper bound means comparison >> baseline (need too much more)
-        """
+    def exceeds_upper_bound(self) -> bool:
+        """True if ratio > upper bound (requirement exceeds tolerance)."""
         return self.ratio > self.tolerance.upper
 
     def __str__(self) -> str:
-        """Human-readable explanation of the difference."""
+        """Human-readable explanation of the comparison."""
         if self.tolerance.upper == float("inf"):
             bounds_str = f"≥ {self.tolerance.lower:.2f}×"
         elif self.tolerance.lower == 0.0:
@@ -301,9 +297,9 @@ class ResourceDifference(ExcludeUnsetModel):
                 f"(within tolerance: {bounds_str})"
             )
         else:
-            direction = "over" if self.is_over_provisioned else "under"
+            bound = "lower" if self.exceeds_lower_bound else "upper"
             return (
-                f"{self.resource.value}: {direction}-provisioned, "
+                f"{self.resource.value}: exceeds {bound} bound, "
                 f"ratio={self.ratio:.2f}× (baseline={self.baseline_value:.2f}, "
                 f"comparison={self.comparison_value:.2f}, tolerance: {bounds_str})"
             )
@@ -315,37 +311,37 @@ class PlanComparisonResult(ExcludeUnsetModel):
     is_equivalent: bool
     """True if plans are within tolerance, False if significant differences"""
 
-    differences: dict[ResourceType, ResourceDifference] = {}
-    """Resource differences keyed by resource type"""
+    comparisons: dict[ResourceType, ResourceComparison] = {}
+    """Resource comparisons keyed by resource type"""
 
     @property
-    def cpu(self) -> ResourceDifference:
+    def cpu(self) -> ResourceComparison:
         """Get CPU comparison result."""
-        return self.differences[ResourceType.cpus]
+        return self.comparisons[ResourceType.cpus]
 
     @property
-    def memory(self) -> ResourceDifference:
+    def memory(self) -> ResourceComparison:
         """Get memory comparison result."""
-        return self.differences[ResourceType.mem_gib]
+        return self.comparisons[ResourceType.mem_gib]
 
     @property
-    def disk(self) -> ResourceDifference:
+    def disk(self) -> ResourceComparison:
         """Get disk comparison result."""
-        return self.differences[ResourceType.disk_gib]
+        return self.comparisons[ResourceType.disk_gib]
 
     @property
-    def network(self) -> ResourceDifference:
+    def network(self) -> ResourceComparison:
         """Get network comparison result."""
-        return self.differences[ResourceType.network_mbps]
+        return self.comparisons[ResourceType.network_mbps]
 
     @property
-    def cost(self) -> ResourceDifference:
+    def cost(self) -> ResourceComparison:
         """Get cost comparison result."""
-        return self.differences[ResourceType.cost]
+        return self.comparisons[ResourceType.cost]
 
-    def get_out_of_tolerance(self) -> list[ResourceDifference]:
-        """Get only differences that exceed tolerance bounds."""
-        return [d for d in self.differences.values() if not d.is_equivalent]
+    def get_out_of_tolerance(self) -> list[ResourceComparison]:
+        """Get only comparisons that exceed tolerance bounds."""
+        return [c for c in self.comparisons.values() if not c.is_equivalent]
 
 
 def _aggregate_resources(plan: CapacityPlan) -> dict[ResourceType, float]:
@@ -401,34 +397,36 @@ def compare_plans(
     baseline_resources = _aggregate_resources(baseline)
     comparison_resources = _aggregate_resources(comparison)
 
-    def make_diff(
+    def make_comparison(
         resource: ResourceType, baseline_val: float, comparison_val: float
-    ) -> ResourceDifference:
-        return ResourceDifference(
+    ) -> ResourceComparison:
+        return ResourceComparison(
             resource=resource,
             baseline_value=baseline_val,
             comparison_value=comparison_val,
             tolerance=tolerances.get_tolerance(resource),
         )
 
-    differences = {
-        ResourceType.cost: make_diff(ResourceType.cost, baseline_cost, comparison_cost),
-        ResourceType.cpus: make_diff(
+    comparisons = {
+        ResourceType.cost: make_comparison(
+            ResourceType.cost, baseline_cost, comparison_cost
+        ),
+        ResourceType.cpus: make_comparison(
             ResourceType.cpus,
             baseline_resources[ResourceType.cpus],
             comparison_resources[ResourceType.cpus],
         ),
-        ResourceType.mem_gib: make_diff(
+        ResourceType.mem_gib: make_comparison(
             ResourceType.mem_gib,
             baseline_resources[ResourceType.mem_gib],
             comparison_resources[ResourceType.mem_gib],
         ),
-        ResourceType.disk_gib: make_diff(
+        ResourceType.disk_gib: make_comparison(
             ResourceType.disk_gib,
             baseline_resources[ResourceType.disk_gib],
             comparison_resources[ResourceType.disk_gib],
         ),
-        ResourceType.network_mbps: make_diff(
+        ResourceType.network_mbps: make_comparison(
             ResourceType.network_mbps,
             baseline_resources[ResourceType.network_mbps],
             comparison_resources[ResourceType.network_mbps],
@@ -436,8 +434,8 @@ def compare_plans(
     }
 
     return PlanComparisonResult(
-        is_equivalent=all(d.is_equivalent for d in differences.values()),
-        differences=differences,
+        is_equivalent=all(c.is_equivalent for c in comparisons.values()),
+        comparisons=comparisons,
     )
 
 
