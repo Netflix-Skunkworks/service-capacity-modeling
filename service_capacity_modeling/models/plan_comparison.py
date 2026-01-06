@@ -193,8 +193,8 @@ class ResourceTolerances(ExcludeUnsetModel):
         ... )
     """
 
-    default: Tolerance = lte(1.1)
-    """Default tolerance: ratio ≤ 1.1 (comparison can be at most 1.1× baseline)"""
+    default: Tolerance = plus_or_minus(0.10)
+    """Default tolerance: ±10% (ratio must be 0.9× to 1.1× baseline)"""
 
     cost: Tolerance | None = None
     """Tolerance for annual cost comparison"""
