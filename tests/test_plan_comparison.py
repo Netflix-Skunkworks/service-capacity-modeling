@@ -34,6 +34,7 @@ from service_capacity_modeling.models.plan_comparison import (
     ResourceType,
     Tolerance,
     tolerance,
+    to_reference_cores,
 )
 
 
@@ -42,13 +43,18 @@ from service_capacity_modeling.models.plan_comparison import (
 # -----------------------------------------------------------------------------
 
 
-def _create_instance(name: str = "test.xlarge") -> Instance:
+def _create_instance(
+    name: str = "test.xlarge",
+    cpu: int = 8,
+    cpu_ghz: float = 2.3,  # Same as default_reference_shape for 1:1 normalization
+    cpu_ipc_scale: float = 1.0,
+) -> Instance:
     """Helper to create a test instance."""
     return Instance(
         name=name,
-        cpu=8,
-        cpu_ghz=2.4,
-        cpu_ipc_scale=1.0,
+        cpu=cpu,
+        cpu_ghz=cpu_ghz,
+        cpu_ipc_scale=cpu_ipc_scale,
         ram_gib=32,
         net_mbps=10000,
         lifecycle=Lifecycle.stable,
@@ -63,8 +69,14 @@ def _create_plan(
     network_mbps: float = 5000.0,
     annual_cost: float = 10000.0,
 ) -> CapacityPlan:
-    """Helper to create test plans with specified resources."""
-    instance = _create_instance()
+    """Helper to create test plans with specified resources.
+
+    CPU is computed from candidate_clusters, so cpu_cores sets the instance CPU
+    with count=1. The instance uses default_reference_shape IPC/GHz for 1:1
+    normalization (cpu_cores directly equals reference-equivalent cores).
+    """
+    # Instance with same IPC/GHz as default_reference_shape for 1:1 normalization
+    instance = _create_instance(cpu=cpu_cores)
     requirement = CapacityRequirement(
         requirement_type="test",
         cpu_cores=certain_int(cpu_cores),
@@ -74,7 +86,7 @@ def _create_plan(
     )
     cluster = ZoneClusterCapacity(
         cluster_type="test",
-        count=10,
+        count=1,  # count=1 so instance.cpu equals total CPU
         instance=instance,
         annual_cost=annual_cost,
     )
@@ -128,6 +140,61 @@ def _create_instance_without_local_drive(
         lifecycle=Lifecycle.stable,
         platforms=[Platform.amd64],
     )
+
+
+# -----------------------------------------------------------------------------
+# to_reference_cores tests
+# -----------------------------------------------------------------------------
+
+
+class TestToReferenceCores:
+    """Tests for to_reference_cores() utility function."""
+
+    def test_same_as_reference_shape(self):
+        """Instance matching reference shape returns cores unchanged.
+
+        default_reference_shape: 2.3 GHz, IPC 1.0
+        100 cores @ 2.3 GHz, IPC 1.0 → 100 × (2.3×1.0)/(2.3×1.0) = 100
+        """
+        instance = _create_instance(cpu=100, cpu_ghz=2.3, cpu_ipc_scale=1.0)
+        assert to_reference_cores(100, instance) == 100.0
+
+    def test_faster_instance_gives_more_reference_cores(self):
+        """Faster instance (higher GHz) yields more reference-equivalent cores.
+
+        100 cores @ 3.0 GHz, IPC 1.0 → 100 × (3.0×1.0)/(2.3×1.0) = 130.4
+        """
+        instance = _create_instance(cpu=100, cpu_ghz=3.0, cpu_ipc_scale=1.0)
+        result = to_reference_cores(100, instance)
+        assert 130.0 < result < 131.0  # 130.43
+
+    def test_higher_ipc_gives_more_reference_cores(self):
+        """Higher IPC yields more reference-equivalent cores.
+
+        100 cores @ 2.3 GHz, IPC 2.0 → 100 × (2.3×2.0)/(2.3×1.0) = 200
+        """
+        instance = _create_instance(cpu=100, cpu_ghz=2.3, cpu_ipc_scale=2.0)
+        assert to_reference_cores(100, instance) == 200.0
+
+    def test_slower_instance_gives_fewer_reference_cores(self):
+        """Slower instance (lower GHz or IPC) yields fewer reference-equivalent cores.
+
+        100 cores @ 2.0 GHz, IPC 0.8 → 100 × (2.0×0.8)/(2.3×1.0) = 69.6
+        """
+        instance = _create_instance(cpu=100, cpu_ghz=2.0, cpu_ipc_scale=0.8)
+        result = to_reference_cores(100, instance)
+        assert 69.0 < result < 70.0  # 69.57
+
+    def test_returns_float_not_int(self):
+        """Returns float for precise ratio calculations (unlike normalize_cores).
+
+        32 cores @ 2.4 GHz, IPC 1.0 → 32 × (2.4×1.0)/(2.3×1.0) = 33.39
+        normalize_cores would return ceil(33.39) = 34, but we need 33.39
+        """
+        instance = _create_instance(cpu=32, cpu_ghz=2.4, cpu_ipc_scale=1.0)
+        result = to_reference_cores(32, instance)
+        assert isinstance(result, float)
+        assert 33.3 < result < 33.5  # 33.39, not 34
 
 
 # -----------------------------------------------------------------------------
@@ -411,6 +478,90 @@ class TestComparePlans:
         assert not result.memory.is_equivalent  # 0.85 < 0.9
         assert result.memory.exceeds_lower_bound
 
+    def test_cpu_normalization_across_different_ipc(self):
+        """CPU comparison normalizes for both GHz and IPC differences.
+
+        Normalization formula:
+            ref_cores = cores × (ghz × ipc) / (2.3 × 1.0)
+
+        Where 2.3 GHz and IPC 1.0 is the default_reference_shape.
+
+        Test cases:
+        1. Different GHz, same IPC:
+           - A: 100 cores @ 2.3 GHz, IPC 1.0 → 100 × 2.3/2.3 = 100 ref
+           - B: 77 cores @ 3.0 GHz, IPC 1.0 → 77 × 3.0/2.3 = 100.4 ref
+           Ratio ≈ 1.0 → equivalent
+
+        2. Same GHz, different IPC (higher IPC = fewer cores needed):
+           - A: 100 cores @ 2.3 GHz, IPC 1.0 → 100 ref
+           - B: 50 cores @ 2.3 GHz, IPC 2.0 → 50 × 4.6/2.3 = 100 ref
+           Ratio = 1.0 → equivalent
+
+        3. Combined GHz + IPC difference:
+           - A: 100 cores @ 2.3 GHz, IPC 1.0 → 100 ref
+           - B: 40 cores @ 3.0 GHz, IPC 2.0 → 40 × 6.0/2.3 = 104.3 ref
+           Ratio ≈ 1.04 → equivalent (within ±10%)
+
+        4. IPC difference exceeds tolerance (failure case):
+           - A: 100 cores @ 2.3 GHz, IPC 1.0 → 100 ref
+           - B: 100 cores @ 2.3 GHz, IPC 0.5 → 100 × 1.15/2.3 = 50 ref
+           Ratio = 0.5 → under-provisioned (outside ±10%)
+        """
+
+        def make_plan(cpu: int, cpu_ghz: float, cpu_ipc_scale: float) -> CapacityPlan:
+            inst = _create_instance(
+                cpu=cpu, cpu_ghz=cpu_ghz, cpu_ipc_scale=cpu_ipc_scale
+            )
+            return CapacityPlan(
+                requirements=Requirements(
+                    zonal=[
+                        CapacityRequirement(
+                            requirement_type="t", cpu_cores=certain_int(cpu)
+                        )
+                    ]
+                ),
+                candidate_clusters=Clusters(
+                    annual_costs={"t": Decimal("1000")},
+                    zonal=[
+                        ZoneClusterCapacity(
+                            cluster_type="t", count=1, instance=inst, annual_cost=1000.0
+                        )
+                    ],
+                ),
+            )
+
+        # Case 1: Different GHz, same IPC
+        baseline = make_plan(cpu=100, cpu_ghz=2.3, cpu_ipc_scale=1.0)
+        comparison = make_plan(cpu=77, cpu_ghz=3.0, cpu_ipc_scale=1.0)
+        result = compare_plans(baseline, comparison)
+        assert result.cpu.is_equivalent
+        assert 0.99 < result.cpu.ratio < 1.05  # 100.4/100 ≈ 1.004
+
+        # Case 2: Same GHz, different IPC (2× IPC = half the cores)
+        baseline = make_plan(cpu=100, cpu_ghz=2.3, cpu_ipc_scale=1.0)
+        comparison = make_plan(cpu=50, cpu_ghz=2.3, cpu_ipc_scale=2.0)
+        result = compare_plans(baseline, comparison)
+        assert result.cpu.is_equivalent
+        assert 0.99 < result.cpu.ratio < 1.01  # Exactly 1.0
+
+        # Case 3: Combined GHz + IPC
+        baseline = make_plan(cpu=100, cpu_ghz=2.3, cpu_ipc_scale=1.0)
+        comparison = make_plan(cpu=40, cpu_ghz=3.0, cpu_ipc_scale=2.0)
+        result = compare_plans(baseline, comparison)
+        assert result.cpu.is_equivalent
+        assert 1.0 < result.cpu.ratio < 1.1  # 104.3/100 ≈ 1.043
+
+        # Case 4: IPC difference exceeds tolerance (NOT equivalent)
+        #   - Baseline: 100 cores @ 2.3 GHz, IPC 1.0 → 100 ref
+        #   - Comparison: 100 cores @ 2.3 GHz, IPC 0.5 → 100 × 1.15/2.3 = 50 ref
+        #   Ratio = 0.5 → under-provisioned (outside ±10%)
+        baseline = make_plan(cpu=100, cpu_ghz=2.3, cpu_ipc_scale=1.0)
+        comparison = make_plan(cpu=100, cpu_ghz=2.3, cpu_ipc_scale=0.5)
+        result = compare_plans(baseline, comparison)
+        assert not result.cpu.is_equivalent
+        assert result.cpu.exceeds_lower_bound  # ratio < 0.9 = under-provisioned
+        assert 0.49 < result.cpu.ratio < 0.51  # Exactly 0.5
+
 
 # -----------------------------------------------------------------------------
 # extract_baseline_plan tests
@@ -437,8 +588,8 @@ class TestExtractBaselinePlan:
         assert len(baseline.requirements.zonal) == 1
         assert len(baseline.requirements.regional) == 0
         req = baseline.requirements.zonal[0]
-        # 4 CPU * 8 nodes = 32 raw, normalized → ~34
-        assert req.cpu_cores.mid == 34
+        # Raw: 4 × 8 = 32 cores (normalized to 33.39 ref cores during comparison)
+        assert req.cpu_cores.mid == 32
         # 30.5 GiB * 8 = 244
         assert req.mem_gib.mid == 244.0
         # 950 * 8 = 7600
@@ -491,7 +642,25 @@ class TestExtractBaselinePlan:
             extract_baseline_plan(desires_factory(), region="us-east-1")
 
     def test_integration_extract_and_compare(self):
-        """Full integration: extract baseline and compare with recommended."""
+        """Full integration: extract baseline and compare with recommended.
+
+        Baseline (extracted from current cluster):
+            Instance: i3.xlarge (4 cores @ 2.4 GHz, IPC 1.0)
+            Count: 8 nodes
+            Raw CPU: 4 × 8 = 32 cores
+            Normalized: 32 × (2.4 × 1.0) / (2.3 × 1.0) = 33.39 ref cores
+
+        Recommended (from _create_plan):
+            Instance: test.xlarge (35 cores @ 2.3 GHz, IPC 1.0)
+            Count: 1
+            Raw CPU: 35 × 1 = 35 cores
+            Normalized: 35 × (2.3 × 1.0) / (2.3 × 1.0) = 35.0 ref cores
+
+        Comparison (default tolerance ±10%):
+            CPU: 35.0 / 33.39 = 1.048 → within [0.9, 1.1] ✓
+            Memory: 250 / 244 = 1.025 → within [0.9, 1.1] ✓
+            Disk: 7500 / 7600 = 0.987 → within [0.9, 1.1] ✓
+        """
         instance = _create_instance_with_local_drive(
             cpu=4, ram_gib=30.5, net_mbps=10000, drive_size_gib=950, annual_cost=2500.0
         )
@@ -504,11 +673,10 @@ class TestExtractBaselinePlan:
 
         baseline = extract_baseline_plan(desires, region="us-east-1")
 
-        # Recommended plan slightly different but within tolerance
         recommended = _create_plan(
-            cpu_cores=35,  # vs ~34 → ratio ~1.03
-            mem_gib=250,  # vs 244 → ratio ~1.02
-            disk_gib=7500,  # vs 7600 → ratio ~0.99
+            cpu_cores=35,
+            mem_gib=250,
+            disk_gib=7500,
             network_mbps=85000,
             annual_cost=21000,
         )

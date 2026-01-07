@@ -2,6 +2,46 @@
 
 This module provides functionality to compare two capacity plans and determine
 if they are roughly equivalent, with detailed explanations of any differences.
+
+Example usage::
+
+    from service_capacity_modeling.models.plan_comparison import (
+        compare_plans,
+        extract_baseline_plan,
+        ignore_resource,
+        lte,
+        plus_or_minus,
+        ResourceTolerances,
+    )
+
+    # Get recommendation from planner
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=desires,
+    )
+    recommendation = cap_plan.least_regret[0]
+
+    # Get current deployment as baseline
+    baseline = extract_baseline_plan(desires, region="us-east-1")
+
+    # Compare with custom tolerances
+    result = compare_plans(
+        baseline,
+        recommendation,
+        tolerances=ResourceTolerances(
+            cost=ignore_resource(),        # Don't care about cost
+            cpu=lte(1.05),                 # CPU can be at most 5% over baseline
+            disk=plus_or_minus(0.10),      # Storage within ±10%
+        ),
+    )
+
+    if result.is_equivalent:
+        print("Current capacity is sufficient")
+    else:
+        print("Capacity adjustments needed:")
+        for diff in result.get_out_of_tolerance():
+            print(f"  - {diff}")
 """
 
 from decimal import Decimal
@@ -21,12 +61,13 @@ from service_capacity_modeling.interface import (
     CurrentClusterCapacity,
     default_reference_shape,
     ExcludeUnsetModel,
+    Instance,
     RegionClusterCapacity,
     Requirements,
     ZoneClusterCapacity,
     certain_float,
+    certain_int,
 )
-from service_capacity_modeling.models.common import normalize_cores
 
 
 @enum_docstrings
@@ -344,19 +385,67 @@ class PlanComparisonResult(ExcludeUnsetModel):
         return [c for c in self.comparisons.values() if not c.is_equivalent]
 
 
+def to_reference_cores(core_count: float, instance: Instance) -> float:
+    """Convert instance cores to reference-equivalent cores.
+
+    This is the inverse of normalize_cores() from models.common. While
+    normalize_cores answers "how many target cores to match N reference cores",
+    this answers "how many reference cores is N instance cores equivalent to".
+
+    Mathematically equivalent to:
+        normalize_cores(core_count, target=default_reference_shape, reference=instance)
+
+    but returns float instead of ceiling int. We need float precision for
+    accurate ratio comparisons - ceiling would distort ratios by up to ~3%.
+
+    See normalize_cores() in models/common.py for the original implementation.
+
+    Args:
+        core_count: Number of cores on the instance
+        instance: The instance shape (with cpu_ghz and cpu_ipc_scale)
+
+    Returns:
+        Equivalent cores on default_reference_shape (2.3 GHz, IPC 1.0)
+
+    Example:
+        # 32 cores on a 2.4 GHz instance = 33.4 reference cores
+        to_reference_cores(32, instance_at_2_4_ghz)  # → 33.39
+    """
+    instance_speed = instance.cpu_ghz * instance.cpu_ipc_scale
+    ref_speed = default_reference_shape.cpu_ghz * default_reference_shape.cpu_ipc_scale
+    return core_count * (instance_speed / ref_speed)
+
+
 def _aggregate_resources(plan: CapacityPlan) -> dict[ResourceType, float]:
-    """Aggregate resource requirements from all zonal and regional requirements."""
+    """Aggregate resource values from a plan, normalizing CPU to reference shape.
+
+    CPU is computed from candidate_clusters and normalized to default_reference_shape
+    using IPC and frequency factors. This ensures consistent comparison even when
+    plans use different instance types with varying CPU performance characteristics.
+
+    Memory, disk, and network are summed from requirements (no normalization needed).
+    """
     totals: dict[ResourceType, float] = {
         ResourceType.cpus: 0.0,
         ResourceType.mem_gib: 0.0,
         ResourceType.disk_gib: 0.0,
         ResourceType.network_mbps: 0.0,
     }
+
+    # CPU: compute from candidate_clusters, normalized to reference shape
+    for cluster in chain(
+        plan.candidate_clusters.zonal, plan.candidate_clusters.regional
+    ):
+        totals[ResourceType.cpus] += to_reference_cores(
+            cluster.instance.cpu * cluster.count, cluster.instance
+        )
+
+    # Other resources: sum from requirements
     for req in chain(plan.requirements.zonal, plan.requirements.regional):
-        totals[ResourceType.cpus] += req.cpu_cores.mid
         totals[ResourceType.mem_gib] += req.mem_gib.mid
         totals[ResourceType.disk_gib] += req.disk_gib.mid
         totals[ResourceType.network_mbps] += req.network_mbps.mid
+
     return totals
 
 
@@ -500,19 +589,12 @@ def _create_plan_from_current_cluster(
     count = int(cluster.cluster_instance_count.mid)
     disk_gib_per_node = _get_disk_gib_from_cluster(cluster)
 
-    # Normalize CPU cores to default_reference_shape for consistent comparison
-    # with recommended plans (which are already normalized)
-    normalized_cpu = normalize_cores(
-        instance.cpu * count,
-        target_shape=default_reference_shape,
-        reference_shape=instance,
-    )
-
     # Build requirements from instance specs * count
+    # Note: CPU normalization for IPC/frequency is handled in _aggregate_resources()
     requirement = CapacityRequirement(
         requirement_type=requirement_type,
-        reference_shape=default_reference_shape,
-        cpu_cores=certain_float(normalized_cpu),
+        reference_shape=instance,
+        cpu_cores=certain_int(instance.cpu * count),
         mem_gib=certain_float(instance.ram_gib * count),
         network_mbps=certain_float(instance.net_mbps * count),
         disk_gib=certain_float(disk_gib_per_node * count),
