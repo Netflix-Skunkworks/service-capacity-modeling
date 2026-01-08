@@ -573,19 +573,30 @@ def _create_plan_from_current_cluster(
     Args:
         cluster: The current cluster capacity
         is_zonal: True if this is a zonal cluster, False for regional
-        region: AWS region for looking up drive pricing
+        region: AWS region for looking up drive pricing and instance specs
         requirement_type: Label for the capacity requirement (e.g., "cassandra")
 
     Returns:
         A CapacityPlan representing the current deployment with cost calculated
-    """
-    if cluster.cluster_instance is None:
-        raise ValueError(
-            "Cannot create plan from current cluster: cluster_instance is None. "
-            "Ensure the CurrentClusterCapacity has a resolved cluster_instance."
-        )
 
-    instance = cluster.cluster_instance
+    Raises:
+        ValueError: If instance cannot be resolved from cluster_instance or
+            cluster_instance_name
+    """
+    # Resolve instance: prefer cluster_instance, fall back to lookup by name
+    if cluster.cluster_instance is not None:
+        instance = cluster.cluster_instance
+    else:
+        regional_instances = shapes.region(region).instances
+        instance_name = cluster.cluster_instance_name
+        if instance_name not in regional_instances:
+            raise ValueError(
+                f"Cannot resolve instance '{instance_name}' in region '{region}'. "
+                f"Either provide cluster_instance directly or use a valid "
+                f"instance name from the hardware catalog."
+            )
+        instance = regional_instances[instance_name]
+
     count = int(cluster.cluster_instance_count.mid)
     disk_gib_per_node = _get_disk_gib_from_cluster(cluster)
 
