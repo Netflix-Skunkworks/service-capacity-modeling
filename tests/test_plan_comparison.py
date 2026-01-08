@@ -623,7 +623,7 @@ class TestExtractBaselinePlan:
                     current_clusters=CurrentClusters(
                         zonal=[
                             CurrentZoneClusterCapacity(
-                                cluster_instance_name="test",
+                                cluster_instance_name="nonexistent-instance-type",
                                 cluster_instance=None,
                                 cluster_instance_count=Interval(
                                     low=3, mid=3, high=3, confidence=1.0
@@ -632,7 +632,7 @@ class TestExtractBaselinePlan:
                         ]
                     )
                 ),
-                "cluster_instance is None",
+                "Cannot resolve instance 'nonexistent-instance-type'",
             ),
         ],
     )
@@ -640,6 +640,25 @@ class TestExtractBaselinePlan:
         """Various error conditions raise ValueError."""
         with pytest.raises(ValueError, match=error_match):
             extract_baseline_plan(desires_factory(), region="us-east-1")
+
+    def test_fallback_to_instance_name_lookup(self):
+        """When cluster_instance is None, lookup by cluster_instance_name."""
+        # Use a real instance name but don't provide cluster_instance object
+        current = CurrentZoneClusterCapacity(
+            cluster_instance_name="m5.xlarge",
+            cluster_instance=None,  # Not provided - should fall back to lookup
+            cluster_instance_count=Interval(low=4, mid=4, high=4, confidence=1.0),
+        )
+        desires = CapacityDesires(current_clusters=CurrentClusters(zonal=[current]))
+
+        # Should succeed by looking up m5.xlarge from hardware catalog
+        baseline = extract_baseline_plan(desires, region="us-east-1")
+
+        # Verify it used the m5.xlarge specs from the catalog
+        # m5.xlarge has 4 vCPUs, so 4 nodes × 4 cores = 16 cores total
+        assert baseline.candidate_clusters.zonal[0].count == 4
+        assert baseline.candidate_clusters.zonal[0].instance.name == "m5.xlarge"
+        assert baseline.candidate_clusters.zonal[0].instance.cpu == 4
 
     def test_integration_extract_and_compare(self):
         """Full integration: extract baseline and compare with recommended.
