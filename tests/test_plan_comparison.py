@@ -634,6 +634,52 @@ class TestExtractBaselinePlan:
                 ),
                 "Cannot resolve instance 'nonexistent-instance-type'",
             ),
+            (
+                lambda: CapacityDesires(
+                    current_clusters=CurrentClusters(
+                        zonal=[
+                            CurrentZoneClusterCapacity(
+                                cluster_instance_name="m5.xlarge",
+                                cluster_instance=None,
+                                cluster_instance_count=Interval(
+                                    low=3, mid=3, high=3, confidence=1.0
+                                ),
+                            ),
+                            CurrentZoneClusterCapacity(
+                                cluster_instance_name="m5.2xlarge",
+                                cluster_instance=None,
+                                cluster_instance_count=Interval(
+                                    low=3, mid=3, high=3, confidence=1.0
+                                ),
+                            ),
+                        ]
+                    )
+                ),
+                "clusters are heterogeneous",
+            ),
+            (
+                lambda: CapacityDesires(
+                    current_clusters=CurrentClusters(
+                        zonal=[
+                            CurrentZoneClusterCapacity(
+                                cluster_instance_name="m5.xlarge",
+                                cluster_instance=None,
+                                cluster_instance_count=Interval(
+                                    low=10, mid=10, high=10, confidence=1.0
+                                ),
+                            ),
+                            CurrentZoneClusterCapacity(
+                                cluster_instance_name="m5.xlarge",
+                                cluster_instance=None,
+                                cluster_instance_count=Interval(
+                                    low=12, mid=12, high=12, confidence=1.0
+                                ),
+                            ),
+                        ]
+                    )
+                ),
+                "different instance counts",
+            ),
         ],
     )
     def test_error_cases(self, desires_factory, error_match):
