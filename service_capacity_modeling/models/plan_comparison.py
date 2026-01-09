@@ -710,14 +710,28 @@ def extract_baseline_plan(
             "and regional clusters. Only one type is supported for comparison."
         )
 
-    if zonal:
-        return _create_plan_from_current_cluster(
-            zonal[0], is_zonal=True, region=region, requirement_type=requirement_type
+    # Determine which cluster list to use
+    clusters = zonal if zonal else regional
+    is_zonal = bool(zonal)
+
+    # Validate homogeneity: all clusters must use the same instance type
+    instance_names = {c.cluster_instance_name for c in clusters}
+    if len(instance_names) > 1:
+        raise ValueError(
+            f"Cannot extract baseline: clusters are heterogeneous with different "
+            f"instance types: {sorted(instance_names)}. "
+            f"Baseline extraction requires all clusters to use the same instance type."
         )
-    else:
-        return _create_plan_from_current_cluster(
-            regional[0],
-            is_zonal=False,
-            region=region,
-            requirement_type=requirement_type,
+
+    # Validate homogeneity: all clusters must have the same instance count
+    instance_counts = {int(c.cluster_instance_count.mid) for c in clusters}
+    if len(instance_counts) > 1:
+        raise ValueError(
+            f"Cannot extract baseline: clusters have different instance counts: "
+            f"{sorted(instance_counts)}. "
+            f"Baseline extraction requires all clusters to have the same count."
         )
+
+    return _create_plan_from_current_cluster(
+        clusters[0], is_zonal=is_zonal, region=region, requirement_type=requirement_type
+    )
