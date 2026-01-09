@@ -1,6 +1,7 @@
 import math
 from typing import Any
 from typing import Dict
+from typing import List
 from typing import Optional
 
 from pydantic import BaseModel
@@ -547,6 +548,42 @@ class NflxDynamoDBCapacityModel(CapacityModel):
             requirements=Requirements(regional=[requirement]),
             candidate_clusters=clusters,
         )
+
+    @staticmethod
+    def service_costs(
+        service_type: str,
+        context: RegionContext,
+        desires: CapacityDesires,
+        requirement: CapacityRequirement,
+        extra_model_arguments: Dict[str, Any],
+    ) -> List[ServiceCapacity]:
+        """Calculate DynamoDB service costs.
+
+        DynamoDB is a managed service with no clusters. All costs are
+        service-based: reads, writes, storage, transfer, and backup.
+        """
+        _ = requirement  # DynamoDB costs are based on desires, not requirement
+        write_plan = _plan_writes(context, desires, extra_model_arguments)
+        read_plan = _plan_reads(context, desires, extra_model_arguments)
+        storage_plan = _plan_storage(context, desires)
+        backup_plan = _plan_backup(context, desires)
+        data_transfer_plan = _plan_data_transfer(context, desires)
+
+        return [
+            ServiceCapacity(
+                service_type=f"{service_type}.standard",
+                annual_cost=(
+                    write_plan.total_annual_write_cost
+                    + read_plan.total_annual_read_cost
+                    + storage_plan.total_annual_data_storage_cost
+                    + data_transfer_plan.total_annual_data_transfer_cost
+                ),
+            ),
+            ServiceCapacity(
+                service_type=f"{service_type}.backup",
+                annual_cost=backup_plan.total_annual_backup_cost,
+            ),
+        ]
 
     @staticmethod
     def description() -> str:
