@@ -549,6 +549,89 @@ class CapacityPlanner:
 
         return [functools.reduce(merge_plan, composed) for composed in zip(*results)]
 
+    def extract_baseline_plan(  # pylint: disable=too-many-positional-arguments
+        self,
+        model_name: str,
+        region: str,
+        desires: CapacityDesires,
+        requirement_type: str = "baseline",
+        num_regions: int = 3,
+        extra_model_arguments: Optional[Dict[str, Any]] = None,
+    ) -> CapacityPlan:
+        """Extract baseline plan from current clusters with model-specific costs.
+
+        Similar to plan_certain(), but creates a plan from the current deployment
+        rather than generating new recommendations. This enables fair cost comparison
+        between baseline and recommendation by including the same service costs
+        (network transfer, backup storage, etc.) in both.
+
+        Args:
+            model_name: Name of the registered capacity model
+                (e.g., "org.netflix.cassandra")
+            region: AWS region for pricing and context
+            desires: The capacity desires (must contain current_clusters)
+            requirement_type: Label for the capacity requirement
+                (default: "baseline")
+            num_regions: Number of regions for cross-region cost calculation
+                (default: 3)
+            extra_model_arguments: Optional model arguments
+                (e.g., copies_per_region)
+
+        Returns:
+            CapacityPlan representing the current deployment with full cost breakdown
+
+        Example::
+
+            # Get recommendation
+            recommendations = planner.plan_certain(
+                model_name="org.netflix.cassandra",
+                region="us-east-1",
+                desires=desires,
+            )
+            recommendation = recommendations[0]
+
+            # Get baseline with same cost structure
+            baseline = planner.extract_baseline_plan(
+                model_name="org.netflix.cassandra",
+                region="us-east-1",
+                desires=desires,
+                extra_model_arguments={"copies_per_region": 3},
+            )
+
+            # Now costs are comparable (both include network, backup, etc.)
+            result = compare_plans(baseline, recommendation)
+        """
+        if model_name not in self._models:
+            raise ValueError(
+                f"model_name={model_name} does not exist. "
+                f"Try {sorted(list(self._models.keys()))}"
+            )
+
+        model = self._models[model_name]
+        extra_model_arguments = extra_model_arguments or {}
+
+        # Build RegionContext with service pricing (same as generate_scenarios)
+        hardware = self._shapes.region(region)
+        context = RegionContext(
+            zones_in_region=hardware.zones_in_region,
+            services={n: s.model_copy(deep=True) for n, s in hardware.services.items()},
+            num_regions=num_regions,
+        )
+
+        # Import here to avoid circular imports
+        from service_capacity_modeling.models.plan_comparison import (
+            extract_baseline_plan as _extract_baseline,
+        )
+
+        return _extract_baseline(
+            desires=desires,
+            region=region,
+            requirement_type=requirement_type,
+            model=model,
+            context=context,
+            extra_model_arguments=extra_model_arguments,
+        )
+
     def _plan_certain(  # pylint: disable=too-many-positional-arguments
         self,
         model_name: str,

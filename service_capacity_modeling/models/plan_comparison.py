@@ -52,6 +52,9 @@ from pydantic import ConfigDict
 
 from service_capacity_modeling.enum_utils import enum_docstrings
 from service_capacity_modeling.enum_utils import StrEnum
+from typing import TYPE_CHECKING
+from typing import Any
+
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import (
     CapacityDesires,
@@ -63,11 +66,16 @@ from service_capacity_modeling.interface import (
     ExcludeUnsetModel,
     Instance,
     RegionClusterCapacity,
+    RegionContext,
     Requirements,
+    ServiceCapacity,
     ZoneClusterCapacity,
     certain_float,
     certain_int,
 )
+
+if TYPE_CHECKING:
+    from service_capacity_modeling.models import CapacityModel
 
 
 @enum_docstrings
@@ -559,11 +567,16 @@ def _get_disk_gib_from_cluster(cluster: CurrentClusterCapacity) -> float:
     return 0
 
 
+# pylint: disable-next=too-many-positional-arguments,too-many-locals
 def _create_plan_from_current_cluster(
     cluster: CurrentClusterCapacity,
     is_zonal: bool,
     region: str,
     requirement_type: str,
+    model: "CapacityModel | None" = None,
+    context: RegionContext | None = None,
+    desires: CapacityDesires | None = None,
+    extra_model_arguments: dict[str, Any] | None = None,
 ) -> CapacityPlan:
     """Create a synthetic CapacityPlan from a CurrentClusterCapacity.
 
@@ -575,6 +588,13 @@ def _create_plan_from_current_cluster(
         is_zonal: True if this is a zonal cluster, False for regional
         region: AWS region for looking up drive pricing and instance specs
         requirement_type: Label for the capacity requirement (e.g., "cassandra")
+        model: Optional model class for calculating service costs (network, backup).
+            When provided with context and desires, service_costs() is called.
+        context: Optional RegionContext with service pricing. Required for
+            service cost calculation.
+        desires: Optional CapacityDesires for service cost calculation.
+            Required for service cost calculation.
+        extra_model_arguments: Optional model arguments (e.g., copies_per_region)
 
     Returns:
         A CapacityPlan representing the current deployment with cost calculated
@@ -583,6 +603,8 @@ def _create_plan_from_current_cluster(
         ValueError: If instance cannot be resolved from cluster_instance or
             cluster_instance_name
     """
+    extra_model_arguments = extra_model_arguments or {}
+
     # Resolve instance: prefer cluster_instance, fall back to lookup by name
     if cluster.cluster_instance is not None:
         instance = cluster.cluster_instance
@@ -648,7 +670,29 @@ def _create_plan_from_current_cluster(
         drive_cost = priced_drive.annual_cost * count
         attached_drives = [priced_drive]
 
-    total_cost = instance_cost + drive_cost
+    # Calculate service costs (network, backup, etc.) if model provided
+    services: list[ServiceCapacity] = []
+    service_cost = 0.0
+    if model is not None and context is not None and desires is not None:
+        services = model.service_costs(
+            service_type=requirement_type,
+            context=context,
+            desires=desires,
+            requirement=requirement,
+            extra_model_arguments=extra_model_arguments,
+        )
+        service_cost = sum(s.annual_cost for s in services)
+
+    # Note: total_cost = instance_cost + drive_cost + service_cost
+    # This is reflected in the sum of annual_costs dict values
+    _ = service_cost  # Used indirectly via services list
+
+    # Build annual_costs dict with breakdown
+    annual_costs: dict[str, Decimal] = {}
+    cluster_key = "current.zonal" if is_zonal else "current.regional"
+    annual_costs[cluster_key] = Decimal(str(instance_cost + drive_cost))
+    for service in services:
+        annual_costs[service.service_type] = Decimal(str(service.annual_cost))
 
     if is_zonal:
         zonal_capacity = ZoneClusterCapacity(
@@ -656,11 +700,12 @@ def _create_plan_from_current_cluster(
             count=count,
             instance=instance,
             attached_drives=attached_drives,
-            annual_cost=total_cost,
+            annual_cost=instance_cost + drive_cost,
         )
         clusters = Clusters(
-            annual_costs={"current.zonal": Decimal(str(total_cost))},
+            annual_costs=annual_costs,
             zonal=[zonal_capacity],
+            services=services,
         )
     else:
         regional_capacity = RegionClusterCapacity(
@@ -668,11 +713,12 @@ def _create_plan_from_current_cluster(
             count=count,
             instance=instance,
             attached_drives=attached_drives,
-            annual_cost=total_cost,
+            annual_cost=instance_cost + drive_cost,
         )
         clusters = Clusters(
-            annual_costs={"current.regional": Decimal(str(total_cost))},
+            annual_costs=annual_costs,
             regional=[regional_capacity],
+            services=services,
         )
 
     return CapacityPlan(
@@ -681,8 +727,13 @@ def _create_plan_from_current_cluster(
     )
 
 
-def extract_baseline_plan(
-    desires: CapacityDesires, region: str, requirement_type: str = "baseline"
+def extract_baseline_plan(  # pylint: disable=too-many-positional-arguments
+    desires: CapacityDesires,
+    region: str,
+    requirement_type: str = "baseline",
+    model: "CapacityModel | None" = None,
+    context: RegionContext | None = None,
+    extra_model_arguments: dict[str, Any] | None = None,
 ) -> CapacityPlan:
     """Extract baseline plan from current clusters in desires.
 
@@ -690,6 +741,11 @@ def extract_baseline_plan(
         desires: The capacity desires (must contain current_clusters)
         region: AWS region for looking up drive pricing from hardware shapes
         requirement_type: Label for the capacity requirement (default: "baseline")
+        model: Optional model class for calculating service costs (network, backup).
+            If provided along with context, service costs will be included.
+        context: Optional RegionContext with service pricing. Required if model is
+            provided for service cost calculation.
+        extra_model_arguments: Optional model arguments (e.g., copies_per_region)
 
     Returns:
         CapacityPlan representing the current deployment
@@ -742,5 +798,12 @@ def extract_baseline_plan(
         )
 
     return _create_plan_from_current_cluster(
-        clusters[0], is_zonal=is_zonal, region=region, requirement_type=requirement_type
+        clusters[0],
+        is_zonal=is_zonal,
+        region=region,
+        requirement_type=requirement_type,
+        model=model,
+        context=context,
+        desires=desires,
+        extra_model_arguments=extra_model_arguments or {},
     )
