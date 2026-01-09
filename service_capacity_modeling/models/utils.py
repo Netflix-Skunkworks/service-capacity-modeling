@@ -4,7 +4,7 @@ from typing import Iterable
 from typing import List
 from typing import Tuple
 
-from service_capacity_modeling.models import CapacityPlan
+from service_capacity_modeling.interface import CapacityPlan
 
 
 def reduce_by_family(

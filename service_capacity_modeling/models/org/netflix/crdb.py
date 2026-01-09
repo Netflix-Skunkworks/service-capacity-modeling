@@ -3,6 +3,7 @@ import math
 from decimal import Decimal
 from typing import Any
 from typing import Dict
+from typing import List
 from typing import Optional
 
 from pydantic import BaseModel
@@ -29,6 +30,7 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
@@ -328,6 +330,37 @@ class NflxCockroachDBCapacityModel(CapacityModel):
             min_vcpu_per_instance=min_vcpu_per_instance,
             license_fee_per_core=license_fee_per_core,
         )
+
+    @staticmethod
+    def service_costs(
+        service_type: str,
+        context: RegionContext,
+        desires: CapacityDesires,
+        requirement: CapacityRequirement,
+        extra_model_arguments: Dict[str, Any],
+    ) -> List[ServiceCapacity]:
+        """Calculate CockroachDB service costs (license fees).
+
+        CockroachDB has per-core licensing fees based on the provisioned
+        CPU cores.
+        """
+        _ = (desires, extra_model_arguments)  # Not used for license calculation
+        license_fee_per_core = context.services[
+            "crdb_core_license"
+        ].annual_cost_per_core
+
+        # Calculate total cores from requirement (per-zone) * zones
+        total_cores = requirement.cpu_cores.mid * context.zones_in_region
+        license_cost = total_cores * license_fee_per_core
+
+        if license_cost > 0:
+            return [
+                ServiceCapacity(
+                    service_type=f"{service_type}.license",
+                    annual_cost=license_cost,
+                )
+            ]
+        return []
 
     @staticmethod
     def description() -> str:
