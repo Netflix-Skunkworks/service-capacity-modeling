@@ -473,7 +473,7 @@ def compare_plans(
 
     Example:
         >>> result = compare_plans(baseline, recommended)
-        >>> if result.cpu.is_over_provisioned:
+        >>> if result.cpu.exceeds_lower_bound:
         ...     print("Current has excess CPU capacity")
         >>> for diff in result.get_out_of_tolerance():
         ...     print(diff)  # Human-readable explanation
@@ -596,6 +596,15 @@ def _create_plan_from_current_cluster(
                 f"instance name from the hardware catalog."
             )
         instance = regional_instances[instance_name]
+
+    # Validate that instance has pricing information
+    if instance.annual_cost == 0:
+        raise ValueError(
+            f"Instance '{instance.name}' has annual_cost=0. "
+            f"This would result in incorrect baseline cost calculations. "
+            f"Either use an instance from the hardware catalog (which includes "
+            f"pricing) or ensure cluster_instance.annual_cost is set."
+        )
 
     count = int(cluster.cluster_instance_count.mid)
     disk_gib_per_node = _get_disk_gib_from_cluster(cluster)

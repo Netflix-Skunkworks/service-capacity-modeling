@@ -680,6 +680,29 @@ class TestExtractBaselinePlan:
                 ),
                 "different instance counts",
             ),
+            (
+                lambda: CapacityDesires(
+                    current_clusters=CurrentClusters(
+                        zonal=[
+                            CurrentZoneClusterCapacity(
+                                cluster_instance_name="test-instance",
+                                cluster_instance=Instance(
+                                    name="test-instance",
+                                    cpu=4,
+                                    cpu_ghz=2.3,
+                                    ram_gib=16,
+                                    net_mbps=10000,
+                                    annual_cost=0,  # Missing pricing!
+                                ),
+                                cluster_instance_count=Interval(
+                                    low=3, mid=3, high=3, confidence=1.0
+                                ),
+                            )
+                        ]
+                    )
+                ),
+                "annual_cost=0",
+            ),
         ],
     )
     def test_error_cases(self, desires_factory, error_match):
