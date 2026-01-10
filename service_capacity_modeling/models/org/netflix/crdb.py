@@ -1,10 +1,9 @@
 import logging
 import math
-from decimal import Decimal
 from typing import Any
 from typing import Dict
-from typing import List
 from typing import Optional
+from typing import Sequence
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -29,8 +28,8 @@ from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Requirements
-from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
@@ -232,8 +231,11 @@ def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-p
         # required_write_buffer_gib=...
     )
 
-    # Communicate to the actual provision that if we want reduced RF
-    params = {"cockroachdb.copies": copies_per_region}
+    # Store params for cluster_costs() to read
+    params = {
+        "cockroachdb.copies": copies_per_region,
+        "cockroachdb.license_fee_per_core": license_fee_per_core,
+    }
     _upsert_params(cluster, params)
 
     # cockroachdb clusters generally should try to stay under some total number
@@ -247,13 +249,13 @@ def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-p
     if cluster.count > (max_regional_size // zones_per_region):
         return None
 
-    ec2_cost = zones_per_region * cluster.annual_cost
-    license_fee = zones_per_region * (cluster.instance.cpu * license_fee_per_core)
-
     cluster.cluster_type = "cockroachdb"
+    zonal_clusters = [cluster] * zones_per_region
     clusters = Clusters(
-        annual_costs={"cockroachdb-zonal": Decimal(ec2_cost + license_fee)},
-        zonal=[cluster] * zones_per_region,
+        annual_costs=NflxCockroachDBCapacityModel.cluster_costs(
+            "cockroachdb", zonal_clusters, []
+        ),
+        zonal=zonal_clusters,
         regional=[],
     )
 
@@ -289,6 +291,36 @@ class NflxCockroachDBCapacityModel(CapacityModel):
         return Buffers(
             default=Buffer(ratio=1.2),
         )
+
+    @staticmethod
+    def cluster_costs(
+        service_type: str,
+        zonal_clusters: Sequence[ClusterCapacity],
+        regional_clusters: Sequence[ClusterCapacity],
+    ) -> Dict[str, float]:
+        """Calculate CockroachDB cluster infrastructure costs.
+
+        CockroachDB costs include:
+        - EC2 compute costs (from cluster.annual_cost)
+        - Per-core license fees (from cluster_params)
+        """
+        _ = regional_clusters  # CockroachDB uses zonal clusters only
+        if not zonal_clusters:
+            return {}
+
+        # Sum EC2 costs
+        ec2_cost = sum(c.annual_cost for c in zonal_clusters)
+
+        # Calculate license fee from cluster_params
+        license_fee = 0.0
+        for cluster in zonal_clusters:
+            fee_per_core: float = cluster.cluster_params[
+                "cockroachdb.license_fee_per_core"
+            ]
+            license_fee += cluster.count * cluster.instance.cpu * fee_per_core
+
+        total = ec2_cost + license_fee
+        return {f"{service_type}-zonal": total}
 
     @staticmethod
     def capacity_plan(
@@ -330,37 +362,6 @@ class NflxCockroachDBCapacityModel(CapacityModel):
             min_vcpu_per_instance=min_vcpu_per_instance,
             license_fee_per_core=license_fee_per_core,
         )
-
-    @staticmethod
-    def service_costs(
-        service_type: str,
-        context: RegionContext,
-        desires: CapacityDesires,
-        requirement: CapacityRequirement,
-        extra_model_arguments: Dict[str, Any],
-    ) -> List[ServiceCapacity]:
-        """Calculate CockroachDB service costs (license fees).
-
-        CockroachDB has per-core licensing fees based on the provisioned
-        CPU cores.
-        """
-        _ = (desires, extra_model_arguments)  # Not used for license calculation
-        license_fee_per_core = context.services[
-            "crdb_core_license"
-        ].annual_cost_per_core
-
-        # Calculate total cores from requirement (per-zone) * zones
-        total_cores = requirement.cpu_cores.mid * context.zones_in_region
-        license_cost = total_cores * license_fee_per_core
-
-        if license_cost > 0:
-            return [
-                ServiceCapacity(
-                    service_type=f"{service_type}.license",
-                    annual_cost=license_cost,
-                )
-            ]
-        return []
 
     @staticmethod
     def description() -> str:

@@ -446,7 +446,6 @@ class NflxEVCacheCapacityModel(CapacityModel):
         """
         _ = requirement  # Not used for EVCache network cost calculation
 
-        # Access directly - raises KeyError if missing
         cross_region_replication = Replication(
             extra_model_arguments["cross_region_replication"]
         )

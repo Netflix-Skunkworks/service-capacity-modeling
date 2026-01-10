@@ -755,7 +755,6 @@ class NflxCassandraCapacityModel(CapacityModel):
         Raises:
             KeyError: If copies_per_region is not in extra_model_arguments
         """
-        # Access directly - raises KeyError if missing
         copies_per_region: int = extra_model_arguments["copies_per_region"]
 
         services: List[ServiceCapacity] = []
