@@ -303,8 +303,8 @@ class CapacityModel:
     @staticmethod
     def cluster_costs(
         service_type: str,
-        zonal_clusters: Sequence["ClusterCapacity"],
-        regional_clusters: Sequence["ClusterCapacity"],
+        zonal_clusters: Sequence["ClusterCapacity"] = (),
+        regional_clusters: Sequence["ClusterCapacity"] = (),
     ) -> Dict[str, float]:
         """Calculate cluster infrastructure costs (instances, drives).
 

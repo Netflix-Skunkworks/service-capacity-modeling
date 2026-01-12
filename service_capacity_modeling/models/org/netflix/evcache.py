@@ -353,11 +353,8 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     evcache_costs = NflxEVCacheCapacityModel.cluster_costs(
         service_type="evcache",
         zonal_clusters=zonal_clusters,
-        regional_clusters=[],
     )
-
-    for s in services:
-        evcache_costs[f"{s.service_type}"] = s.annual_cost
+    evcache_costs.update({s.service_type: s.annual_cost for s in services})
 
     clusters = Clusters(
         annual_costs=evcache_costs,
@@ -405,24 +402,27 @@ class NflxEVCacheCapacityModel(CapacityModel):
     @staticmethod
     def cluster_costs(
         service_type: str,
-        zonal_clusters: Sequence[ClusterCapacity],
-        regional_clusters: Sequence[ClusterCapacity],
+        zonal_clusters: Sequence[ClusterCapacity] = (),
+        regional_clusters: Sequence[ClusterCapacity] = (),
     ) -> Dict[str, float]:
         """Calculate EVCache cluster infrastructure costs.
 
         EVCache uses zonal clusters only. Includes:
-        - "{service_type}.zonal-clusters": sum of cluster annual costs
+        - "{service_type}.zonal-clusters": sum of cluster annual costs (via base)
         - "{service_type}.spread.cost": penalty for small clusters
         """
-        _ = regional_clusters  # EVCache doesn't use regional clusters
-        costs: Dict[str, float] = {}
+        # Get base cluster costs from parent class
+        costs = CapacityModel.cluster_costs(
+            service_type=service_type,
+            zonal_clusters=zonal_clusters,
+            regional_clusters=regional_clusters,
+        )
+
+        # Add spread cost penalty for small clusters
         if zonal_clusters:
-            costs[f"{service_type}.zonal-clusters"] = sum(
-                c.annual_cost for c in zonal_clusters
-            )
-            # Add spread cost penalty for small clusters
             cluster_count = zonal_clusters[0].count
             costs[f"{service_type}.spread.cost"] = calculate_spread_cost(cluster_count)
+
         return costs
 
     @staticmethod

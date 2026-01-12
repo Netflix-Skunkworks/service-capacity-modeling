@@ -395,7 +395,6 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     kafka_costs = NflxKafkaCapacityModel.cluster_costs(
         service_type="kafka",
         zonal_clusters=zonal_clusters,
-        regional_clusters=[],
     )
 
     clusters = Clusters(

@@ -122,9 +122,9 @@ class NflxZookeeperCapacityModel(CapacityModel):
             zonal = [soln(1), soln(1), soln(1)]
 
         clusters = Clusters(
-            annual_costs={
-                "zk-zonal.zonal-clusters": (round(sum(z.annual_cost for z in zonal), 2))
-            },
+            annual_costs=NflxZookeeperCapacityModel.cluster_costs(
+                service_type="zk-zonal", zonal_clusters=zonal
+            ),
             zonal=zonal,
             regional=[],
             services=[],

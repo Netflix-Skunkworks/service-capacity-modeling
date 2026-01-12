@@ -253,7 +253,7 @@ def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-p
     zonal_clusters = [cluster] * zones_per_region
     clusters = Clusters(
         annual_costs=NflxCockroachDBCapacityModel.cluster_costs(
-            "cockroachdb", zonal_clusters, []
+            service_type="cockroachdb", zonal_clusters=zonal_clusters
         ),
         zonal=zonal_clusters,
         regional=[],
@@ -295,8 +295,8 @@ class NflxCockroachDBCapacityModel(CapacityModel):
     @staticmethod
     def cluster_costs(
         service_type: str,
-        zonal_clusters: Sequence[ClusterCapacity],
-        regional_clusters: Sequence[ClusterCapacity],
+        zonal_clusters: Sequence[ClusterCapacity] = (),
+        regional_clusters: Sequence[ClusterCapacity] = (),
     ) -> Dict[str, float]:
         """Calculate CockroachDB cluster infrastructure costs.
 
@@ -304,7 +304,6 @@ class NflxCockroachDBCapacityModel(CapacityModel):
         - EC2 compute costs (from cluster.annual_cost)
         - Per-core license fees (from cluster_params)
         """
-        _ = regional_clusters  # CockroachDB uses zonal clusters only
         if not zonal_clusters:
             return {}
 

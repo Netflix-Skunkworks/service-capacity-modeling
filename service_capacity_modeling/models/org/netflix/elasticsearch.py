@@ -333,14 +333,12 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         if data_cluster.count > (max_regional_size // zones_in_region):
             return None
 
-        ec2_costs = {
-            "elasticsearch-data.zonal-clusters": zones_in_region
-            * data_cluster.annual_cost
-        }
-
+        zonal_clusters = [data_cluster] * zones_in_region
         clusters = Clusters(
-            annual_costs=ec2_costs,
-            zonal=[data_cluster] * zones_in_region,
+            annual_costs=NflxElasticsearchDataCapacityModel.cluster_costs(
+                service_type="elasticsearch-data", zonal_clusters=zonal_clusters
+            ),
+            zonal=zonal_clusters,
             regional=[],
         )
 
@@ -385,10 +383,12 @@ class NflxElasticsearchMasterCapacityModel(CapacityModel):
 
         # TODO(josephl): This probably needs network transfer costs like
         # C*, EVCache, etc ... have
-        ec2_cost = zones_in_region * cluster.annual_cost
+        zonal_clusters = [cluster] * zones_in_region
         clusters = Clusters(
-            annual_costs={"elasticsearch-master.zonal-clusters": ec2_cost},
-            zonal=[cluster] * zones_in_region,
+            annual_costs=NflxElasticsearchMasterCapacityModel.cluster_costs(
+                service_type="elasticsearch-master", zonal_clusters=zonal_clusters
+            ),
+            zonal=zonal_clusters,
         )
 
         return CapacityPlan(
@@ -428,10 +428,12 @@ class NflxElasticsearchSearchCapacityModel(CapacityModel):
             annual_cost=instance.annual_cost,
         )
 
-        ec2_cost = zones_in_region * cluster.annual_cost
+        zonal_clusters = [cluster] * zones_in_region
         clusters = Clusters(
-            annual_costs={"elasticsearch-search.zonal-clusters": ec2_cost},
-            zonal=[cluster] * zones_in_region,
+            annual_costs=NflxElasticsearchSearchCapacityModel.cluster_costs(
+                service_type="elasticsearch-search", zonal_clusters=zonal_clusters
+            ),
+            zonal=zonal_clusters,
         )
 
         return CapacityPlan(

@@ -125,7 +125,6 @@ def _estimate_java_app_region(  # pylint: disable=too-many-positional-arguments
         # Calculate cluster costs using the model's method
         costs: Dict[str, Any] = NflxJavaAppCapacityModel.cluster_costs(
             service_type="nflx-java-app",
-            zonal_clusters=[],
             regional_clusters=regional_clusters,
         )
 
@@ -137,8 +136,7 @@ def _estimate_java_app_region(  # pylint: disable=too-many-positional-arguments
             requirement=requirement,
             extra_model_arguments={},
         )
-        for s in services:
-            costs[s.service_type] = s.annual_cost
+        costs.update({s.service_type: s.annual_cost for s in services})
 
         return CapacityPlan(
             requirements=Requirements(regional=[requirement]),

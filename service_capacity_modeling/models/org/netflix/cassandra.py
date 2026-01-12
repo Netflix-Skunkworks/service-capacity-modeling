@@ -552,10 +552,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     cassandra_costs = NflxCassandraCapacityModel.cluster_costs(
         service_type="cassandra",
         zonal_clusters=zonal_clusters,
-        regional_clusters=[],
     )
-    for s in cap_services:
-        cassandra_costs[f"{s.service_type}"] = s.annual_cost
+    cassandra_costs.update({s.service_type: s.annual_cost for s in cap_services})
 
     clusters = Clusters(
         annual_costs=cassandra_costs,
