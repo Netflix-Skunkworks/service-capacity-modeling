@@ -206,10 +206,11 @@ def _estimate_rds_regional(
     cluster.cluster_params["rds.replicas"] = replicas
 
     regional_clusters = [cluster]
+    rds_costs = NflxRDSCapacityModel.cluster_costs(
+        service_type="rds-cluster", regional_clusters=regional_clusters
+    )
     clusters = Clusters(
-        annual_costs=NflxRDSCapacityModel.cluster_costs(
-            service_type="rds-cluster", regional_clusters=regional_clusters
-        ),
+        annual_costs=rds_costs,
         zonal=[],
         regional=regional_clusters,
     )

@@ -334,10 +334,11 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             return None
 
         zonal_clusters = [data_cluster] * zones_in_region
+        es_data_costs = NflxElasticsearchDataCapacityModel.cluster_costs(
+            service_type="elasticsearch-data", zonal_clusters=zonal_clusters
+        )
         clusters = Clusters(
-            annual_costs=NflxElasticsearchDataCapacityModel.cluster_costs(
-                service_type="elasticsearch-data", zonal_clusters=zonal_clusters
-            ),
+            annual_costs=es_data_costs,
             zonal=zonal_clusters,
             regional=[],
         )
@@ -384,10 +385,11 @@ class NflxElasticsearchMasterCapacityModel(CapacityModel):
         # TODO(josephl): This probably needs network transfer costs like
         # C*, EVCache, etc ... have
         zonal_clusters = [cluster] * zones_in_region
+        es_master_costs = NflxElasticsearchMasterCapacityModel.cluster_costs(
+            service_type="elasticsearch-master", zonal_clusters=zonal_clusters
+        )
         clusters = Clusters(
-            annual_costs=NflxElasticsearchMasterCapacityModel.cluster_costs(
-                service_type="elasticsearch-master", zonal_clusters=zonal_clusters
-            ),
+            annual_costs=es_master_costs,
             zonal=zonal_clusters,
         )
 
@@ -429,10 +431,11 @@ class NflxElasticsearchSearchCapacityModel(CapacityModel):
         )
 
         zonal_clusters = [cluster] * zones_in_region
+        es_search_costs = NflxElasticsearchSearchCapacityModel.cluster_costs(
+            service_type="elasticsearch-search", zonal_clusters=zonal_clusters
+        )
         clusters = Clusters(
-            annual_costs=NflxElasticsearchSearchCapacityModel.cluster_costs(
-                service_type="elasticsearch-search", zonal_clusters=zonal_clusters
-            ),
+            annual_costs=es_search_costs,
             zonal=zonal_clusters,
         )
 

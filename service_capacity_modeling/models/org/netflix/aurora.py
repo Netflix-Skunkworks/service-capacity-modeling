@@ -259,10 +259,11 @@ def _estimate_aurora_regional(
     cluster.cluster_params["aurora.replicas"] = replicas
 
     regional_clusters = [cluster]
+    aurora_costs = NflxAuroraCapacityModel.cluster_costs(
+        service_type="aurora-cluster", regional_clusters=regional_clusters
+    )
     clusters = Clusters(
-        annual_costs=NflxAuroraCapacityModel.cluster_costs(
-            service_type="aurora-cluster", regional_clusters=regional_clusters
-        ),
+        annual_costs=aurora_costs,
         zonal=[],
         regional=regional_clusters,
     )
