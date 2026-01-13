@@ -393,7 +393,7 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
 
     # Account for the clusters and replication costs
     kafka_costs = NflxKafkaCapacityModel.cluster_costs(
-        service_type="kafka",
+        service_type=NflxKafkaCapacityModel.service_name,
         zonal_clusters=zonal_clusters,
     )
 
@@ -468,6 +468,8 @@ class NflxKafkaArguments(BaseModel):
 
 
 class NflxKafkaCapacityModel(CapacityModel):
+    service_name = "kafka"
+
     HA_DEFAULT_REPLICATION_FACTOR = 2
     SC_DEFAULT_REPLICATION_FACTOR = 3
 

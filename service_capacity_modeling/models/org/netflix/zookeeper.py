@@ -85,6 +85,8 @@ class NflxZookeeperArguments(BaseModel):
 
 
 class NflxZookeeperCapacityModel(CapacityModel):
+    service_name = "zk-zonal"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,
@@ -122,7 +124,8 @@ class NflxZookeeperCapacityModel(CapacityModel):
             zonal = [soln(1), soln(1), soln(1)]
 
         zk_costs = NflxZookeeperCapacityModel.cluster_costs(
-            service_type="zk-zonal", zonal_clusters=zonal
+            service_type=NflxZookeeperCapacityModel.service_name,
+            zonal_clusters=zonal,
         )
         clusters = Clusters(
             annual_costs=zk_costs,

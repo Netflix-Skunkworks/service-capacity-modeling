@@ -205,7 +205,6 @@ def _compute_aurora_region(  # pylint: disable=too-many-positional-arguments
         instance=instance,
         attached_drives=attached_drives,
         annual_cost=total_annual_cost,
-        cluster_params={"instance_cost": instance.annual_cost},
     )
 
 
@@ -250,17 +249,13 @@ def _estimate_aurora_regional(
     if not cluster:
         return None
 
-    if desires.service_tier < 3:
-        replicas = 2
-    else:
-        replicas = 1
-
-    # Store replicas in cluster_params for cluster_costs() to use
-    cluster.cluster_params["aurora.replicas"] = replicas
+    # Replicas for requirements: tier < 3 gets 2, otherwise 1
+    replicas = 2 if desires.service_tier < 3 else 1
 
     regional_clusters = [cluster]
     aurora_costs = NflxAuroraCapacityModel.cluster_costs(
-        service_type="aurora-cluster", regional_clusters=regional_clusters
+        service_type=NflxAuroraCapacityModel.service_name,
+        regional_clusters=regional_clusters,
     )
     clusters = Clusters(
         annual_costs=aurora_costs,
@@ -287,6 +282,8 @@ class NflxAuroraArguments(BaseModel):
 
 
 class NflxAuroraCapacityModel(CapacityModel):
+    service_name = "aurora-cluster"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,
@@ -310,18 +307,21 @@ class NflxAuroraCapacityModel(CapacityModel):
     ) -> Dict[str, float]:
         """Calculate Aurora cluster infrastructure costs.
 
-        Aurora has a writer node (annual_cost) plus read replicas
-        (instance_cost per replica). Both values are stored in cluster_params.
+        Aurora has a writer (annual_cost includes storage/IO) plus read replicas
+        (just instance cost). Replicas derived from cluster.count.
         """
         if not regional_clusters:
             return {}
 
         total_cost = 0.0
         for cluster in regional_clusters:
-            replicas: int = cluster.cluster_params["aurora.replicas"]
-            instance_cost: float = cluster.cluster_params["instance_cost"]
             # Writer cost + read replica costs
-            total_cost += cluster.annual_cost + (replicas - 1) * instance_cost
+            # annual_cost = writer (instance + storage + IO)
+            # Read replicas only pay instance cost (no separate IO)
+            num_readers = cluster.count - 1
+            total_cost += (
+                cluster.annual_cost + num_readers * cluster.instance.annual_cost
+            )
 
         return {f"{service_type}.regional-clusters": total_cost}
 

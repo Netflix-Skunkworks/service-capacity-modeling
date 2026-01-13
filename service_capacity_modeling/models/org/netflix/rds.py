@@ -202,12 +202,13 @@ def _estimate_rds_regional(
     else:
         replicas = 1
 
-    # Store replicas in cluster_params for cluster_costs() to use
-    cluster.cluster_params["rds.replicas"] = replicas
+    # Include replicas in annual_cost (annual_cost already has instance + drive)
+    cluster.annual_cost *= replicas
 
     regional_clusters = [cluster]
     rds_costs = NflxRDSCapacityModel.cluster_costs(
-        service_type="rds-cluster", regional_clusters=regional_clusters
+        service_type=NflxRDSCapacityModel.service_name,
+        regional_clusters=regional_clusters,
     )
     clusters = Clusters(
         annual_costs=rds_costs,
@@ -234,6 +235,8 @@ class NflxRDSArguments(BaseModel):
 
 
 class NflxRDSCapacityModel(CapacityModel):
+    service_name = "rds-cluster"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,
@@ -257,17 +260,14 @@ class NflxRDSCapacityModel(CapacityModel):
     ) -> Dict[str, float]:
         """Calculate RDS cluster infrastructure costs.
 
-        RDS is regional, so we use regional_clusters. Cost is EC2 cost
-        multiplied by the replica count stored in cluster_params.
+        RDS is regional. The annual_cost already includes:
+        - From capacity_plan(): (instance + drive) * replicas
+        - From baseline extraction: (instance + drive) * count
         """
         if not regional_clusters:
             return {}
 
-        total_cost = 0.0
-        for cluster in regional_clusters:
-            replicas: int = cluster.cluster_params["rds.replicas"]
-            total_cost += cluster.annual_cost * replicas
-
+        total_cost = sum(cluster.annual_cost for cluster in regional_clusters)
         return {f"{service_type}.regional-clusters": total_cost}
 
     @staticmethod

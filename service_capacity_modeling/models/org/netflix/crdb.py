@@ -252,7 +252,8 @@ def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-p
     cluster.cluster_type = "cockroachdb"
     zonal_clusters = [cluster] * zones_per_region
     crdb_costs = NflxCockroachDBCapacityModel.cluster_costs(
-        service_type="cockroachdb", zonal_clusters=zonal_clusters
+        service_type=NflxCockroachDBCapacityModel.service_name,
+        zonal_clusters=zonal_clusters,
     )
     clusters = Clusters(
         annual_costs=crdb_costs,
@@ -287,6 +288,8 @@ class NflxCockroachDBArguments(BaseModel):
 
 
 class NflxCockroachDBCapacityModel(CapacityModel):
+    service_name = "cockroachdb"
+
     @staticmethod
     def default_buffers() -> Buffers:
         return Buffers(

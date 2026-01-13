@@ -426,6 +426,8 @@ def _plan_backup(
 
 
 class NflxDynamoDBCapacityModel(CapacityModel):
+    service_name = "dynamodb"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,
@@ -482,7 +484,7 @@ class NflxDynamoDBCapacityModel(CapacityModel):
 
         # Calculate service costs using the model's service_costs method
         dynamo_services = NflxDynamoDBCapacityModel.service_costs(
-            service_type="dynamo",
+            service_type=NflxDynamoDBCapacityModel.service_name,
             context=context,
             desires=desires,
             requirement=requirement,
