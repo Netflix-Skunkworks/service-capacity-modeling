@@ -595,8 +595,10 @@ class TestExtractBaselinePlan:
         assert len(baseline.requirements.zonal) == 1
         assert len(baseline.requirements.regional) == 0
         req = baseline.requirements.zonal[0]
-        # i3.xlarge has 4 cores, so 4 × 8 = 32 cores
-        assert req.cpu_cores.mid == 32
+        # i3.xlarge from hardware catalog: 4 cores, 30.65 GiB RAM, 885 GiB NVMe
+        assert req.cpu_cores.mid == 32  # 4 × 8 nodes
+        assert req.mem_gib.mid == 245.2  # 30.65 × 8 nodes
+        assert req.disk_gib.mid == 7080  # 885 × 8 nodes
 
     def test_regional_cluster_extraction(self):
         """Extract baseline from regional cluster using Aurora model."""
@@ -761,7 +763,16 @@ class TestExtractBaselinePlan:
     def test_integration_extract_and_compare(self):
         """Full integration: extract baseline and compare with recommended.
 
-        Uses CapacityPlanner.extract_baseline_plan() with model-specific costs.
+        Baseline (extracted from current cluster):
+            Instance: i3.xlarge (4 cores @ 2.3 GHz, IPC 1.0, from hardware catalog)
+            Count: 8 nodes
+            Raw CPU: 4 × 8 = 32 cores
+            Normalized: 32 × (2.3 × 1.0) / (2.3 × 1.0) = 32.0 ref cores
+            RAM: 30.65 × 8 = 245.2 GiB
+            Disk: 885 × 8 = 7080 GiB
+
+        Recommended (from _create_plan):
+            Adjusted to be within ±10% of baseline for all resources.
         """
         current = CurrentZoneClusterCapacity(
             cluster_instance_name="i3.xlarge",
@@ -777,15 +788,16 @@ class TestExtractBaselinePlan:
             extra_model_arguments={"copies_per_region": 3},
         )
 
+        # Create recommended plan with values within ±10% of baseline
+        # Baseline from i3.xlarge × 8 nodes: 32 cores, 245.2 GiB RAM, 7080 GiB disk,
+        # 8000 Mbps network, ~11032 cost
         recommended = _create_plan(
-            cpu_cores=35,
-            mem_gib=250,
-            disk_gib=7500,
-            network_mbps=85000,
-            annual_cost=21000,
+            cpu_cores=35,  # 1.09x baseline (within ±10%)
+            mem_gib=250,  # 1.02x baseline (within ±10%)
+            disk_gib=7200,  # 1.02x baseline (within ±10%)
+            network_mbps=8500,  # 1.06x baseline (within ±10%), adjusted from 85000
+            annual_cost=11500,  # 1.04x baseline (within ±10%), adjusted from 21000
         )
 
         result = compare_plans(baseline, recommended)
-        # Verify comparison works (exact equivalence depends on actual instance specs)
-        assert result is not None
-        assert hasattr(result, "is_equivalent")
+        assert result.is_equivalent
