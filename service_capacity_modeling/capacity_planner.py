@@ -223,7 +223,22 @@ def _convert_current_clusters(
     service_type: str,
     is_zonal: bool,
 ) -> Tuple[List[ClusterCapacity], List[CapacityRequirement]]:
-    """Convert CurrentClusterCapacity to ClusterCapacity and CapacityRequirement."""
+    """Convert current deployment to ClusterCapacity and CapacityRequirement.
+
+    Follows the same cost calculation pattern as compute_stateful_zone():
+    - annual_cost = (instance.annual_cost + drive.annual_cost) × count
+    - Drives are priced using hardware.price_drive() to get catalog pricing
+    - Instance specs (CPU, RAM, network) are multiplied by count for requirements
+
+    Args:
+        clusters: Current cluster capacities from deployment
+        hardware: Hardware catalog for the region (used to price drives)
+        service_type: Service name for cluster_type labeling
+        is_zonal: True for ZoneClusterCapacity, False for RegionClusterCapacity
+
+    Returns:
+        Tuple of (capacities, requirements) lists for building CapacityPlan
+    """
 
     capacities: List[ClusterCapacity] = []
     requirements: List[CapacityRequirement] = []
