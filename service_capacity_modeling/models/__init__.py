@@ -110,6 +110,10 @@ class CapacityModel:
 
     """
 
+    # Default service name for cost key naming. Override in subclasses.
+    # Used by extract_baseline_plan() to calculate tech-specific costs.
+    service_name: str = "unknown"
+
     def __init__(self) -> None:
         pass
 

@@ -538,7 +538,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     # Calculate service costs (network + backup) using the model's service_costs method
     # This is defined later in NflxCassandraCapacityModel but we call it here for DRY
     cap_services = NflxCassandraCapacityModel.service_costs(
-        service_type="cassandra",
+        service_type=NflxCassandraCapacityModel.service_name,
         context=context,
         desires=desires,
         requirement=requirement,
@@ -550,7 +550,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
 
     # Account for the clusters, backup, and network costs
     cassandra_costs = NflxCassandraCapacityModel.cluster_costs(
-        service_type="cassandra",
+        service_type=NflxCassandraCapacityModel.service_name,
         zonal_clusters=zonal_clusters,
     )
     cassandra_costs.update({s.service_type: s.annual_cost for s in cap_services})
@@ -703,6 +703,8 @@ class NflxCassandraArguments(BaseModel):
 
 
 class NflxCassandraCapacityModel(CapacityModel):
+    service_name = "cassandra"
+
     def __init__(self) -> None:
         pass
 

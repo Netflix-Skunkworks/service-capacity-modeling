@@ -336,7 +336,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
 
     # Calculate service costs (network transfer) using the model's service_costs method
     services = NflxEVCacheCapacityModel.service_costs(
-        service_type="evcache",
+        service_type=NflxEVCacheCapacityModel.service_name,
         context=context,
         desires=desires,
         requirement=requirement,
@@ -351,7 +351,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
 
     # Account for the clusters and replication costs
     evcache_costs = NflxEVCacheCapacityModel.cluster_costs(
-        service_type="evcache",
+        service_type=NflxEVCacheCapacityModel.service_name,
         zonal_clusters=zonal_clusters,
     )
     evcache_costs.update({s.service_type: s.annual_cost for s in services})
@@ -399,6 +399,8 @@ class NflxEVCacheArguments(BaseModel):
 
 
 class NflxEVCacheCapacityModel(CapacityModel):
+    service_name = "evcache"
+
     @staticmethod
     def cluster_costs(
         service_type: str,

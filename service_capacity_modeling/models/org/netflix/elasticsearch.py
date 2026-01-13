@@ -186,6 +186,8 @@ class NflxElasticsearchArguments(BaseModel):
 
 
 class NflxElasticsearchDataCapacityModel(CapacityModel):
+    service_name = "elasticsearch-data"
+
     @staticmethod
     def default_buffers() -> Buffers:
         return Buffers(
@@ -335,7 +337,8 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
 
         zonal_clusters = [data_cluster] * zones_in_region
         es_data_costs = NflxElasticsearchDataCapacityModel.cluster_costs(
-            service_type="elasticsearch-data", zonal_clusters=zonal_clusters
+            service_type=NflxElasticsearchDataCapacityModel.service_name,
+            zonal_clusters=zonal_clusters,
         )
         clusters = Clusters(
             annual_costs=es_data_costs,
@@ -352,6 +355,8 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
 
 
 class NflxElasticsearchMasterCapacityModel(CapacityModel):
+    service_name = "elasticsearch-master"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,
@@ -386,7 +391,8 @@ class NflxElasticsearchMasterCapacityModel(CapacityModel):
         # C*, EVCache, etc ... have
         zonal_clusters = [cluster] * zones_in_region
         es_master_costs = NflxElasticsearchMasterCapacityModel.cluster_costs(
-            service_type="elasticsearch-master", zonal_clusters=zonal_clusters
+            service_type=NflxElasticsearchMasterCapacityModel.service_name,
+            zonal_clusters=zonal_clusters,
         )
         clusters = Clusters(
             annual_costs=es_master_costs,
@@ -400,6 +406,8 @@ class NflxElasticsearchMasterCapacityModel(CapacityModel):
 
 
 class NflxElasticsearchSearchCapacityModel(CapacityModel):
+    service_name = "elasticsearch-search"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,
@@ -432,7 +440,8 @@ class NflxElasticsearchSearchCapacityModel(CapacityModel):
 
         zonal_clusters = [cluster] * zones_in_region
         es_search_costs = NflxElasticsearchSearchCapacityModel.cluster_costs(
-            service_type="elasticsearch-search", zonal_clusters=zonal_clusters
+            service_type=NflxElasticsearchSearchCapacityModel.service_name,
+            zonal_clusters=zonal_clusters,
         )
         clusters = Clusters(
             annual_costs=es_search_costs,
