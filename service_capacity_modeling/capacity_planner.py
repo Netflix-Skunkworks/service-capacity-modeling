@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# pylint: disable=too-many-lines
 import functools
 import logging
 import math
@@ -23,6 +24,9 @@ from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import ClusterCapacity
+from service_capacity_modeling.interface import Clusters
+from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Hardware
@@ -33,9 +37,11 @@ from service_capacity_modeling.interface import Lifecycle
 from service_capacity_modeling.interface import PlanExplanation
 from service_capacity_modeling.interface import Platform
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import UncertainCapacityPlan
+from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.org import netflix
@@ -209,6 +215,70 @@ def _set_instance_objects(
                     f"Model not trained to right size clusters that are of instance"
                     f" types {regional_cluster_capacity.cluster_instance_name}"
                 )
+
+
+def _convert_current_clusters(
+    clusters: Sequence[CurrentClusterCapacity],
+    hardware: Hardware,
+    service_type: str,
+    is_zonal: bool,
+) -> Tuple[List[ClusterCapacity], List[CapacityRequirement]]:
+    """Convert CurrentClusterCapacity to ClusterCapacity and CapacityRequirement."""
+
+    capacities: List[ClusterCapacity] = []
+    requirements: List[CapacityRequirement] = []
+    cluster_label = f"{service_type}-zonal" if is_zonal else f"{service_type}-regional"
+
+    for current in clusters:
+        instance = current.cluster_instance
+        if instance is None:
+            raise ValueError(
+                f"cluster_instance not resolved for '{current.cluster_instance_name}'"
+            )
+        count = int(current.cluster_instance_count.mid)
+
+        # Calculate costs same as compute_stateful_zone (models/common.py:561-612)
+        cost = count * instance.annual_cost
+
+        attached_drives = []
+        if current.cluster_drive is not None:
+            # Price drive using hardware catalog (see hardware.price_drive docstring)
+            attached_drive = hardware.price_drive(current.cluster_drive)
+            attached_drives.append(attached_drive)
+            cost = cost + (attached_drive.annual_cost * count)
+
+        # Get disk size per node
+        disk_gib = 0.0
+        if current.cluster_drive is not None:
+            disk_gib = current.cluster_drive.size_gib or 0
+        elif instance.drive is not None:
+            disk_gib = instance.drive.size_gib or 0
+
+        # Build capacity
+        capacity_cls = ZoneClusterCapacity if is_zonal else RegionClusterCapacity
+        capacities.append(
+            capacity_cls(
+                cluster_type=cluster_label,
+                count=count,
+                instance=instance,
+                attached_drives=attached_drives,
+                annual_cost=cost,
+            )
+        )
+
+        # Build requirement
+        requirements.append(
+            CapacityRequirement(
+                requirement_type=cluster_label,
+                reference_shape=instance,
+                cpu_cores=certain_float(instance.cpu * count),
+                mem_gib=certain_float(instance.ram_gib * count),
+                network_mbps=certain_float(instance.net_mbps * count),
+                disk_gib=certain_float(disk_gib * count),
+            )
+        )
+
+    return capacities, requirements
 
 
 def _allow_instance(
@@ -554,52 +624,20 @@ class CapacityPlanner:
         model_name: str,
         region: str,
         desires: CapacityDesires,
-        requirement_type: str = "baseline",
         num_regions: int = 3,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
     ) -> CapacityPlan:
-        """Extract baseline plan from current clusters with model-specific costs.
-
-        Similar to plan_certain(), but creates a plan from the current deployment
-        rather than generating new recommendations. This enables fair cost comparison
-        between baseline and recommendation by including the same service costs
-        (network transfer, backup storage, etc.) in both.
+        """Extract baseline plan from current clusters using model cost methods.
 
         Args:
-            model_name: Name of the registered capacity model
-                (e.g., "org.netflix.cassandra")
-            region: AWS region for pricing and context
-            desires: The capacity desires (must contain current_clusters)
-            requirement_type: Label for the capacity requirement
-                (default: "baseline")
-            num_regions: Number of regions for cross-region cost calculation
-                (default: 3)
-            extra_model_arguments: Optional model arguments
-                (e.g., copies_per_region)
+            model_name: Registered model name (e.g., "org.netflix.cassandra")
+            region: AWS region for pricing
+            desires: CapacityDesires with current_clusters populated
+            num_regions: For cross-region cost calculation (default: 3)
+            extra_model_arguments: Model-specific arguments (e.g., copies_per_region)
 
         Returns:
-            CapacityPlan representing the current deployment with full cost breakdown
-
-        Example::
-
-            # Get recommendation
-            recommendations = planner.plan_certain(
-                model_name="org.netflix.cassandra",
-                region="us-east-1",
-                desires=desires,
-            )
-            recommendation = recommendations[0]
-
-            # Get baseline with same cost structure
-            baseline = planner.extract_baseline_plan(
-                model_name="org.netflix.cassandra",
-                region="us-east-1",
-                desires=desires,
-                extra_model_arguments={"copies_per_region": 3},
-            )
-
-            # Now costs are comparable (both include network, backup, etc.)
-            result = compare_plans(baseline, recommendation)
+            CapacityPlan with costs from model.cluster_costs() and model.service_costs()
         """
         if model_name not in self._models:
             raise ValueError(
@@ -610,26 +648,73 @@ class CapacityPlanner:
         model = self._models[model_name]
         extra_model_arguments = extra_model_arguments or {}
 
-        # Build RegionContext with service pricing (same as generate_scenarios)
+        # Validate current_clusters
+        if desires.current_clusters is None:
+            raise ValueError(
+                "Cannot extract baseline: desires.current_clusters is None. "
+                "This function requires an existing deployment to compare against."
+            )
+        if not desires.current_clusters.zonal and not desires.current_clusters.regional:
+            raise ValueError(
+                "Cannot extract baseline: desires.current_clusters has no zonal "
+                "or regional clusters defined."
+            )
+        if desires.current_clusters.zonal and desires.current_clusters.regional:
+            raise ValueError(
+                "Cannot extract baseline with both zonal and regional clusters. "
+                "Models are either zonal (Cassandra, EVCache) or regional "
+                "(Aurora, RDS)."
+            )
+
+        # Determine cluster type (zonal vs regional)
+        is_zonal = bool(desires.current_clusters.zonal)
+
+        # Build context and resolve instances
         hardware = self._shapes.region(region)
         context = RegionContext(
             zones_in_region=hardware.zones_in_region,
             services={n: s.model_copy(deep=True) for n, s in hardware.services.items()},
             num_regions=num_regions,
         )
+        _set_instance_objects(desires, hardware)
 
-        # Import here to avoid circular imports
-        from service_capacity_modeling.models.plan_comparison import (
-            extract_baseline_plan as _extract_baseline,
+        # Convert current clusters to ClusterCapacity
+        current_clusters = (
+            desires.current_clusters.zonal
+            if is_zonal
+            else desires.current_clusters.regional
+        )
+        capacities, requirements = _convert_current_clusters(
+            current_clusters, hardware, model.service_name, is_zonal
         )
 
-        return _extract_baseline(
-            desires=desires,
-            region=region,
-            requirement_type=requirement_type,
-            model=model,
+        # Use model's cost methods directly
+        costs = model.cluster_costs(
+            service_type=model.service_name,
+            zonal_clusters=capacities if is_zonal else [],
+            regional_clusters=[] if is_zonal else capacities,
+        )
+
+        services = model.service_costs(
+            service_type=model.service_name,
             context=context,
+            desires=desires,
+            requirement=requirements[0],
             extra_model_arguments=extra_model_arguments,
+        )
+        costs.update({s.service_type: s.annual_cost for s in services})
+
+        return CapacityPlan(
+            requirements=Requirements(
+                zonal=requirements if is_zonal else [],
+                regional=[] if is_zonal else requirements,
+            ),
+            candidate_clusters=Clusters(
+                annual_costs=costs,
+                zonal=capacities if is_zonal else [],
+                regional=[] if is_zonal else capacities,
+                services=services,
+            ),
         )
 
     def _plan_certain(  # pylint: disable=too-many-positional-arguments

@@ -7,7 +7,6 @@ Example usage::
 
     from service_capacity_modeling.models.plan_comparison import (
         compare_plans,
-        extract_baseline_plan,
         ignore_resource,
         lte,
         plus_or_minus,
@@ -15,15 +14,21 @@ Example usage::
     )
 
     # Get recommendation from planner
-    cap_plan = planner.plan_certain(
+    recommendations = planner.plan_certain(
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=desires,
     )
-    recommendation = cap_plan.least_regret[0]
+    recommendation = recommendations[0]
 
-    # Get current deployment as baseline
-    baseline = extract_baseline_plan(desires, region="us-east-1")
+    # Get current deployment as baseline using CapacityPlanner
+    # This uses model-specific cost methods for accurate comparison
+    baseline = planner.extract_baseline_plan(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=desires,  # must have current_clusters populated
+        extra_model_arguments={"copies_per_region": 3},
+    )
 
     # Compare with custom tolerances
     result = compare_plans(
@@ -44,7 +49,6 @@ Example usage::
             print(f"  - {diff}")
 """
 
-from decimal import Decimal
 from functools import lru_cache
 from itertools import chain
 
@@ -52,30 +56,13 @@ from pydantic import ConfigDict
 
 from service_capacity_modeling.enum_utils import enum_docstrings
 from service_capacity_modeling.enum_utils import StrEnum
-from typing import TYPE_CHECKING
-from typing import Any
 
-from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import (
-    CapacityDesires,
     CapacityPlan,
-    CapacityRequirement,
-    Clusters,
-    CurrentClusterCapacity,
     default_reference_shape,
     ExcludeUnsetModel,
     Instance,
-    RegionClusterCapacity,
-    RegionContext,
-    Requirements,
-    ServiceCapacity,
-    ZoneClusterCapacity,
-    certain_float,
-    certain_int,
 )
-
-if TYPE_CHECKING:
-    from service_capacity_modeling.models import CapacityModel
 
 
 @enum_docstrings
@@ -533,277 +520,4 @@ def compare_plans(
     return PlanComparisonResult(
         is_equivalent=all(c.is_equivalent for c in comparisons.values()),
         comparisons=comparisons,
-    )
-
-
-# -----------------------------------------------------------------------------
-# Baseline extraction helper
-# -----------------------------------------------------------------------------
-
-
-def _get_disk_gib_from_cluster(cluster: CurrentClusterCapacity) -> float:
-    """Get disk size in GiB from a current cluster capacity.
-
-    Handles both attached storage (cluster_drive) and local storage
-    (instance.drive). Returns 0 if no storage is configured.
-
-    Args:
-        cluster: The current cluster capacity to inspect
-
-    Returns:
-        Disk size in GiB per node, or 0 if no storage
-    """
-    # Check for attached storage first (e.g., EBS)
-    if cluster.cluster_drive is not None:
-        return cluster.cluster_drive.size_gib or 0
-
-    # Fall back to local storage (e.g., NVMe SSD on instance)
-    if (
-        cluster.cluster_instance is not None
-        and cluster.cluster_instance.drive is not None
-    ):
-        return cluster.cluster_instance.drive.size_gib or 0
-
-    return 0
-
-
-# pylint: disable-next=too-many-positional-arguments,too-many-locals
-def _create_plan_from_current_cluster(
-    cluster: CurrentClusterCapacity,
-    is_zonal: bool,
-    region: str,
-    requirement_type: str,
-    model: "CapacityModel | None" = None,
-    context: RegionContext | None = None,
-    desires: CapacityDesires | None = None,
-    extra_model_arguments: dict[str, Any] | None = None,
-) -> CapacityPlan:
-    """Create a synthetic CapacityPlan from a CurrentClusterCapacity.
-
-    This allows comparison between an existing deployment and a recommended
-    plan using the compare_plans() function.
-
-    Args:
-        cluster: The current cluster capacity
-        is_zonal: True if this is a zonal cluster, False for regional
-        region: AWS region for looking up drive pricing and instance specs
-        requirement_type: Label for the capacity requirement (e.g., "cassandra")
-        model: Optional model class for calculating service costs (network, backup).
-            When provided with context and desires, service_costs() is called.
-        context: Optional RegionContext with service pricing. Required for
-            service cost calculation.
-        desires: Optional CapacityDesires for service cost calculation.
-            Required for service cost calculation.
-        extra_model_arguments: Optional model arguments (e.g., copies_per_region)
-
-    Returns:
-        A CapacityPlan representing the current deployment with cost calculated
-
-    Raises:
-        ValueError: If instance cannot be resolved from cluster_instance or
-            cluster_instance_name
-    """
-    extra_model_arguments = extra_model_arguments or {}
-
-    # Resolve instance: prefer cluster_instance, fall back to lookup by name
-    if cluster.cluster_instance is not None:
-        instance = cluster.cluster_instance
-    else:
-        regional_instances = shapes.region(region).instances
-        instance_name = cluster.cluster_instance_name
-        if instance_name not in regional_instances:
-            raise ValueError(
-                f"Cannot resolve instance '{instance_name}' in region '{region}'. "
-                f"Either provide cluster_instance directly or use a valid "
-                f"instance name from the hardware catalog."
-            )
-        instance = regional_instances[instance_name]
-
-    # Validate that instance has pricing information
-    if instance.annual_cost == 0:
-        raise ValueError(
-            f"Instance '{instance.name}' has annual_cost=0. "
-            f"This would result in incorrect baseline cost calculations. "
-            f"Either use an instance from the hardware catalog (which includes "
-            f"pricing) or ensure cluster_instance.annual_cost is set."
-        )
-
-    count = int(cluster.cluster_instance_count.mid)
-    disk_gib_per_node = _get_disk_gib_from_cluster(cluster)
-
-    # Build requirements from instance specs * count
-    # Note: CPU normalization for IPC/frequency is handled in _aggregate_resources()
-    requirement = CapacityRequirement(
-        requirement_type=requirement_type,
-        reference_shape=instance,
-        cpu_cores=certain_int(instance.cpu * count),
-        mem_gib=certain_float(instance.ram_gib * count),
-        network_mbps=certain_float(instance.net_mbps * count),
-        disk_gib=certain_float(disk_gib_per_node * count),
-    )
-
-    if is_zonal:
-        requirements = Requirements(zonal=[requirement])
-    else:
-        requirements = Requirements(regional=[requirement])
-
-    # Calculate instance cost
-    instance_cost = instance.annual_cost * count
-
-    # Calculate drive cost using priced drive from hardware shapes
-    drive_cost = 0.0
-    attached_drives = []
-    if cluster.cluster_drive is not None:
-        # Get the priced version of the drive from hardware shapes
-        regional_drives = shapes.region(region).drives
-        drive_name = cluster.cluster_drive.name
-        if drive_name not in regional_drives:
-            raise ValueError(
-                f"Cannot price drive '{drive_name}' in region '{region}'. "
-                f"Available drives: {sorted(regional_drives.keys())}. "
-                "Ensure the drive name matches a known drive type (e.g., 'gp3', 'io2')."
-            )
-        priced_drive = regional_drives[drive_name].model_copy()
-        priced_drive.size_gib = cluster.cluster_drive.size_gib or 0
-        priced_drive.read_io_per_s = cluster.cluster_drive.read_io_per_s
-        priced_drive.write_io_per_s = cluster.cluster_drive.write_io_per_s
-        drive_cost = priced_drive.annual_cost * count
-        attached_drives = [priced_drive]
-
-    # Calculate service costs (network, backup, etc.) if model provided
-    services: list[ServiceCapacity] = []
-    service_cost = 0.0
-    if model is not None and context is not None and desires is not None:
-        services = model.service_costs(
-            service_type=requirement_type,
-            context=context,
-            desires=desires,
-            requirement=requirement,
-            extra_model_arguments=extra_model_arguments,
-        )
-        service_cost = sum(s.annual_cost for s in services)
-
-    # Note: total_cost = instance_cost + drive_cost + service_cost
-    # This is reflected in the sum of annual_costs dict values
-    _ = service_cost  # Used indirectly via services list
-
-    # Build annual_costs dict with breakdown
-    annual_costs: dict[str, Decimal] = {}
-    cluster_key = "current.zonal" if is_zonal else "current.regional"
-    annual_costs[cluster_key] = Decimal(str(instance_cost + drive_cost))
-    for service in services:
-        annual_costs[service.service_type] = Decimal(str(service.annual_cost))
-
-    if is_zonal:
-        zonal_capacity = ZoneClusterCapacity(
-            cluster_type="current",
-            count=count,
-            instance=instance,
-            attached_drives=attached_drives,
-            annual_cost=instance_cost + drive_cost,
-        )
-        clusters = Clusters(
-            annual_costs=annual_costs,
-            zonal=[zonal_capacity],
-            services=services,
-        )
-    else:
-        regional_capacity = RegionClusterCapacity(
-            cluster_type="current",
-            count=count,
-            instance=instance,
-            attached_drives=attached_drives,
-            annual_cost=instance_cost + drive_cost,
-        )
-        clusters = Clusters(
-            annual_costs=annual_costs,
-            regional=[regional_capacity],
-            services=services,
-        )
-
-    return CapacityPlan(
-        requirements=requirements,
-        candidate_clusters=clusters,
-    )
-
-
-def extract_baseline_plan(  # pylint: disable=too-many-positional-arguments
-    desires: CapacityDesires,
-    region: str,
-    requirement_type: str = "baseline",
-    model: "CapacityModel | None" = None,
-    context: RegionContext | None = None,
-    extra_model_arguments: dict[str, Any] | None = None,
-) -> CapacityPlan:
-    """Extract baseline plan from current clusters in desires.
-
-    Args:
-        desires: The capacity desires (must contain current_clusters)
-        region: AWS region for looking up drive pricing from hardware shapes
-        requirement_type: Label for the capacity requirement (default: "baseline")
-        model: Optional model class for calculating service costs (network, backup).
-            If provided along with context, service costs will be included.
-        context: Optional RegionContext with service pricing. Required if model is
-            provided for service cost calculation.
-        extra_model_arguments: Optional model arguments (e.g., copies_per_region)
-
-    Returns:
-        CapacityPlan representing the current deployment
-
-    Raises:
-        ValueError: If desires.current_clusters is None or empty
-        ValueError: If cluster_instance is not resolved in current_clusters
-    """
-    if desires.current_clusters is None:
-        raise ValueError(
-            "Cannot extract baseline: desires.current_clusters is None. "
-            "This function requires an existing deployment to compare against."
-        )
-
-    zonal = desires.current_clusters.zonal
-    regional = desires.current_clusters.regional
-
-    if not zonal and not regional:
-        raise ValueError(
-            "Cannot extract baseline: desires.current_clusters has no zonal "
-            "or regional clusters defined."
-        )
-
-    if zonal and regional:
-        raise ValueError(
-            "Cannot extract baseline: desires.current_clusters has both zonal "
-            "and regional clusters. Only one type is supported for comparison."
-        )
-
-    # Determine which cluster list to use
-    clusters = zonal if zonal else regional
-    is_zonal = bool(zonal)
-
-    # Validate homogeneity: all clusters must use the same instance type
-    instance_names = {c.cluster_instance_name for c in clusters}
-    if len(instance_names) > 1:
-        raise ValueError(
-            f"Cannot extract baseline: clusters are heterogeneous with different "
-            f"instance types: {sorted(instance_names)}. "
-            f"Baseline extraction requires all clusters to use the same instance type."
-        )
-
-    # Validate homogeneity: all clusters must have the same instance count
-    instance_counts = {int(c.cluster_instance_count.mid) for c in clusters}
-    if len(instance_counts) > 1:
-        raise ValueError(
-            f"Cannot extract baseline: clusters have different instance counts: "
-            f"{sorted(instance_counts)}. "
-            f"Baseline extraction requires all clusters to have the same count."
-        )
-
-    return _create_plan_from_current_cluster(
-        clusters[0],
-        is_zonal=is_zonal,
-        region=region,
-        requirement_type=requirement_type,
-        model=model,
-        context=context,
-        desires=desires,
-        extra_model_arguments=extra_model_arguments or {},
     )
