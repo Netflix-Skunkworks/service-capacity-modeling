@@ -1,8 +1,10 @@
+# pylint: disable=too-many-lines
 import logging
 import math
 from typing import Any
 from typing import Callable
 from typing import Dict
+from typing import List
 from typing import Optional
 from typing import Set
 
@@ -533,40 +535,29 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     if cluster.count > (max_regional_size // zones_per_region):
         return None
 
-    # Durable Cassandra clusters backup to S3
-    # TODO use the write rate and estimated write size to estimate churn
-    # over the retention period.
-    cap_services = []
-    if desires.data_shape.durability_slo_order.mid >= 1000:
-        blob = context.services.get("blob.standard", None)
-        if blob:
-            cap_services = [
-                ServiceCapacity(
-                    service_type=f"cassandra.backup.{blob.name}",
-                    annual_cost=blob.annual_cost_gib(requirement.disk_gib.mid),
-                    service_params={
-                        "nines_required": (
-                            1 - 1.0 / desires.data_shape.durability_slo_order.mid
-                        )
-                    },
-                )
-            ]
-
-    network_costs = network_services("cassandra", context, desires, copies_per_region)
-    if network_costs:
-        cap_services.extend(network_costs)
-
-    # Account for the clusters, backup, and network costs
-    cassandra_costs = {
-        "cassandra.zonal-clusters": zones_per_region * cluster.annual_cost,
-    }
-    for s in cap_services:
-        cassandra_costs[f"{s.service_type}"] = s.annual_cost
+    # Calculate service costs (network + backup) using the model's service_costs method
+    # This is defined later in NflxCassandraCapacityModel but we call it here for DRY
+    cap_services = NflxCassandraCapacityModel.service_costs(
+        service_type="cassandra",
+        context=context,
+        desires=desires,
+        requirement=requirement,
+        extra_model_arguments={"copies_per_region": copies_per_region},
+    )
 
     cluster.cluster_type = "cassandra"
+    zonal_clusters = [cluster] * zones_per_region
+
+    # Account for the clusters, backup, and network costs
+    cassandra_costs = NflxCassandraCapacityModel.cluster_costs(
+        service_type="cassandra",
+        zonal_clusters=zonal_clusters,
+    )
+    cassandra_costs.update({s.service_type: s.annual_cost for s in cap_services})
+
     clusters = Clusters(
         annual_costs=cassandra_costs,
-        zonal=[cluster] * zones_per_region,
+        zonal=zonal_clusters,
         regional=[],
         services=cap_services,
     )
@@ -743,6 +734,53 @@ class NflxCassandraCapacityModel(CapacityModel):
             )
 
         return required_cluster_size
+
+    @staticmethod
+    def service_costs(
+        service_type: str,
+        context: RegionContext,
+        desires: CapacityDesires,
+        requirement: CapacityRequirement,
+        extra_model_arguments: Dict[str, Any],
+    ) -> List[ServiceCapacity]:
+        """Calculate Cassandra-specific service costs (network + backup).
+
+        Adds:
+        - Network costs: inter-region and intra-region transfer based on
+          write throughput and replication factor
+        - Backup costs: S3 blob storage for durable clusters (durability >= 1000)
+
+        Raises:
+            KeyError: If copies_per_region is not in extra_model_arguments
+        """
+        copies_per_region: int = extra_model_arguments["copies_per_region"]
+
+        services: List[ServiceCapacity] = []
+
+        # Add network costs (inter-region and intra-region transfer)
+        network_costs = network_services(
+            service_type, context, desires, copies_per_region
+        )
+        if network_costs:
+            services.extend(network_costs)
+
+        # Add backup costs for durable Cassandra clusters (durability SLO >= 1000)
+        if desires.data_shape.durability_slo_order.mid >= 1000:
+            blob = context.services.get("blob.standard", None)
+            if blob:
+                services.append(
+                    ServiceCapacity(
+                        service_type=f"{service_type}.backup.{blob.name}",
+                        annual_cost=blob.annual_cost_gib(requirement.disk_gib.mid),
+                        service_params={
+                            "nines_required": (
+                                1 - 1.0 / desires.data_shape.durability_slo_order.mid
+                            )
+                        },
+                    )
+                )
+
+        return services
 
     @staticmethod
     def capacity_plan(

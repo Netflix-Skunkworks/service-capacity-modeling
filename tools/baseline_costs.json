@@ -1,0 +1,135 @@
+[
+  {
+    "scenario": "rds_small_tier1",
+    "model": "org.netflix.rds",
+    "region": "us-east-1",
+    "service_tier": 1,
+    "annual_costs": {
+      "rds-cluster.regional-clusters": 2673.34
+    },
+    "total_annual_cost": 2673.34,
+    "cluster_count": 1,
+    "service_count": 0,
+    "instance_name": "m5.2xlarge",
+    "instance_count": 1,
+    "deployment": "regional"
+  },
+  {
+    "scenario": "rds_tier3",
+    "model": "org.netflix.rds",
+    "region": "us-east-1",
+    "service_tier": 3,
+    "annual_costs": {
+      "rds-cluster.regional-clusters": 3608.0
+    },
+    "total_annual_cost": 3608.0,
+    "cluster_count": 1,
+    "service_count": 0,
+    "instance_name": "r5.4xlarge",
+    "instance_count": 1,
+    "deployment": "regional"
+  },
+  {
+    "scenario": "aurora_small_tier1",
+    "model": "org.netflix.aurora",
+    "region": "us-east-1",
+    "service_tier": 1,
+    "annual_costs": {
+      "aurora-cluster.regional-clusters": 7362.984
+    },
+    "total_annual_cost": 7362.98,
+    "cluster_count": 1,
+    "service_count": 0,
+    "instance_name": "db.r5.2xlarge",
+    "instance_count": 2,
+    "deployment": "regional"
+  },
+  {
+    "scenario": "aurora_tier3",
+    "model": "org.netflix.aurora",
+    "region": "us-east-1",
+    "service_tier": 3,
+    "annual_costs": {
+      "aurora-cluster.regional-clusters": 4162.128
+    },
+    "total_annual_cost": 4162.13,
+    "cluster_count": 1,
+    "service_count": 0,
+    "instance_name": "db.r5.2xlarge",
+    "instance_count": 1,
+    "deployment": "regional"
+  },
+  {
+    "scenario": "cassandra_small_high_qps_local",
+    "model": "org.netflix.cassandra",
+    "region": "us-east-1",
+    "service_tier": 1,
+    "annual_costs": {
+      "cassandra.zonal-clusters": 29508.0,
+      "cassandra.backup.s3-standard": 3.276,
+      "cassandra.net.inter.region": 30095.029830932617,
+      "cassandra.net.intra.region": 90285.08949279785
+    },
+    "total_annual_cost": 149891.4,
+    "cluster_count": 3,
+    "service_count": 3,
+    "instance_name": "c5d.4xlarge",
+    "instance_count": 4,
+    "deployment": "zonal"
+  },
+  {
+    "scenario": "cassandra_high_writes_ebs",
+    "model": "org.netflix.cassandra",
+    "region": "us-east-1",
+    "service_tier": 1,
+    "annual_costs": {
+      "cassandra.zonal-clusters": 69031.92,
+      "cassandra.backup.s3-standard": 67.032,
+      "cassandra.net.inter.region": 150475.1491546631,
+      "cassandra.net.intra.region": 225712.72373199463
+    },
+    "total_annual_cost": 445286.82,
+    "cluster_count": 3,
+    "service_count": 3,
+    "instance_name": "c7a.4xlarge",
+    "instance_count": 8,
+    "deployment": "zonal"
+  },
+  {
+    "error": "No capacity plans generated"
+  },
+  {
+    "scenario": "evcache_small_no_replication",
+    "model": "org.netflix.evcache",
+    "region": "us-east-1",
+    "service_tier": 1,
+    "annual_costs": {
+      "evcache.zonal-clusters": 31265.129999999997,
+      "evcache.spread.cost": 0.0
+    },
+    "total_annual_cost": 31265.13,
+    "cluster_count": 3,
+    "service_count": 0,
+    "instance_name": "m7a.xlarge",
+    "instance_count": 13,
+    "deployment": "zonal"
+  },
+  {
+    "scenario": "evcache_large_with_replication",
+    "model": "org.netflix.evcache",
+    "region": "us-east-1",
+    "service_tier": 1,
+    "annual_costs": {
+      "evcache.zonal-clusters": 100204.26000000001,
+      "evcache.spread.cost": 0.0,
+      "evcache.net.inter.region": 30095.029830932617,
+      "evcache.net.intra.region": 45142.544746398926
+    },
+    "total_annual_cost": 175441.83,
+    "cluster_count": 2,
+    "service_count": 2,
+    "instance_name": "c6id.2xlarge",
+    "instance_count": 39,
+    "deployment": "zonal"
+  }
+]
