@@ -121,11 +121,10 @@ class NflxZookeeperCapacityModel(CapacityModel):
             requirements = [req] * context.zones_in_region
             zonal = [soln(1), soln(1), soln(1)]
 
-        zk_costs = NflxZookeeperCapacityModel.cluster_costs(
-            service_type="zk-zonal", zonal_clusters=zonal
-        )
         clusters = Clusters(
-            annual_costs=zk_costs,
+            annual_costs={
+                "zk-zonal.zonal-clusters": (round(sum(z.annual_cost for z in zonal), 2))
+            },
             zonal=zonal,
             regional=[],
             services=[],

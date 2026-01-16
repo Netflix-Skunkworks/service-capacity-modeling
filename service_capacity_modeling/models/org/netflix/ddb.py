@@ -1,7 +1,6 @@
 import math
 from typing import Any
 from typing import Dict
-from typing import List
 from typing import Optional
 
 from pydantic import BaseModel
@@ -440,7 +439,9 @@ class NflxDynamoDBCapacityModel(CapacityModel):
         storage_plan = _plan_storage(context, desires)
         backup_plan = _plan_backup(context, desires)
         data_transfer_plan = _plan_data_transfer(context, desires)
-
+        target_max_annual_cost: float = extra_model_arguments.get(
+            "target_max_annual_cost", 0
+        )
         target_util_percentage = 0.80
         if desires.service_tier in _TIER_TARGET_UTILIZATION_MAPPING:
             target_util_percentage = _TIER_TARGET_UTILIZATION_MAPPING[
@@ -452,105 +453,32 @@ class NflxDynamoDBCapacityModel(CapacityModel):
             "write_capacity_units": write_plan.write_capacity_units,
             "data_transfer_gib": data_transfer_plan.total_data_transfer_gib,
             "target_utilization_percentage": target_util_percentage,
-            "replicated_write_capacity_units": (
-                write_plan.replicated_write_capacity_units
-            ),
         }
-
-        target_max_annual_cost: float = extra_model_arguments.get(
-            "target_max_annual_cost", 0
+        requirement_context["replicated_write_capacity_units"] = (
+            write_plan.replicated_write_capacity_units
         )
-        if target_max_annual_cost > 0:
-            requirement_context["target_max_annual_cost"] = target_max_annual_cost
 
         dynamo_costs = {
             "dynamo.regional-writes": write_plan.total_annual_write_cost,
             "dynamo.regional-reads": read_plan.total_annual_read_cost,
             "dynamo.regional-storage": storage_plan.total_annual_data_storage_cost,
-            "dynamo.regional-transfer": (
-                data_transfer_plan.total_annual_data_transfer_cost
-            ),
-            "dynamo.data-backup": backup_plan.total_annual_backup_cost,
         }
 
-        requirement = CapacityRequirement(
-            requirement_type="dynamo-regional",
-            cpu_cores=certain_int(0),
-            disk_gib=certain_float(storage_plan.total_data_storage_gib),
-            context=requirement_context,
+        dynamo_costs["dynamo.regional-transfer"] = (
+            data_transfer_plan.total_annual_data_transfer_cost
         )
 
-        # Calculate service costs using the model's service_costs method
-        dynamo_services = NflxDynamoDBCapacityModel.service_costs(
-            service_type="dynamo",
-            context=context,
-            desires=desires,
-            requirement=requirement,
-            extra_model_arguments=extra_model_arguments,
-        )
+        dynamo_costs["dynamo.data-backup"] = backup_plan.total_annual_backup_cost
 
-        clusters = Clusters(
-            annual_costs=dynamo_costs,
-            zonal=[],
-            regional=[],
-            services=dynamo_services,
-        )
-
-        return CapacityPlan(
-            requirements=Requirements(regional=[requirement]),
-            candidate_clusters=clusters,
-        )
-
-    @staticmethod
-    def service_costs(
-        service_type: str,
-        context: RegionContext,
-        desires: CapacityDesires,
-        requirement: CapacityRequirement,
-        extra_model_arguments: Dict[str, Any],
-    ) -> List[ServiceCapacity]:
-        """Calculate DynamoDB service costs.
-
-        DynamoDB is a managed service with no clusters. All costs are
-        service-based: reads, writes, storage, transfer, and backup.
-
-        Returns ServiceCapacity objects with full service_params including
-        auto_scale configuration based on target_max_annual_cost.
-        """
-        _ = requirement  # DynamoDB costs are based on desires, not requirement
-        write_plan = _plan_writes(context, desires, extra_model_arguments)
-        read_plan = _plan_reads(context, desires, extra_model_arguments)
-        storage_plan = _plan_storage(context, desires)
-        backup_plan = _plan_backup(context, desires)
-        data_transfer_plan = _plan_data_transfer(context, desires)
-
-        # Determine target utilization based on service tier
-        target_util_percentage = 0.80
-        if desires.service_tier in _TIER_TARGET_UTILIZATION_MAPPING:
-            target_util_percentage = _TIER_TARGET_UTILIZATION_MAPPING[
-                desires.service_tier
-            ]
-
-        # Calculate total costs and capacity units
-        total_annual_costs = round(
-            write_plan.total_annual_write_cost
-            + read_plan.total_annual_read_cost
-            + storage_plan.total_annual_data_storage_cost
-            + data_transfer_plan.total_annual_data_transfer_cost
-            + backup_plan.total_annual_backup_cost,
-            2,
-        )
+        total_annual_costs = round(sum(dynamo_costs.values()), 2)
         total_write_capacity_units = (
             write_plan.write_capacity_units + write_plan.replicated_write_capacity_units
         )
         max_read_capacity_units = max(1, read_plan.read_capacity_units)
         max_write_capacity_units = max(1, total_write_capacity_units)
 
-        # Adjust auto_scale max based on target_max_annual_cost if provided
-        target_max_annual_cost: float = extra_model_arguments.get(
-            "target_max_annual_cost", 0
-        )
         if target_max_annual_cost > 0:
+            requirement_context["target_max_annual_cost"] = target_max_annual_cost
             annual_balance_target = target_max_annual_cost - total_annual_costs
             if annual_balance_target > 0:
                 max_read_capacity_units += math.ceil(
@@ -565,9 +493,15 @@ class NflxDynamoDBCapacityModel(CapacityModel):
                     * total_write_capacity_units,
                 )
 
-        return [
+        requirement = CapacityRequirement(
+            requirement_type="dynamo-regional",
+            cpu_cores=certain_int(0),
+            disk_gib=certain_float(storage_plan.total_data_storage_gib),
+            context=requirement_context,
+        )
+        dynamo_services = [
             ServiceCapacity(
-                service_type=f"{service_type}.standard",
+                service_type="dynamo.standard",
                 annual_cost=(
                     write_plan.total_annual_write_cost
                     + read_plan.total_annual_read_cost
@@ -584,7 +518,10 @@ class NflxDynamoDBCapacityModel(CapacityModel):
                         },
                     },
                     "write_capacity_units": {
-                        "estimated": total_write_capacity_units,
+                        "estimated": (
+                            write_plan.write_capacity_units
+                            + write_plan.replicated_write_capacity_units
+                        ),
                         "auto_scale": {
                             "min": 1,
                             "max": max_write_capacity_units,
@@ -594,10 +531,22 @@ class NflxDynamoDBCapacityModel(CapacityModel):
                 },
             ),
             ServiceCapacity(
-                service_type=f"{service_type}.backup",
+                service_type="dynamo.backup",
                 annual_cost=backup_plan.total_annual_backup_cost,
             ),
         ]
+
+        clusters = Clusters(
+            annual_costs=dynamo_costs,
+            zonal=[],
+            regional=[],
+            services=dynamo_services,
+        )
+
+        return CapacityPlan(
+            requirements=Requirements(regional=[requirement]),
+            candidate_clusters=clusters,
+        )
 
     @staticmethod
     def description() -> str:
