@@ -8,6 +8,7 @@ from typing import Callable
 from typing import Dict
 from typing import List
 from typing import Optional
+from typing import Sequence
 from typing import Set
 from typing import Tuple
 
@@ -25,6 +26,7 @@ from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import CurrentClusters
@@ -46,6 +48,38 @@ from service_capacity_modeling.models.headroom_strategy import (
 logger = logging.getLogger(__name__)
 
 SECONDS_IN_YEAR = 31556926
+
+
+def cluster_infra_cost(
+    service_type: str,
+    zonal_clusters: Sequence[ClusterCapacity],
+    regional_clusters: Sequence[ClusterCapacity],
+) -> Dict[str, float]:
+    """Compute cluster infrastructure costs for zonal and/or regional clusters.
+
+    This is a helper function that sums the annual_cost of each cluster
+    and returns a dict with appropriate cost keys. Models can use this
+    directly in their cluster_costs() override.
+
+    Args:
+        service_type: The service type prefix for cost keys (e.g., "cassandra")
+        zonal_clusters: List of per-zone cluster capacity objects
+        regional_clusters: List of regional cluster capacity objects
+
+    Returns:
+        Dict with keys like "{service_type}.zonal-clusters" and/or
+        "{service_type}.regional-clusters" mapped to total annual costs.
+    """
+    costs: Dict[str, float] = {}
+    if zonal_clusters:
+        costs[f"{service_type}.zonal-clusters"] = round(
+            sum(c.annual_cost for c in zonal_clusters), 2
+        )
+    if regional_clusters:
+        costs[f"{service_type}.regional-clusters"] = round(
+            sum(c.annual_cost for c in regional_clusters), 2
+        )
+    return costs
 
 
 # In square root staffing we have to take into account the QOS parameter

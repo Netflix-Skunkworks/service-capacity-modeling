@@ -388,15 +388,18 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     if cluster.count > (max_regional_size // zones_per_region):
         return None
 
-    ec2_cost = zones_per_region * cluster.annual_cost
+    cluster.cluster_type = "kafka"
+    zonal_clusters = [cluster] * zones_per_region
 
     # Account for the clusters and replication costs
-    kafka_costs = {"kafka.zonal-clusters": ec2_cost}
+    kafka_costs = NflxKafkaCapacityModel.cluster_costs(
+        service_type="kafka",
+        zonal_clusters=zonal_clusters,
+    )
 
-    cluster.cluster_type = "kafka"
     clusters = Clusters(
         annual_costs=kafka_costs,
-        zonal=[cluster] * zones_per_region,
+        zonal=zonal_clusters,
         regional=[],
         services=[],
     )

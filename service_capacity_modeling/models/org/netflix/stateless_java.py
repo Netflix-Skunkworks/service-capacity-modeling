@@ -1,6 +1,7 @@
 import math
 from typing import Any
 from typing import Dict
+from typing import List
 from typing import Optional
 
 from pydantic import BaseModel
@@ -26,6 +27,7 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import compute_stateless_region
 from service_capacity_modeling.models.common import network_services
@@ -118,20 +120,31 @@ def _estimate_java_app_region(  # pylint: disable=too-many-positional-arguments
     # with such large clusters
 
     if cluster.count <= 256:
-        costs = {"nflx-java-app.regional-clusters": cluster.annual_cost}
-        # Assume stateless java stays in the same region but crosses a zone
-        network = network_services(
-            "nflx-java-app", RegionContext(num_regions=1), desires, copies_per_region=2
+        regional_clusters = [cluster]
+
+        # Calculate cluster costs using the model's method
+        java_app_costs: Dict[str, Any] = NflxJavaAppCapacityModel.cluster_costs(
+            service_type="nflx-java-app",
+            regional_clusters=regional_clusters,
         )
-        for s in network:
-            costs[s.service_type] = s.annual_cost
+
+        # Calculate service costs (intra-region network) using the model's method
+        services = NflxJavaAppCapacityModel.service_costs(
+            service_type="nflx-java-app",
+            context=context,
+            desires=desires,
+            requirement=requirement,
+            extra_model_arguments={},
+        )
+        java_app_costs.update({s.service_type: s.annual_cost for s in services})
 
         return CapacityPlan(
             requirements=Requirements(regional=[requirement]),
             candidate_clusters=Clusters(
-                annual_costs=costs,
-                regional=[cluster],
+                annual_costs=java_app_costs,
+                regional=regional_clusters,
                 zonal=[],
+                services=services,
             ),
         )
     return None
@@ -151,6 +164,25 @@ class NflxJavaAppArguments(BaseModel):
 
 
 class NflxJavaAppCapacityModel(CapacityModel):
+    @staticmethod
+    def service_costs(
+        service_type: str,
+        context: RegionContext,
+        desires: CapacityDesires,
+        requirement: CapacityRequirement,
+        extra_model_arguments: Dict[str, Any],
+    ) -> List[ServiceCapacity]:
+        """Calculate Java app service costs (intra-region network transfer).
+
+        Stateless Java apps stay in the same region but cross zones,
+        so we calculate intra-region network costs only (num_regions=1).
+        """
+        _ = (requirement, extra_model_arguments)  # Not used for Java app network cost
+        # Stateless java stays in the same region but crosses a zone
+        return network_services(
+            service_type, RegionContext(num_regions=1), desires, copies_per_region=2
+        )
+
     @staticmethod
     def capacity_plan(
         instance: Instance,
