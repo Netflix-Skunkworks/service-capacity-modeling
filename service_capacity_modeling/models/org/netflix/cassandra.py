@@ -6,6 +6,7 @@ from typing import Callable
 from typing import Dict
 from typing import List
 from typing import Optional
+from typing import Sequence
 from typing import Set
 
 from pydantic import BaseModel
@@ -21,6 +22,7 @@ from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import CurrentClusterCapacity
@@ -35,7 +37,9 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import buffer_for_components
+from service_capacity_modeling.models.common import cluster_infra_cost
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import DerivedBuffers
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
@@ -702,7 +706,7 @@ class NflxCassandraArguments(BaseModel):
         return cls.model_validate(args)
 
 
-class NflxCassandraCapacityModel(CapacityModel):
+class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
     def __init__(self) -> None:
         pass
 
@@ -781,6 +785,15 @@ class NflxCassandraCapacityModel(CapacityModel):
                 )
 
         return services
+
+    @staticmethod
+    def cluster_costs(
+        service_type: str,
+        zonal_clusters: Sequence[ClusterCapacity] = (),
+        regional_clusters: Sequence[ClusterCapacity] = (),
+    ) -> Dict[str, float]:
+        """Calculate Cassandra cluster infrastructure costs."""
+        return cluster_infra_cost(service_type, zonal_clusters, regional_clusters)
 
     @staticmethod
     def capacity_plan(

@@ -35,7 +35,9 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import buffer_for_components
+from service_capacity_modeling.models.common import cluster_infra_cost
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
@@ -398,7 +400,7 @@ class NflxEVCacheArguments(BaseModel):
     )
 
 
-class NflxEVCacheCapacityModel(CapacityModel):
+class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
     @staticmethod
     def cluster_costs(
         service_type: str,
@@ -411,12 +413,8 @@ class NflxEVCacheCapacityModel(CapacityModel):
         - "{service_type}.zonal-clusters": sum of cluster annual costs (via base)
         - "{service_type}.spread.cost": penalty for small clusters
         """
-        # Get base cluster costs from parent class
-        costs = CapacityModel.cluster_costs(
-            service_type=service_type,
-            zonal_clusters=zonal_clusters,
-            regional_clusters=regional_clusters,
-        )
+        # Get base cluster costs
+        costs = cluster_infra_cost(service_type, zonal_clusters, regional_clusters)
 
         # Add spread cost penalty for small clusters
         if zonal_clusters:

@@ -2,7 +2,9 @@ import logging
 import math
 from typing import Any
 from typing import Dict
+from typing import List
 from typing import Optional
+from typing import Sequence
 from typing import Tuple
 
 from pydantic import BaseModel
@@ -17,6 +19,7 @@ from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
@@ -33,8 +36,11 @@ from service_capacity_modeling.interface import MIB_IN_BYTES
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import buffer_for_components
+from service_capacity_modeling.models.common import cluster_infra_cost
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
@@ -467,7 +473,7 @@ class NflxKafkaArguments(BaseModel):
     )
 
 
-class NflxKafkaCapacityModel(CapacityModel):
+class NflxKafkaCapacityModel(CapacityModel, CostAwareModel):
     HA_DEFAULT_REPLICATION_FACTOR = 2
     SC_DEFAULT_REPLICATION_FACTOR = 3
 
@@ -539,6 +545,26 @@ class NflxKafkaCapacityModel(CapacityModel):
             hot_retention_seconds=hot_retention_seconds,
             require_same_instance_family=require_same_instance_family,
         )
+
+    @staticmethod
+    def cluster_costs(
+        service_type: str,
+        zonal_clusters: Sequence[ClusterCapacity] = (),
+        regional_clusters: Sequence[ClusterCapacity] = (),
+    ) -> Dict[str, float]:
+        """Calculate Kafka cluster infrastructure costs."""
+        return cluster_infra_cost(service_type, zonal_clusters, regional_clusters)
+
+    @staticmethod
+    def service_costs(
+        service_type: str,
+        context: RegionContext,
+        desires: CapacityDesires,
+        requirement: CapacityRequirement,
+        extra_model_arguments: Dict[str, Any],
+    ) -> List[ServiceCapacity]:
+        """Kafka has no additional service costs."""
+        return []
 
     @staticmethod
     def description() -> str:
