@@ -4,6 +4,7 @@ from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import Optional
+from typing import Sequence
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -15,6 +16,7 @@ from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
@@ -195,16 +197,27 @@ def _estimate_rds_regional(
     if not cluster:
         return None
 
-    if desires.service_tier < 3:
-        replicas = 2
+    # Replicas: explicit parameter overrides service_tier-based default
+    # This allows users to specify exact topology for baseline extraction
+    explicit_replicas = extra_model_arguments.get("rds.replicas")
+    if explicit_replicas is not None:
+        replicas = int(explicit_replicas)
+    elif desires.service_tier < 3:
+        replicas = 2  # Primary + standby for tier 0-2
     else:
-        replicas = 1
+        replicas = 1  # Primary only for tier 3+
 
-    costs = {"rds-cluster.regional-clusters": cluster.annual_cost * replicas}
+    # Store replicas in cluster_params for cluster_costs() to use
+    cluster.cluster_params["rds.replicas"] = replicas
+
+    regional_clusters = [cluster]
+    rds_costs = NflxRDSCapacityModel.cluster_costs(
+        service_type="rds-cluster", regional_clusters=regional_clusters
+    )
     clusters = Clusters(
-        annual_costs=costs,
+        annual_costs=rds_costs,
         zonal=[],
-        regional=[cluster],
+        regional=regional_clusters,
     )
 
     return CapacityPlan(
@@ -223,6 +236,16 @@ class NflxRDSArguments(BaseModel):
         default="mysql",
         description="RDS Database type",
     )
+    rds_replicas: Optional[int] = Field(
+        alias="rds.replicas",
+        default=None,
+        description=(
+            "Number of RDS replicas (primary + standbys). "
+            "If not specified, defaults to 2 for tier 0-2 (primary + standby) "
+            "or 1 for tier 3+ (primary only). For baseline extraction, pass the "
+            "actual replica count from your deployment."
+        ),
+    )
 
 
 class NflxRDSCapacityModel(CapacityModel):
@@ -240,6 +263,27 @@ class NflxRDSCapacityModel(CapacityModel):
             desires=desires,
             extra_model_arguments=extra_model_arguments,
         )
+
+    @staticmethod
+    def cluster_costs(
+        service_type: str,
+        zonal_clusters: Sequence[ClusterCapacity] = (),
+        regional_clusters: Sequence[ClusterCapacity] = (),
+    ) -> Dict[str, float]:
+        """Calculate RDS cluster infrastructure costs.
+
+        RDS is regional, so we use regional_clusters. Cost is EC2 cost
+        multiplied by the replica count stored in cluster_params.
+        """
+        if not regional_clusters:
+            return {}
+
+        total_cost = 0.0
+        for cluster in regional_clusters:
+            replicas: int = cluster.cluster_params["rds.replicas"]
+            total_cost += cluster.annual_cost * replicas
+
+        return {f"{service_type}.regional-clusters": total_cost}
 
     @staticmethod
     def description() -> str:

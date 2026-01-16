@@ -2,6 +2,8 @@ import logging
 import math
 from typing import Any
 from typing import Dict
+from typing import List
+from typing import Sequence
 from typing import Optional
 from typing import Tuple
 
@@ -28,8 +30,10 @@ from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
@@ -330,36 +334,31 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     if cluster.count > (max_regional_size // copies_per_region):
         return None
 
-    services = []
-    if cross_region_replication is Replication.sets:
-        services.extend(
-            network_services("evcache", context, desires, copies_per_region)
-        )
-    elif cross_region_replication is Replication.evicts:
-        modified = desires.model_copy(deep=True)
-        # Assume that DELETES replicating cross region mean 128 bytes
-        # of key per evict.
-        modified.query_pattern.estimated_mean_write_size_bytes = certain_int(128)
-        services.extend(
-            network_services("evcache", context, modified, copies_per_region)
-        )
-
-    ec2_cost = copies_per_region * cluster.annual_cost
-    spread_cost = calculate_spread_cost(cluster.count)
-
-    # Account for the clusters and replication costs
-    evcache_costs = {
-        "evcache.zonal-clusters": ec2_cost,
-        "evcache.spread.cost": spread_cost,
-    }
-
-    for s in services:
-        evcache_costs[f"{s.service_type}"] = s.annual_cost
+    # Calculate service costs (network transfer) using the model's service_costs method
+    services = NflxEVCacheCapacityModel.service_costs(
+        service_type="evcache",
+        context=context,
+        desires=desires,
+        requirement=requirement,
+        extra_model_arguments={
+            "copies_per_region": copies_per_region,
+            "cross_region_replication": cross_region_replication.value,
+        },
+    )
 
     cluster.cluster_type = "evcache"
+    zonal_clusters = [cluster] * copies_per_region
+
+    # Account for the clusters and replication costs
+    evcache_costs = NflxEVCacheCapacityModel.cluster_costs(
+        service_type="evcache",
+        zonal_clusters=zonal_clusters,
+    )
+    evcache_costs.update({s.service_type: s.annual_cost for s in services})
+
     clusters = Clusters(
         annual_costs=evcache_costs,
-        zonal=[cluster] * copies_per_region,
+        zonal=zonal_clusters,
         regional=[],
         services=services,
     )
@@ -400,6 +399,72 @@ class NflxEVCacheArguments(BaseModel):
 
 
 class NflxEVCacheCapacityModel(CapacityModel):
+    @staticmethod
+    def cluster_costs(
+        service_type: str,
+        zonal_clusters: Sequence[ClusterCapacity] = (),
+        regional_clusters: Sequence[ClusterCapacity] = (),
+    ) -> Dict[str, float]:
+        """Calculate EVCache cluster infrastructure costs.
+
+        EVCache uses zonal clusters only. Includes:
+        - "{service_type}.zonal-clusters": sum of cluster annual costs (via base)
+        - "{service_type}.spread.cost": penalty for small clusters
+        """
+        # Get base cluster costs from parent class
+        costs = CapacityModel.cluster_costs(
+            service_type=service_type,
+            zonal_clusters=zonal_clusters,
+            regional_clusters=regional_clusters,
+        )
+
+        # Add spread cost penalty for small clusters
+        if zonal_clusters:
+            cluster_count = zonal_clusters[0].count
+            costs[f"{service_type}.spread.cost"] = calculate_spread_cost(cluster_count)
+
+        return costs
+
+    @staticmethod
+    def service_costs(
+        service_type: str,
+        context: RegionContext,
+        desires: CapacityDesires,
+        requirement: CapacityRequirement,
+        extra_model_arguments: Dict[str, Any],
+    ) -> List[ServiceCapacity]:
+        """Calculate EVCache-specific service costs (network transfer).
+
+        Network costs depend on cross_region_replication mode:
+        - 'none': No network costs
+        - 'sets': Full write size replicated cross-region
+        - 'evicts': Only 128-byte keys replicated (DELETE operations)
+
+        Raises:
+            KeyError: If cross_region_replication or copies_per_region
+                (when replication enabled) is not in extra_model_arguments
+        """
+        _ = requirement  # Not used for EVCache network cost calculation
+
+        cross_region_replication = Replication(
+            extra_model_arguments["cross_region_replication"]
+        )
+
+        match cross_region_replication:
+            case Replication.sets:
+                copies: int = extra_model_arguments["copies_per_region"]
+                return network_services(service_type, context, desires, copies)
+            case Replication.evicts:
+                copies = extra_model_arguments["copies_per_region"]
+                # For evicts mode, only replicate 128-byte keys (DELETE operations)
+                modified = desires.model_copy(deep=True)
+                modified.query_pattern.estimated_mean_write_size_bytes = certain_int(
+                    128
+                )
+                return network_services(service_type, context, modified, copies)
+            case Replication.none:
+                return []
+
     @staticmethod
     def capacity_plan(
         instance: Instance,

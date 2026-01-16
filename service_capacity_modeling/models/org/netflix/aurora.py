@@ -3,7 +3,9 @@ import math
 from typing import Any
 from typing import Callable
 from typing import Dict
+from typing import List
 from typing import Optional
+from typing import Sequence
 from typing import Tuple
 
 from pydantic import BaseModel
@@ -16,6 +18,7 @@ from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
@@ -29,6 +32,7 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -139,7 +143,6 @@ def _compute_aurora_region(  # pylint: disable=too-many-positional-arguments
     needed_network_mbps: float,
     required_disk_ios: Callable[[int], float],
     required_disk_space: Callable[[int], float],
-    db_type: str,
     desires: CapacityDesires,
 ) -> Optional[RegionClusterCapacity]:
     """Computes a regional cluster of a Aurora service
@@ -172,13 +175,10 @@ def _compute_aurora_region(  # pylint: disable=too-many-positional-arguments
     )  # todo: Figure out the IO vs disk
     attached_drives.append(attached_drive)
 
-    io_cost = _estimate_io_cost(
-        db_type,
-        desires,
-        drive.annual_cost_per_read_io[0][1],
-        drive.annual_cost_per_write_io[0][1],
-    )
-    total_annual_cost = instance.annual_cost + attached_drive.annual_cost + io_cost
+    # IO cost is now calculated separately via service_costs() method
+    # to ensure consistent cost calculation between recommendations
+    # and baseline extraction
+    cluster_annual_cost = instance.annual_cost + attached_drive.annual_cost
 
     logger.debug(
         "For (cpu, memory_gib, disk_gib) = (%s, %s, %s) need ( %s, %s, %s)",
@@ -187,7 +187,7 @@ def _compute_aurora_region(  # pylint: disable=too-many-positional-arguments
         needed_disk_gib,
         instance.name,
         attached_drives,
-        total_annual_cost,
+        cluster_annual_cost,
     )
 
     # TODO (ramsrivatsak): In future we need to leverage read traffic and model the
@@ -202,7 +202,7 @@ def _compute_aurora_region(  # pylint: disable=too-many-positional-arguments
         count=instance_count,
         instance=instance,
         attached_drives=attached_drives,
-        annual_cost=total_annual_cost,
+        annual_cost=cluster_annual_cost,
         cluster_params={"instance_cost": instance.annual_cost},
     )
 
@@ -210,6 +210,7 @@ def _compute_aurora_region(  # pylint: disable=too-many-positional-arguments
 def _estimate_aurora_regional(
     instance: Instance,
     drive: Drive,
+    context: RegionContext,
     desires: CapacityDesires,
     extra_model_arguments: Dict[str, Any],
 ) -> Optional[CapacityPlan]:
@@ -241,26 +242,55 @@ def _estimate_aurora_regional(
         required_disk_ios=lambda size_gib: _rds_required_disk_ios(size_gib, db_type)
         * math.ceil(0.1 * rps),
         required_disk_space=lambda x: x * 1.2,  # Unscientific random guess!
-        db_type=db_type,
         desires=desires,
     )
 
     if not cluster:
         return None
 
-    if desires.service_tier < 3:
-        replicas = 2
+    # Replicas: explicit parameter overrides service_tier-based default
+    # This allows users to specify exact topology for baseline extraction
+    explicit_replicas = extra_model_arguments.get("aurora.replicas")
+    if explicit_replicas is not None:
+        replicas = int(explicit_replicas)
+    elif desires.service_tier < 3:
+        replicas = 2  # Writer + 1 read replica for tier 0-2
     else:
-        replicas = 1
+        replicas = 1  # Writer only for tier 3+
 
-    costs = {
-        "aurora-cluster.regional-clusters": cluster.annual_cost
-        + (replicas - 1) * cluster.cluster_params["instance_cost"]
-    }
+    # Store replicas in cluster_params for cluster_costs() to use
+    cluster.cluster_params["aurora.replicas"] = replicas
+
+    regional_clusters = [cluster]
+
+    # Calculate infrastructure costs (instance + storage)
+    aurora_costs = NflxAuroraCapacityModel.cluster_costs(
+        service_type="aurora-cluster", regional_clusters=regional_clusters
+    )
+
+    # Store drive IO prices in extra_model_arguments for service_costs() to use
+    extra_args_with_io = extra_model_arguments.copy()
+    extra_args_with_io["aurora.read_io_price"] = drive.annual_cost_per_read_io[0][1]
+    extra_args_with_io["aurora.write_io_price"] = drive.annual_cost_per_write_io[0][1]
+
+    # Calculate service costs (IO operations)
+    services = NflxAuroraCapacityModel.service_costs(
+        service_type="aurora-cluster",
+        context=context,
+        desires=desires,
+        requirement=requirement,
+        extra_model_arguments=extra_args_with_io,
+    )
+
+    # Merge service costs into annual_costs
+    for service in services:
+        aurora_costs[service.service_type] = service.annual_cost
+
     clusters = Clusters(
-        annual_costs=costs,
+        annual_costs=aurora_costs,
         zonal=[],
-        regional=[cluster],
+        regional=regional_clusters,
+        services=services,
     )
 
     return CapacityPlan(
@@ -279,6 +309,16 @@ class NflxAuroraArguments(BaseModel):
         default="mysql",
         description="Aurora Database type",
     )
+    aurora_replicas: Optional[int] = Field(
+        alias="aurora.replicas",
+        default=None,
+        description=(
+            "Number of Aurora replicas (writer + read replicas). "
+            "If not specified, defaults to 2 for tier 0-2 (writer + 1 read replica) "
+            "or 1 for tier 3+ (writer only). For baseline extraction, pass the "
+            "actual replica count from your deployment."
+        ),
+    )
 
 
 class NflxAuroraCapacityModel(CapacityModel):
@@ -293,9 +333,77 @@ class NflxAuroraCapacityModel(CapacityModel):
         return _estimate_aurora_regional(
             instance=instance,
             drive=drive,
+            context=context,
             desires=desires,
             extra_model_arguments=extra_model_arguments,
         )
+
+    @staticmethod
+    def service_costs(
+        service_type: str,
+        context: RegionContext,
+        desires: CapacityDesires,
+        requirement: CapacityRequirement,
+        extra_model_arguments: Dict[str, Any],
+    ) -> List[ServiceCapacity]:
+        """Calculate Aurora-specific service costs (IO operations).
+
+        Aurora IO costs are calculated based on read/write query patterns
+        and the aurora drive's IO pricing. This method is called both
+        during recommendation (from capacity_plan) and baseline extraction
+        (from extract_baseline_plan) to ensure cost parity.
+
+        IO prices must be passed via extra_model_arguments:
+        - aurora.read_io_price: Cost per read IO
+        - aurora.write_io_price: Cost per write IO
+        """
+        db_type = extra_model_arguments.get("aurora.engine", "postgres")
+
+        read_io_price = extra_model_arguments.get("aurora.read_io_price")
+        write_io_price = extra_model_arguments.get("aurora.write_io_price")
+
+        # If we don't have IO prices, return empty (no IO costs)
+        if read_io_price is None or write_io_price is None:
+            return []
+
+        io_cost = _estimate_io_cost(
+            db_type,
+            desires,
+            read_io_price,
+            write_io_price,
+        )
+
+        if io_cost > 0:
+            return [
+                ServiceCapacity(
+                    service_type=f"{service_type}.io",
+                    annual_cost=io_cost,
+                )
+            ]
+        return []
+
+    @staticmethod
+    def cluster_costs(
+        service_type: str,
+        zonal_clusters: Sequence[ClusterCapacity] = (),
+        regional_clusters: Sequence[ClusterCapacity] = (),
+    ) -> Dict[str, float]:
+        """Calculate Aurora cluster infrastructure costs.
+
+        Aurora has a writer node (annual_cost) plus read replicas
+        (instance_cost per replica). Both values are stored in cluster_params.
+        """
+        if not regional_clusters:
+            return {}
+
+        total_cost = 0.0
+        for cluster in regional_clusters:
+            replicas: int = cluster.cluster_params["aurora.replicas"]
+            instance_cost: float = cluster.cluster_params["instance_cost"]
+            # Writer cost + read replica costs
+            total_cost += cluster.annual_cost + (replicas - 1) * instance_cost
+
+        return {f"{service_type}.regional-clusters": total_cost}
 
     @staticmethod
     def description() -> str:
