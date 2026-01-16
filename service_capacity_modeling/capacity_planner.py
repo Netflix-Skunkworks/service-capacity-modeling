@@ -2,6 +2,7 @@
 import functools
 import logging
 import math
+from decimal import Decimal
 from hashlib import blake2b
 from typing import Any
 from typing import Callable
@@ -579,8 +580,31 @@ class CapacityPlanner:
             if plan is not None:
                 plans.append(plan)
 
-        # lowest cost first
-        plans.sort(key=lambda p: (p.rank, p.candidate_clusters.total_annual_cost))
+        # Compute sort key, applying same_family_bias if applicable
+        same_family_bias = extra_model_arguments.get("same_family_bias")
+        current_family = None
+        if (
+            same_family_bias is not None
+            and desires.current_clusters is not None
+            and desires.current_clusters.zonal
+        ):
+            current_instance_name = desires.current_clusters.zonal[
+                0
+            ].cluster_instance_name
+            if current_instance_name:
+                # Extract family from instance name (e.g., "i4i.2xlarge" -> "i4i")
+                current_family = current_instance_name.rsplit(".", 1)[0]
+
+        def sort_key(plan: CapacityPlan) -> Tuple[int, Decimal]:
+            base_cost = Decimal(str(plan.candidate_clusters.total_annual_cost))
+            if current_family is not None and plan.candidate_clusters.zonal:
+                plan_family = plan.candidate_clusters.zonal[0].instance.family
+                # Apply bias if switching to a different family
+                if plan_family != current_family:
+                    return (plan.rank, base_cost * Decimal(str(same_family_bias)))
+            return (plan.rank, base_cost)
+
+        plans.sort(key=sort_key)
 
         num_results = num_results or self._default_num_results
         return reduce_by_family(plans, max_results_per_family=max_results_per_family)[

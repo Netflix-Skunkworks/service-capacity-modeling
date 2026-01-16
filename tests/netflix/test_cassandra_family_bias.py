@@ -1,168 +1,150 @@
-"""Tests for Cassandra family_bias model argument in least-regret selection.
+"""Tests for Cassandra same_family_bias model argument.
 
-The family_bias argument allows tuning the regret calculation to prefer
-certain instance families over others. This is useful when operational
-preferences (e.g., familiarity with i3/i4i families) should influence
-the capacity planning decision.
+The same_family_bias argument adds a cost penalty when the proposed plan
+uses a different instance family than the current cluster. This encourages
+staying on the same family during capacity changes, reducing operational
+risk from family switches.
 """
 
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import CurrentClusters
+from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.org.netflix.cassandra import (
     NflxCassandraArguments,
 )
 
 
-class TestCassandraFamilyBiasArgument:
-    """Test that family_bias is accepted as a model argument."""
+class TestCassandraSameFamilyBiasArgument:
+    """Test that same_family_bias is accepted as a model argument."""
 
-    def test_family_bias_argument_accepted(self):
-        """NflxCassandraArguments should accept family_bias parameter."""
+    def test_same_family_bias_argument_accepted(self):
+        """NflxCassandraArguments should accept same_family_bias parameter."""
         args = NflxCassandraArguments.from_extra_model_arguments(
-            {"family_bias": {"i": 0.5, "r": 1.0, "m": 1.0}}
+            {"same_family_bias": 2.0}
         )
-        assert args.family_bias == {"i": 0.5, "r": 1.0, "m": 1.0}
+        assert args.same_family_bias == 2.0
 
-    def test_family_bias_default_is_none(self):
-        """family_bias should default to None when not specified."""
+    def test_same_family_bias_default_is_none(self):
+        """same_family_bias should default to None when not specified."""
         args = NflxCassandraArguments.from_extra_model_arguments({})
-        assert args.family_bias is None
-
-    def test_family_bias_empty_dict(self):
-        """family_bias can be an empty dict (no bias applied)."""
-        args = NflxCassandraArguments.from_extra_model_arguments({"family_bias": {}})
-        assert args.family_bias == {}
+        assert args.same_family_bias is None
 
 
-class TestCassandraFamilyBiasSelection:
-    """Test that family_bias influences instance family selection."""
+class TestCassandraSameFamilyBiasSelection:
+    """Test that same_family_bias influences instance family selection."""
 
-    # A workload that could reasonably use either i-family (storage-optimized)
-    # or m-family (general purpose) instances
-    mixed_workload = CapacityDesires(
-        service_tier=1,
-        query_pattern=QueryPattern(
-            estimated_read_per_second=certain_int(50_000),
-            estimated_write_per_second=certain_int(20_000),
-            estimated_mean_read_latency_ms=certain_float(1.0),
-            estimated_mean_write_latency_ms=certain_float(0.8),
-        ),
-        data_shape=DataShape(
-            estimated_state_size_gib=certain_int(500),
-        ),
-    )
-
-    def test_family_bias_prefers_biased_family(self):
-        """family_bias should make biased family appear in top results."""
-        # First, get baseline results without bias
-        baseline_plans = planner.plan_certain(
-            model_name="org.netflix.cassandra",
-            region="us-east-1",
-            desires=self.mixed_workload,
-            num_results=5,
-            extra_model_arguments={
-                "require_local_disks": False,
-            },
+    def test_same_family_bias_prefers_current_family(self):
+        """With same_family_bias, plans should prefer current family."""
+        # Current cluster is on i4i family
+        current_cluster = CurrentZoneClusterCapacity(
+            cluster_instance_name="i4i.2xlarge",
+            cluster_instance_count=Interval(low=4, mid=4, high=4, confidence=1),
+            cpu_utilization=certain_float(50.0),
+            memory_utilization_gib=certain_float(32.0),
+            disk_utilization_gib=certain_float(500.0),
+            network_utilization_mbps=certain_float(100.0),
         )
-        baseline_top = baseline_plans[0].candidate_clusters.zonal[0].instance.family
 
-        # Now apply a strong bias toward m-family (general purpose)
-        # A bias < 1.0 means "prefer this family" (lower regret multiplier)
+        desires_with_current = CapacityDesires(
+            service_tier=1,
+            current_clusters=CurrentClusters(zonal=[current_cluster]),
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(50_000),
+                estimated_write_per_second=certain_int(20_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(500),
+            ),
+        )
+
+        # With same_family_bias - should prefer staying on i-family
         biased_plans = planner.plan_certain(
             model_name="org.netflix.cassandra",
             region="us-east-1",
-            desires=self.mixed_workload,
+            desires=desires_with_current,
             num_results=5,
             extra_model_arguments={
                 "require_local_disks": False,
-                "family_bias": {"m": 0.5},  # Strong preference for m-family
+                "same_family_bias": 2.0,  # 2x cost penalty for switching families
             },
         )
 
-        # The biased plans should have m-family appearing more prominently
-        # in the top results compared to baseline
+        # The biased plans should have i-family at the top (same as current)
         biased_top = biased_plans[0].candidate_clusters.zonal[0].instance.family
-        assert biased_top.startswith("m") or biased_top != baseline_top, (
-            f"Expected m-family or different family with family_bias={{'m': 0.5}}, "
-            f"but got {biased_top} (baseline was {baseline_top})"
+        current_family = "i4i"
+
+        # With bias, same family should be preferred
+        assert biased_top.startswith("i"), (
+            f"Expected i-family (same as current {current_family}) with "
+            f"same_family_bias=2.0, but got {biased_top}"
         )
 
-    def test_family_bias_penalty_avoids_family(self):
-        """A family_bias > 1.0 should penalize (avoid) that family."""
-        # Apply a penalty to i-family instances
-        penalized_plans = planner.plan_certain(
-            model_name="org.netflix.cassandra",
-            region="us-east-1",
-            desires=self.mixed_workload,
-            num_results=5,
-            extra_model_arguments={
-                "require_local_disks": True,  # Normally would prefer i-family
-                "family_bias": {"i": 2.0},  # Penalty for i-family
-            },
-        )
-
-        # Despite require_local_disks=True, the i-family penalty should
-        # push the planner toward other local-disk families if available
-        top_family = penalized_plans[0].candidate_clusters.zonal[0].instance.family
-
-        # The top result should either not be i-family, or if it is,
-        # the regret calculation properly considered the penalty
-        # (This assertion may need adjustment based on actual implementation)
-        assert top_family is not None, "Expected a valid instance family"
-
-    def test_family_bias_no_effect_when_one_family_viable(self):
-        """family_bias shouldn't force invalid configurations."""
-        # A workload that strongly requires local storage (only i-family viable)
-        storage_heavy = CapacityDesires(
-            service_tier=0,  # Critical tier
+    def test_same_family_bias_no_effect_without_current(self):
+        """same_family_bias should have no effect when no current cluster."""
+        desires_no_current = CapacityDesires(
+            service_tier=1,
             query_pattern=QueryPattern(
-                estimated_read_per_second=certain_int(100_000),
-                estimated_write_per_second=certain_int(100_000),
+                estimated_read_per_second=certain_int(50_000),
+                estimated_write_per_second=certain_int(20_000),
             ),
             data_shape=DataShape(
-                estimated_state_size_gib=certain_int(10_000),  # Large storage need
+                estimated_state_size_gib=certain_int(500),
             ),
         )
 
-        # Even with a strong bias against i-family, if it's the only viable option,
-        # the planner should still select it
-        plans = planner.plan_certain(
+        # Without same_family_bias
+        baseline_plans = planner.plan_certain(
             model_name="org.netflix.cassandra",
             region="us-east-1",
-            desires=storage_heavy,
-            num_results=3,
+            desires=desires_no_current,
+            num_results=5,
             extra_model_arguments={
-                "require_local_disks": True,
-                "family_bias": {"i": 10.0},  # Strong penalty, but i-family required
+                "require_local_disks": False,
             },
         )
 
-        # Should still get valid plans (i-family) despite the penalty
-        assert len(plans) > 0, "Should return valid plans even with family_bias penalty"
-        top_result = plans[0].candidate_clusters.zonal[0]
-        assert top_result.instance.family.startswith("i"), (
-            "With require_local_disks=True and large storage, "
-            "i-family should still be selected despite penalty"
+        # With same_family_bias (should have no effect - no current cluster)
+        biased_plans = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires_no_current,
+            num_results=5,
+            extra_model_arguments={
+                "require_local_disks": False,
+                "same_family_bias": 2.0,
+            },
         )
 
+        # Results should be the same since there's no current cluster
+        baseline_top = baseline_plans[0].candidate_clusters.zonal[0].instance.family
+        biased_top = biased_plans[0].candidate_clusters.zonal[0].instance.family
 
-class TestCassandraFamilyBiasRegretCalculation:
-    """Test that family_bias correctly modifies regret calculations."""
+        assert baseline_top == biased_top, (
+            f"Expected same results without current cluster, but baseline got "
+            f"{baseline_top} and biased got {biased_top}"
+        )
 
-    def test_family_bias_multiplies_regret(self):
-        """family_bias should act as a multiplier on the regret score."""
-        # This test verifies the mechanics of how family_bias affects regret
-        # The exact implementation may vary, but the principle is:
-        # - bias < 1.0 reduces regret (prefers that family)
-        # - bias > 1.0 increases regret (avoids that family)
-        # - bias = 1.0 or missing = no change
+    def test_same_family_bias_higher_value_stronger_preference(self):
+        """Higher same_family_bias values should more strongly prefer same family."""
+        # Current cluster is on m6i family
+        current_cluster = CurrentZoneClusterCapacity(
+            cluster_instance_name="m6i.4xlarge",
+            cluster_instance_count=Interval(low=6, mid=6, high=6, confidence=1),
+            cpu_utilization=certain_float(40.0),
+            memory_utilization_gib=certain_float(48.0),
+            disk_utilization_gib=certain_float(200.0),
+            network_utilization_mbps=certain_float(150.0),
+        )
 
-        workload = CapacityDesires(
+        desires = CapacityDesires(
             service_tier=1,
+            current_clusters=CurrentClusters(zonal=[current_cluster]),
             query_pattern=QueryPattern(
                 estimated_read_per_second=certain_int(30_000),
                 estimated_write_per_second=certain_int(10_000),
@@ -172,40 +154,22 @@ class TestCassandraFamilyBiasRegretCalculation:
             ),
         )
 
-        # Get plans with different bias configurations
-        no_bias = planner.plan_certain(
+        # With very high same_family_bias - m-family should definitely be preferred
+        strongly_biased_plans = planner.plan_certain(
             model_name="org.netflix.cassandra",
             region="us-east-1",
-            desires=workload,
-            num_results=10,
-            extra_model_arguments={"require_local_disks": False},
+            desires=desires,
+            num_results=5,
+            extra_model_arguments={
+                "require_local_disks": False,
+                "same_family_bias": 10.0,  # Very strong preference for same family
+            },
         )
 
-        # Collect families from no-bias results
-        no_bias_families = [
-            p.candidate_clusters.zonal[0].instance.family for p in no_bias
-        ]
-
-        # If there are multiple families in results, bias should reorder them
-        unique_families = set(no_bias_families)
-        if len(unique_families) > 1:
-            # Pick a family that's not first and bias toward it
-            non_top_family = [f for f in unique_families if f != no_bias_families[0]][0]
-            family_prefix = non_top_family[0]  # First character (e.g., 'r', 'm', 'c')
-
-            biased = planner.plan_certain(
-                model_name="org.netflix.cassandra",
-                region="us-east-1",
-                desires=workload,
-                num_results=10,
-                extra_model_arguments={
-                    "require_local_disks": False,
-                    "family_bias": {family_prefix: 0.1},  # Strong preference
-                },
-            )
-
-            biased_top_family = biased[0].candidate_clusters.zonal[0].instance.family
-            assert biased_top_family.startswith(family_prefix), (
-                f"Expected {family_prefix}-family to become top choice with "
-                f"family_bias={{{family_prefix}: 0.1}}, but got {biased_top_family}"
-            )
+        top_family = (
+            strongly_biased_plans[0].candidate_clusters.zonal[0].instance.family
+        )
+        assert top_family.startswith("m"), (
+            f"Expected m-family (same as current m6i) with same_family_bias=10.0, "
+            f"but got {top_family}"
+        )
