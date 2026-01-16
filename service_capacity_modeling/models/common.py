@@ -72,12 +72,12 @@ def cluster_infra_cost(
     """
     costs: Dict[str, float] = {}
     if zonal_clusters:
-        costs[f"{service_type}.zonal-clusters"] = round(
-            sum(c.annual_cost for c in zonal_clusters), 2
+        costs[f"{service_type}.zonal-clusters"] = sum(
+            c.annual_cost for c in zonal_clusters
         )
     if regional_clusters:
-        costs[f"{service_type}.regional-clusters"] = round(
-            sum(c.annual_cost for c in regional_clusters), 2
+        costs[f"{service_type}.regional-clusters"] = sum(
+            c.annual_cost for c in regional_clusters
         )
     return costs
 
