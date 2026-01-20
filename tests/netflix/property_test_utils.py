@@ -61,16 +61,19 @@ def valid_item_count(draw, min_items=1000, max_items=1_000_000_000_000):
 @st.composite
 def capacity_desires_simple(  # pylint: disable=too-many-positional-arguments
     draw,
+    # Query pattern (QPS and sizes)
     min_qps=100,
     max_qps=100_000,
-    min_data_gib=1,
-    max_data_gib=10_000,
-    min_tier=0,
-    max_tier=2,
     min_read_size_bytes=128,
     max_read_size_bytes=8192,
     min_write_size_bytes=128,
     max_write_size_bytes=8192,
+    # Data shape
+    min_data_gib=1,
+    max_data_gib=10_000,
+    # SLA tier
+    min_tier=0,
+    max_tier=2,
 ):
     """
     Generate simple CapacityDesires with certain (non-interval) values.
@@ -79,14 +82,14 @@ def capacity_desires_simple(  # pylint: disable=too-many-positional-arguments
         draw: Hypothesis draw function
         min_qps: Minimum QPS to generate
         max_qps: Maximum QPS to generate
-        min_data_gib: Minimum data size in GiB
-        max_data_gib: Maximum data size in GiB
-        min_tier: Minimum service tier
-        max_tier: Maximum service tier
         min_read_size_bytes: Minimum read size in bytes
         max_read_size_bytes: Maximum read size in bytes
         min_write_size_bytes: Minimum write size in bytes (0 for read-only)
         max_write_size_bytes: Maximum write size in bytes (0 for read-only)
+        min_data_gib: Minimum data size in GiB
+        max_data_gib: Maximum data size in GiB
+        min_tier: Minimum service tier
+        max_tier: Maximum service tier
 
     Returns:
         CapacityDesires with certain values for fast, deterministic testing
@@ -166,18 +169,21 @@ def capacity_desires_for_model(model_name, **overrides):
     read_size_range = _get_model_config(model_name, "read_size_range")
     write_size_range = _get_model_config(model_name, "write_size_range")
 
-    # Default parameters
+    # Default parameters (order matches capacity_desires_simple signature)
     params = {
+        # Query pattern
         "min_qps": overrides.get("min_qps", 1000),
         "max_qps": overrides.get("max_qps", 50_000),
-        "min_data_gib": overrides.get("min_data_gib", 1),
-        "max_data_gib": overrides.get("max_data_gib", 10_000),
-        "min_tier": overrides.get("min_tier", 0),
-        "max_tier": overrides.get("max_tier", 2),
         "min_read_size_bytes": overrides.get("min_read_size_bytes", 128),
         "max_read_size_bytes": overrides.get("max_read_size_bytes", 8192),
         "min_write_size_bytes": overrides.get("min_write_size_bytes", 128),
         "max_write_size_bytes": overrides.get("max_write_size_bytes", 8192),
+        # Data shape
+        "min_data_gib": overrides.get("min_data_gib", 1),
+        "max_data_gib": overrides.get("max_data_gib", 10_000),
+        # SLA tier
+        "min_tier": overrides.get("min_tier", 0),
+        "max_tier": overrides.get("max_tier", 2),
     }
 
     # Apply model-specific QPS range if configured
