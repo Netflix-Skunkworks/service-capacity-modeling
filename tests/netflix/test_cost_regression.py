@@ -237,38 +237,6 @@ def load_baseline() -> dict[str, dict[str, Any]]:
         return {}
 
 
-def capture_scenario_costs(scenario_name: str) -> dict[str, Any]:
-    """Run planner and capture costs for a scenario."""
-    scenario = SCENARIOS[scenario_name]
-    try:
-        cap_plans = planner.plan_certain(
-            model_name=scenario["model"],
-            region=scenario["region"],
-            desires=scenario["desires"],
-            num_results=1,
-            extra_model_arguments=scenario["extra_args"] or {},
-        )
-
-        if not cap_plans:
-            return {"error": "No capacity plans generated", "scenario": scenario_name}
-
-        cap_plan = cap_plans[0]
-        clusters = cap_plan.candidate_clusters
-
-        result: dict[str, Any] = {
-            "scenario": scenario_name,
-            "model": scenario["model"],
-            "region": scenario["region"],
-            "service_tier": scenario["desires"].service_tier,
-            "annual_costs": {k: float(v) for k, v in clusters.annual_costs.items()},
-            "total_annual_cost": float(clusters.total_annual_cost),
-        }
-
-        return result
-    except (ValueError, KeyError, AttributeError) as e:
-        return {"error": str(e), "scenario": scenario_name}
-
-
 @pytest.fixture(scope="session")
 def baseline_costs() -> dict[str, dict[str, Any]]:
     """Load baseline costs from JSON file."""
@@ -285,10 +253,7 @@ class TestBaselineDrift:
         baseline_costs: dict[str, dict[str, Any]],
     ) -> None:
         """Test that scenario costs match baseline within 1% tolerance."""
-        actual = capture_scenario_costs(scenario_name)
-
-        if "error" in actual:
-            pytest.skip(f"Scenario failed: {actual['error']}")
+        scenario = SCENARIOS[scenario_name]
 
         if scenario_name not in baseline_costs:
             pytest.fail(
@@ -298,7 +263,22 @@ class TestBaselineDrift:
 
         baseline = baseline_costs[scenario_name]
         baseline_total = baseline["total_annual_cost"]
-        actual_total = actual["total_annual_cost"]
+        baseline_keys = set(baseline["annual_costs"].keys())
+
+        # Run plan_certain to get actual costs
+        cap_plans = planner.plan_certain(
+            model_name=scenario["model"],
+            region=scenario["region"],
+            desires=scenario["desires"],
+            num_results=1,
+            extra_model_arguments=scenario["extra_args"] or {},
+        )
+
+        assert cap_plans, f"No capacity plans generated for {scenario_name}"
+        cap_plan = cap_plans[0]
+
+        actual_total = float(cap_plan.candidate_clusters.total_annual_cost)
+        actual_keys = set(cap_plan.candidate_clusters.annual_costs.keys())
 
         assert actual_total == pytest.approx(baseline_total, rel=0.01), (
             f"Total cost drift for {scenario_name}: "
@@ -306,10 +286,6 @@ class TestBaselineDrift:
             f"diff={((actual_total - baseline_total) / baseline_total) * 100:+.2f}%. "
             "If expected, update baseline: tox -e capture-baseline"
         )
-
-        # Compare cost breakdown keys
-        baseline_keys = set(baseline["annual_costs"].keys())
-        actual_keys = set(actual["annual_costs"].keys())
 
         added = actual_keys - baseline_keys
         removed = baseline_keys - actual_keys
