@@ -1065,9 +1065,15 @@ class CapacityDesires(ExcludeUnsetModel):
         )
         user_count = self.data_shape.estimated_state_item_count
 
-        # Infer item size from write_size (normal) or read_size (read-only workloads).
-        # If both are 0, the model defaults are misconfigured - fail fast.
-        # If inference isn't needed (user provided both or neither), this is unused.
+        # Bidirectional inference: state_size_gib ↔ item_count
+        #
+        # Users often know one but not the other. We can infer the missing value:
+        #   state_size_gib = item_count × item_size_bytes
+        #   item_count = state_size_gib / item_size_bytes
+        #
+        # Item size comes from write_size (the size of records written to storage).
+        # For read-only workloads (e.g., read replicas), use read_size as fallback.
+        # If user provided both or neither, no inference is needed.
         item_size_bytes = (
             desires.query_pattern.estimated_mean_write_size_bytes.mid
             or desires.query_pattern.estimated_mean_read_size_bytes.mid
