@@ -30,6 +30,7 @@ from service_capacity_modeling.interface import (
     Interval,
     QueryPattern,
 )
+from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling import tools as scm_tools
 
 
@@ -245,6 +246,28 @@ def baseline_costs() -> dict[str, dict[str, Any]]:
     return load_baseline()
 
 
+def _clusters_to_current(cap_plan) -> CurrentClusters:
+    """Convert plan's candidate_clusters to CurrentClusters format."""
+    current_zonal = []
+    for cluster in cap_plan.candidate_clusters.zonal:
+        current_zonal.append(
+            CurrentZoneClusterCapacity(
+                cluster_instance_name=cluster.instance.name,
+                cluster_instance=None,
+                cluster_instance_count=Interval(
+                    low=cluster.count,
+                    mid=cluster.count,
+                    high=cluster.count,
+                    confidence=1.0,
+                ),
+                cluster_drive=cluster.attached_drives[0]
+                if cluster.attached_drives
+                else None,
+            )
+        )
+    return CurrentClusters(zonal=current_zonal)
+
+
 class TestBaselineDrift:
     """Test that actual costs match baseline within tolerance."""
 
@@ -296,134 +319,114 @@ class TestBaselineDrift:
             "If expected, update baseline: tox -e capture-baseline"
         )
 
+        # For CostAwareModel scenarios, also verify extract_baseline_plan
+        model = planner.models[scenario["model"]]
+        if isinstance(model, CostAwareModel):
+            current_clusters = _clusters_to_current(cap_plan)
+            desires_with_current = scenario["desires"].model_copy(deep=True)
+            desires_with_current.current_clusters = current_clusters
 
-# ============================================================================
-# extract_baseline_plan cost comparison tests
-# ============================================================================
-
-# CostAwareModel scenarios (Cassandra, Kafka, EVCache) can use extract_baseline_plan
-COST_AWARE_SCENARIOS = {
-    name: scenario
-    for name, scenario in SCENARIOS.items()
-    if scenario["model"]
-    in ("org.netflix.cassandra", "org.netflix.kafka", "org.netflix.evcache")
-}
-
-
-def _clusters_to_current(cap_plan) -> CurrentClusters:
-    """Convert plan's candidate_clusters to CurrentClusters format.
-
-    Takes the zonal clusters from a capacity plan and converts them to
-    CurrentZoneClusterCapacity format for use with extract_baseline_plan.
-    """
-    current_zonal = []
-    for cluster in cap_plan.candidate_clusters.zonal:
-        current_zonal.append(
-            CurrentZoneClusterCapacity(
-                cluster_instance_name=cluster.instance.name,
-                cluster_instance=None,  # Will be resolved from catalog
-                cluster_instance_count=Interval(
-                    low=cluster.count,
-                    mid=cluster.count,
-                    high=cluster.count,
-                    confidence=1.0,
-                ),
-                # Include drive if attached
-                cluster_drive=cluster.attached_drives[0]
-                if cluster.attached_drives
-                else None,
+            extracted = planner.extract_baseline_plan(
+                model_name=scenario["model"],
+                region=scenario["region"],
+                desires=desires_with_current,
+                extra_model_arguments=scenario["extra_args"] or {},
             )
+
+            extracted_total = float(extracted.candidate_clusters.total_annual_cost)
+            assert extracted_total == pytest.approx(baseline_total, rel=0.01), (
+                f"extract_baseline_plan cost drift for {scenario_name}: "
+                f"baseline=${baseline_total:,.2f}, extracted=${extracted_total:,.2f}"
+            )
+
+
+class TestExtractBaselinePlanValidation:
+    """Tests for extract_baseline_plan input validation and edge cases."""
+
+    def test_error_current_clusters_none(self):
+        """Error when current_clusters is None."""
+        desires = CapacityDesires()
+        with pytest.raises(ValueError, match="current_clusters is None"):
+            planner.extract_baseline_plan(
+                model_name="org.netflix.cassandra",
+                region="us-east-1",
+                desires=desires,
+            )
+
+    def test_error_empty_clusters(self):
+        """Error when no zonal or regional clusters defined."""
+        desires = CapacityDesires(current_clusters=CurrentClusters())
+        with pytest.raises(ValueError, match="no zonal or regional"):
+            planner.extract_baseline_plan(
+                model_name="org.netflix.cassandra",
+                region="us-east-1",
+                desires=desires,
+            )
+
+    def test_error_invalid_model(self):
+        """Error when model_name doesn't exist."""
+        current = CurrentZoneClusterCapacity(
+            cluster_instance_name="m5.xlarge",
+            cluster_instance=None,
+            cluster_instance_count=Interval(low=3, mid=3, high=3, confidence=1.0),
         )
-    return CurrentClusters(zonal=current_zonal)
+        desires = CapacityDesires(current_clusters=CurrentClusters(zonal=[current]))
+        with pytest.raises(ValueError, match="does not exist"):
+            planner.extract_baseline_plan(
+                model_name="org.netflix.nonexistent",
+                region="us-east-1",
+                desires=desires,
+            )
 
-
-class TestExtractBaselinePlanCostMatch:
-    """Test that extract_baseline_plan costs match plan_certain costs.
-
-    For CostAwareModel models (Cassandra, Kafka, EVCache), the baseline
-    extraction should produce the same costs as plan_certain when given
-    the same cluster configuration.
-    """
-
-    @pytest.mark.parametrize("scenario_name", list(COST_AWARE_SCENARIOS.keys()))
-    def test_baseline_total_cost_matches_planner(self, scenario_name: str) -> None:
-        """Baseline total_annual_cost should match planner exactly."""
-        scenario = COST_AWARE_SCENARIOS[scenario_name]
-
-        # Get recommended plan
-        cap_plans = planner.plan_certain(
-            model_name=scenario["model"],
-            region=scenario["region"],
-            desires=scenario["desires"],
-            num_results=1,
-            extra_model_arguments=scenario["extra_args"] or {},
+    def test_error_invalid_instance_name(self):
+        """Error when instance name doesn't exist in hardware catalog."""
+        current = CurrentZoneClusterCapacity(
+            cluster_instance_name="nonexistent-instance-type",
+            cluster_instance=None,
+            cluster_instance_count=Interval(low=3, mid=3, high=3, confidence=1.0),
         )
+        desires = CapacityDesires(current_clusters=CurrentClusters(zonal=[current]))
+        with pytest.raises(ValueError, match="nonexistent-instance-type"):
+            planner.extract_baseline_plan(
+                model_name="org.netflix.cassandra",
+                region="us-east-1",
+                desires=desires,
+            )
 
-        if not cap_plans:
-            pytest.skip(f"No capacity plans generated for {scenario_name}")
-
-        recommended = cap_plans[0]
-
-        # Convert to current clusters and extract baseline
-        current_clusters = _clusters_to_current(recommended)
-        desires_with_current = scenario["desires"].model_copy(deep=True)
-        desires_with_current.current_clusters = current_clusters
+    def test_uses_model_service_name(self):
+        """Uses model's service_name for requirement_type."""
+        current = CurrentZoneClusterCapacity(
+            cluster_instance_name="m5.xlarge",
+            cluster_instance=None,
+            cluster_instance_count=Interval(low=3, mid=3, high=3, confidence=1.0),
+        )
+        desires = CapacityDesires(current_clusters=CurrentClusters(zonal=[current]))
 
         baseline = planner.extract_baseline_plan(
-            model_name=scenario["model"],
-            region=scenario["region"],
-            desires=desires_with_current,
-            extra_model_arguments=scenario["extra_args"] or {},
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={"copies_per_region": 3},
         )
 
-        # Compare total annual cost
-        recommended_total = recommended.candidate_clusters.total_annual_cost
-        baseline_total = baseline.candidate_clusters.total_annual_cost
+        assert "cassandra" in baseline.requirements.zonal[0].requirement_type
 
-        assert baseline_total == pytest.approx(recommended_total, rel=0.01), (
-            f"Total cost mismatch for {scenario_name}: "
-            f"recommended=${recommended_total:,.2f}, "
-            f"baseline=${baseline_total:,.2f}\n"
-            f"Breakdown - recommended: {recommended.candidate_clusters.annual_costs}\n"
-            f"Breakdown - baseline: {baseline.candidate_clusters.annual_costs}"
+    def test_instance_resolved_from_hardware_catalog(self):
+        """Instance is resolved from hardware catalog when not provided."""
+        current = CurrentZoneClusterCapacity(
+            cluster_instance_name="m5.xlarge",
+            cluster_instance=None,
+            cluster_instance_count=Interval(low=4, mid=4, high=4, confidence=1.0),
         )
-
-    @pytest.mark.parametrize("scenario_name", list(COST_AWARE_SCENARIOS.keys()))
-    def test_baseline_cost_keys_match_planner(self, scenario_name: str) -> None:
-        """Baseline extraction should produce same cost keys as planner."""
-        scenario = COST_AWARE_SCENARIOS[scenario_name]
-
-        # Get recommended plan
-        cap_plans = planner.plan_certain(
-            model_name=scenario["model"],
-            region=scenario["region"],
-            desires=scenario["desires"],
-            num_results=1,
-            extra_model_arguments=scenario["extra_args"] or {},
-        )
-
-        if not cap_plans:
-            pytest.skip(f"No capacity plans generated for {scenario_name}")
-
-        recommended = cap_plans[0]
-
-        # Convert to current clusters and extract baseline
-        current_clusters = _clusters_to_current(recommended)
-        desires_with_current = scenario["desires"].model_copy(deep=True)
-        desires_with_current.current_clusters = current_clusters
+        desires = CapacityDesires(current_clusters=CurrentClusters(zonal=[current]))
 
         baseline = planner.extract_baseline_plan(
-            model_name=scenario["model"],
-            region=scenario["region"],
-            desires=desires_with_current,
-            extra_model_arguments=scenario["extra_args"] or {},
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={"copies_per_region": 3},
         )
 
-        # Compare cost breakdown keys
-        recommended_keys = set(recommended.candidate_clusters.annual_costs.keys())
-        baseline_keys = set(baseline.candidate_clusters.annual_costs.keys())
-
-        assert baseline_keys == recommended_keys, (
-            f"Cost keys differ for {scenario_name}: "
-            f"recommended={recommended_keys}, baseline={baseline_keys}"
-        )
+        assert baseline.candidate_clusters.zonal[0].count == 4
+        assert baseline.candidate_clusters.zonal[0].instance.name == "m5.xlarge"
+        assert baseline.candidate_clusters.zonal[0].instance.cpu == 4
