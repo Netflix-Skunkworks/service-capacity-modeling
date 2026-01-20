@@ -1064,12 +1064,30 @@ class CapacityDesires(ExcludeUnsetModel):
             .get("estimated_state_size_gib", None)
         )
         user_count = self.data_shape.estimated_state_item_count
-        item_size_bytes = desires.query_pattern.estimated_mean_write_size_bytes.mid
+
+        # Infer item size from write_size (normal) or read_size (read-only workloads).
+        # If both are 0, the model defaults are misconfigured - fail fast.
+        # If inference isn't needed (user provided both or neither), this is unused.
+        item_size_bytes = (
+            desires.query_pattern.estimated_mean_write_size_bytes.mid
+            or desires.query_pattern.estimated_mean_read_size_bytes.mid
+        )
+
         if user_size is None and user_count is not None:
+            if not item_size_bytes:
+                raise ValueError(
+                    "Model default_desires() must set estimated_mean_write_size_bytes "
+                    "or estimated_mean_read_size_bytes to infer state_size_gib"
+                )
             desires.data_shape.estimated_state_size_gib = user_count.scale(
                 factor=(item_size_bytes / GIB_IN_BYTES)
             )
         elif user_size is not None and user_count is None:
+            if not item_size_bytes:
+                raise ValueError(
+                    "Model default_desires() must set estimated_mean_write_size_bytes "
+                    "or estimated_mean_read_size_bytes to infer item_count"
+                )
             user_size_gib = self.data_shape.estimated_state_size_gib
             desires.data_shape.estimated_state_item_count = user_size_gib.scale(
                 factor=(GIB_IN_BYTES / item_size_bytes)
