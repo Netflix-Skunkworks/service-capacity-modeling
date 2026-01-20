@@ -24,6 +24,8 @@ from service_capacity_modeling.interface import (
     CapacityDesires,
     certain_float,
     certain_int,
+    CurrentClusters,
+    CurrentZoneClusterCapacity,
     DataShape,
     Interval,
     QueryPattern,
@@ -187,7 +189,7 @@ SCENARIOS: dict[str, dict[str, Any]] = {
         "model": "org.netflix.cassandra",
         "region": "us-east-1",
         "desires": CASSANDRA_SMALL_HIGH_QPS,
-        "extra_args": {"require_local_disks": True},
+        "extra_args": {"require_local_disks": True, "copies_per_region": 3},
     },
     "cassandra_high_writes_ebs": {
         "model": "org.netflix.cassandra",
@@ -292,4 +294,136 @@ class TestBaselineDrift:
         assert baseline_keys == actual_keys, (
             f"Cost keys changed for {scenario_name}: added={added}, removed={removed}. "
             "If expected, update baseline: tox -e capture-baseline"
+        )
+
+
+# ============================================================================
+# extract_baseline_plan cost comparison tests
+# ============================================================================
+
+# CostAwareModel scenarios (Cassandra, Kafka, EVCache) can use extract_baseline_plan
+COST_AWARE_SCENARIOS = {
+    name: scenario
+    for name, scenario in SCENARIOS.items()
+    if scenario["model"]
+    in ("org.netflix.cassandra", "org.netflix.kafka", "org.netflix.evcache")
+}
+
+
+def _clusters_to_current(cap_plan) -> CurrentClusters:
+    """Convert plan's candidate_clusters to CurrentClusters format.
+
+    Takes the zonal clusters from a capacity plan and converts them to
+    CurrentZoneClusterCapacity format for use with extract_baseline_plan.
+    """
+    current_zonal = []
+    for cluster in cap_plan.candidate_clusters.zonal:
+        current_zonal.append(
+            CurrentZoneClusterCapacity(
+                cluster_instance_name=cluster.instance.name,
+                cluster_instance=None,  # Will be resolved from catalog
+                cluster_instance_count=Interval(
+                    low=cluster.count,
+                    mid=cluster.count,
+                    high=cluster.count,
+                    confidence=1.0,
+                ),
+                # Include drive if attached
+                cluster_drive=cluster.attached_drives[0]
+                if cluster.attached_drives
+                else None,
+            )
+        )
+    return CurrentClusters(zonal=current_zonal)
+
+
+class TestExtractBaselinePlanCostMatch:
+    """Test that extract_baseline_plan costs match plan_certain costs.
+
+    For CostAwareModel models (Cassandra, Kafka, EVCache), the baseline
+    extraction should produce the same costs as plan_certain when given
+    the same cluster configuration.
+    """
+
+    @pytest.mark.parametrize("scenario_name", list(COST_AWARE_SCENARIOS.keys()))
+    def test_baseline_total_cost_matches_planner(self, scenario_name: str) -> None:
+        """Baseline total_annual_cost should match planner exactly."""
+        scenario = COST_AWARE_SCENARIOS[scenario_name]
+
+        # Get recommended plan
+        cap_plans = planner.plan_certain(
+            model_name=scenario["model"],
+            region=scenario["region"],
+            desires=scenario["desires"],
+            num_results=1,
+            extra_model_arguments=scenario["extra_args"] or {},
+        )
+
+        if not cap_plans:
+            pytest.skip(f"No capacity plans generated for {scenario_name}")
+
+        recommended = cap_plans[0]
+
+        # Convert to current clusters and extract baseline
+        current_clusters = _clusters_to_current(recommended)
+        desires_with_current = scenario["desires"].model_copy(deep=True)
+        desires_with_current.current_clusters = current_clusters
+
+        baseline = planner.extract_baseline_plan(
+            model_name=scenario["model"],
+            region=scenario["region"],
+            desires=desires_with_current,
+            extra_model_arguments=scenario["extra_args"] or {},
+        )
+
+        # Compare total annual cost
+        recommended_total = recommended.candidate_clusters.total_annual_cost
+        baseline_total = baseline.candidate_clusters.total_annual_cost
+
+        assert baseline_total == pytest.approx(recommended_total, rel=0.01), (
+            f"Total cost mismatch for {scenario_name}: "
+            f"recommended=${recommended_total:,.2f}, "
+            f"baseline=${baseline_total:,.2f}\n"
+            f"Breakdown - recommended: {recommended.candidate_clusters.annual_costs}\n"
+            f"Breakdown - baseline: {baseline.candidate_clusters.annual_costs}"
+        )
+
+    @pytest.mark.parametrize("scenario_name", list(COST_AWARE_SCENARIOS.keys()))
+    def test_baseline_cost_keys_match_planner(self, scenario_name: str) -> None:
+        """Baseline extraction should produce same cost keys as planner."""
+        scenario = COST_AWARE_SCENARIOS[scenario_name]
+
+        # Get recommended plan
+        cap_plans = planner.plan_certain(
+            model_name=scenario["model"],
+            region=scenario["region"],
+            desires=scenario["desires"],
+            num_results=1,
+            extra_model_arguments=scenario["extra_args"] or {},
+        )
+
+        if not cap_plans:
+            pytest.skip(f"No capacity plans generated for {scenario_name}")
+
+        recommended = cap_plans[0]
+
+        # Convert to current clusters and extract baseline
+        current_clusters = _clusters_to_current(recommended)
+        desires_with_current = scenario["desires"].model_copy(deep=True)
+        desires_with_current.current_clusters = current_clusters
+
+        baseline = planner.extract_baseline_plan(
+            model_name=scenario["model"],
+            region=scenario["region"],
+            desires=desires_with_current,
+            extra_model_arguments=scenario["extra_args"] or {},
+        )
+
+        # Compare cost breakdown keys
+        recommended_keys = set(recommended.candidate_clusters.annual_costs.keys())
+        baseline_keys = set(baseline.candidate_clusters.annual_costs.keys())
+
+        assert baseline_keys == recommended_keys, (
+            f"Cost keys differ for {scenario_name}: "
+            f"recommended={recommended_keys}, baseline={baseline_keys}"
         )

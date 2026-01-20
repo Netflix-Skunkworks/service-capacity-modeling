@@ -707,6 +707,8 @@ class NflxCassandraArguments(BaseModel):
 
 
 class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
+    service_name = "cassandra"
+
     def __init__(self) -> None:
         pass
 

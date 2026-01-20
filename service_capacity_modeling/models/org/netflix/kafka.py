@@ -474,6 +474,7 @@ class NflxKafkaArguments(BaseModel):
 
 
 class NflxKafkaCapacityModel(CapacityModel, CostAwareModel):
+    service_name = "kafka"
     HA_DEFAULT_REPLICATION_FACTOR = 2
     SC_DEFAULT_REPLICATION_FACTOR = 3
 

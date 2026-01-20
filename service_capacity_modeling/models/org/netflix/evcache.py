@@ -401,6 +401,8 @@ class NflxEVCacheArguments(BaseModel):
 
 
 class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
+    service_name = "evcache"
+
     @staticmethod
     def cluster_costs(
         service_type: str,
