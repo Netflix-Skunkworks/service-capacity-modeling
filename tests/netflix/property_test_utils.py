@@ -67,6 +67,10 @@ def capacity_desires_simple(  # pylint: disable=too-many-positional-arguments
     max_data_gib=10_000,
     min_tier=0,
     max_tier=2,
+    min_read_size_bytes=128,
+    max_read_size_bytes=8192,
+    min_write_size_bytes=128,
+    max_write_size_bytes=8192,
 ):
     """
     Generate simple CapacityDesires with certain (non-interval) values.
@@ -79,6 +83,10 @@ def capacity_desires_simple(  # pylint: disable=too-many-positional-arguments
         max_data_gib: Maximum data size in GiB
         min_tier: Minimum service tier
         max_tier: Maximum service tier
+        min_read_size_bytes: Minimum read size in bytes
+        max_read_size_bytes: Maximum read size in bytes
+        min_write_size_bytes: Minimum write size in bytes (0 for read-only)
+        max_write_size_bytes: Maximum write size in bytes (0 for read-only)
 
     Returns:
         CapacityDesires with certain values for fast, deterministic testing
@@ -86,15 +94,23 @@ def capacity_desires_simple(  # pylint: disable=too-many-positional-arguments
     read_qps = draw(st.integers(min_value=min_qps, max_value=max_qps))
     write_qps = draw(st.integers(min_value=min_qps, max_value=max_qps))
     data_gib = draw(st.integers(min_value=min_data_gib, max_value=max_data_gib))
-
-    # Determine tier range
     tier = draw(st.integers(min_value=min_tier, max_value=max_tier))
+
+    # Generate read/write sizes for network bandwidth calculations
+    read_size = draw(
+        st.integers(min_value=min_read_size_bytes, max_value=max_read_size_bytes)
+    )
+    write_size = draw(
+        st.integers(min_value=min_write_size_bytes, max_value=max_write_size_bytes)
+    )
 
     return CapacityDesires(
         service_tier=tier,
         query_pattern=QueryPattern(
             estimated_read_per_second=certain_int(read_qps),
             estimated_write_per_second=certain_int(write_qps),
+            estimated_mean_read_size_bytes=certain_int(read_size),
+            estimated_mean_write_size_bytes=certain_int(write_size),
         ),
         data_shape=DataShape(
             estimated_state_size_gib=certain_int(data_gib),
@@ -147,6 +163,8 @@ def capacity_desires_for_model(model_name, **overrides):
     qps_range = _get_model_config(model_name, "qps_range")
     data_range_gib = _get_model_config(model_name, "data_range_gib")
     tier_range = _get_model_config(model_name, "tier_range")
+    read_size_range = _get_model_config(model_name, "read_size_range")
+    write_size_range = _get_model_config(model_name, "write_size_range")
 
     # Default parameters
     params = {
@@ -156,6 +174,10 @@ def capacity_desires_for_model(model_name, **overrides):
         "max_data_gib": overrides.get("max_data_gib", 10_000),
         "min_tier": overrides.get("min_tier", 0),
         "max_tier": overrides.get("max_tier", 2),
+        "min_read_size_bytes": overrides.get("min_read_size_bytes", 128),
+        "max_read_size_bytes": overrides.get("max_read_size_bytes", 8192),
+        "min_write_size_bytes": overrides.get("min_write_size_bytes", 128),
+        "max_write_size_bytes": overrides.get("max_write_size_bytes", 8192),
     }
 
     # Apply model-specific QPS range if configured
@@ -172,6 +194,23 @@ def capacity_desires_for_model(model_name, **overrides):
     if tier_range:
         params["min_tier"] = overrides.get("min_tier", tier_range[0])
         params["max_tier"] = overrides.get("max_tier", tier_range[1])
+
+    # Apply model-specific read/write size ranges if configured
+    # Use (0, 0) for read-only models
+    if read_size_range:
+        params["min_read_size_bytes"] = overrides.get(
+            "min_read_size_bytes", read_size_range[0]
+        )
+        params["max_read_size_bytes"] = overrides.get(
+            "max_read_size_bytes", read_size_range[1]
+        )
+    if write_size_range:
+        params["min_write_size_bytes"] = overrides.get(
+            "min_write_size_bytes", write_size_range[0]
+        )
+        params["max_write_size_bytes"] = overrides.get(
+            "max_write_size_bytes", write_size_range[1]
+        )
 
     return capacity_desires_simple(**params)
 
