@@ -17,6 +17,7 @@ from .graphkv import nflx_graphkv_capacity_model
 from .kafka import nflx_kafka_capacity_model
 from .key_value import nflx_key_value_capacity_model
 from .postgres import nflx_postgres_capacity_model
+from .rds import nflx_rds_capacity_model
 from .stateless_java import nflx_java_app_capacity_model
 from .time_series import nflx_time_series_capacity_model
 from .wal import nflx_wal_capacity_model
@@ -41,6 +42,7 @@ def models() -> Dict[str, Any]:
         "org.netflix.cockroachdb": nflx_cockroachdb_capacity_model,
         "org.netflix.aurora": nflx_aurora_capacity_model,
         "org.netflix.postgres": nflx_postgres_capacity_model,
+        "org.netflix.rds": nflx_rds_capacity_model,
         "org.netflix.kafka": nflx_kafka_capacity_model,
         "org.netflix.dynamodb": nflx_ddb_capacity_model,
         "org.netflix.wal": nflx_wal_capacity_model,
