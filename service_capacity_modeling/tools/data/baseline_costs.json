@@ -31,33 +31,33 @@
   },
   {
     "annual_costs": {
-      "aurora-cluster.regional-clusters": 7362.984
+      "aurora-cluster.regional-clusters": 3447.644
     },
     "cluster_count": 1,
     "deployment": "regional",
     "instance_count": 2,
-    "instance_name": "db.r5.2xlarge",
+    "instance_name": "db.r6g.xlarge",
     "model": "org.netflix.aurora",
     "region": "us-east-1",
     "scenario": "aurora_small_tier1",
     "service_count": 0,
     "service_tier": 1,
-    "total_annual_cost": 7362.98
+    "total_annual_cost": 3447.64
   },
   {
     "annual_costs": {
-      "aurora-cluster.regional-clusters": 4162.128
+      "aurora-cluster.regional-clusters": 2204.4579999999996
     },
     "cluster_count": 1,
     "deployment": "regional",
     "instance_count": 1,
-    "instance_name": "db.r5.2xlarge",
+    "instance_name": "db.r6g.xlarge",
     "model": "org.netflix.aurora",
     "region": "us-east-1",
     "scenario": "aurora_tier3",
     "service_count": 0,
     "service_tier": 3,
-    "total_annual_cost": 4162.13
+    "total_annual_cost": 2204.46
   },
   {
     "annual_costs": {
