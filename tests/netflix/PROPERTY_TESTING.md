@@ -31,6 +31,13 @@ PROPERTY_TEST_CONFIG = {
         # NOTE: If tier_range[0] > 0, tier 0 support is automatically disabled
         "tier_range": (1, 2),
 
+        # Valid read size range in bytes (default: 128-8192)
+        "read_size_range": (128, 8192),
+
+        # Valid write size range in bytes (default: 128-8192)
+        # Set to (0, 0) for read-only models
+        "write_size_range": (0, 0),
+
         # Skip all universal property tests (use sparingly)
         "exclude_from_universal_tests": True,
     },
@@ -61,6 +68,17 @@ PROPERTY_TEST_CONFIG = {
             "counter.mode": "exact",
             "counter.cardinality": "high",
         },
+    },
+}
+```
+
+### Read-Only Model
+For models with read-only workloads, set `write_size_range` to `(0, 0)`:
+```python
+PROPERTY_TEST_CONFIG = {
+    "org.netflix.read-only-kv": {
+        "extra_model_arguments": {"require_local_disks": False},
+        "write_size_range": (0, 0),  # Read-only model
     },
 }
 ```
