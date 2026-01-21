@@ -11,6 +11,14 @@ Usage:
 
     # Update baseline when costs intentionally change
     tox -e capture-baseline
+
+Recommended Setup:
+    # Install pre-commit hooks to auto-update baselines on commit
+    pre-commit install
+
+    With hooks installed, the baseline capture runs automatically during commit.
+    If you're seeing test failures due to baseline drift, run:
+        pre-commit install && tox -e capture-baseline
 """
 
 import json
@@ -22,6 +30,11 @@ import pytest
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling import tools as scm_tools
 from service_capacity_modeling.tools.capture_baseline_costs import SCENARIOS
+
+# Help message for baseline-related test failures
+_BASELINE_HELP = (
+    "To fix: tox -e capture-baseline\nTo auto-update on commit: pre-commit install"
+)
 
 
 def load_baseline() -> dict[str, dict[str, Any]]:
@@ -59,8 +72,7 @@ class TestBaselineDrift:
 
         if scenario_name not in baseline_costs:
             pytest.fail(
-                f"Scenario '{scenario_name}' not in baseline. "
-                "Run: tox -e capture-baseline"
+                f"Scenario '{scenario_name}' not in baseline.\n{_BASELINE_HELP}"
             )
 
         baseline = baseline_costs[scenario_name]
@@ -85,13 +97,13 @@ class TestBaselineDrift:
         assert actual_total == pytest.approx(baseline_total, rel=0.01), (
             f"Total cost drift for {scenario_name}: "
             f"baseline=${baseline_total:,.2f}, actual=${actual_total:,.2f}, "
-            f"diff={((actual_total - baseline_total) / baseline_total) * 100:+.2f}%. "
-            "If expected, update baseline: tox -e capture-baseline"
+            f"diff={((actual_total - baseline_total) / baseline_total) * 100:+.2f}%.\n"
+            f"{_BASELINE_HELP}"
         )
 
         added = actual_keys - baseline_keys
         removed = baseline_keys - actual_keys
         assert baseline_keys == actual_keys, (
-            f"Cost keys changed for {scenario_name}: added={added}, removed={removed}. "
-            "If expected, update baseline: tox -e capture-baseline"
+            f"Cost keys changed for {scenario_name}: "
+            f"added={added}, removed={removed}.\n{_BASELINE_HELP}"
         )
