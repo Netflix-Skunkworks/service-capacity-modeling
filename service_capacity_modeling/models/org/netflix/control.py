@@ -67,23 +67,23 @@ class NflxControlCapacityModel(CapacityModel):
     def compose_with(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
-        def _modify_aurora_desires(
+        def _modify_postgres_desires(
             user_desires: CapacityDesires,
         ) -> CapacityDesires:
             relaxed = user_desires.model_copy(deep=True)
 
-            # Aurora doesn't support tier 0, so downgrade to tier 1
+            # Postgres doesn't support tier 0, so downgrade to tier 1
             if relaxed.service_tier == 0:
                 relaxed.service_tier = 1
 
-            # Control caches reads in memory, only writes go to Aurora
-            # Set read QPS to minimal since Aurora only handles writes
+            # Control caches reads in memory, only writes go to Postgres
+            # Set read QPS to minimal since Postgres only handles writes
             if relaxed.query_pattern.estimated_read_per_second:
                 relaxed.query_pattern.estimated_read_per_second = certain_int(1)
 
             return relaxed
 
-        return (("org.netflix.aurora", _modify_aurora_desires),)
+        return (("org.netflix.postgres", _modify_postgres_desires),)
 
     @staticmethod
     def default_desires(

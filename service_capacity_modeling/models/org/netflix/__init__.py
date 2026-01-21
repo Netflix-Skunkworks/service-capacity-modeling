@@ -17,7 +17,6 @@ from .graphkv import nflx_graphkv_capacity_model
 from .kafka import nflx_kafka_capacity_model
 from .key_value import nflx_key_value_capacity_model
 from .postgres import nflx_postgres_capacity_model
-from .rds import nflx_rds_capacity_model
 from .stateless_java import nflx_java_app_capacity_model
 from .time_series import nflx_time_series_capacity_model
 from .wal import nflx_wal_capacity_model
@@ -33,7 +32,6 @@ def models() -> Dict[str, Any]:
         "org.netflix.counter": nflx_counter_capacity_model,
         "org.netflix.zookeeper": nflx_zookeeper_capacity_model,
         "org.netflix.evcache": nflx_evcache_capacity_model,
-        "org.netflix.rds": nflx_rds_capacity_model,
         "org.netflix.elasticsearch": nflx_elasticsearch_capacity_model,
         "org.netflix.elasticsearch.node": nflx_elasticsearch_data_capacity_model,
         "org.netflix.elasticsearch.master": nflx_elasticsearch_master_capacity_model,

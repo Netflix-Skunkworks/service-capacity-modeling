@@ -30,6 +30,10 @@ class NflxEntityCapacityModel(CapacityModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
+        # Entity doesn't support tier 0
+        if desires.service_tier == 0:
+            return None
+
         # Entity wants 20GiB root volumes
         extra_model_arguments.setdefault("root_disk_gib", 20)
 
@@ -59,7 +63,7 @@ class NflxEntityCapacityModel(CapacityModel):
     def compose_with(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
-        def _modify_crdb_desires(
+        def _modify_postgres_desires(
             user_desires: CapacityDesires,
         ) -> CapacityDesires:
             relaxed = user_desires.model_copy(deep=True)
@@ -96,7 +100,7 @@ class NflxEntityCapacityModel(CapacityModel):
             return relaxed
 
         return (
-            ("org.netflix.cockroachdb", _modify_crdb_desires),
+            ("org.netflix.postgres", _modify_postgres_desires),
             ("org.netflix.key-value", lambda x: x),
             ("org.netflix.elasticsearch", _modify_elasticsearch_desires),
         )
