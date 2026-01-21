@@ -15,10 +15,13 @@ from typing import Any
 
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import (
+    AccessConsistency,
     CapacityDesires,
     certain_float,
     certain_int,
+    Consistency,
     DataShape,
+    GlobalConsistency,
     Interval,
     QueryPattern,
 )
@@ -52,7 +55,9 @@ def capture_costs(
             "model": model_name,
             "region": region,
             "service_tier": desires.service_tier,
-            "annual_costs": {k: float(v) for k, v in clusters.annual_costs.items()},
+            "annual_costs": dict(
+                sorted((k, float(v)) for k, v in clusters.annual_costs.items())
+            ),
             "total_annual_cost": float(clusters.total_annual_cost),
             "cluster_count": len(clusters.zonal) + len(clusters.regional),
             "service_count": len(clusters.services),
@@ -288,25 +293,58 @@ scenarios.extend(
     ]
 )
 
-# Capture all scenarios
-results = []
-for model, region, desires, extra_args, scenario_name in scenarios:
-    print(f"Capturing: {scenario_name}...")
-    result = capture_costs(model, region, desires, extra_args, scenario_name)
-    results.append(result)
+# Key-Value scenarios (composite: Cassandra + EVCache)
+# Uses evcache_large desires with eventual consistency to enable caching layer
+kv_with_cache = evcache_large.model_copy(deep=True)
+kv_with_cache.query_pattern.access_consistency = GlobalConsistency(
+    same_region=Consistency(target_consistency=AccessConsistency.eventual),
+    cross_region=Consistency(target_consistency=AccessConsistency.best_effort),
+)
 
-    if "error" in result:
-        print(f"  ERROR: {result['error']}")
-    else:
-        print(f"  Total cost: ${result['total_annual_cost']:,.2f}")
-        print(f"  Cost breakdown: {list(result['annual_costs'].keys())}")
+scenarios.extend(
+    [
+        (
+            "org.netflix.key-value",
+            "us-east-1",
+            kv_with_cache,
+            None,
+            "kv_with_cache",
+        ),
+    ]
+)
 
-# Save results
-output_file = Path(__file__).parent / "data" / "baseline_costs.json"
-with open(output_file, "w", encoding="utf-8") as f:
-    json.dump(results, f, indent=2)
-    f.write("\n")  # Ensure trailing newline for pre-commit
+# Export as dict for tests to import (single source of truth)
+SCENARIOS: dict[str, dict[str, Any]] = {
+    name: {
+        "model": model,
+        "region": region,
+        "desires": desires,
+        "extra_args": extra_args,
+    }
+    for model, region, desires, extra_args, name in scenarios
+}
 
-print(f"\nResults saved to: {output_file}")
-success_count = len([r for r in results if "error" not in r])
-print(f"Total scenarios captured: {success_count}/{len(results)}")
+
+if __name__ == "__main__":
+    # Capture all scenarios
+    results = []
+    for model, region, desires, extra_args, scenario_name in scenarios:
+        print(f"Capturing: {scenario_name}...")
+        result = capture_costs(model, region, desires, extra_args, scenario_name)
+        results.append(result)
+
+        if "error" in result:
+            print(f"  ERROR: {result['error']}")
+        else:
+            print(f"  Total cost: ${result['total_annual_cost']:,.2f}")
+            print(f"  Cost breakdown: {list(result['annual_costs'].keys())}")
+
+    # Save results
+    output_file = Path(__file__).parent / "data" / "baseline_costs.json"
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, sort_keys=True)
+        f.write("\n")  # Ensure trailing newline for pre-commit
+
+    print(f"\nResults saved to: {output_file}")
+    success_count = len([r for r in results if "error" not in r])
+    print(f"Total scenarios captured: {success_count}/{len(results)}")
