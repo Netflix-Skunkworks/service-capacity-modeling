@@ -8,8 +8,8 @@ Key characteristics:
 - Regional deployment (not zonal)
 - Read-only after data population is complete
 - Uses RocksDB as the storage backend
-- Local disks preferred (EBS optional)
-- RF=2 by default for redundancy
+- Local disks only, attached disk not supported
+- Define min_replica_count but determine the optimal number of replicas as output
 """
 
 import logging
@@ -51,43 +51,47 @@ from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
-from service_capacity_modeling.models.utils import next_n
 from service_capacity_modeling.stats import dist_for_interval
 
 logger = logging.getLogger(__name__)
 
 
-class NflxReadOnlyKVArguments(BaseModel):
-    """Configuration arguments for the Netflix Read-Only KV capacity model."""
+def _upsert_params(cluster: Any, params: Dict[str, Any]) -> None:
+    """Update or set cluster parameters."""
+    if cluster.cluster_params:
+        cluster.cluster_params.update(params)
+    else:
+        cluster.cluster_params = params
 
-    replica_count: int = Field(
+
+class NflxReadOnlyKVArguments(BaseModel):
+    """Configuration arguments for the Netflix Read-Only KV capacity model.
+
+    Note: This model only supports local (ephemeral) disks. EBS/attached disks
+    are not supported because the partition-aware algorithm relies on fixed disk
+    capacity per instance to calculate partition placement and leverage spare
+    disk space for additional replicas in compute-heavy workloads.
+    """
+
+    min_replica_count: int = Field(
         default=2,
-        description="Number of data replicas (RF). Default is 2 for redundancy.",
+        description="Minimum number of data replicas. "
+        "Actual count may be higher for compute-heavy workloads.",
         ge=1,
-        le=5,
+        le=10,
     )
-    require_local_disks: bool = Field(
-        default=True,
-        description="If local (ephemeral) drives are required. "
-        "Set to False to allow EBS/attached drives.",
-    )
-    require_attached_disks: bool = Field(
-        default=False,
-        description="If attached (EBS) drives are required. "
-        "Set to True to force EBS usage.",
+    total_num_partitions: int = Field(
+        description="Total number of partitions for the dataset (required).",
+        ge=1,
     )
     max_regional_size: int = Field(
         default=256,
         description="Maximum number of instances in the regional cluster.",
     )
-    max_local_data_per_node_gib: int = Field(
-        default=1500,
-        description="Maximum data per node for local disk instances (GiB). "
-        "Prevents overloading nodes with too much data.",
-    )
-    max_attached_data_per_node_gib: int = Field(
+    max_data_per_node_gib: int = Field(
         default=2048,
-        description="Maximum data per node for attached disk instances (GiB).",
+        description="Maximum data per node (GiB). "
+        "Prevents overloading nodes with too much data.",
     )
     rocksdb_block_cache_percent: float = Field(
         default=0.3,
@@ -172,6 +176,10 @@ def _estimate_read_only_kv_requirement(
 ) -> CapacityRequirement:
     """Estimate the capacity requirement for the read-only KV regional cluster.
 
+    Note: For the partition-aware algorithm, we calculate requirements that are
+    independent of replica count. The actual replica count is determined by the
+    cluster computation based on partition placement and compute needs.
+
     Args:
         instance: The compute instance being considered
         drive: The drive configuration
@@ -192,12 +200,13 @@ def _estimate_read_only_kv_requirement(
         buffers=desires.buffers, components=[BufferComponent.memory]
     )
 
-    # Calculate raw data size (before buffer)
-    raw_data_size_gib = _get_data_size_gib(desires, args.replica_count)
-    # Apply disk buffer
-    data_size_gib = raw_data_size_gib * disk_buffer.ratio
+    # Unreplicated data size
+    unreplicated_data_gib = desires.data_shape.estimated_state_size_gib.mid
 
-    # CPU calculation using sqrt staffing model
+    # Partition size (unreplicated)
+    partition_size_gib = unreplicated_data_gib / args.total_num_partitions
+
+    # CPU calculation using sqrt staffing model (independent of replicas)
     raw_cores = sqrt_staffed_cores(desires)
     raw_cores = normalize_cores(
         core_count=raw_cores,
@@ -207,31 +216,34 @@ def _estimate_read_only_kv_requirement(
     # Apply compute buffer
     needed_cores = raw_cores * compute_buffer.ratio
 
-    # Memory calculation
-    raw_memory_gib = _get_memory_gib(
+    # Memory calculation PER REPLICA (not total)
+    # This will be multiplied by actual replica count in cluster computation
+    memory_per_replica_gib = _get_memory_gib(
         desires=desires,
         drive=instance.drive or drive,
-        replica_count=args.replica_count,
+        replica_count=1,  # Per-replica memory
         block_cache_percent=args.rocksdb_block_cache_percent,
     )
-    needed_memory_gib = raw_memory_gib * memory_buffer.ratio
+    memory_per_replica_gib = memory_per_replica_gib * memory_buffer.ratio
 
     # Network calculation (read-only, so only outbound read traffic)
+    # Independent of replicas
     needed_network_mbps = simple_network_mbps(desires)
 
     return CapacityRequirement(
         requirement_type="read-only-kv-regional",
         reference_shape=desires.reference_shape,
         cpu_cores=certain_int(int(needed_cores)),
-        mem_gib=certain_float(needed_memory_gib),
-        disk_gib=certain_float(data_size_gib),
+        mem_gib=certain_float(memory_per_replica_gib),  # Per-replica memory
+        disk_gib=certain_float(partition_size_gib * disk_buffer.ratio),
         network_mbps=certain_float(needed_network_mbps),
         context={
-            "replica_count": args.replica_count,
+            "min_replica_count": args.min_replica_count,
+            "total_num_partitions": args.total_num_partitions,
+            "unreplicated_data_gib": round(unreplicated_data_gib, 2),
+            "partition_size_gib": round(partition_size_gib, 2),
             "raw_cores": round(raw_cores, 2),
-            "raw_data_size_gib": round(raw_data_size_gib, 2),
-            "data_size_gib": round(data_size_gib, 2),
-            "raw_memory_gib": round(raw_memory_gib, 2),
+            "memory_per_replica_gib": round(memory_per_replica_gib, 2),
             "block_cache_percent": args.rocksdb_block_cache_percent,
             "compute_buffer_ratio": compute_buffer.ratio,
             "disk_buffer_ratio": disk_buffer.ratio,
@@ -242,78 +254,100 @@ def _estimate_read_only_kv_requirement(
 
 def _compute_read_only_kv_regional_cluster(
     instance: Instance,
-    drive: Drive,
     requirement: CapacityRequirement,
     args: NflxReadOnlyKVArguments,
 ) -> Optional[RegionClusterCapacity]:
-    """Compute the regional cluster configuration for read-only KV.
+    """Compute the regional cluster configuration using the partition-aware algorithm.
+
+    Partition-aware algorithm (local disks only):
+    1. DISK FIRST: Calculate partitions_per_node based on local disk capacity
+    2. Calculate nodes_for_one_copy = total_partitions / partitions_per_node
+    3. Start with min_replica_count, calculate initial node count
+    4. CHECK CPU & MEMORY: If not satisfied, increase replica_count (uses spare disk)
+
+    Note: Only supports local disks. EBS/attached disk is not supported because:
+    - EBS disk is provisioned exactly for data needs (no spare space)
+    - The partition-aware algorithm relies on leveraging spare disk capacity
 
     Args:
-        instance: The compute instance being considered
-        drive: The drive configuration
-        requirement: Calculated capacity requirement
+        instance: The compute instance being considered (must have local disk)
+        requirement: Calculated capacity requirement (with per-replica values)
         args: Read-only KV specific arguments
+
     Returns:
         RegionClusterCapacity or None if configuration is not viable
     """
-    needed_cores = int(requirement.cpu_cores.mid)
-    needed_memory_gib = requirement.mem_gib.mid
-    needed_disk_gib = requirement.disk_gib.mid
-    needed_network_mbps = requirement.network_mbps.mid
-
-    # Calculate available memory per instance (minus reserved)
-    available_memory_per_instance = max(0, instance.ram_gib - args.reserved_memory_gib)
-    if available_memory_per_instance <= 0:
+    # Only support instances with local disks
+    if instance.drive is None:
         return None
 
-    # Calculate count based on CPU
-    count = max(2, math.ceil(needed_cores / instance.cpu))
+    total_needed_cores = int(requirement.cpu_cores.mid)
+    total_memory_per_replica_gib = requirement.mem_gib.mid
+    partition_size_with_buffer_gib = requirement.disk_gib.mid
 
-    # Adjust count based on memory
-    count = max(count, math.ceil(needed_memory_gib / available_memory_per_instance))
+    # Step 1 (DISK): Calculate effective disk capacity per node
+    effective_disk_per_node = min(instance.drive.size_gib, args.max_data_per_node_gib)
 
-    # Adjust count based on network
-    count = max(count, math.ceil(needed_network_mbps / instance.net_mbps))
-
-    # Adjust count based on disk
-    if instance.drive is not None:
-        # Local disk
-        max_data_per_node: float = min(
-            instance.drive.size_gib, args.max_local_data_per_node_gib
-        )
-        count = max(count, math.ceil(needed_disk_gib / max_data_per_node))
-    else:
-        # Attached disk (EBS)
-        max_data_per_node = min(drive.max_size_gib, args.max_attached_data_per_node_gib)
-        count = max(count, math.ceil(needed_disk_gib / max_data_per_node))
-
-    # Check max cluster size
-    if count > args.max_regional_size:
+    # Step 2 (DISK): Calculate partitions_per_node
+    if partition_size_with_buffer_gib <= 0:
+        return None
+    partitions_per_node = int(effective_disk_per_node / partition_size_with_buffer_gib)
+    if partitions_per_node < 1:
+        # This instance type cannot fit even one partition
         return None
 
-    # Calculate cost
+    # Step 3 (DISK): Calculate nodes needed for one copy of the dataset
+    nodes_for_one_copy = math.ceil(args.total_num_partitions / partitions_per_node)
+
+    # Calculate available memory per node
+    available_memory_per_node = instance.ram_gib - args.reserved_memory_gib
+
+    # Step 4: Start with min_replica_count, iterate until CPU & memory satisfied
+    replica_count = args.min_replica_count
+
+    while True:
+        count = nodes_for_one_copy * replica_count
+
+        # Ensure minimum of 2 nodes for redundancy
+        count = max(2, count)
+
+        # Check if count exceeds max cluster size
+        if count > args.max_regional_size:
+            return None
+
+        # CHECK CPU: Primary constraint after disk
+        cpu_satisfied = (count * instance.cpu) >= total_needed_cores
+
+        # CHECK MEMORY: Total memory >= memory_per_replica * replica_count
+        total_available_memory = count * available_memory_per_node
+        total_needed_memory = total_memory_per_replica_gib * replica_count
+        memory_satisfied = total_available_memory >= total_needed_memory
+
+        if cpu_satisfied and memory_satisfied:
+            break
+
+        # Not satisfied, increase replicas to add more nodes
+        replica_count += 1
+
+    # Calculate cost (local disks only, no EBS cost)
     cost = count * instance.annual_cost
 
-    # Handle attached drives for EBS instances
-    attached_drives: Tuple[Drive, ...] = tuple()
-    if instance.drive is None and needed_disk_gib > 0:
-        disk_per_node: float = math.ceil(needed_disk_gib / count)
-        # Round up to 100 GiB increments for EBS
-        disk_per_node = next_n(disk_per_node, 100)
-        disk_per_node = min(disk_per_node, drive.max_size_gib)
-
-        attached_drive = drive.model_copy()
-        attached_drive.size_gib = int(disk_per_node)
-        attached_drives = (attached_drive,)
-        cost += attached_drive.annual_cost * count
-
-    return RegionClusterCapacity(
+    cluster = RegionClusterCapacity(
         cluster_type="read-only-kv",
         count=count,
         instance=instance,
-        attached_drives=attached_drives,
+        attached_drives=tuple(),  # No attached drives
         annual_cost=cost,
     )
+
+    # Add cluster parameters for provisioning
+    params = {
+        "read-only-kv.replica_count": replica_count,
+        "read-only-kv.partitions_per_node": partitions_per_node,
+    }
+    _upsert_params(cluster, params)
+
+    return cluster
 
 
 def _estimate_read_only_kv_cluster(  # pylint: disable=unused-argument
@@ -325,9 +359,13 @@ def _estimate_read_only_kv_cluster(  # pylint: disable=unused-argument
 ) -> Optional[CapacityPlan]:
     """Main function to estimate read-only KV cluster configuration.
 
+    Note: Only supports instances with local disks. EBS is not supported
+    because the partition-aware algorithm relies on fixed disk capacity to
+    calculate partition placement.
+
     Args:
-        instance: The compute instance being considered
-        drive: The drive configuration
+        instance: The compute instance being considered (must have local disk)
+        drive: The drive configuration (unused - local disks only)
         _context: Regional context (unused - read-only KV is not zone-balanced)
         desires: User's capacity desires
         args: Read-only KV specific arguments
@@ -335,24 +373,19 @@ def _estimate_read_only_kv_cluster(  # pylint: disable=unused-argument
     Returns:
         CapacityPlan or None if configuration is not viable
     """
-    # Validate instance constraints
-    if instance.cpu < 2 or instance.ram_gib < 8:
+    # Validate instance constraints (minimum 64GB RAM per instance)
+    if instance.cpu < 2 or instance.ram_gib < 64:
         return None
 
-    # Filter based on disk requirements
-    if instance.drive is None and args.require_local_disks:
-        return None
-    if instance.drive is not None and args.require_attached_disks:
-        return None
-
-    # Read-only KV supports gp2 and gp3 for attached drives
-    if instance.drive is None and drive.name not in ("gp2", "gp3"):
+    # Only support instances with local disks
+    # EBS not supported: partition-aware algorithm relies on fixed disk capacity
+    if instance.drive is None:
         return None
 
     # Calculate requirements
     requirement = _estimate_read_only_kv_requirement(
         instance=instance,
-        drive=drive,
+        drive=instance.drive,  # Use instance's local drive
         desires=desires,
         args=args,
     )
@@ -360,7 +393,6 @@ def _estimate_read_only_kv_cluster(  # pylint: disable=unused-argument
     # Compute cluster
     cluster = _compute_read_only_kv_regional_cluster(
         instance=instance,
-        drive=drive,
         requirement=requirement,
         args=args,
     )
@@ -431,8 +463,8 @@ class NflxReadOnlyKVCapacityModel(CapacityModel):
             desired={
                 # No background work, just traffic spikes
                 "compute": Buffer(
-                    ratio=1.25, components=[BufferComponent.compute]
-                ),  # 80%
+                    ratio=1.5, components=[BufferComponent.compute]
+                ),  # 67%
                 # Read-only: can run at high disk utilization
                 "disk": Buffer(ratio=1.15, components=[BufferComponent.disk]),  # 87%
                 # Memory headroom for RocksDB block cache
