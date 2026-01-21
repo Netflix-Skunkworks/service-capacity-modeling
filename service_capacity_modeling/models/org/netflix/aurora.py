@@ -307,7 +307,7 @@ class NflxAuroraCapacityModel(CapacityModel):
 
     @staticmethod
     def allowed_platforms() -> Tuple[Platform, ...]:
-        return Platform.aurora_mysql, Platform.aurora_mysql
+        return Platform.aurora_mysql, Platform.aurora_postgres
 
     @staticmethod
     def default_desires(

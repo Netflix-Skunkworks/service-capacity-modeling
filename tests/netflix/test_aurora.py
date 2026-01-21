@@ -110,12 +110,12 @@ def test_small_footprint():
         desires=small_footprint,
     )
     shape = cap_plan[0].candidate_clusters.regional[0].instance
-    assert 4 < shape.cpu < 12
+    assert 4 <= shape.cpu < 12
     assert 10 < shape.ram_gib < 64
 
     # two instance plus storage and io
     assert (
-        6000
+        3000
         < cap_plan[0].candidate_clusters.annual_costs[
             "aurora-cluster.regional-clusters"
         ]
@@ -128,7 +128,7 @@ def test_medium_footprint():
         model_name="org.netflix.aurora", region="us-east-1", desires=mid_footprint
     )
 
-    expected = shape("db.r5.4xlarge")
+    expected = shape("db.r6g.4xlarge")
     leader = cap_plan[0].candidate_clusters.regional[0].instance
     assert_similar_compute(expected_shape=expected, actual_shape=leader)
 
@@ -140,7 +140,7 @@ def test_large_footprint():
         desires=large_footprint,
     )
 
-    expected = shape("db.r5.12xlarge")
+    expected = shape("db.r6g.12xlarge")
     leader = cap_plan[0].candidate_clusters.regional[0].instance
     assert_similar_compute(expected_shape=expected, actual_shape=leader)
 
@@ -152,7 +152,7 @@ def test_tier_3():
         desires=tier_3,
     )
 
-    expected = shape("db.r5.2xlarge")
+    expected = shape("db.r6g.xlarge")
     leader = cap_plan[0].candidate_clusters.regional[0].instance
     assert_similar_compute(expected_shape=expected, actual_shape=leader)
 
@@ -272,6 +272,6 @@ def test_cap_plan():
         desires=my_desire,
     )
 
-    expected = shape("db.r5.2xlarge")
+    expected = shape("db.r6g.2xlarge")
     leader = cap_plan[0].candidate_clusters.regional[0].instance
     assert_similar_compute(expected_shape=expected, actual_shape=leader)

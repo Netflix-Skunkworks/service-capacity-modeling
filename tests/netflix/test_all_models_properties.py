@@ -76,7 +76,7 @@ def test_all_models_produce_valid_plans(model_name, data):
 
     Note: Some models don't support certain configurations (e.g., tier 0),
     so we generate model-specific desires that avoid unsupported configs.
-    Some models (postgres, aurora, rds, counter, zookeeper, kafka) have very
+    Some models (postgres, aurora, counter, zookeeper, kafka) have very
     restrictive constraints and will filter many inputs.
     """
     from tests.netflix.property_test_utils import capacity_desires_for_model
