@@ -22,15 +22,13 @@ from tests.util import has_local_storage
 # See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
 PROPERTY_TEST_CONFIG = {
     "org.netflix.read-only-kv": {
-        # Exclude from universal property tests because:
-        # 1. Model requires estimated_mean_read_size_bytes for network bandwidth
-        # 2. merge_with uses write_size_bytes (0 for read-only) causing div by 0
-        # 3. Model requires total_num_partitions (no default)
-        # 4. Model only supports local disks (no EBS)
-        "exclude_from_universal_tests": True,
         "extra_model_arguments": {
             "total_num_partitions": 12,
         },
+        # Read-only model: no writes
+        "write_size_range": (0, 0),
+        # Ensure read size is set for network bandwidth calculation
+        "read_size_range": (128, 8192),
     },
 }
 
@@ -47,7 +45,6 @@ small_dataset_high_rps = CapacityDesires(
     ),
     data_shape=DataShape(
         estimated_state_size_gib=certain_int(50),
-        estimated_state_item_count=certain_int(50_000_000),
     ),
 )
 
@@ -63,7 +60,6 @@ large_dataset_moderate_rps = CapacityDesires(
     ),
     data_shape=DataShape(
         estimated_state_size_gib=certain_int(1000),
-        estimated_state_item_count=certain_int(1_000_000_000),
     ),
 )
 
@@ -80,7 +76,6 @@ throughput_workload = CapacityDesires(
     ),
     data_shape=DataShape(
         estimated_state_size_gib=certain_int(2000),
-        estimated_state_item_count=certain_int(500_000_000),
     ),
 )
 
@@ -311,7 +306,6 @@ class TestReadOnlyKVClusterConstraints:
             ),
             data_shape=DataShape(
                 estimated_state_size_gib=certain_int(10000),
-                estimated_state_item_count=certain_int(10_000_000_000),
             ),
         )
 
@@ -391,7 +385,6 @@ class TestReadOnlyKVCostCalculation:
             ),
             data_shape=DataShape(
                 estimated_state_size_gib=certain_int(5000),  # 5TB dataset
-                estimated_state_item_count=certain_int(5_000_000_000),
             ),
         )
 
@@ -579,7 +572,6 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
             data_shape=DataShape(
                 # Small dataset relative to RPS
                 estimated_state_size_gib=certain_int(100),
-                estimated_state_item_count=certain_int(100_000_000),
             ),
         )
 
@@ -626,7 +618,6 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
             data_shape=DataShape(
                 # Large dataset relative to RPS
                 estimated_state_size_gib=certain_int(5000),  # 5TB
-                estimated_state_item_count=certain_int(5_000_000_000),
             ),
         )
 
@@ -662,7 +653,6 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
             ),
             data_shape=DataShape(
                 estimated_state_size_gib=certain_int(1000),  # 1TB
-                estimated_state_item_count=certain_int(1_000_000_000),
             ),
         )
 
