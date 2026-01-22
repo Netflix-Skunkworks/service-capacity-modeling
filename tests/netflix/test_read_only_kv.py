@@ -206,7 +206,7 @@ class TestReadOnlyKVReplication:
 
         # Check actual replica_count in cluster_params (may be >= min)
         actual_rf = result.cluster_params["read-only-kv.replica_count"]
-        assert actual_rf >= 2, f"Actual RF {actual_rf} should be >= min RF 2"
+        assert actual_rf >= 2, f"Current RF {actual_rf} should be >= min RF 2"
 
         # Storage should account for data replication
         total_storage = get_total_storage_gib(result)
@@ -234,7 +234,7 @@ class TestReadOnlyKVReplication:
 
         # Check actual replica_count in cluster_params (may be >= min)
         actual_rf = result.cluster_params["read-only-kv.replica_count"]
-        assert actual_rf >= 3, f"Actual RF {actual_rf} should be >= min RF 3"
+        assert actual_rf >= 3, f"Current RF {actual_rf} should be >= min RF 3"
 
         # Storage should be higher with more replicas
         total_storage = get_total_storage_gib(result)
@@ -722,3 +722,262 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
         assert replica_count >= 2
         assert partitions_per_node >= 1
         assert result.count >= 2
+
+
+class TestReadOnlyKVExploration:
+    """Exploratory tests that print results for parameter tuning.
+
+    Run: pytest ...::TestReadOnlyKVExploration::test_... -v -s
+    """
+
+    def _print_workload_summary(self, desires, extra_args):
+        """Print workload parameters."""
+        print("\n" + "=" * 60)
+        print("WORKLOAD PARAMETERS")
+        print("=" * 60)
+
+        # Data shape
+        data_size = desires.data_shape.estimated_state_size_gib
+        if hasattr(data_size, "mid"):
+            print(f"Data Size: {data_size.mid} GiB")
+        else:
+            print(f"Data Size: {data_size} GiB")
+
+        # Query pattern
+        qp = desires.query_pattern
+        rps = qp.estimated_read_per_second
+        if hasattr(rps, "low") and hasattr(rps, "high"):
+            print(f"Read RPS:  {rps.low:,} - {rps.mid:,} - {rps.high:,}")
+        elif hasattr(rps, "mid"):
+            print(f"Read RPS:  {rps.mid:,}")
+
+        latency = qp.estimated_mean_read_latency_ms
+        if hasattr(latency, "mid"):
+            print(f"Latency:   {latency.mid} ms target")
+
+        # Extra args and partition info
+        print("\nModel Arguments:")
+        for k, v in extra_args.items():
+            print(f"  {k}: {v}")
+
+        # Calculate and print partition sizes
+        total_partitions = extra_args.get("total_num_partitions", 0)
+        if total_partitions and hasattr(data_size, "mid"):
+            partition_size = data_size.mid / total_partitions
+            disk_buffer = 1.15  # default disk buffer
+            partition_size_buf = partition_size * disk_buffer
+            print("\nPartition Info:")
+            print(f"  partition_size: {partition_size:.2f} GiB")
+            print(f"  partition_size_with_buffer: {partition_size_buf:.2f} GiB")
+
+    def _print_cluster_row(self, info: dict):  # noqa: C901
+        """Print a single cluster row with utilization metrics."""
+        cpu_pct = (info["need_cpu"] / info["cpu"] * 100) if info["cpu"] else 0
+        mem_pct = (info["need_mem"] / info["mem"] * 100) if info["mem"] else 0
+        disk_pct = (info["need_disk"] / info["disk"] * 100) if info["disk"] else 0
+        print(
+            f"{info['label']:<8} {info['name']:<16} "
+            f"Count={info['count']}, RF={info['rf']}, Part/Node={info['ppn']}"
+        )
+        print(
+            f"        CPU:  {info['cpu']:>6}/{info['need_cpu']:>6} = {cpu_pct:>5.1f}%"
+        )
+        m, nm = info["mem"], info["need_mem"]
+        d, nd = info["disk"], info["need_disk"]
+        print(f"        RAM:  {m:>6,.0f}/{nm:>6,.0f} = {mem_pct:>5.1f}%")
+        print(f"        Disk: {d:>6,}/{nd:>6,.0f} = {disk_pct:>5.1f}%")
+        cost_str = f"        Cost: ${info['cost']:,.0f}/yr"
+        if info.get("vs_curr"):
+            cost_str += f"  {info['vs_curr']}"
+        print(cost_str)
+        print()
+
+    def _print_comparison_table(  # noqa: C901 pylint: disable=too-many-locals
+        self, plans, data_size_gib, current_cluster_info
+    ):
+        """Print comparison table of current vs recommended clusters."""
+        # Get requirements context from first plan
+        ctx = plans[0].requirements.regional[0].context
+        raw_cpu = ctx.get("raw_cores", 0)
+        mem_per_replica = ctx.get("memory_per_replica_gib", 0)
+        mem_buffer = ctx.get("memory_buffer_ratio", 1.2)
+        disk_buffer = ctx.get("disk_buffer_ratio", 1.15)
+        partition_size_gib = ctx.get("partition_size_gib", 0)
+        part_size_buf = partition_size_gib * disk_buffer
+
+        print("\n" + "=" * 70)
+        print("COMPARISON TABLE (have / need = %)")
+        print("=" * 70)
+        print(
+            f"Buffers: CPU={ctx.get('compute_buffer_ratio', 1.5)}x, "
+            f"Mem={mem_buffer}x, Disk={disk_buffer}x"
+        )
+        print()
+
+        actual_cost = current_cluster_info.get("cost")
+
+        # Print current cluster if specified
+        cfg = current_cluster_info.get("config")
+        inst = current_cluster_info.get("instance")
+        if cfg and inst:
+            rf = cfg.get("replica_count", 1)
+            disk_node = inst.drive.size_gib if inst.drive else 0
+            self._print_cluster_row(
+                {
+                    "label": "Current",
+                    "name": inst.name,
+                    "count": cfg["count"],
+                    "rf": rf,
+                    "ppn": cfg.get("partitions_per_node", "?"),
+                    "cpu": cfg["count"] * inst.cpu,
+                    "need_cpu": raw_cpu,
+                    "mem": cfg["count"] * inst.ram_gib,
+                    "need_mem": (mem_per_replica / mem_buffer) * rf,
+                    "disk": disk_node * cfg["count"],
+                    "need_disk": data_size_gib * rf,
+                    "cost": actual_cost,
+                }
+            )
+            print("-" * 70)
+
+        # Print recommendations
+        for i, plan in enumerate(plans[:5]):
+            r = plan.candidate_clusters.regional[0]
+            rf = r.cluster_params.get("read-only-kv.replica_count", 1)
+            ppn = r.cluster_params.get("read-only-kv.partitions_per_node", "?")
+            disk_node = r.instance.drive.size_gib if r.instance.drive else 0
+
+            vs_curr = ""
+            if actual_cost:
+                diff = r.annual_cost - actual_cost
+                sign = "-" if diff < 0 else "+"
+                vs_curr = f"{sign}${abs(diff):,.0f} ({diff / actual_cost * 100:+.0f}%)"
+
+            self._print_cluster_row(
+                {
+                    "label": f"#{i + 1}",
+                    "name": r.instance.name,
+                    "count": r.count,
+                    "rf": rf,
+                    "ppn": ppn,
+                    "cpu": r.count * r.instance.cpu,
+                    "need_cpu": raw_cpu,
+                    "mem": r.count * r.instance.ram_gib,
+                    "need_mem": (mem_per_replica / mem_buffer) * rf,
+                    "disk": disk_node * r.count,
+                    "need_disk": data_size_gib * rf,
+                    "cost": r.annual_cost,
+                    "vs_curr": vs_curr,
+                }
+            )
+
+            # Debug: algorithm calculation
+            nfc = r.count // rf if rf else r.count
+            eff = min(disk_node, 2048)
+            ppn_calc = int(eff / part_size_buf) if part_size_buf else 0
+            print(f"        [Debug] nfc={nfc}, eff_disk={eff}, ppn={ppn_calc}")
+            print()
+
+    def _run_capacity_exploration(
+        self,
+        workload: CapacityDesires,
+        extra_args: dict,
+        actual_cluster: dict = None,
+    ):
+        """Run capacity exploration and print comparison table.
+
+        Args:
+            workload: CapacityDesires defining the workload
+            extra_args: Model arguments (total_num_partitions, min_replica_count, etc.)
+            actual_cluster: Current cluster config for comparison, or None to skip
+                           Format: {"instance": str, "count": int, "replica_count": int,
+                                    "partitions_per_node": int}
+        """
+        self._print_workload_summary(workload, extra_args)
+
+        plans = planner.plan_certain(
+            model_name="org.netflix.read-only-kv",
+            region="us-east-1",
+            desires=workload,
+            extra_model_arguments=extra_args,
+        )
+
+        # Look up actual cluster if specified
+        actual_instance = None
+        actual_cost = None
+        if actual_cluster:
+            try:
+                actual_instance = planner.instance(
+                    actual_cluster["instance"], region="us-east-1"
+                )
+                actual_cost = actual_instance.annual_cost * actual_cluster["count"]
+            except KeyError:
+                print(f"\nWARNING: Instance '{actual_cluster['instance']}' not found")
+                actual_cluster = None
+
+        # Print comparison table
+        data_size_gib = workload.data_shape.estimated_state_size_gib.mid
+        current_info = {
+            "config": actual_cluster,
+            "instance": actual_instance,
+            "cost": actual_cost,
+        }
+        self._print_comparison_table(plans, data_size_gib, current_info)
+
+    def test_ihs(self):
+        workload = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                access_pattern=AccessPattern.latency,
+                estimated_read_per_second=certain_int(21_000),
+                estimated_write_per_second=certain_int(0),
+                estimated_mean_read_latency_ms=certain_float(14.0),
+                estimated_mean_write_latency_ms=certain_float(0),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(725),
+            ),
+        )
+
+        extra_args = {
+            "total_num_partitions": 512,
+            "min_replica_count": 4,
+        }
+
+        actual_cluster = {
+            "instance": "i3en.6xlarge",
+            "count": 64,
+            "replica_count": 4,
+            "partitions_per_node": 32,
+        }
+
+        self._run_capacity_exploration(workload, extra_args, actual_cluster)
+
+    def test_ads_profile(self):
+        workload = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                access_pattern=AccessPattern.latency,
+                estimated_read_per_second=certain_int(20_000),
+                estimated_write_per_second=certain_int(0),
+                estimated_mean_read_latency_ms=certain_float(2.0),
+                estimated_mean_write_latency_ms=certain_float(0),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(430),
+            ),
+        )
+
+        extra_args = {
+            "total_num_partitions": 8,
+            "min_replica_count": 3,
+        }
+
+        actual_cluster = {
+            "instance": "i3en.6xlarge",
+            "count": 3,
+            "replica_count": 3,
+            "partitions_per_node": 16,
+        }
+
+        self._run_capacity_exploration(workload, extra_args, actual_cluster)
