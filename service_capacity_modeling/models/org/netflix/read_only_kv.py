@@ -22,7 +22,7 @@ from typing import Tuple
 from pydantic import BaseModel
 from pydantic import Field
 
-from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import Buffer, AccessPattern
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
@@ -46,8 +46,6 @@ from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
-from service_capacity_modeling.models.common import working_set_from_drive_and_slo
-from service_capacity_modeling.stats import dist_for_interval
 
 logger = logging.getLogger(__name__)
 
@@ -122,47 +120,18 @@ def _get_data_size_gib(
     return data_size_gib * replica_count
 
 
-def _get_memory_gib(
-    desires: CapacityDesires,
-    drive: Drive,
-    replica_count: int,
-) -> float:
-    """Calculate total memory required for the cluster.
-
-    Uses working set estimation based on drive latency vs SLO requirements.
-    This is more meaningful than block cache percentage since it's driven
-    by actual performance needs rather than an arbitrary configuration.
-
-    Note: Memory is not used as a sizing constraint (instances are filtered
-    to require 64+ GiB RAM), but this calculation is kept for debugging.
-
-    Args:
-        desires: Capacity desires with data shape and SLO requirements
-        drive: Drive to use for latency estimation
-        replica_count: Number of replicas
-
-    Returns:
-        Total memory required in GiB
-    """
-    unreplicated_data_gib = desires.data_shape.estimated_state_size_gib.mid
-
-    working_set_percent = working_set_from_drive_and_slo(
-        drive_read_latency_dist=dist_for_interval(drive.read_io_latency_ms),
-        read_slo_latency_dist=dist_for_interval(
-            desires.query_pattern.read_latency_slo_ms
-        ),
-        estimated_working_set=desires.data_shape.estimated_working_set_percent,
-        target_percentile=0.95,
-    ).mid
-    working_set_gib = unreplicated_data_gib * working_set_percent
-
-    memory_per_replica = working_set_gib
-    return memory_per_replica * replica_count
+# TODO: Memory estimation is currently disabled because working_set_from_drive_and_slo
+# doesn't work well for large datasets (which is all of OODM use cases). The working
+# set calculation assumes a relationship between drive latency and SLO that doesn't
+# hold for large datasets where the working set is a small fraction of total data.
+# For now, we rely on the 64 GiB minimum RAM filter on instances and don't use
+# memory as a sizing constraint. Future work: implement a better memory estimation
+# that considers actual access patterns and cache hit rates for large datasets.
 
 
-def _estimate_read_only_kv_requirement(
+def _estimate_read_only_kv_requirement(  # pylint: disable=unused-argument
     instance: Instance,
-    drive: Drive,
+    drive: Drive,  # Unused - memory calculation disabled (see TODO at top of file)
     desires: CapacityDesires,
     args: NflxReadOnlyKVArguments,
 ) -> CapacityRequirement:
@@ -174,7 +143,7 @@ def _estimate_read_only_kv_requirement(
 
     Args:
         instance: The compute instance being considered
-        drive: The drive configuration
+        drive: The drive configuration (unused - memory calculation disabled)
         desires: User's capacity desires
         args: Read-only KV specific arguments
 
@@ -187,9 +156,6 @@ def _estimate_read_only_kv_requirement(
     )
     disk_buffer = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
-    )
-    memory_buffer = buffer_for_components(
-        buffers=desires.buffers, components=[BufferComponent.memory]
     )
 
     # Unreplicated data size
@@ -208,14 +174,8 @@ def _estimate_read_only_kv_requirement(
     # Apply compute buffer
     needed_cores = raw_cores * compute_buffer.ratio
 
-    # Memory calculation PER REPLICA (not total)
-    # This will be multiplied by actual replica count in cluster computation
-    memory_per_replica_gib = _get_memory_gib(
-        desires=desires,
-        drive=instance.drive or drive,
-        replica_count=1,  # Per-replica memory
-    )
-    memory_per_replica_gib = memory_per_replica_gib * memory_buffer.ratio
+    # Memory: not used as sizing constraint (see TODO at top of file)
+    # Instances are filtered to require 64+ GiB RAM
 
     # Network calculation (read-only, so only outbound read traffic)
     # Independent of replicas
@@ -225,7 +185,7 @@ def _estimate_read_only_kv_requirement(
         requirement_type="read-only-kv-regional",
         reference_shape=desires.reference_shape,
         cpu_cores=certain_int(int(needed_cores)),
-        mem_gib=certain_float(memory_per_replica_gib),  # Per-replica memory
+        mem_gib=certain_float(0),  # Not used (see TODO at top of file)
         disk_gib=certain_float(partition_size_gib * disk_buffer.ratio),
         network_mbps=certain_float(needed_network_mbps),
         context={
@@ -234,11 +194,9 @@ def _estimate_read_only_kv_requirement(
             "unreplicated_data_gib": round(unreplicated_data_gib, 2),
             "partition_size_gib": round(partition_size_gib, 2),
             "raw_cores": round(raw_cores, 2),
-            "memory_per_replica_gib": round(memory_per_replica_gib, 2),
             "block_cache_percent": args.rocksdb_block_cache_percent,
             "compute_buffer_ratio": compute_buffer.ratio,
             "disk_buffer_ratio": disk_buffer.ratio,
-            "memory_buffer_ratio": memory_buffer.ratio,
         },
     )
 
@@ -254,7 +212,7 @@ def _compute_read_only_kv_regional_cluster(
     1. DISK FIRST: Calculate partitions_per_node based on local disk capacity
     2. Calculate nodes_for_one_copy = total_partitions / partitions_per_node
     3. Start with min_replica_count, calculate initial node count
-    4. CHECK CPU & MEMORY: If not satisfied, increase replica_count (uses spare disk)
+    4. CHECK CPU: If not satisfied, increase replica_count (uses spare disk)
 
     Note: Only supports local disks. EBS/attached disk is not supported because:
     - EBS disk is provisioned exactly for data needs (no spare space)
@@ -273,7 +231,6 @@ def _compute_read_only_kv_regional_cluster(
         return None
 
     total_needed_cores = int(requirement.cpu_cores.mid)
-    total_memory_per_replica_gib = requirement.mem_gib.mid
     partition_size_with_buffer_gib = requirement.disk_gib.mid
 
     # Step 1 (DISK): Calculate effective disk capacity per node
@@ -316,36 +273,8 @@ def _compute_read_only_kv_regional_cluster(
         # Not satisfied, increase replicas to add more nodes
         replica_count += 1
 
-    # Calculate nodes needed for each constraint (for debugging)
+    # Calculate nodes needed for CPU constraint (for debugging)
     nodes_for_cpu = math.ceil(total_needed_cores / instance.cpu)
-
-    # Memory calculation for debugging only (not used as constraint)
-    # Partition-aware: memory per node is based on data it holds, not replication
-    partition_size_gib = requirement.context["partition_size_gib"]
-    unreplicated_data_gib = requirement.context["unreplicated_data_gib"]
-    available_memory_per_node = instance.ram_gib - args.reserved_memory_gib
-
-    # Data held by each node (based on partitions it holds)
-    data_per_node_gib = partitions_per_node * partition_size_gib
-
-    # Memory needed per node = proportion of working set for the data this node holds
-    # memory_per_replica_gib = unreplicated_data * working_set_percent * buffer
-    # So: memory_per_node = data_per_node * working_set_percent * buffer
-    #                     = (data_per_node / unreplicated_data) * memory_per_replica
-    if unreplicated_data_gib > 0:
-        memory_needed_per_node = (
-            data_per_node_gib / unreplicated_data_gib
-        ) * total_memory_per_replica_gib
-    else:
-        memory_needed_per_node = 0
-
-    # nodes_for_memory: how many nodes for one copy if memory was the only constraint
-    if available_memory_per_node > 0:
-        nodes_for_memory = math.ceil(
-            total_memory_per_replica_gib / available_memory_per_node
-        )
-    else:
-        nodes_for_memory = 0
 
     # Calculate cost (local disks only, no EBS cost)
     cost = count * instance.annual_cost
@@ -365,8 +294,6 @@ def _compute_read_only_kv_regional_cluster(
         "read-only-kv.effective_disk_per_node_gib": effective_disk_per_node,
         "read-only-kv.nodes_for_one_copy": nodes_for_one_copy,
         "read-only-kv.nodes_for_cpu": nodes_for_cpu,
-        "read-only-kv.nodes_for_memory": nodes_for_memory,
-        "read-only-kv.memory_needed_per_node_gib": round(memory_needed_per_node, 2),
     }
     _upsert_params(cluster, params)
 
@@ -508,14 +435,14 @@ class NflxReadOnlyKVCapacityModel(CapacityModel):
         # (RPS, latency SLO, data size), so differentiated defaults are not needed.
         return CapacityDesires(
             query_pattern=QueryPattern(
-                access_pattern=user_desires.query_pattern.access_pattern,
-                # No writes (read-only)
-                estimated_mean_write_size_bytes=certain_float(1),
+                access_pattern=AccessPattern.latency,
+                # Read-only: no writes
+                estimated_mean_write_size_bytes=certain_float(0),
+                estimated_mean_write_latency_ms=certain_float(0),
                 # RocksDB point reads are fast when data is in cache
                 estimated_mean_read_latency_ms=Interval(
                     low=0.5, mid=2, high=10, confidence=0.98
                 ),
-                estimated_mean_write_latency_ms=certain_float(1),
                 # Single digit millisecond SLO for latency pattern
                 read_latency_slo_ms=FixedInterval(
                     minimum_value=0.1,
@@ -523,14 +450,6 @@ class NflxReadOnlyKVCapacityModel(CapacityModel):
                     low=0.5,
                     mid=2,
                     high=10,
-                    confidence=0.98,
-                ),
-                write_latency_slo_ms=FixedInterval(
-                    minimum_value=0.1,
-                    maximum_value=20,
-                    low=1,
-                    mid=1,
-                    high=1,
                     confidence=0.98,
                 ),
             ),
