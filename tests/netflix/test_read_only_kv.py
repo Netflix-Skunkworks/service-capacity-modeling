@@ -876,6 +876,9 @@ class TestReadOnlyKVExploration:
             nodes_for_memory = r.cluster_params.get(
                 "read-only-kv.nodes_for_memory", "?"
             )
+            mem_per_node = r.cluster_params.get(
+                "read-only-kv.memory_needed_per_node_gib", "?"
+            )
             total_partitions = ctx.get("total_num_partitions", "?")
             print(
                 f"        partitions_per_node = eff_disk / partition_size_with_buffer "
@@ -885,9 +888,10 @@ class TestReadOnlyKVExploration:
                 f"        nodes_for_one_copy = total_partitions / partitions_per_node "
                 f"= {total_partitions} / {partitions_per_node} = {nodes_for_one_copy}"
             )
+            print(f"        nodes_for_cpu = {nodes_for_cpu}")
             print(
-                f"        nodes_for_cpu = {nodes_for_cpu} \n"
-                f"        nodes_for_memory = {nodes_for_memory}"
+                f"        nodes_for_memory = {nodes_for_memory} "
+                f"(memory_needed_per_node = {mem_per_node} GiB)"
             )
             print()
 
