@@ -1,3 +1,5 @@
+# pylint: disable=too-many-lines
+
 """
 Tests for Netflix Read-Only Key-Value capacity model.
 
@@ -245,31 +247,6 @@ class TestReadOnlyKVReplication:
 
 class TestReadOnlyKVMemoryConfiguration:
     """Test ReadOnlyKV RocksDB memory configurations."""
-
-    def test_high_block_cache_percent(self):
-        """Test ReadOnlyKV with higher block cache percentage."""
-        cap_plan = planner.plan_certain(
-            model_name="org.netflix.read-only-kv",
-            region="us-east-1",
-            desires=large_dataset_moderate_rps,
-            extra_model_arguments={
-                "rocksdb_block_cache_percent": 0.5,  # 50% cache
-                "total_num_partitions": 12,
-            },
-        )[0]
-
-        requirement = cap_plan.requirements.regional[0]
-
-        # Check block cache percent is recorded
-        assert requirement.context["block_cache_percent"] == 0.5
-
-        # Memory per replica should be higher with 50% cache
-        memory_per_replica = requirement.context["memory_per_replica_gib"]
-        # 1TB data * 50% = 500GB per replica (before buffer)
-        assert memory_per_replica >= 400, (
-            f"Expected >= 400 GiB memory per replica for 50% cache, "
-            f"got {memory_per_replica}"
-        )
 
     def test_low_block_cache_percent(self):
         """Test ReadOnlyKV with lower block cache percentage."""
@@ -760,11 +737,16 @@ class TestReadOnlyKVExploration:
         for k, v in extra_args.items():
             print(f"  {k}: {v}")
 
+        # Buffers (default values)
+        cpu_buffer = 1.5
+        mem_buffer = 1.2
+        disk_buffer = 1.15
+        print(f"\nBuffers: CPU={cpu_buffer}x, Mem={mem_buffer}x, Disk={disk_buffer}x")
+
         # Calculate and print partition sizes
         total_partitions = extra_args.get("total_num_partitions", 0)
         if total_partitions and hasattr(data_size, "mid"):
             partition_size = data_size.mid / total_partitions
-            disk_buffer = 1.15  # default disk buffer
             partition_size_buf = partition_size * disk_buffer
             print("\nPartition Info:")
             print(f"  partition_size: {partition_size:.2f} GiB")
@@ -775,10 +757,21 @@ class TestReadOnlyKVExploration:
         cpu_pct = (info["need_cpu"] / info["cpu"] * 100) if info["cpu"] else 0
         mem_pct = (info["need_mem"] / info["mem"] * 100) if info["mem"] else 0
         disk_pct = (info["need_disk"] / info["disk"] * 100) if info["disk"] else 0
+        ppn = info["partitions_per_node"]
         print(
             f"{info['label']:<8} {info['name']:<16} "
-            f"Count={info['count']}, RF={info['rf']}, Part/Node={info['ppn']}"
+            f"Count={info['count']}, RF={info['rf']}, partitions_per_node={ppn}"
         )
+        print("-" * 70)
+        # Node specs
+        inst = info.get("instance")
+        if inst:
+            disk_str = f"{inst.drive.size_gib:,} GiB" if inst.drive else "N/A"
+            print(
+                f"        Node: {inst.cpu} cores, {inst.ram_gib:.0f} GiB RAM, "
+                f"{disk_str} disk"
+            )
+        # Cluster totals vs needs
         print(
             f"        CPU:  {info['cpu']:>6}/{info['need_cpu']:>6} = {cpu_pct:>5.1f}%"
         )
@@ -799,6 +792,8 @@ class TestReadOnlyKVExploration:
         # Get requirements context from first plan
         ctx = plans[0].requirements.regional[0].context
         raw_cpu = ctx.get("raw_cores", 0)
+        cpu_buffer = ctx.get("compute_buffer_ratio", 1.5)
+        need_cpu = raw_cpu * cpu_buffer  # Buffered CPU cores needed
         mem_per_replica = ctx.get("memory_per_replica_gib", 0)
         mem_buffer = ctx.get("memory_buffer_ratio", 1.2)
         disk_buffer = ctx.get("disk_buffer_ratio", 1.15)
@@ -808,11 +803,6 @@ class TestReadOnlyKVExploration:
         print("\n" + "=" * 70)
         print("COMPARISON TABLE (have / need = %)")
         print("=" * 70)
-        print(
-            f"Buffers: CPU={ctx.get('compute_buffer_ratio', 1.5)}x, "
-            f"Mem={mem_buffer}x, Disk={disk_buffer}x"
-        )
-        print()
 
         actual_cost = current_cluster_info.get("cost")
 
@@ -826,11 +816,12 @@ class TestReadOnlyKVExploration:
                 {
                     "label": "Current",
                     "name": inst.name,
+                    "instance": inst,
                     "count": cfg["count"],
                     "rf": rf,
-                    "ppn": cfg.get("partitions_per_node", "?"),
+                    "partitions_per_node": cfg.get("partitions_per_node", "?"),
                     "cpu": cfg["count"] * inst.cpu,
-                    "need_cpu": raw_cpu,
+                    "need_cpu": need_cpu,
                     "mem": cfg["count"] * inst.ram_gib,
                     "need_mem": (mem_per_replica / mem_buffer) * rf,
                     "disk": disk_node * cfg["count"],
@@ -838,13 +829,14 @@ class TestReadOnlyKVExploration:
                     "cost": actual_cost,
                 }
             )
-            print("-" * 70)
 
         # Print recommendations
         for i, plan in enumerate(plans[:5]):
             r = plan.candidate_clusters.regional[0]
             rf = r.cluster_params.get("read-only-kv.replica_count", 1)
-            ppn = r.cluster_params.get("read-only-kv.partitions_per_node", "?")
+            partitions_per_node = r.cluster_params.get(
+                "read-only-kv.partitions_per_node", "?"
+            )
             disk_node = r.instance.drive.size_gib if r.instance.drive else 0
 
             vs_curr = ""
@@ -853,15 +845,17 @@ class TestReadOnlyKVExploration:
                 sign = "-" if diff < 0 else "+"
                 vs_curr = f"{sign}${abs(diff):,.0f} ({diff / actual_cost * 100:+.0f}%)"
 
+            print("=" * 70)
             self._print_cluster_row(
                 {
                     "label": f"#{i + 1}",
                     "name": r.instance.name,
+                    "instance": r.instance,
                     "count": r.count,
                     "rf": rf,
-                    "ppn": ppn,
+                    "partitions_per_node": partitions_per_node,
                     "cpu": r.count * r.instance.cpu,
-                    "need_cpu": raw_cpu,
+                    "need_cpu": need_cpu,
                     "mem": r.count * r.instance.ram_gib,
                     "need_mem": (mem_per_replica / mem_buffer) * rf,
                     "disk": disk_node * r.count,
@@ -871,11 +865,30 @@ class TestReadOnlyKVExploration:
                 }
             )
 
-            # Debug: algorithm calculation
-            nfc = r.count // rf if rf else r.count
-            eff = min(disk_node, 2048)
-            ppn_calc = int(eff / part_size_buf) if part_size_buf else 0
-            print(f"        [Debug] nfc={nfc}, eff_disk={eff}, ppn={ppn_calc}")
+            # Debug: show how key values are calculated
+            eff_disk = r.cluster_params.get(
+                "read-only-kv.effective_disk_per_node_gib", "?"
+            )
+            nodes_for_one_copy = r.cluster_params.get(
+                "read-only-kv.nodes_for_one_copy", "?"
+            )
+            nodes_for_cpu = r.cluster_params.get("read-only-kv.nodes_for_cpu", "?")
+            nodes_for_memory = r.cluster_params.get(
+                "read-only-kv.nodes_for_memory", "?"
+            )
+            total_partitions = ctx.get("total_num_partitions", "?")
+            print(
+                f"        partitions_per_node = eff_disk / partition_size_with_buffer "
+                f"= {eff_disk} / {part_size_buf:.2f} = {partitions_per_node}"
+            )
+            print(
+                f"        nodes_for_one_copy = total_partitions / partitions_per_node "
+                f"= {total_partitions} / {partitions_per_node} = {nodes_for_one_copy}"
+            )
+            print(
+                f"        nodes_for_cpu = {nodes_for_cpu} \n"
+                f"        nodes_for_memory = {nodes_for_memory}"
+            )
             print()
 
     def _run_capacity_exploration(
@@ -929,13 +942,13 @@ class TestReadOnlyKVExploration:
             service_tier=1,
             query_pattern=QueryPattern(
                 access_pattern=AccessPattern.latency,
-                estimated_read_per_second=certain_int(21_000),
+                estimated_read_per_second=certain_int(20_000),
                 estimated_write_per_second=certain_int(0),
-                estimated_mean_read_latency_ms=certain_float(14.0),
+                estimated_mean_read_latency_ms=certain_float(2.0),
                 estimated_mean_write_latency_ms=certain_float(0),
             ),
             data_shape=DataShape(
-                estimated_state_size_gib=certain_int(725),
+                estimated_state_size_gib=certain_int(48_000),
             ),
         )
 
@@ -960,11 +973,11 @@ class TestReadOnlyKVExploration:
                 access_pattern=AccessPattern.latency,
                 estimated_read_per_second=certain_int(20_000),
                 estimated_write_per_second=certain_int(0),
-                estimated_mean_read_latency_ms=certain_float(2.0),
+                estimated_mean_read_latency_ms=certain_float(2),
                 estimated_mean_write_latency_ms=certain_float(0),
             ),
             data_shape=DataShape(
-                estimated_state_size_gib=certain_int(430),
+                estimated_state_size_gib=certain_int(1397),
             ),
         )
 

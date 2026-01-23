@@ -22,8 +22,6 @@ from typing import Tuple
 from pydantic import BaseModel
 from pydantic import Field
 
-from service_capacity_modeling.interface import AccessConsistency
-from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
@@ -33,11 +31,9 @@ from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
-from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import FixedInterval
-from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import Platform
@@ -94,7 +90,7 @@ class NflxReadOnlyKVArguments(BaseModel):
         "Prevents overloading nodes with too much data.",
     )
     rocksdb_block_cache_percent: float = Field(
-        default=0.3,
+        default=0.1,
         description="Percentage of data to keep in RocksDB block cache. "
         "Higher values improve read latency but require more memory.",
         ge=0.0,
@@ -130,29 +126,25 @@ def _get_memory_gib(
     desires: CapacityDesires,
     drive: Drive,
     replica_count: int,
-    block_cache_percent: float,
 ) -> float:
     """Calculate total memory required for the cluster.
 
-    Takes the max of (per replica):
-    - Block cache: data * block_cache_percent
-    - Working set: data * working_set_percent (based on drive latency vs SLO)
+    Uses working set estimation based on drive latency vs SLO requirements.
+    This is more meaningful than block cache percentage since it's driven
+    by actual performance needs rather than an arbitrary configuration.
 
-    Then multiplies by replica_count for total.
-    Bloom filters and index blocks are covered by reserved_memory_gib.
+    Note: Memory is not used as a sizing constraint (instances are filtered
+    to require 64+ GiB RAM), but this calculation is kept for debugging.
 
     Args:
         desires: Capacity desires with data shape and SLO requirements
         drive: Drive to use for latency estimation
         replica_count: Number of replicas
-        block_cache_percent: Percentage of data to keep in block cache
 
     Returns:
         Total memory required in GiB
     """
     unreplicated_data_gib = desires.data_shape.estimated_state_size_gib.mid
-
-    block_cache_gib = unreplicated_data_gib * block_cache_percent
 
     working_set_percent = working_set_from_drive_and_slo(
         drive_read_latency_dist=dist_for_interval(drive.read_io_latency_ms),
@@ -164,7 +156,7 @@ def _get_memory_gib(
     ).mid
     working_set_gib = unreplicated_data_gib * working_set_percent
 
-    memory_per_replica = max(block_cache_gib, working_set_gib)
+    memory_per_replica = working_set_gib
     return memory_per_replica * replica_count
 
 
@@ -222,7 +214,6 @@ def _estimate_read_only_kv_requirement(
         desires=desires,
         drive=instance.drive or drive,
         replica_count=1,  # Per-replica memory
-        block_cache_percent=args.rocksdb_block_cache_percent,
     )
     memory_per_replica_gib = memory_per_replica_gib * memory_buffer.ratio
 
@@ -299,10 +290,11 @@ def _compute_read_only_kv_regional_cluster(
     # Step 3 (DISK): Calculate nodes needed for one copy of the dataset
     nodes_for_one_copy = math.ceil(args.total_num_partitions / partitions_per_node)
 
-    # Calculate available memory per node
-    available_memory_per_node = instance.ram_gib - args.reserved_memory_gib
-
-    # Step 4: Start with min_replica_count, iterate until CPU & memory satisfied
+    # Step 4: Start with min_replica_count, iterate until CPU satisfied
+    # Note: Memory is NOT used as a constraint because:
+    # - Instances are pre-filtered to require minimum 64 GiB RAM
+    # - With 64+ GiB RAM and typical partition sizes, memory is rarely the bottleneck
+    # - CPU and disk constraints dominate for read-only KV workloads
     replica_count = args.min_replica_count
 
     while True:
@@ -318,16 +310,18 @@ def _compute_read_only_kv_regional_cluster(
         # CHECK CPU: Primary constraint after disk
         cpu_satisfied = (count * instance.cpu) >= total_needed_cores
 
-        # CHECK MEMORY: Total memory >= memory_per_replica * replica_count
-        total_available_memory = count * available_memory_per_node
-        total_needed_memory = total_memory_per_replica_gib * replica_count
-        memory_satisfied = total_available_memory >= total_needed_memory
-
-        if cpu_satisfied and memory_satisfied:
+        if cpu_satisfied:
             break
 
         # Not satisfied, increase replicas to add more nodes
         replica_count += 1
+
+    # Calculate nodes needed for each constraint (for debugging)
+    nodes_for_cpu = math.ceil(total_needed_cores / instance.cpu)
+    # Memory calculation for debugging only (not used as constraint)
+    available_memory_per_node = instance.ram_gib - args.reserved_memory_gib
+    total_needed_memory = total_memory_per_replica_gib * replica_count
+    nodes_for_memory = math.ceil(total_needed_memory / available_memory_per_node)
 
     # Calculate cost (local disks only, no EBS cost)
     cost = count * instance.annual_cost
@@ -344,6 +338,10 @@ def _compute_read_only_kv_regional_cluster(
     params = {
         "read-only-kv.replica_count": replica_count,
         "read-only-kv.partitions_per_node": partitions_per_node,
+        "read-only-kv.effective_disk_per_node_gib": effective_disk_per_node,
+        "read-only-kv.nodes_for_one_copy": nodes_for_one_copy,
+        "read-only-kv.nodes_for_cpu": nodes_for_cpu,
+        "read-only-kv.nodes_for_memory": nodes_for_memory,
     }
     _upsert_params(cluster, params)
 
@@ -373,7 +371,9 @@ def _estimate_read_only_kv_cluster(  # pylint: disable=unused-argument
     Returns:
         CapacityPlan or None if configuration is not viable
     """
-    # Validate instance constraints (minimum 64GB RAM per instance)
+    # Validate instance constraints
+    # Minimum 64 GiB RAM: ensures sufficient memory for RocksDB block cache
+    # and working set without needing memory as a sizing constraint
     if instance.cpu < 2 or instance.ram_gib < 64:
         return None
 
@@ -476,151 +476,50 @@ class NflxReadOnlyKVCapacityModel(CapacityModel):
     def default_desires(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> CapacityDesires:
-        # Read-only KV only accepts read consistency models
-        acceptable_consistency = {
-            None,
-            AccessConsistency.best_effort,
-            AccessConsistency.eventual,
-            AccessConsistency.never,
-        }
-        for key, value in user_desires.query_pattern.access_consistency:
-            if value.target_consistency not in acceptable_consistency:
-                raise ValueError(
-                    f"Read-only KV can only provide "
-                    f"{acceptable_consistency} access. User asked for {key}={value}"
-                )
-
         buffers = NflxReadOnlyKVCapacityModel.default_buffers()
 
-        if user_desires.query_pattern.access_pattern == AccessPattern.latency:
-            return CapacityDesires(
-                query_pattern=QueryPattern(
-                    access_pattern=AccessPattern.latency,
-                    access_consistency=GlobalConsistency(
-                        same_region=Consistency(
-                            target_consistency=AccessConsistency.eventual,
-                        ),
-                        cross_region=Consistency(
-                            target_consistency=AccessConsistency.never,
-                        ),
-                    ),
-                    # Read size (items are typically small to medium)
-                    estimated_mean_read_size_bytes=Interval(
-                        low=128, mid=1024, high=8192, confidence=0.95
-                    ),
-                    # No writes (read-only)
-                    estimated_mean_write_size_bytes=Interval(
-                        low=0, mid=0, high=0, confidence=1.0
-                    ),
-                    # RocksDB point reads are fast when data is in cache
-                    estimated_mean_read_latency_ms=Interval(
-                        low=0.1, mid=1, high=5, confidence=0.98
-                    ),
-                    estimated_mean_write_latency_ms=Interval(
-                        low=0, mid=0, high=0, confidence=1.0
-                    ),
-                    # Single digit millisecond SLO for latency pattern
-                    read_latency_slo_ms=FixedInterval(
-                        minimum_value=0.1,
-                        maximum_value=20,
-                        low=0.5,
-                        mid=2,
-                        high=10,
-                        confidence=0.98,
-                    ),
-                    write_latency_slo_ms=FixedInterval(
-                        low=0, mid=0, high=0, confidence=1.0
-                    ),
+        # Both latency and throughput access patterns use the same defaults.
+        # The actual capacity calculation is driven by user-provided values
+        # (RPS, latency SLO, data size), so differentiated defaults are not needed.
+        return CapacityDesires(
+            query_pattern=QueryPattern(
+                access_pattern=user_desires.query_pattern.access_pattern,
+                # No writes (read-only)
+                estimated_mean_write_size_bytes=certain_float(1),
+                # RocksDB point reads are fast when data is in cache
+                estimated_mean_read_latency_ms=Interval(
+                    low=0.5, mid=2, high=10, confidence=0.98
                 ),
-                data_shape=DataShape(
-                    # Typical dataset size
-                    estimated_state_size_gib=Interval(
-                        low=10, mid=100, high=1000, confidence=0.98
-                    ),
-                    # Typical item count
-                    estimated_state_item_count=Interval(
-                        low=1_000_000,
-                        mid=100_000_000,
-                        high=10_000_000_000,
-                        confidence=0.98,
-                    ),
-                    # RocksDB uses LZ4/Snappy compression
-                    estimated_compression_ratio=Interval(
-                        minimum_value=1.1,
-                        maximum_value=5,
-                        low=1.5,
-                        mid=2,
-                        high=3,
-                        confidence=0.98,
-                    ),
-                    # Reserved memory for OS and RocksDB overhead
-                    reserved_instance_app_mem_gib=4,
+                estimated_mean_write_latency_ms=certain_float(1),
+                # Single digit millisecond SLO for latency pattern
+                read_latency_slo_ms=FixedInterval(
+                    minimum_value=0.1,
+                    maximum_value=20,
+                    low=0.5,
+                    mid=2,
+                    high=10,
+                    confidence=0.98,
                 ),
-                buffers=buffers,
-            )
-        else:
-            # Throughput pattern - batch/scan operations
-            return CapacityDesires(
-                query_pattern=QueryPattern(
-                    access_pattern=AccessPattern.throughput,
-                    access_consistency=GlobalConsistency(
-                        same_region=Consistency(
-                            target_consistency=AccessConsistency.eventual,
-                        ),
-                        cross_region=Consistency(
-                            target_consistency=AccessConsistency.never,
-                        ),
-                    ),
-                    # Larger reads for throughput pattern (scans/batches)
-                    estimated_mean_read_size_bytes=Interval(
-                        low=1024, mid=8192, high=65536, confidence=0.95
-                    ),
-                    estimated_mean_write_size_bytes=Interval(
-                        low=0, mid=0, high=0, confidence=1.0
-                    ),
-                    # Scan operations are slower
-                    estimated_mean_read_latency_ms=Interval(
-                        low=1, mid=10, high=50, confidence=0.98
-                    ),
-                    estimated_mean_write_latency_ms=Interval(
-                        low=0, mid=0, high=0, confidence=1.0
-                    ),
-                    # Relaxed SLO for throughput pattern
-                    read_latency_slo_ms=FixedInterval(
-                        minimum_value=5,
-                        maximum_value=500,
-                        low=10,
-                        mid=50,
-                        high=200,
-                        confidence=0.98,
-                    ),
-                    write_latency_slo_ms=FixedInterval(
-                        low=0, mid=0, high=0, confidence=1.0
-                    ),
+                write_latency_slo_ms=FixedInterval(
+                    minimum_value=0.1,
+                    maximum_value=20,
+                    low=1,
+                    mid=1,
+                    high=1,
+                    confidence=0.98,
                 ),
-                data_shape=DataShape(
-                    # Larger datasets for throughput pattern
-                    estimated_state_size_gib=Interval(
-                        low=100, mid=1000, high=5000, confidence=0.98
-                    ),
-                    estimated_state_item_count=Interval(
-                        low=10_000_000,
-                        mid=1_000_000_000,
-                        high=100_000_000_000,
-                        confidence=0.98,
-                    ),
-                    estimated_compression_ratio=Interval(
-                        minimum_value=1.1,
-                        maximum_value=5,
-                        low=1.5,
-                        mid=2,
-                        high=3,
-                        confidence=0.98,
-                    ),
-                    reserved_instance_app_mem_gib=4,
+            ),
+            data_shape=DataShape(
+                # Typical dataset size
+                estimated_state_size_gib=Interval(
+                    low=10, mid=100, high=1000, confidence=0.98
                 ),
-                buffers=buffers,
-            )
+                estimated_compression_ratio=certain_float(1),
+                # Reserved memory for OS and RocksDB overhead
+                reserved_instance_app_mem_gib=4,
+            ),
+            buffers=buffers,
+        )
 
 
 nflx_read_only_kv_capacity_model = NflxReadOnlyKVCapacityModel()
