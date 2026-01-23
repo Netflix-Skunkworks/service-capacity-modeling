@@ -318,10 +318,34 @@ def _compute_read_only_kv_regional_cluster(
 
     # Calculate nodes needed for each constraint (for debugging)
     nodes_for_cpu = math.ceil(total_needed_cores / instance.cpu)
+
     # Memory calculation for debugging only (not used as constraint)
+    # Partition-aware: memory per node is based on data it holds, not replication
+    partition_size_gib = requirement.context["partition_size_gib"]
+    unreplicated_data_gib = requirement.context["unreplicated_data_gib"]
     available_memory_per_node = instance.ram_gib - args.reserved_memory_gib
-    total_needed_memory = total_memory_per_replica_gib * replica_count
-    nodes_for_memory = math.ceil(total_needed_memory / available_memory_per_node)
+
+    # Data held by each node (based on partitions it holds)
+    data_per_node_gib = partitions_per_node * partition_size_gib
+
+    # Memory needed per node = proportion of working set for the data this node holds
+    # memory_per_replica_gib = unreplicated_data * working_set_percent * buffer
+    # So: memory_per_node = data_per_node * working_set_percent * buffer
+    #                     = (data_per_node / unreplicated_data) * memory_per_replica
+    if unreplicated_data_gib > 0:
+        memory_needed_per_node = (
+            data_per_node_gib / unreplicated_data_gib
+        ) * total_memory_per_replica_gib
+    else:
+        memory_needed_per_node = 0
+
+    # nodes_for_memory: how many nodes for one copy if memory was the only constraint
+    if available_memory_per_node > 0:
+        nodes_for_memory = math.ceil(
+            total_memory_per_replica_gib / available_memory_per_node
+        )
+    else:
+        nodes_for_memory = 0
 
     # Calculate cost (local disks only, no EBS cost)
     cost = count * instance.annual_cost
@@ -342,6 +366,7 @@ def _compute_read_only_kv_regional_cluster(
         "read-only-kv.nodes_for_one_copy": nodes_for_one_copy,
         "read-only-kv.nodes_for_cpu": nodes_for_cpu,
         "read-only-kv.nodes_for_memory": nodes_for_memory,
+        "read-only-kv.memory_needed_per_node_gib": round(memory_needed_per_node, 2),
     }
     _upsert_params(cluster, params)
 
