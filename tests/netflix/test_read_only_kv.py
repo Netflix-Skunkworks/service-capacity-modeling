@@ -739,9 +739,8 @@ class TestReadOnlyKVExploration:
 
         # Buffers (default values)
         cpu_buffer = 1.5
-        mem_buffer = 1.2
         disk_buffer = 1.15
-        print(f"\nBuffers: CPU={cpu_buffer}x, Mem={mem_buffer}x, Disk={disk_buffer}x")
+        print(f"\nBuffers: CPU={cpu_buffer}x, Disk={disk_buffer}x")
 
         # Calculate and print partition sizes
         total_partitions = extra_args.get("total_num_partitions", 0)
@@ -752,10 +751,9 @@ class TestReadOnlyKVExploration:
             print(f"  partition_size: {partition_size:.2f} GiB")
             print(f"  partition_size_with_buffer: {partition_size_buf:.2f} GiB")
 
-    def _print_cluster_row(self, info: dict):  # noqa: C901
+    def _print_cluster_row(self, info: dict):
         """Print a single cluster row with utilization metrics."""
         cpu_pct = (info["need_cpu"] / info["cpu"] * 100) if info["cpu"] else 0
-        mem_pct = (info["need_mem"] / info["mem"] * 100) if info["mem"] else 0
         disk_pct = (info["need_disk"] / info["disk"] * 100) if info["disk"] else 0
         ppn = info["partitions_per_node"]
         print(
@@ -775,9 +773,7 @@ class TestReadOnlyKVExploration:
         print(
             f"        CPU:  {info['cpu']:>6}/{info['need_cpu']:>6} = {cpu_pct:>5.1f}%"
         )
-        m, nm = info["mem"], info["need_mem"]
         d, nd = info["disk"], info["need_disk"]
-        print(f"        RAM:  {m:>6,.0f}/{nm:>6,.0f} = {mem_pct:>5.1f}%")
         print(f"        Disk: {d:>6,}/{nd:>6,.0f} = {disk_pct:>5.1f}%")
         cost_str = f"        Cost: ${info['cost']:,.0f}/yr"
         if info.get("vs_curr"):
@@ -794,8 +790,6 @@ class TestReadOnlyKVExploration:
         raw_cpu = ctx.get("raw_cores", 0)
         cpu_buffer = ctx.get("compute_buffer_ratio", 1.5)
         need_cpu = raw_cpu * cpu_buffer  # Buffered CPU cores needed
-        mem_per_replica = ctx.get("memory_per_replica_gib", 0)
-        mem_buffer = ctx.get("memory_buffer_ratio", 1.2)
         disk_buffer = ctx.get("disk_buffer_ratio", 1.15)
         partition_size_gib = ctx.get("partition_size_gib", 0)
         part_size_buf = partition_size_gib * disk_buffer
@@ -822,8 +816,6 @@ class TestReadOnlyKVExploration:
                     "partitions_per_node": cfg.get("partitions_per_node", "?"),
                     "cpu": cfg["count"] * inst.cpu,
                     "need_cpu": need_cpu,
-                    "mem": cfg["count"] * inst.ram_gib,
-                    "need_mem": (mem_per_replica / mem_buffer) * rf,
                     "disk": disk_node * cfg["count"],
                     "need_disk": data_size_gib * rf,
                     "cost": actual_cost,
@@ -856,8 +848,6 @@ class TestReadOnlyKVExploration:
                     "partitions_per_node": partitions_per_node,
                     "cpu": r.count * r.instance.cpu,
                     "need_cpu": need_cpu,
-                    "mem": r.count * r.instance.ram_gib,
-                    "need_mem": (mem_per_replica / mem_buffer) * rf,
                     "disk": disk_node * r.count,
                     "need_disk": data_size_gib * rf,
                     "cost": r.annual_cost,
@@ -873,12 +863,6 @@ class TestReadOnlyKVExploration:
                 "read-only-kv.nodes_for_one_copy", "?"
             )
             nodes_for_cpu = r.cluster_params.get("read-only-kv.nodes_for_cpu", "?")
-            nodes_for_memory = r.cluster_params.get(
-                "read-only-kv.nodes_for_memory", "?"
-            )
-            mem_per_node = r.cluster_params.get(
-                "read-only-kv.memory_needed_per_node_gib", "?"
-            )
             total_partitions = ctx.get("total_num_partitions", "?")
             print(
                 f"        partitions_per_node = eff_disk / partition_size_with_buffer "
@@ -889,10 +873,6 @@ class TestReadOnlyKVExploration:
                 f"= {total_partitions} / {partitions_per_node} = {nodes_for_one_copy}"
             )
             print(f"        nodes_for_cpu = {nodes_for_cpu}")
-            print(
-                f"        nodes_for_memory = {nodes_for_memory} "
-                f"(memory_needed_per_node = {mem_per_node} GiB)"
-            )
             print()
 
     def _run_capacity_exploration(
