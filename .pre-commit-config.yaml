@@ -48,4 +48,10 @@ repos:
         language: system
         types: [python]
         exclude: ^tests/
+      - id: capture-baseline
+        name: capture cost baseline
+        entry: tox -e capture-baseline --
+        language: system
+        always_run: true
+        pass_filenames: false
 fail_fast: true
