@@ -199,7 +199,7 @@ scenarios.extend(
             "org.netflix.cassandra",
             "us-east-1",
             cassandra_small_high_qps,
-            {"require_local_disks": True},
+            {"require_local_disks": True, "copies_per_region": 3},
             "cassandra_small_high_qps_local",
         ),
         (
