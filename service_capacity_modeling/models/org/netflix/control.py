@@ -67,30 +67,6 @@ class NflxControlCapacityModel(CapacityModel):
     def compose_with(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
-        def _modify_rds_desires(
-            user_desires: CapacityDesires,
-        ) -> CapacityDesires:
-            """RDS proxy for Control service."""
-            relaxed = user_desires.model_copy(deep=True)
-
-            # RDS doesn't support tier 0
-            if relaxed.service_tier == 0:
-                relaxed.service_tier = 1
-
-            # Control caches reads, so proxy only sees writes + minimal reads
-            relaxed.query_pattern.estimated_read_per_second = certain_int(1)
-            if relaxed.query_pattern.estimated_write_per_second:
-                relaxed.query_pattern.estimated_write_per_second = (
-                    relaxed.query_pattern.estimated_write_per_second.scale(0.05)
-                )
-
-            # Minimal data footprint for connection metadata
-            relaxed.data_shape.estimated_state_size_gib = (
-                relaxed.data_shape.estimated_state_size_gib.scale(0.01)
-            )
-
-            return relaxed
-
         def _modify_postgres_desires(
             user_desires: CapacityDesires,
         ) -> CapacityDesires:
@@ -107,10 +83,7 @@ class NflxControlCapacityModel(CapacityModel):
 
             return relaxed
 
-        return (
-            ("org.netflix.rds", _modify_rds_desires),
-            ("org.netflix.postgres", _modify_postgres_desires),
-        )
+        return (("org.netflix.postgres", _modify_postgres_desires),)
 
     @staticmethod
     def default_desires(
