@@ -87,37 +87,12 @@ class NflxReadOnlyKVArguments(BaseModel):
         description="Maximum data per node (GiB). "
         "Prevents overloading nodes with too much data.",
     )
-    rocksdb_block_cache_percent: float = Field(
-        default=0.1,
-        description="Percentage of data to keep in RocksDB block cache. "
-        "Higher values improve read latency but require more memory.",
-        ge=0.0,
-        le=1.0,
-    )
     reserved_memory_gib: float = Field(
         default=8.0,
         description="Reserved memory for OS, bloom filters, index blocks, "
         "and other processes (GiB).",
         ge=0,
     )
-
-
-def _get_data_size_gib(
-    desires: CapacityDesires,
-    replica_count: int,
-) -> float:
-    """Calculate total data size in GiB including replication.
-
-    Args:
-        desires: User's capacity desires containing data shape
-        replica_count: Number of replicas (RF)
-
-    Returns:
-        Total data size in GiB
-    """
-    # Use estimated_state_size_gib directly (user-provided total data size)
-    data_size_gib = desires.data_shape.estimated_state_size_gib.mid
-    return data_size_gib * replica_count
 
 
 # TODO: Memory estimation is currently disabled because working_set_from_drive_and_slo
@@ -129,9 +104,8 @@ def _get_data_size_gib(
 # that considers actual access patterns and cache hit rates for large datasets.
 
 
-def _estimate_read_only_kv_requirement(  # pylint: disable=unused-argument
+def _estimate_read_only_kv_requirement(
     instance: Instance,
-    drive: Drive,  # Unused - memory calculation disabled (see TODO at top of file)
     desires: CapacityDesires,
     args: NflxReadOnlyKVArguments,
 ) -> CapacityRequirement:
@@ -143,7 +117,6 @@ def _estimate_read_only_kv_requirement(  # pylint: disable=unused-argument
 
     Args:
         instance: The compute instance being considered
-        drive: The drive configuration (unused - memory calculation disabled)
         desires: User's capacity desires
         args: Read-only KV specific arguments
 
@@ -194,7 +167,6 @@ def _estimate_read_only_kv_requirement(  # pylint: disable=unused-argument
             "unreplicated_data_gib": round(unreplicated_data_gib, 2),
             "partition_size_gib": round(partition_size_gib, 2),
             "raw_cores": round(raw_cores, 2),
-            "block_cache_percent": args.rocksdb_block_cache_percent,
             "compute_buffer_ratio": compute_buffer.ratio,
             "disk_buffer_ratio": disk_buffer.ratio,
         },
@@ -300,10 +272,10 @@ def _compute_read_only_kv_regional_cluster(
     return cluster
 
 
-def _estimate_read_only_kv_cluster(  # pylint: disable=unused-argument
+def _estimate_read_only_kv_cluster(
     instance: Instance,
     drive: Drive,
-    _context: RegionContext,
+    context: RegionContext,
     desires: CapacityDesires,
     args: NflxReadOnlyKVArguments,
 ) -> Optional[CapacityPlan]:
@@ -316,13 +288,17 @@ def _estimate_read_only_kv_cluster(  # pylint: disable=unused-argument
     Args:
         instance: The compute instance being considered (must have local disk)
         drive: The drive configuration (unused - local disks only)
-        _context: Regional context (unused - read-only KV is not zone-balanced)
+        context: Regional context (unused - read-only KV is not zone-balanced)
         desires: User's capacity desires
         args: Read-only KV specific arguments
 
     Returns:
         CapacityPlan or None if configuration is not viable
     """
+    # Mark unused parameters (required by CapacityModel interface)
+    _ = drive  # Local disks only - use instance.drive
+    _ = context  # Read-only KV is not zone-balanced
+
     # Validate instance constraints
     # Minimum 64 GiB RAM: ensures sufficient memory for RocksDB block cache
     # and working set without needing memory as a sizing constraint
@@ -337,7 +313,6 @@ def _estimate_read_only_kv_cluster(  # pylint: disable=unused-argument
     # Calculate requirements
     requirement = _estimate_read_only_kv_requirement(
         instance=instance,
-        drive=instance.drive,  # Use instance's local drive
         desires=desires,
         args=args,
     )
@@ -391,7 +366,7 @@ class NflxReadOnlyKVCapacityModel(CapacityModel):
         return _estimate_read_only_kv_cluster(
             instance=instance,
             drive=drive,
-            _context=context,
+            context=context,
             desires=desires,
             args=args,
         )
