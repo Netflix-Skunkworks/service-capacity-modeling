@@ -205,10 +205,13 @@ def _compute_read_only_kv_regional_cluster(
     total_needed_cores = int(requirement.cpu_cores.mid)
     partition_size_with_buffer_gib = requirement.disk_gib.mid
 
-    # Step 1 (DISK): Calculate effective disk capacity per node
+    # Step 1 (DISK): Calculate effective disk capacity per node (raw, no buffer)
     effective_disk_per_node = min(instance.drive.size_gib, args.max_data_per_node_gib)
 
     # Step 2 (DISK): Calculate partitions_per_node
+    # We divide raw disk by buffered partition size to leave disk headroom.
+    # Example: 2048 GiB disk / 115 GiB buffered partition = 17 partitions
+    #          17 partitions × 100 GiB actual = 1700 GiB used (83% utilization)
     if partition_size_with_buffer_gib <= 0:
         return None
     partitions_per_node = int(effective_disk_per_node / partition_size_with_buffer_gib)

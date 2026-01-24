@@ -9,6 +9,12 @@ A read-only data serving layer backed by RocksDB that:
 - Deploys regionally with configurable replication (RF=2 default)
 """
 
+from dataclasses import dataclass
+from typing import Optional
+
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
@@ -678,6 +684,364 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
         assert replica_count >= 2
         assert partitions_per_node >= 1
         assert result.count >= 2
+
+
+# ============================================================================
+# STANDARDIZED ALGORITHM TESTING
+# ============================================================================
+#
+# This section provides LeetCode-style verification of the partition capacity
+# algorithm using a standardized problem representation.
+#
+# KEY INSIGHT FOR IMMUTABLE READ-ONLY DATA:
+# The greedy algorithm (maximize partitions per node) is CORRECT because:
+# 1. Higher RF is FREE for immutable data (no write amplification)
+# 2. Higher RF provides exponentially better fault tolerance (P(down) = p^RF)
+# 3. Higher RF is critical for AZ fault tolerance with random placement
+# ============================================================================
+
+
+@dataclass(frozen=True)
+class StandardizedProblem:
+    """
+    Canonical problem representation for partition capacity planning.
+    All model-specific details (buffers, instance shapes) pre-computed.
+    """
+
+    n_partitions: int  # Total partitions (atomic units)
+    partition_size_gib: float  # Size WITH buffer already applied
+    disk_per_node_gib: float  # Effective disk (after max_data cap)
+    min_replicas: int  # Minimum replication factor
+    cpu_needed: int  # Total CPU cores required
+    cpu_per_node: int  # CPU cores per node
+    max_nodes: int = 10000  # Cluster size limit
+
+
+@dataclass
+class CapacityResult:
+    """Result from the capacity algorithm."""
+
+    node_count: int
+    replica_count: int
+    partitions_per_node: int
+    nodes_for_one_copy: int
+
+
+class TestReadOnlyKVStandardizedAlgorithm:
+    """
+    Standardized tests for the partition-aware capacity algorithm.
+
+    These tests verify:
+    1. The actual implementation matches the reference algorithm
+    2. Results always satisfy constraints (CPU, disk, RF, max nodes)
+    3. Property-based tests with random inputs
+    """
+
+    def _run_actual_algorithm(
+        self, problem: StandardizedProblem
+    ) -> Optional[CapacityResult]:
+        """Run the actual implementation and return standardized result."""
+        from service_capacity_modeling.interface import (
+            CapacityRequirement,
+            Drive,
+            DriveType,
+            Instance,
+        )
+        from service_capacity_modeling.models.org.netflix.read_only_kv import (
+            NflxReadOnlyKVArguments,
+            _compute_read_only_kv_regional_cluster,
+        )
+
+        # Create mock instance
+        mock_instance = Instance(
+            name="test-instance",
+            cpu=problem.cpu_per_node,
+            cpu_ghz=3.0,
+            ram_gib=128,
+            net_mbps=10000,
+            drive=Drive(
+                name="local-nvme",
+                drive_type=DriveType.local_ssd,
+                size_gib=int(problem.disk_per_node_gib),
+            ),
+            annual_cost=5000,
+        )
+
+        # Create requirement with pre-computed values
+        requirement = CapacityRequirement(
+            requirement_type="read-only-kv-regional",
+            cpu_cores=certain_int(problem.cpu_needed),
+            mem_gib=certain_float(0),
+            disk_gib=certain_float(problem.partition_size_gib),
+            network_mbps=certain_float(100),
+            context={
+                "min_replica_count": problem.min_replicas,
+                "total_num_partitions": problem.n_partitions,
+            },
+        )
+
+        args = NflxReadOnlyKVArguments(
+            total_num_partitions=problem.n_partitions,
+            min_replica_count=problem.min_replicas,
+            max_regional_size=problem.max_nodes,
+            max_data_per_node_gib=int(problem.disk_per_node_gib),
+        )
+
+        cluster = _compute_read_only_kv_regional_cluster(
+            instance=mock_instance,
+            requirement=requirement,
+            args=args,
+        )
+
+        if cluster is None:
+            return None
+
+        return CapacityResult(
+            node_count=cluster.count,
+            replica_count=cluster.cluster_params["read-only-kv.replica_count"],
+            partitions_per_node=cluster.cluster_params[
+                "read-only-kv.partitions_per_node"
+            ],
+            nodes_for_one_copy=cluster.cluster_params[
+                "read-only-kv.nodes_for_one_copy"
+            ],
+        )
+
+    # ========================================================================
+    # DETERMINISTIC TESTS
+    # ========================================================================
+
+    def test_data_constrained_workload(self):
+        """Test data-constrained workload where disk determines sizing.
+
+        Hand calculation:
+        - ppn = floor(2048 / 575) = 3
+        - nodes_for_one_copy = ceil(200 / 3) = 67
+        - cpu_needed = 800, cpu_per_node = 16
+        - nodes_for_cpu = ceil(800 / 16) = 50
+        - Since n1c (67) > nodes_for_cpu (50), disk is bottleneck
+        - rf = 2 (min), node_count = 67 * 2 = 134
+        """
+        problem = StandardizedProblem(
+            n_partitions=200,
+            partition_size_gib=575,
+            disk_per_node_gib=2048,
+            min_replicas=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+            max_nodes=10000,
+        )
+
+        result = self._run_actual_algorithm(problem)
+
+        assert result is not None
+        assert result.partitions_per_node == 3  # floor(2048 / 575)
+        assert result.nodes_for_one_copy == 67  # ceil(200 / 3)
+        assert result.replica_count == 2  # min_replicas (CPU satisfied)
+        assert result.node_count == 134  # 67 * 2
+
+    def test_cpu_constrained_workload(self):
+        """Test CPU-constrained workload where RF increases to satisfy CPU.
+
+        Hand calculation:
+        - ppn = floor(2048 / 575) = 3
+        - nodes_for_one_copy = ceil(200 / 3) = 67
+        - cpu_needed = 3200, cpu_per_node = 16
+        - nodes_for_cpu = ceil(3200 / 16) = 200
+        - rf=2: 67*2=134 nodes, 134*16=2144 CPU < 3200 (not enough)
+        - rf=3: 67*3=201 nodes, 201*16=3216 CPU >= 3200 (satisfied)
+        """
+        problem = StandardizedProblem(
+            n_partitions=200,
+            partition_size_gib=575,
+            disk_per_node_gib=2048,
+            min_replicas=2,
+            cpu_needed=3200,
+            cpu_per_node=16,
+            max_nodes=10000,
+        )
+
+        result = self._run_actual_algorithm(problem)
+
+        assert result is not None
+        assert result.partitions_per_node == 3
+        assert result.nodes_for_one_copy == 67
+        assert result.replica_count == 3  # Increased to satisfy CPU
+        assert result.node_count == 201  # 67 * 3
+
+    def test_single_partition_per_node(self):
+        """Test when only 1 partition fits per node.
+
+        Hand calculation:
+        - ppn = floor(2048 / 2000) = 1
+        - nodes_for_one_copy = ceil(100 / 1) = 100
+        - cpu_needed = 500, cpu_per_node = 8
+        - rf=2: 100*2=200 nodes, 200*8=1600 CPU >= 500 (satisfied)
+        """
+        problem = StandardizedProblem(
+            n_partitions=100,
+            partition_size_gib=2000,
+            disk_per_node_gib=2048,
+            min_replicas=2,
+            cpu_needed=500,
+            cpu_per_node=8,
+            max_nodes=10000,
+        )
+
+        result = self._run_actual_algorithm(problem)
+
+        assert result is not None
+        assert result.partitions_per_node == 1
+        assert result.nodes_for_one_copy == 100
+        assert result.replica_count == 2
+        assert result.node_count == 200
+
+    def test_partition_too_large_returns_none(self):
+        """When partition > disk, should return None."""
+        problem = StandardizedProblem(
+            n_partitions=100,
+            partition_size_gib=3000,  # Larger than disk
+            disk_per_node_gib=2048,
+            min_replicas=2,
+            cpu_needed=100,
+            cpu_per_node=16,
+            max_nodes=10000,
+        )
+
+        result = self._run_actual_algorithm(problem)
+        assert result is None
+
+    def test_exceeds_max_nodes_returns_none(self):
+        """When constraints can't be met within max_nodes, return None."""
+        problem = StandardizedProblem(
+            n_partitions=10000,
+            partition_size_gib=1000,
+            disk_per_node_gib=1000,  # 1 partition per node
+            min_replicas=2,
+            cpu_needed=1000000,  # Huge CPU need
+            cpu_per_node=16,
+            max_nodes=100,  # But max 100 nodes
+        )
+
+        result = self._run_actual_algorithm(problem)
+        assert result is None
+
+    # ========================================================================
+    # CONSTRAINT VALIDATION TESTS
+    # ========================================================================
+
+    def test_result_satisfies_all_constraints(self):
+        """Verify results satisfy CPU, disk, RF, and max_nodes constraints."""
+        problems = [
+            StandardizedProblem(200, 575, 2048, 2, 800, 16, 10000),
+            StandardizedProblem(100, 1024, 2048, 2, 100, 16, 10000),
+            StandardizedProblem(1000, 100, 2000, 3, 5000, 16, 10000),
+            StandardizedProblem(512, 107.8, 2048, 4, 60, 24, 256),  # IHS-like
+        ]
+
+        for problem in problems:
+            result = self._run_actual_algorithm(problem)
+            if result is None:
+                continue
+
+            # CPU satisfied
+            total_cpu = result.node_count * problem.cpu_per_node
+            assert total_cpu >= problem.cpu_needed, (
+                f"CPU not satisfied: {total_cpu} < {problem.cpu_needed}"
+            )
+
+            # Disk satisfied (enough slots for all replicas)
+            total_slots = result.node_count * result.partitions_per_node
+            total_replicas = problem.n_partitions * result.replica_count
+            assert total_slots >= total_replicas, (
+                f"Disk not satisfied: {total_slots} < {total_replicas}"
+            )
+
+            # RF >= min
+            assert result.replica_count >= problem.min_replicas
+
+            # Max nodes respected
+            assert result.node_count <= problem.max_nodes
+
+    # ========================================================================
+    # HYPOTHESIS PROPERTY-BASED TESTS
+    # ========================================================================
+
+    @staticmethod
+    @st.composite
+    def valid_problems(draw):
+        """Generate random but valid capacity problems."""
+        disk_per_node = draw(st.integers(min_value=100, max_value=10000))
+        partition_size = draw(st.integers(min_value=10, max_value=disk_per_node))
+        n_partitions = draw(st.integers(min_value=1, max_value=1000))
+        min_replicas = draw(st.integers(min_value=1, max_value=5))
+        cpu_per_node = draw(st.integers(min_value=1, max_value=128))
+        max_nodes = draw(st.integers(min_value=10, max_value=10000))
+        cpu_needed = draw(st.integers(min_value=1, max_value=max_nodes * cpu_per_node))
+
+        return StandardizedProblem(
+            n_partitions=n_partitions,
+            partition_size_gib=float(partition_size),
+            disk_per_node_gib=float(disk_per_node),
+            min_replicas=min_replicas,
+            cpu_needed=cpu_needed,
+            cpu_per_node=cpu_per_node,
+            max_nodes=max_nodes,
+        )
+
+    @given(problem=valid_problems())
+    @settings(max_examples=200, deadline=None)
+    def test_hypothesis_satisfies_constraints(self, problem: StandardizedProblem):
+        """PROPERTY: Results must always satisfy all constraints."""
+        result = self._run_actual_algorithm(problem)
+        if result is None:
+            return  # No result to validate
+
+        # CPU constraint
+        total_cpu = result.node_count * problem.cpu_per_node
+        assert total_cpu >= problem.cpu_needed, (
+            f"CPU constraint violated: {total_cpu} < {problem.cpu_needed}"
+        )
+
+        # Disk constraint
+        total_slots = result.node_count * result.partitions_per_node
+        total_replicas = problem.n_partitions * result.replica_count
+        assert total_slots >= total_replicas, (
+            f"Disk constraint violated: {total_slots} < {total_replicas}"
+        )
+
+        # Min replica constraint
+        assert result.replica_count >= problem.min_replicas
+
+        # Max nodes constraint
+        assert result.node_count <= problem.max_nodes
+
+    @given(problem=valid_problems())
+    @settings(max_examples=200, deadline=None)
+    def test_hypothesis_node_count_formula(self, problem: StandardizedProblem):
+        """PROPERTY: node_count = max(2, nodes_for_one_copy × replica_count)."""
+        result = self._run_actual_algorithm(problem)
+        if result is None:
+            return
+
+        expected = max(2, result.nodes_for_one_copy * result.replica_count)
+        assert result.node_count == expected, (
+            f"node_count={result.node_count} != "
+            f"max(2, {result.nodes_for_one_copy} × {result.replica_count}) = {expected}"
+        )
+
+    @given(problem=valid_problems())
+    @settings(max_examples=200, deadline=None)
+    def test_hypothesis_uses_max_ppn(self, problem: StandardizedProblem):
+        """PROPERTY: Greedy algorithm always uses maximum PPn that fits on disk."""
+        result = self._run_actual_algorithm(problem)
+        if result is None:
+            return
+
+        max_ppn = int(problem.disk_per_node_gib / problem.partition_size_gib)
+        assert result.partitions_per_node == max_ppn, (
+            f"Didn't use max PPn: used {result.partitions_per_node}, max is {max_ppn}"
+        )
 
 
 class TestReadOnlyKVExploration:
