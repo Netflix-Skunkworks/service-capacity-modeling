@@ -311,11 +311,34 @@ scenarios.extend(
     ]
 )
 
-# Key-Value scenarios (composite: Cassandra + EVCache)
-# Uses evcache_large desires with eventual consistency to enable caching layer
-kv_with_cache = evcache_large.model_copy(deep=True)
+# Key-Value scenarios (composite: Cassandra + dgwkv, optionally + EVCache)
+# Base desires for KV - high read throughput with significant state
+kv_base = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=certain_int(500_000),
+        estimated_write_per_second=certain_int(50_000),
+        estimated_mean_read_latency_ms=certain_float(1.0),
+    ),
+    data_shape=DataShape(
+        estimated_state_size_gib=certain_int(500),
+        estimated_state_item_count=Interval(
+            low=10_000_000, mid=100_000_000, high=200_000_000, confidence=0.98
+        ),
+    ),
+)
+
+# With cache: eventual consistency enables EVCache layer
+kv_with_cache = kv_base.model_copy(deep=True)
 kv_with_cache.query_pattern.access_consistency = GlobalConsistency(
     same_region=Consistency(target_consistency=AccessConsistency.eventual),
+    cross_region=Consistency(target_consistency=AccessConsistency.best_effort),
+)
+
+# Without cache: read_your_writes consistency = Cassandra + dgwkv only (no EVCache)
+kv_without_cache = kv_base.model_copy(deep=True)
+kv_without_cache.query_pattern.access_consistency = GlobalConsistency(
+    same_region=Consistency(target_consistency=AccessConsistency.read_your_writes),
     cross_region=Consistency(target_consistency=AccessConsistency.best_effort),
 )
 
@@ -327,6 +350,13 @@ scenarios.extend(
             kv_with_cache,
             None,
             "kv_with_cache",
+        ),
+        (
+            "org.netflix.key-value",
+            "us-east-1",
+            kv_without_cache,
+            None,
+            "kv_without_cache",
         ),
     ]
 )

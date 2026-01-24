@@ -263,9 +263,8 @@ def _convert_current_clusters(
         if current.cluster_drive is not None:
             attached_drive = hardware.price_drive(current.cluster_drive)
             attached_drives.append(attached_drive)
-            # Only add drive cost for zonal (stateful) clusters
-            if is_zonal:
-                cost = cost + (attached_drive.annual_cost * count)
+            # Always include drive cost when a drive is attached
+            cost = cost + (attached_drive.annual_cost * count)
 
         disk_gib = 0.0
         if current.cluster_drive is not None:
