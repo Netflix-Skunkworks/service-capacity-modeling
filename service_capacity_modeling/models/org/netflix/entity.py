@@ -63,34 +63,6 @@ class NflxEntityCapacityModel(CapacityModel):
     def compose_with(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
-        def _modify_rds_desires(
-            user_desires: CapacityDesires,
-        ) -> CapacityDesires:
-            """RDS proxy handles connection pooling and auth translation.
-            Capacity needs are much lower than the backend database."""
-            relaxed = user_desires.model_copy(deep=True)
-
-            # RDS doesn't support tier 0
-            if relaxed.service_tier == 0:
-                relaxed.service_tier = 1
-
-            # Proxy layer sees ~5% of actual load due to connection pooling
-            if relaxed.query_pattern.estimated_read_per_second:
-                relaxed.query_pattern.estimated_read_per_second = (
-                    relaxed.query_pattern.estimated_read_per_second.scale(0.05)
-                )
-            if relaxed.query_pattern.estimated_write_per_second:
-                relaxed.query_pattern.estimated_write_per_second = (
-                    relaxed.query_pattern.estimated_write_per_second.scale(0.05)
-                )
-
-            # Proxy only needs to store connection metadata, not actual data
-            relaxed.data_shape.estimated_state_size_gib = (
-                relaxed.data_shape.estimated_state_size_gib.scale(0.01)
-            )
-
-            return relaxed
-
         def _modify_postgres_desires(
             user_desires: CapacityDesires,
         ) -> CapacityDesires:
@@ -128,7 +100,6 @@ class NflxEntityCapacityModel(CapacityModel):
             return relaxed
 
         return (
-            ("org.netflix.rds", _modify_rds_desires),
             ("org.netflix.postgres", _modify_postgres_desires),
             ("org.netflix.key-value", lambda x: x),
             ("org.netflix.elasticsearch", _modify_elasticsearch_desires),
