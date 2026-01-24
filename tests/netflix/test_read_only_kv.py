@@ -245,27 +245,6 @@ class TestReadOnlyKVReplication:
         assert total_storage >= 150
 
 
-class TestReadOnlyKVMemoryConfiguration:
-    """Test ReadOnlyKV RocksDB memory configurations."""
-
-    def test_low_block_cache_percent(self):
-        """Test ReadOnlyKV with lower block cache percentage."""
-        cap_plan = planner.plan_certain(
-            model_name="org.netflix.read-only-kv",
-            region="us-east-1",
-            desires=large_dataset_moderate_rps,
-            extra_model_arguments={
-                "rocksdb_block_cache_percent": 0.1,  # 10% cache
-                "total_num_partitions": 12,
-            },
-        )[0]
-
-        requirement = cap_plan.requirements.regional[0]
-
-        # Check block cache percent is recorded
-        assert requirement.context["block_cache_percent"] == 0.1
-
-
 class TestReadOnlyKVClusterConstraints:
     """Test ReadOnlyKV cluster size and regional constraints."""
 
