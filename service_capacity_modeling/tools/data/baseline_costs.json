@@ -3,14 +3,21 @@
     "annual_costs": {
       "rds-cluster.regional-clusters": 2673.34
     },
-    "cluster_count": 1,
-    "deployment": "regional",
-    "instance_count": 1,
-    "instance_name": "m5.2xlarge",
+    "clusters": [
+      {
+        "annual_cost": 1336.67,
+        "attached_drives": [
+          "gp2 : 60GB"
+        ],
+        "cluster_type": "rds-cluster",
+        "count": 1,
+        "deployment": "regional",
+        "instance": "m5.2xlarge"
+      }
+    ],
     "model": "org.netflix.rds",
     "region": "us-east-1",
     "scenario": "rds_small_tier1",
-    "service_count": 0,
     "service_tier": 1,
     "total_annual_cost": 2673.34
   },
@@ -18,14 +25,21 @@
     "annual_costs": {
       "rds-cluster.regional-clusters": 3608.0
     },
-    "cluster_count": 1,
-    "deployment": "regional",
-    "instance_count": 1,
-    "instance_name": "r5.4xlarge",
+    "clusters": [
+      {
+        "annual_cost": 3608.0,
+        "attached_drives": [
+          "gp2 : 240GB"
+        ],
+        "cluster_type": "rds-cluster",
+        "count": 1,
+        "deployment": "regional",
+        "instance": "r5.4xlarge"
+      }
+    ],
     "model": "org.netflix.rds",
     "region": "us-east-1",
     "scenario": "rds_tier3",
-    "service_count": 0,
     "service_tier": 3,
     "total_annual_cost": 3608.0
   },
@@ -33,14 +47,21 @@
     "annual_costs": {
       "aurora-cluster.regional-clusters": 3447.644
     },
-    "cluster_count": 1,
-    "deployment": "regional",
-    "instance_count": 2,
-    "instance_name": "db.r6g.xlarge",
+    "clusters": [
+      {
+        "annual_cost": 1862.3139999999999,
+        "attached_drives": [
+          "aurora : 60GB"
+        ],
+        "cluster_type": "aurora-cluster",
+        "count": 2,
+        "deployment": "regional",
+        "instance": "db.r6g.xlarge"
+      }
+    ],
     "model": "org.netflix.aurora",
     "region": "us-east-1",
     "scenario": "aurora_small_tier1",
-    "service_count": 0,
     "service_tier": 1,
     "total_annual_cost": 3447.64
   },
@@ -48,14 +69,21 @@
     "annual_costs": {
       "aurora-cluster.regional-clusters": 2204.4579999999996
     },
-    "cluster_count": 1,
-    "deployment": "regional",
-    "instance_count": 1,
-    "instance_name": "db.r6g.xlarge",
+    "clusters": [
+      {
+        "annual_cost": 2204.4579999999996,
+        "attached_drives": [
+          "aurora : 240GB"
+        ],
+        "cluster_type": "aurora-cluster",
+        "count": 1,
+        "deployment": "regional",
+        "instance": "db.r6g.xlarge"
+      }
+    ],
     "model": "org.netflix.aurora",
     "region": "us-east-1",
     "scenario": "aurora_tier3",
-    "service_count": 0,
     "service_tier": 3,
     "total_annual_cost": 2204.46
   },
@@ -66,14 +94,32 @@
       "cassandra.net.intra.region": 90285.08949279785,
       "cassandra.zonal-clusters": 29508.0
     },
-    "cluster_count": 3,
-    "deployment": "zonal",
-    "instance_count": 4,
-    "instance_name": "c5d.4xlarge",
+    "clusters": [
+      {
+        "annual_cost": 9836.0,
+        "cluster_type": "cassandra",
+        "count": 4,
+        "deployment": "zonal",
+        "instance": "c5d.4xlarge"
+      },
+      {
+        "annual_cost": 9836.0,
+        "cluster_type": "cassandra",
+        "count": 4,
+        "deployment": "zonal",
+        "instance": "c5d.4xlarge"
+      },
+      {
+        "annual_cost": 9836.0,
+        "cluster_type": "cassandra",
+        "count": 4,
+        "deployment": "zonal",
+        "instance": "c5d.4xlarge"
+      }
+    ],
     "model": "org.netflix.cassandra",
     "region": "us-east-1",
     "scenario": "cassandra_small_high_qps_local",
-    "service_count": 3,
     "service_tier": 1,
     "total_annual_cost": 149891.4
   },
@@ -84,14 +130,41 @@
       "cassandra.net.intra.region": 225712.72373199463,
       "cassandra.zonal-clusters": 69031.92
     },
-    "cluster_count": 3,
-    "deployment": "zonal",
-    "instance_count": 8,
-    "instance_name": "c7a.4xlarge",
+    "clusters": [
+      {
+        "annual_cost": 23010.64,
+        "attached_drives": [
+          "gp3 : 100GB"
+        ],
+        "cluster_type": "cassandra",
+        "count": 8,
+        "deployment": "zonal",
+        "instance": "c7a.4xlarge"
+      },
+      {
+        "annual_cost": 23010.64,
+        "attached_drives": [
+          "gp3 : 100GB"
+        ],
+        "cluster_type": "cassandra",
+        "count": 8,
+        "deployment": "zonal",
+        "instance": "c7a.4xlarge"
+      },
+      {
+        "annual_cost": 23010.64,
+        "attached_drives": [
+          "gp3 : 100GB"
+        ],
+        "cluster_type": "cassandra",
+        "count": 8,
+        "deployment": "zonal",
+        "instance": "c7a.4xlarge"
+      }
+    ],
     "model": "org.netflix.cassandra",
     "region": "us-east-1",
     "scenario": "cassandra_high_writes_ebs",
-    "service_count": 3,
     "service_tier": 1,
     "total_annual_cost": 445286.82
   },
@@ -99,14 +172,32 @@
     "annual_costs": {
       "kafka.zonal-clusters": 13494.059999999998
     },
-    "cluster_count": 3,
-    "deployment": "zonal",
-    "instance_count": 6,
-    "instance_name": "i3en.large",
+    "clusters": [
+      {
+        "annual_cost": 4498.0199999999995,
+        "cluster_type": "kafka",
+        "count": 6,
+        "deployment": "zonal",
+        "instance": "i3en.large"
+      },
+      {
+        "annual_cost": 4498.0199999999995,
+        "cluster_type": "kafka",
+        "count": 6,
+        "deployment": "zonal",
+        "instance": "i3en.large"
+      },
+      {
+        "annual_cost": 4498.0199999999995,
+        "cluster_type": "kafka",
+        "count": 6,
+        "deployment": "zonal",
+        "instance": "i3en.large"
+      }
+    ],
     "model": "org.netflix.kafka",
     "region": "us-east-1",
     "scenario": "kafka_100mib_throughput",
-    "service_count": 0,
     "service_tier": 1,
     "total_annual_cost": 13494.06
   },
@@ -115,14 +206,32 @@
       "evcache.spread.cost": 93333.33333333333,
       "evcache.zonal-clusters": 2490.0
     },
-    "cluster_count": 3,
-    "deployment": "zonal",
-    "instance_count": 2,
-    "instance_name": "r5.large",
+    "clusters": [
+      {
+        "annual_cost": 830.0,
+        "cluster_type": "evcache",
+        "count": 2,
+        "deployment": "zonal",
+        "instance": "r5.large"
+      },
+      {
+        "annual_cost": 830.0,
+        "cluster_type": "evcache",
+        "count": 2,
+        "deployment": "zonal",
+        "instance": "r5.large"
+      },
+      {
+        "annual_cost": 830.0,
+        "cluster_type": "evcache",
+        "count": 2,
+        "deployment": "zonal",
+        "instance": "r5.large"
+      }
+    ],
     "model": "org.netflix.evcache",
     "region": "us-east-1",
     "scenario": "evcache_tiny_with_spread",
-    "service_count": 0,
     "service_tier": 1,
     "total_annual_cost": 95823.33
   },
@@ -131,14 +240,32 @@
       "evcache.spread.cost": 0.0,
       "evcache.zonal-clusters": 31265.129999999997
     },
-    "cluster_count": 3,
-    "deployment": "zonal",
-    "instance_count": 13,
-    "instance_name": "m7a.xlarge",
+    "clusters": [
+      {
+        "annual_cost": 10421.71,
+        "cluster_type": "evcache",
+        "count": 13,
+        "deployment": "zonal",
+        "instance": "m7a.xlarge"
+      },
+      {
+        "annual_cost": 10421.71,
+        "cluster_type": "evcache",
+        "count": 13,
+        "deployment": "zonal",
+        "instance": "m7a.xlarge"
+      },
+      {
+        "annual_cost": 10421.71,
+        "cluster_type": "evcache",
+        "count": 13,
+        "deployment": "zonal",
+        "instance": "m7a.xlarge"
+      }
+    ],
     "model": "org.netflix.evcache",
     "region": "us-east-1",
     "scenario": "evcache_small_no_replication",
-    "service_count": 0,
     "service_tier": 1,
     "total_annual_cost": 31265.13
   },
@@ -149,14 +276,25 @@
       "evcache.spread.cost": 0.0,
       "evcache.zonal-clusters": 100204.26000000001
     },
-    "cluster_count": 2,
-    "deployment": "zonal",
-    "instance_count": 39,
-    "instance_name": "c6id.2xlarge",
+    "clusters": [
+      {
+        "annual_cost": 50102.130000000005,
+        "cluster_type": "evcache",
+        "count": 39,
+        "deployment": "zonal",
+        "instance": "c6id.2xlarge"
+      },
+      {
+        "annual_cost": 50102.130000000005,
+        "cluster_type": "evcache",
+        "count": 39,
+        "deployment": "zonal",
+        "instance": "c6id.2xlarge"
+      }
+    ],
     "model": "org.netflix.evcache",
     "region": "us-east-1",
     "scenario": "evcache_large_with_replication",
-    "service_count": 2,
     "service_tier": 1,
     "total_annual_cost": 175441.83
   },
@@ -170,14 +308,63 @@
       "evcache.zonal-clusters": 150306.39,
       "nflx-java-app.regional-clusters": 107484.0
     },
-    "cluster_count": 7,
-    "deployment": "zonal",
-    "instance_count": 39,
-    "instance_name": "c6id.2xlarge",
+    "clusters": [
+      {
+        "annual_cost": 50102.130000000005,
+        "cluster_type": "evcache",
+        "count": 39,
+        "deployment": "zonal",
+        "instance": "c6id.2xlarge"
+      },
+      {
+        "annual_cost": 50102.130000000005,
+        "cluster_type": "evcache",
+        "count": 39,
+        "deployment": "zonal",
+        "instance": "c6id.2xlarge"
+      },
+      {
+        "annual_cost": 50102.130000000005,
+        "cluster_type": "evcache",
+        "count": 39,
+        "deployment": "zonal",
+        "instance": "c6id.2xlarge"
+      },
+      {
+        "annual_cost": 14753.34,
+        "cluster_type": "cassandra",
+        "count": 2,
+        "deployment": "zonal",
+        "instance": "c5d.12xlarge"
+      },
+      {
+        "annual_cost": 14753.34,
+        "cluster_type": "cassandra",
+        "count": 2,
+        "deployment": "zonal",
+        "instance": "c5d.12xlarge"
+      },
+      {
+        "annual_cost": 14753.34,
+        "cluster_type": "cassandra",
+        "count": 2,
+        "deployment": "zonal",
+        "instance": "c5d.12xlarge"
+      },
+      {
+        "annual_cost": 107484.0,
+        "attached_drives": [
+          "gp2 : 20GB"
+        ],
+        "cluster_type": "dgwkv",
+        "count": 78,
+        "deployment": "regional",
+        "instance": "c7a.2xlarge"
+      }
+    ],
     "model": "org.netflix.key-value",
     "region": "us-east-1",
     "scenario": "kv_with_cache",
-    "service_count": 3,
     "service_tier": 1,
     "total_annual_cost": 362408.3
   }

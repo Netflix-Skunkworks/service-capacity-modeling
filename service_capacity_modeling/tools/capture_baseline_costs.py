@@ -19,12 +19,34 @@ from service_capacity_modeling.interface import (
     CapacityDesires,
     certain_float,
     certain_int,
+    ClusterCapacity,
     Consistency,
     DataShape,
     GlobalConsistency,
     Interval,
     QueryPattern,
 )
+
+
+def _format_cluster(cluster: ClusterCapacity, deployment: str) -> dict[str, Any]:
+    """Format a single cluster's details."""
+    info: dict[str, Any] = {
+        "cluster_type": cluster.cluster_type,
+        "deployment": deployment,
+        "instance": cluster.instance.name,
+        "count": cluster.count,
+        "annual_cost": float(cluster.annual_cost),
+    }
+
+    # Add attached drives if present
+    if cluster.attached_drives:
+        drives = []
+        for drive in cluster.attached_drives:
+            size_gib = int(drive.size_gib) if drive.size_gib else 0
+            drives.append(f"{drive.name} : {size_gib}GB")
+        info["attached_drives"] = sorted(drives)
+
+    return info
 
 
 def capture_costs(
@@ -48,30 +70,26 @@ def capture_costs(
             return {"error": "No capacity plans generated", "scenario": scenario_name}
 
         cap_plan = cap_plans[0]
-        clusters = cap_plan.candidate_clusters
+        candidate = cap_plan.candidate_clusters
+
+        # Build cluster details for each cluster
+        cluster_details = []
+        for zonal_cluster in candidate.zonal:
+            cluster_details.append(_format_cluster(zonal_cluster, "zonal"))
+        for regional_cluster in candidate.regional:
+            cluster_details.append(_format_cluster(regional_cluster, "regional"))
 
         result = {
             "scenario": scenario_name,
             "model": model_name,
             "region": region,
             "service_tier": desires.service_tier,
+            "total_annual_cost": float(candidate.total_annual_cost),
+            "clusters": cluster_details,
             "annual_costs": dict(
-                sorted((k, float(v)) for k, v in clusters.annual_costs.items())
+                sorted((k, float(v)) for k, v in candidate.annual_costs.items())
             ),
-            "total_annual_cost": float(clusters.total_annual_cost),
-            "cluster_count": len(clusters.zonal) + len(clusters.regional),
-            "service_count": len(clusters.services),
         }
-
-        # Add instance info
-        if clusters.zonal:
-            result["instance_name"] = clusters.zonal[0].instance.name
-            result["instance_count"] = clusters.zonal[0].count
-            result["deployment"] = "zonal"
-        elif clusters.regional:
-            result["instance_name"] = clusters.regional[0].instance.name
-            result["instance_count"] = clusters.regional[0].count
-            result["deployment"] = "regional"
 
         return result
     except (ValueError, KeyError, AttributeError) as e:
