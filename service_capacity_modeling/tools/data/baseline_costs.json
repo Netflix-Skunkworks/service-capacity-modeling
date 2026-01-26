@@ -306,7 +306,7 @@
       "cassandra.zonal-clusters": 44260.020000000004,
       "evcache.spread.cost": 0.0,
       "evcache.zonal-clusters": 150306.39,
-      "nflx-java-app.regional-clusters": 107484.0
+      "nflx-java-app.regional-clusters": 108432.87
     },
     "clusters": [
       {
@@ -352,20 +352,20 @@
         "instance": "c5d.12xlarge"
       },
       {
-        "annual_cost": 107484.0,
+        "annual_cost": 108432.87,
         "attached_drives": [
           "gp2 : 20GB"
         ],
         "cluster_type": "dgwkv",
-        "count": 78,
+        "count": 39,
         "deployment": "regional",
-        "instance": "c7a.2xlarge"
+        "instance": "c7a.4xlarge"
       }
     ],
     "model": "org.netflix.key-value",
     "region": "us-east-1",
     "scenario": "kv_with_cache",
     "service_tier": 1,
-    "total_annual_cost": 362408.3
+    "total_annual_cost": 363357.17
   }
 ]
