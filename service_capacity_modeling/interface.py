@@ -565,6 +565,30 @@ class Hardware(ExcludeUnsetModel):
     """Managed services available (e.g. service name -> Service with
     params, cost, etc.)"""
 
+    def price_drive(self, drive: Drive) -> Drive:
+        """Hydrate a drive with pricing information from the hardware catalog.
+
+        User-provided drives (e.g., from CurrentClusterCapacity.cluster_drive)
+        contain size/IOPS but lack pricing. This method looks up pricing by
+        drive name and returns a properly priced Drive instance.
+
+        Args:
+            drive: Drive with name, size_gib, read_io_per_s, write_io_per_s
+
+        Returns:
+            Drive with catalog pricing and input size/IO values
+
+        Raises:
+            ValueError: If drive.name not in hardware catalog
+        """
+        if drive.name not in self.drives:
+            raise ValueError(f"Cannot price drive '{drive.name}'")
+        priced = self.drives[drive.name].model_copy()
+        priced.size_gib = drive.size_gib
+        priced.read_io_per_s = drive.read_io_per_s
+        priced.write_io_per_s = drive.write_io_per_s
+        return priced
+
 
 class GlobalHardware(ExcludeUnsetModel):
     """Represents all possible hardware shapes in all regions
@@ -821,6 +845,9 @@ class CurrentClusterCapacity(ExcludeUnsetModel):
     cluster_instance: Optional[Instance] = None
     cluster_drive: Optional[Drive] = None
     cluster_instance_count: Interval
+    # Optional cluster_type to preserve through baseline extraction.
+    # If not set, extract_baseline_plan uses model.cluster_type.
+    cluster_type: Optional[str] = None
     # The distribution cpu utilization in the cluster.
     cpu_utilization: Interval = certain_float(0.0)
     # The per node distribution of memory used in gib.
