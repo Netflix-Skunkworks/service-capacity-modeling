@@ -222,31 +222,32 @@ def _compute_read_only_kv_regional_cluster(
     # Step 3 (DISK): Calculate nodes needed for one copy of the dataset
     nodes_for_one_copy = math.ceil(args.total_num_partitions / partitions_per_node)
 
-    # Step 4: Start with min_replica_count, iterate until CPU satisfied
+    # Step 4: Calculate replica count using closed-form formula
     # Note: Memory is NOT used as a constraint because:
     # - Instances are pre-filtered to require minimum 64 GiB RAM
     # - With 64+ GiB RAM and typical partition sizes, memory is rarely the bottleneck
     # - CPU and disk constraints dominate for read-only KV workloads
-    replica_count = args.min_replica_count
+    #
+    # Math: find minimum rf such that max(2, base × rf) × cpu ≥ cpu_needed
+    base = nodes_for_one_copy
 
-    while True:
-        count = nodes_for_one_copy * replica_count
+    if base >= 2:
+        # Normal case: max(2, base×rf) = base×rf since base ≥ 2
+        rf_for_cpu = math.ceil(total_needed_cores / (base * instance.cpu))
+        replica_count = max(args.min_replica_count, rf_for_cpu)
+        count = base * replica_count
+    else:
+        # base == 1: 2-node minimum may satisfy CPU at min_rf
+        if 2 * instance.cpu >= total_needed_cores:
+            replica_count = args.min_replica_count
+            count = max(2, replica_count)
+        else:
+            rf_for_cpu = math.ceil(total_needed_cores / instance.cpu)
+            replica_count = max(args.min_replica_count, rf_for_cpu)
+            count = replica_count  # rf ≥ 2 guaranteed, so max(2, 1×rf) = rf
 
-        # Ensure minimum of 2 nodes for redundancy
-        count = max(2, count)
-
-        # Check if count exceeds max cluster size
-        if count > args.max_regional_size:
-            return None
-
-        # CHECK CPU: Primary constraint after disk
-        cpu_satisfied = (count * instance.cpu) >= total_needed_cores
-
-        if cpu_satisfied:
-            break
-
-        # Not satisfied, increase replicas to add more nodes
-        replica_count += 1
+    if count > args.max_regional_size:
+        return None
 
     # Calculate nodes needed for CPU constraint (for debugging)
     nodes_for_cpu = math.ceil(total_needed_cores / instance.cpu)
