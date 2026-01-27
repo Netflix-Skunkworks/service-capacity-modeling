@@ -1032,16 +1032,173 @@ class TestReadOnlyKVStandardizedAlgorithm:
 
     @given(problem=valid_problems())
     @settings(max_examples=200, deadline=None)
-    def test_hypothesis_uses_max_ppn(self, problem: StandardizedProblem):
-        """PROPERTY: Greedy algorithm always uses maximum PPn that fits on disk."""
+    def test_hypothesis_ppn_in_valid_range(self, problem: StandardizedProblem):
+        """PROPERTY: PPn is always in [1, max_ppn] range."""
         result = self._run_actual_algorithm(problem)
         if result is None:
             return
 
         max_ppn = int(problem.disk_per_node_gib / problem.partition_size_gib)
-        assert result.partitions_per_node == max_ppn, (
-            f"Didn't use max PPn: used {result.partitions_per_node}, max is {max_ppn}"
+        assert 1 <= result.partitions_per_node <= max_ppn, (
+            f"PPn {result.partitions_per_node} not in valid range [1, {max_ppn}]"
         )
+
+
+# ============================================================================
+# ALGORITHM BEHAVIOR TESTS
+# ============================================================================
+#
+# These tests demonstrate HOW and WHY the algorithm works, making it easier
+# for engineers to understand the partition-aware capacity planning logic.
+# ============================================================================
+
+
+class TestAlgorithmBehavior:
+    """
+    Educational tests demonstrating algorithm behavior.
+
+    These tests show:
+    1. How the algorithm finds optimal (highest RF) solutions
+    2. When/why it falls back to lower RF solutions
+    3. The relationship between PPn, RF, and node_count
+    """
+
+    def test_optimal_rf_when_max_nodes_relaxed(self):
+        """
+        When max_nodes is not a constraint, algorithm finds highest RF.
+
+        Hand calculation for 21 partitions, 10 CPU, 1 CPU/node:
+            max_ppn = 1000/100 = 10
+            base = ceil(21/10) = 3 nodes for one copy
+            rf_for_cpu = ceil(10 / (3*1)) = 4
+            node_count = 3 × 4 = 12
+
+        Result: rf=4 (optimal fault tolerance)
+        """
+        from service_capacity_modeling.models.org.netflix.read_only_kv import (
+            _find_valid_cluster_config,
+        )
+
+        config = _find_valid_cluster_config(
+            total_partitions=21,
+            max_ppn=10,  # 1000 GiB disk / 100 GiB partition
+            cpu_needed=10,
+            cpu_per_node=1,
+            min_rf=2,
+            max_nodes=100,  # Relaxed - not a constraint
+        )
+
+        assert config is not None
+        assert config.partitions_per_node == 10  # Uses max PPn
+        assert config.nodes_for_one_copy == 3  # ceil(21/10)
+        assert config.replica_count == 4  # Highest RF for CPU
+        assert config.count == 12  # 3 × 4
+
+    def test_fallback_rf_when_max_nodes_tight(self):
+        """
+        When max_nodes is tight, algorithm finds lower RF that fits.
+
+        Same setup, but max_nodes=10:
+            At max_ppn=10: base=3, rf=4 → 12 nodes > 10 (doesn't fit!)
+
+        Search finds: ppn=5 → base=5, rf=2 → 10 nodes ≤ 10 ✓
+
+        Result: rf=2 (lower but fits within constraint)
+        """
+        from service_capacity_modeling.models.org.netflix.read_only_kv import (
+            _find_valid_cluster_config,
+        )
+
+        config = _find_valid_cluster_config(
+            total_partitions=21,
+            max_ppn=10,
+            cpu_needed=10,
+            cpu_per_node=1,
+            min_rf=2,
+            max_nodes=10,  # Tight constraint!
+        )
+
+        assert config is not None
+        assert config.partitions_per_node == 5  # Lower than max (fallback)
+        assert config.nodes_for_one_copy == 5  # ceil(21/5)
+        assert config.replica_count == 2  # Lower RF
+        assert config.count == 10  # 5 × 2 (fits!)
+
+    def test_why_search_order_matters(self):
+        """
+        Searching from max PPn down naturally finds highest RF first.
+
+        The algorithm searches PPn = [10, 9, 8, ..., 1]:
+        - Higher PPn → fewer base nodes → need higher RF for CPU
+        - We WANT high RF (better fault tolerance for immutable data)
+        - First valid config found is optimal (highest RF that fits)
+
+        If we searched 1 → max, we'd find low RF first (suboptimal).
+        """
+        from service_capacity_modeling.models.org.netflix.read_only_kv import (
+            _find_valid_cluster_config,
+        )
+
+        # With relaxed max_nodes, first valid config (at max_ppn) is returned
+        config = _find_valid_cluster_config(
+            total_partitions=100,
+            max_ppn=20,
+            cpu_needed=50,
+            cpu_per_node=2,
+            min_rf=2,
+            max_nodes=1000,
+        )
+
+        assert config is not None
+        assert config.partitions_per_node == 20  # Max PPn (searched first)
+
+        # Verify this gives higher RF than if we used lower PPn
+        # At ppn=20: base=5, rf=ceil(50/(5*2))=5
+        # At ppn=10: base=10, rf=ceil(50/(10*2))=3
+        # At ppn=5: base=20, rf=ceil(50/(20*2))=2
+        assert config.replica_count == 5  # Higher than alternatives
+
+    def test_non_monotonic_node_count(self):
+        """
+        Demonstrates why we use linear search: node_count(ppn) is non-monotonic.
+
+        Due to ceiling effects, lowering PPn doesn't always increase node_count.
+        This means we can't use binary search.
+        """
+        import math
+
+        from service_capacity_modeling.models.org.netflix.read_only_kv import (
+            _find_min_rf_for_cpu,
+        )
+
+        total_partitions = 21
+        cpu_needed = 10
+        cpu_per_node = 1
+        min_rf = 2
+
+        # Calculate node_count for different PPn values
+        results = []
+        for ppn in range(10, 0, -1):
+            base = math.ceil(total_partitions / ppn)
+            count, rf = _find_min_rf_for_cpu(base, cpu_needed, cpu_per_node, min_rf)
+            results.append((ppn, base, rf, count))
+
+        # PPn=10: base=3, rf=4, count=12
+        # PPn=9:  base=3, rf=4, count=12 (same)
+        # PPn=8:  base=3, rf=4, count=12 (same)
+        # PPn=7:  base=3, rf=4, count=12 (same)
+        # PPn=6:  base=4, rf=3, count=12 (same)
+        # PPn=5:  base=5, rf=2, count=10 (DROPS!)
+        # PPn=4:  base=6, rf=2, count=12 (jumps back!)
+        # PPn=3:  base=7, rf=2, count=14 (increases)
+
+        counts = [r[3] for r in results]
+
+        # Verify non-monotonicity: count goes 12 → 10 → 12
+        assert 10 in counts and 12 in counts
+        idx_10 = counts.index(10)
+        assert counts[idx_10 - 1] == 12  # Before 10 was 12
+        assert counts[idx_10 + 1] == 12  # After 10 goes back to 12
 
 
 class TestReadOnlyKVExploration:
