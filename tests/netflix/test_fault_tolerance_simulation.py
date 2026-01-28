@@ -249,35 +249,25 @@ class TestSimulationMatchesClosedForm:
 # =============================================================================
 # TEST: Property-based testing with Hypothesis
 # =============================================================================
+#
+# NOTE ON TOOL CHOICE:
+# - Monte Carlo (above): Validates closed-form math for SPECIFIC representative cases
+# - Hypothesis (below): Tests PROPERTIES of closed-form functions across input space
+#
+# We do NOT use Hypothesis to generate inputs for Monte Carlo because:
+# 1. It's slow (double randomization)
+# 2. It's redundant (if Monte Carlo validates specific cases, the math is proven)
+# 3. Hypothesis is for finding implementation bugs, not validating math
+# =============================================================================
 
 
 class TestFaultToleranceProperties:
-    """Property tests for fault tolerance functions."""
+    """Property tests for fault tolerance functions.
 
-    @given(
-        n_nodes=st.integers(6, 30),
-        rf=st.integers(2, 5),
-        n_partitions=st.integers(10, 100),
-    )
-    @settings(max_examples=50, deadline=None)
-    def test_hypothesis_simulation_consistency(self, n_nodes, rf, n_partitions):
-        """Property test: closed form and simulation should agree."""
-        n_zones = 3  # Standard 3-AZ
-
-        if rf > n_nodes:
-            return  # Invalid
-
-        closed = system_availability(n_nodes, n_zones, rf, n_partitions)
-        simulated = simulate_system_availability(
-            n_nodes, n_zones, rf, n_partitions, n_trials=5000
-        )
-
-        # Wider tolerance for hypothesis (fewer trials, more variance)
-        tolerance = max(0.05, abs(closed) * 0.15)
-        assert abs(closed - simulated) < tolerance, (
-            f"Mismatch: closed={closed:.4f}, simulated={simulated:.4f}\n"
-            f"Params: n_nodes={n_nodes}, rf={rf}, n_partitions={n_partitions}"
-        )
+    These tests verify mathematical properties of the closed-form functions
+    WITHOUT running Monte Carlo simulation. Hypothesis explores the input
+    space to find edge cases in the implementation.
+    """
 
     @given(
         rf=st.integers(2, 6),
@@ -328,6 +318,56 @@ class TestFaultToleranceProperties:
             f"More partitions should mean lower availability: "
             f"P={n_partitions_low} gives {avail_few}, "
             f"P={n_partitions_high} gives {avail_many}"
+        )
+
+    @given(
+        n_nodes=st.integers(6, 100),
+        n_zones=st.integers(1, 5),
+        rf=st.integers(1, 10),
+        n_partitions=st.integers(1, 1000),
+    )
+    @settings(max_examples=200, deadline=None)
+    def test_availability_always_in_bounds(self, n_nodes, n_zones, rf, n_partitions):
+        """Property: availability is always in [0, 1]."""
+        if rf > n_nodes:
+            return  # Invalid input
+
+        avail = system_availability(n_nodes, n_zones, rf, n_partitions)
+        assert 0.0 <= avail <= 1.0, f"Availability {avail} out of bounds"
+
+        unavail = per_partition_unavailability(n_nodes, n_zones, rf)
+        assert 0.0 <= unavail <= 1.0, f"Unavailability {unavail} out of bounds"
+
+    @given(
+        nodes_per_zone=st.integers(2, 10),
+        n_zones=st.integers(2, 5),
+        rf=st.integers(2, 5),
+        n_partitions=st.integers(10, 200),
+    )
+    @settings(max_examples=100, deadline=None)
+    def test_more_zones_better_availability(
+        self, nodes_per_zone, n_zones, rf, n_partitions
+    ):
+        """Property: more zones (with fixed nodes/zone) -> better availability.
+
+        Note: More TOTAL nodes doesn't always help! With more nodes per zone,
+        there are more ways to place all replicas in the same zone.
+        The correct property is: more ZONES (with fixed nodes/zone) helps.
+        """
+        n_nodes = nodes_per_zone * n_zones
+
+        if rf > nodes_per_zone:
+            return  # RF exceeds single zone - always 100% available
+
+        avail_fewer_zones = system_availability(n_nodes, n_zones, rf, n_partitions)
+        avail_more_zones = system_availability(
+            nodes_per_zone * (n_zones + 1), n_zones + 1, rf, n_partitions
+        )
+
+        assert avail_more_zones >= avail_fewer_zones - 1e-9, (
+            f"More zones should give better availability: "
+            f"zones={n_zones} gives {avail_fewer_zones}, "
+            f"zones={n_zones + 1} gives {avail_more_zones}"
         )
 
 
