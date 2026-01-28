@@ -14,6 +14,7 @@ Key characteristics:
 
 import logging
 import math
+from dataclasses import dataclass
 from typing import Any
 from typing import Dict
 from typing import Optional
@@ -46,6 +47,10 @@ from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
+from service_capacity_modeling.models.org.netflix.partition_capacity import (
+    CapacityProblem,
+    search_algorithm,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -173,101 +178,135 @@ def _estimate_read_only_kv_requirement(
     )
 
 
-def _compute_read_only_kv_regional_cluster(
+# ═══════════════════════════════════════════════════════════════════════════════
+# PARTITION-AWARE CAPACITY PLANNING
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# The algorithm is implemented in partition_capacity.py for clarity and testability.
+# See that module for:
+#   - CapacityProblem: input specification
+#   - CapacityResult: output (node_count, rf, partitions_per_node, base_nodes)
+#   - search_algorithm: finds highest RF that fits within max_nodes
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@dataclass(frozen=True)
+class _PartitionSearchInputs:
+    """Pure numeric inputs to the partition-aware search algorithm.
+
+    This dataclass represents the boundary between "model domain" (Instance,
+    CapacityRequirement) and "algorithm domain" (pure numbers). This separation:
+    - Makes the algorithm testable with simple numeric inputs
+    - Makes it clear what information flows into the search
+    - Documents the transformation from model objects to algorithm parameters
+    """
+
+    total_partitions: int  # from args.total_num_partitions
+    max_ppn: int  # derived from disk capacity / partition size
+    cpu_needed: int  # from requirement.cpu_cores.mid
+    cpu_per_node: int  # from instance.cpu
+    min_rf: int  # from args.min_replica_count
+    max_nodes: int  # from args.max_regional_size
+    effective_disk_per_node_gib: float  # for cluster params (metadata)
+
+
+def _extract_planning_inputs(
     instance: Instance,
     requirement: CapacityRequirement,
     args: NflxReadOnlyKVArguments,
-) -> Optional[RegionClusterCapacity]:
-    """Compute the regional cluster configuration using the partition-aware algorithm.
+) -> Optional[_PartitionSearchInputs]:
+    """Transform model objects into pure algorithm inputs.
 
-    Partition-aware algorithm (local disks only):
-    1. DISK FIRST: Calculate partitions_per_node based on local disk capacity
-    2. Calculate nodes_for_one_copy = total_partitions / partitions_per_node
-    3. Start with min_replica_count, calculate initial node count
-    4. CHECK CPU: If not satisfied, increase replica_count (uses spare disk)
+    This function handles:
+    - Instance validation (must have local disk)
+    - Disk capacity calculation
+    - Max partitions-per-node derivation
 
-    Note: Only supports local disks. EBS/attached disk is not supported because:
-    - EBS disk is provisioned exactly for data needs (no spare space)
-    - The partition-aware algorithm relies on leveraging spare disk capacity
-
-    Args:
-        instance: The compute instance being considered (must have local disk)
-        requirement: Calculated capacity requirement (with per-replica values)
-        args: Read-only KV specific arguments
-
-    Returns:
-        RegionClusterCapacity or None if configuration is not viable
+    Returns None if the instance is not viable for this workload.
     """
     # Only support instances with local disks
     if instance.drive is None:
         return None
 
-    total_needed_cores = int(requirement.cpu_cores.mid)
     partition_size_with_buffer_gib = requirement.disk_gib.mid
-
-    # Step 1 (DISK): Calculate effective disk capacity per node (raw, no buffer)
-    effective_disk_per_node = min(instance.drive.size_gib, args.max_data_per_node_gib)
-
-    # Step 2 (DISK): Calculate partitions_per_node
-    # We divide raw disk by buffered partition size to leave disk headroom.
-    # Example: 2048 GiB disk / 115 GiB buffered partition = 17 partitions
-    #          17 partitions × 100 GiB actual = 1700 GiB used (83% utilization)
     if partition_size_with_buffer_gib <= 0:
         return None
-    partitions_per_node = int(effective_disk_per_node / partition_size_with_buffer_gib)
-    if partitions_per_node < 1:
-        # This instance type cannot fit even one partition
+
+    # Calculate effective disk capacity per node
+    effective_disk_per_node = min(instance.drive.size_gib, args.max_data_per_node_gib)
+
+    # Calculate max partitions per node (disk capacity / partition size)
+    max_ppn = int(effective_disk_per_node / partition_size_with_buffer_gib)
+    if max_ppn < 1:
         return None
 
-    # Step 3 (DISK): Calculate nodes needed for one copy of the dataset
-    nodes_for_one_copy = math.ceil(args.total_num_partitions / partitions_per_node)
+    return _PartitionSearchInputs(
+        total_partitions=args.total_num_partitions,
+        max_ppn=max_ppn,
+        cpu_needed=int(requirement.cpu_cores.mid),
+        cpu_per_node=instance.cpu,
+        min_rf=args.min_replica_count,
+        max_nodes=args.max_regional_size,
+        effective_disk_per_node_gib=effective_disk_per_node,
+    )
 
-    # Step 4: Start with min_replica_count, iterate until CPU satisfied
-    # Note: Memory is NOT used as a constraint because:
-    # - Instances are pre-filtered to require minimum 64 GiB RAM
-    # - With 64+ GiB RAM and typical partition sizes, memory is rarely the bottleneck
-    # - CPU and disk constraints dominate for read-only KV workloads
-    replica_count = args.min_replica_count
 
-    while True:
-        count = nodes_for_one_copy * replica_count
+def _compute_read_only_kv_regional_cluster(
+    instance: Instance,
+    requirement: CapacityRequirement,
+    args: NflxReadOnlyKVArguments,
+) -> Optional[RegionClusterCapacity]:
+    """Orchestrate: extract inputs → run algorithm → build cluster.
 
-        # Ensure minimum of 2 nodes for redundancy
-        count = max(2, count)
+    This function is intentionally thin - it delegates to:
+    - _extract_planning_inputs: model domain → algorithm domain
+    - search_algorithm: pure algorithm (from partition_capacity module)
+    - Result building: algorithm output → RegionClusterCapacity
+    """
+    # ─────────────────────────────────────────────────────────────────────────
+    # Step 1: Extract planning inputs from model objects
+    # ─────────────────────────────────────────────────────────────────────────
+    inputs = _extract_planning_inputs(instance, requirement, args)
+    if inputs is None:
+        return None
 
-        # Check if count exceeds max cluster size
-        if count > args.max_regional_size:
-            return None
+    # ─────────────────────────────────────────────────────────────────────────
+    # Step 2: Run the partition-aware search algorithm
+    # ─────────────────────────────────────────────────────────────────────────
+    problem = CapacityProblem(
+        n_partitions=inputs.total_partitions,
+        partition_size_gib=requirement.disk_gib.mid,
+        disk_per_node_gib=inputs.effective_disk_per_node_gib,
+        min_rf=inputs.min_rf,
+        cpu_needed=inputs.cpu_needed,
+        cpu_per_node=inputs.cpu_per_node,
+        max_nodes=inputs.max_nodes,
+    )
+    config = search_algorithm(problem)
 
-        # CHECK CPU: Primary constraint after disk
-        cpu_satisfied = (count * instance.cpu) >= total_needed_cores
+    if config is None:
+        return None
 
-        if cpu_satisfied:
-            break
-
-        # Not satisfied, increase replicas to add more nodes
-        replica_count += 1
-
-    # Calculate nodes needed for CPU constraint (for debugging)
-    nodes_for_cpu = math.ceil(total_needed_cores / instance.cpu)
-
-    # Calculate cost (local disks only, no EBS cost)
-    cost = count * instance.annual_cost
+    # ─────────────────────────────────────────────────────────────────────────
+    # Step 3: Build the cluster result
+    # ─────────────────────────────────────────────────────────────────────────
+    nodes_for_cpu = math.ceil(inputs.cpu_needed / inputs.cpu_per_node)
+    cost = config.node_count * instance.annual_cost
 
     cluster = RegionClusterCapacity(
         cluster_type="read-only-kv",
-        count=count,
+        count=config.node_count,
         instance=instance,
-        attached_drives=tuple(),  # No attached drives
+        attached_drives=tuple(),
         annual_cost=cost,
     )
 
-    # Add cluster parameters for provisioning
     params = {
-        "read-only-kv.replica_count": replica_count,
-        "read-only-kv.partitions_per_node": partitions_per_node,
-        "read-only-kv.effective_disk_per_node_gib": effective_disk_per_node,
-        "read-only-kv.nodes_for_one_copy": nodes_for_one_copy,
+        "read-only-kv.replica_count": config.rf,
+        "read-only-kv.partitions_per_node": config.partitions_per_node,
+        "read-only-kv.effective_disk_per_node_gib": inputs.effective_disk_per_node_gib,
+        "read-only-kv.nodes_for_one_copy": config.base_nodes,
         "read-only-kv.nodes_for_cpu": nodes_for_cpu,
     }
     _upsert_params(cluster, params)
