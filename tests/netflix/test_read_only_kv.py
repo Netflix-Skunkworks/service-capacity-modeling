@@ -1075,24 +1075,28 @@ class TestAlgorithmBehavior:
 
         Result: rf=4 (optimal fault tolerance)
         """
-        from service_capacity_modeling.models.org.netflix.read_only_kv import (
-            _find_valid_cluster_config,
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            CapacityProblem,
+            search_algorithm,
         )
 
-        config = _find_valid_cluster_config(
-            total_partitions=21,
-            max_ppn=10,  # 1000 GiB disk / 100 GiB partition
-            cpu_needed=10,
-            cpu_per_node=1,
-            min_rf=2,
-            max_nodes=100,  # Relaxed - not a constraint
+        config = search_algorithm(
+            CapacityProblem(
+                n_partitions=21,
+                partition_size_gib=100.0,  # disk/partition = 1000/100 = 10 max_ppn
+                disk_per_node_gib=1000.0,
+                cpu_needed=10,
+                cpu_per_node=1,
+                min_rf=2,
+                max_nodes=100,  # Relaxed - not a constraint
+            )
         )
 
         assert config is not None
         assert config.partitions_per_node == 10  # Uses max PPn
-        assert config.nodes_for_one_copy == 3  # ceil(21/10)
-        assert config.replica_count == 4  # Highest RF for CPU
-        assert config.count == 12  # 3 × 4
+        assert config.base_nodes == 3  # ceil(21/10)
+        assert config.rf == 4  # Highest RF for CPU
+        assert config.node_count == 12  # 3 × 4
 
     def test_fallback_rf_when_max_nodes_tight(self):
         """
@@ -1105,24 +1109,28 @@ class TestAlgorithmBehavior:
 
         Result: rf=2 (lower but fits within constraint)
         """
-        from service_capacity_modeling.models.org.netflix.read_only_kv import (
-            _find_valid_cluster_config,
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            CapacityProblem,
+            search_algorithm,
         )
 
-        config = _find_valid_cluster_config(
-            total_partitions=21,
-            max_ppn=10,
-            cpu_needed=10,
-            cpu_per_node=1,
-            min_rf=2,
-            max_nodes=10,  # Tight constraint!
+        config = search_algorithm(
+            CapacityProblem(
+                n_partitions=21,
+                partition_size_gib=100.0,
+                disk_per_node_gib=1000.0,
+                cpu_needed=10,
+                cpu_per_node=1,
+                min_rf=2,
+                max_nodes=10,  # Tight constraint!
+            )
         )
 
         assert config is not None
         assert config.partitions_per_node == 5  # Lower than max (fallback)
-        assert config.nodes_for_one_copy == 5  # ceil(21/5)
-        assert config.replica_count == 2  # Lower RF
-        assert config.count == 10  # 5 × 2 (fits!)
+        assert config.base_nodes == 5  # ceil(21/5)
+        assert config.rf == 2  # Lower RF
+        assert config.node_count == 10  # 5 × 2 (fits!)
 
     def test_why_search_order_matters(self):
         """
@@ -1135,18 +1143,22 @@ class TestAlgorithmBehavior:
 
         If we searched 1 → max, we'd find low RF first (suboptimal).
         """
-        from service_capacity_modeling.models.org.netflix.read_only_kv import (
-            _find_valid_cluster_config,
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            CapacityProblem,
+            search_algorithm,
         )
 
         # With relaxed max_nodes, first valid config (at max_ppn) is returned
-        config = _find_valid_cluster_config(
-            total_partitions=100,
-            max_ppn=20,
-            cpu_needed=50,
-            cpu_per_node=2,
-            min_rf=2,
-            max_nodes=1000,
+        config = search_algorithm(
+            CapacityProblem(
+                n_partitions=100,
+                partition_size_gib=50.0,  # 1000/50 = 20 max_ppn
+                disk_per_node_gib=1000.0,
+                cpu_needed=50,
+                cpu_per_node=2,
+                min_rf=2,
+                max_nodes=1000,
+            )
         )
 
         assert config is not None
@@ -1156,7 +1168,7 @@ class TestAlgorithmBehavior:
         # At ppn=20: base=5, rf=ceil(50/(5*2))=5
         # At ppn=10: base=10, rf=ceil(50/(10*2))=3
         # At ppn=5: base=20, rf=ceil(50/(20*2))=2
-        assert config.replica_count == 5  # Higher than alternatives
+        assert config.rf == 5  # Higher than alternatives
 
     def test_non_monotonic_node_count(self):
         """
@@ -1167,9 +1179,14 @@ class TestAlgorithmBehavior:
         """
         import math
 
-        from service_capacity_modeling.models.org.netflix.read_only_kv import (
-            _find_min_rf_for_cpu,
-        )
+        def find_min_rf_for_cpu(base, cpu_needed, cpu_per_node, min_rf):
+            """Inline helper to demonstrate the RF calculation."""
+            baseline_nodes = max(2, base * min_rf)
+            if baseline_nodes * cpu_per_node >= cpu_needed:
+                return baseline_nodes, min_rf
+            target_nodes = math.ceil(cpu_needed / cpu_per_node)
+            target_rf = math.ceil(target_nodes / base)
+            return max(2, base * target_rf), target_rf
 
         total_partitions = 21
         cpu_needed = 10
@@ -1180,7 +1197,7 @@ class TestAlgorithmBehavior:
         results = []
         for ppn in range(10, 0, -1):
             base = math.ceil(total_partitions / ppn)
-            count, rf = _find_min_rf_for_cpu(base, cpu_needed, cpu_per_node, min_rf)
+            count, rf = find_min_rf_for_cpu(base, cpu_needed, cpu_per_node, min_rf)
             results.append((ppn, base, rf, count))
 
         # PPn=10: base=3, rf=4, count=12

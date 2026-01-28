@@ -47,6 +47,10 @@ from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
+from service_capacity_modeling.models.org.netflix.partition_capacity import (
+    CapacityProblem,
+    search_algorithm,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -174,141 +178,17 @@ def _estimate_read_only_kv_requirement(
     )
 
 
-@dataclass(frozen=True)
-class _ClusterConfig:
-    """A valid cluster configuration."""
-
-    count: int
-    replica_count: int
-    partitions_per_node: int
-    nodes_for_one_copy: int
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # PARTITION-AWARE CAPACITY PLANNING
 # ═══════════════════════════════════════════════════════════════════════════════
 #
-# PROBLEM: Find (node_count, replica_factor) satisfying:
-#   - DISK:  All partitions × all replicas must fit
-#   - CPU:   node_count × cpu_per_node ≥ cpu_needed
-#   - RF:    replica_factor ≥ min_rf
-#   - SIZE:  node_count ≤ max_nodes
-#
-# For IMMUTABLE read-only data, higher RF is always better:
-#   • No write amplification (data never changes)
-#   • Fault tolerance: P(data loss) = p^RF (exponentially better)
-#   • Read throughput: more replicas = more serving capacity
-#
-# ALGORITHM: Search PPn from max to 1, return first valid config.
-#   - Starting from max PPn naturally maximizes RF (fewer base nodes → more RF)
-#   - Falls back to lower PPn only when max_nodes forces it
+# The algorithm is implemented in partition_capacity.py for clarity and testability.
+# See that module for:
+#   - CapacityProblem: input specification
+#   - CapacityResult: output (node_count, rf, partitions_per_node, base_nodes)
+#   - search_algorithm: finds highest RF that fits within max_nodes
 #
 # ═══════════════════════════════════════════════════════════════════════════════
-
-
-def _find_min_rf_for_cpu(
-    nodes_for_one_copy: int,
-    cpu_needed: int,
-    cpu_per_node: int,
-    min_rf: int,
-) -> Tuple[int, int]:
-    """
-    Given base nodes (for one data copy), find minimum RF to satisfy CPU.
-
-    Returns: (node_count, replica_factor)
-
-    ─────────────────────────────────────────────────────────────────────────────
-    ALGORITHM:
-
-    1. At min_rf: baseline_nodes = max(2, base × min_rf)
-    2. If baseline provides enough CPU → return (baseline_nodes, min_rf)
-    3. Otherwise: rf = ⌈cpu_needed / (base × cpu_per_node)⌉
-                  return (base × rf, rf)
-
-    WHY DISK IS AUTOMATICALLY SATISFIED:
-
-    With base = ⌈P/ppn⌉ nodes per copy:
-        total_slots = base × rf × ppn ≥ P × rf
-
-    The ceiling guarantees enough slots. RF only affects CPU.
-    ─────────────────────────────────────────────────────────────────────────────
-    """
-    base = nodes_for_one_copy
-
-    # What we get at minimum replication
-    baseline_nodes = max(2, base * min_rf)
-    baseline_cpu = baseline_nodes * cpu_per_node
-
-    # Is baseline enough?
-    if baseline_cpu >= cpu_needed:
-        return baseline_nodes, min_rf
-
-    # Scale up RF to meet CPU requirement
-    target_nodes = math.ceil(cpu_needed / cpu_per_node)
-    target_rf = math.ceil(target_nodes / base)
-    node_count = max(2, base * target_rf)
-
-    return node_count, target_rf
-
-
-def _find_valid_cluster_config(
-    total_partitions: int,
-    max_ppn: int,
-    *,  # keyword-only after this point
-    cpu_needed: int,
-    cpu_per_node: int,
-    min_rf: int,
-    max_nodes: int,
-) -> Optional[_ClusterConfig]:
-    """
-    Find optimal cluster config: highest RF that fits within max_nodes.
-
-    ─────────────────────────────────────────────────────────────────────────────
-    ALGORITHM: Search PPn from max down to 1
-
-    For each PPn value:
-      1. base = ⌈partitions / ppn⌉     (nodes for one copy)
-      2. rf = min RF satisfying CPU     (from _find_min_rf_for_cpu)
-      3. count = base × rf
-      4. If count ≤ max_nodes → return this config
-
-    WHY START FROM MAX PPn?
-
-    Higher PPn → fewer base nodes → need higher RF for CPU → better fault tolerance
-
-    Example (21 partitions, 10 CPU needed, 1 CPU/node):
-      PPn=10: base=3  → rf=4 → 12 nodes (rf=4, best fault tolerance)
-      PPn=5:  base=5  → rf=2 → 10 nodes (rf=2, fits if max_nodes=10)
-
-    Starting from max naturally finds highest-RF solution first.
-
-    WHY LINEAR SEARCH?
-
-    node_count(ppn) is NON-MONOTONIC due to ceiling effects:
-      PPn=10: count=12
-      PPn=5:  count=10  ← drops!
-      PPn=4:  count=12  ← jumps back!
-
-    Can't binary search. Linear is O(max_ppn) ≈ O(100) in practice.
-    ─────────────────────────────────────────────────────────────────────────────
-    """
-    if max_ppn < 1:
-        return None
-
-    # Search from max PPn (highest RF) down to 1 (lowest RF)
-    for ppn in range(max_ppn, 0, -1):
-        base = math.ceil(total_partitions / ppn)
-        node_count, rf = _find_min_rf_for_cpu(base, cpu_needed, cpu_per_node, min_rf)
-
-        if node_count <= max_nodes:
-            return _ClusterConfig(
-                count=node_count,
-                replica_count=rf,
-                partitions_per_node=ppn,
-                nodes_for_one_copy=base,
-            )
-
-    return None  # No valid configuration exists
 
 
 @dataclass(frozen=True)
@@ -381,7 +261,7 @@ def _compute_read_only_kv_regional_cluster(
 
     This function is intentionally thin - it delegates to:
     - _extract_planning_inputs: model domain → algorithm domain
-    - _find_valid_cluster_config: pure algorithm (search)
+    - search_algorithm: pure algorithm (from partition_capacity module)
     - Result building: algorithm output → RegionClusterCapacity
     """
     # ─────────────────────────────────────────────────────────────────────────
@@ -394,14 +274,16 @@ def _compute_read_only_kv_regional_cluster(
     # ─────────────────────────────────────────────────────────────────────────
     # Step 2: Run the partition-aware search algorithm
     # ─────────────────────────────────────────────────────────────────────────
-    config = _find_valid_cluster_config(
-        total_partitions=inputs.total_partitions,
-        max_ppn=inputs.max_ppn,
+    problem = CapacityProblem(
+        n_partitions=inputs.total_partitions,
+        partition_size_gib=requirement.disk_gib.mid,
+        disk_per_node_gib=inputs.effective_disk_per_node_gib,
+        min_rf=inputs.min_rf,
         cpu_needed=inputs.cpu_needed,
         cpu_per_node=inputs.cpu_per_node,
-        min_rf=inputs.min_rf,
         max_nodes=inputs.max_nodes,
     )
+    config = search_algorithm(problem)
 
     if config is None:
         return None
@@ -410,21 +292,21 @@ def _compute_read_only_kv_regional_cluster(
     # Step 3: Build the cluster result
     # ─────────────────────────────────────────────────────────────────────────
     nodes_for_cpu = math.ceil(inputs.cpu_needed / inputs.cpu_per_node)
-    cost = config.count * instance.annual_cost
+    cost = config.node_count * instance.annual_cost
 
     cluster = RegionClusterCapacity(
         cluster_type="read-only-kv",
-        count=config.count,
+        count=config.node_count,
         instance=instance,
         attached_drives=tuple(),
         annual_cost=cost,
     )
 
     params = {
-        "read-only-kv.replica_count": config.replica_count,
+        "read-only-kv.replica_count": config.rf,
         "read-only-kv.partitions_per_node": config.partitions_per_node,
         "read-only-kv.effective_disk_per_node_gib": inputs.effective_disk_per_node_gib,
-        "read-only-kv.nodes_for_one_copy": config.nodes_for_one_copy,
+        "read-only-kv.nodes_for_one_copy": config.base_nodes,
         "read-only-kv.nodes_for_cpu": nodes_for_cpu,
     }
     _upsert_params(cluster, params)
