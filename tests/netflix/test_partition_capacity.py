@@ -443,3 +443,395 @@ class TestNodeCountFormula:
                 f"Formula violated: {result.node_count} != "
                 f"max(2, {result.base_nodes}×{result.rf})"
             )
+
+
+# =============================================================================
+# PART 6: Tier configuration and utility function tests
+# =============================================================================
+
+
+class TestTierConfiguration:
+    """Test tier configuration and utility function."""
+
+    def test_tier_defaults_exist(self):
+        """All default tiers should be defined."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            get_tier_config,
+        )
+
+        for tier in range(4):
+            config = get_tier_config(tier)
+            assert config.min_rf >= 2
+            assert 0 < config.target_availability <= 1
+            assert config.cost_sensitivity > 0
+            assert config.max_cost_multiplier >= 1
+
+    def test_tier_ordering(self):
+        """Higher tiers should have lower requirements."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            get_tier_config,
+        )
+
+        for tier in range(3):
+            lower = get_tier_config(tier)
+            higher = get_tier_config(tier + 1)
+
+            # Higher tier should have lower or equal availability target
+            assert higher.target_availability <= lower.target_availability
+            # Higher tier should have higher cost sensitivity (more cost-focused)
+            assert higher.cost_sensitivity >= lower.cost_sensitivity
+
+    def test_invalid_tier_returns_default(self):
+        """Invalid tier should return tier 2 config."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            get_tier_config,
+            TIER_DEFAULTS,
+        )
+
+        assert get_tier_config(99) == TIER_DEFAULTS[2]
+        assert get_tier_config(-1) == TIER_DEFAULTS[2]
+
+
+class TestUtilityFunction:
+    """Test the utility function for balancing availability and cost."""
+
+    def test_utility_above_target_is_positive(self):
+        """Utility should be positive when availability exceeds target."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            utility,
+        )
+
+        # Tier 2: target is 0.95
+        u = utility(availability=0.99, cost=100, tier=2, base_cost=100)
+        assert u > 0, f"Expected positive utility, got {u}"
+
+    def test_utility_below_target_is_negative(self):
+        """Utility should be negative when availability is below target."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            utility,
+        )
+
+        # Tier 2: target is 0.95
+        u = utility(availability=0.90, cost=100, tier=2, base_cost=100)
+        assert u < 0, f"Expected negative utility, got {u}"
+
+    def test_utility_higher_availability_higher_utility(self):
+        """Higher availability should give higher utility."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            utility,
+        )
+
+        u_low = utility(availability=0.95, cost=100, tier=2, base_cost=100)
+        u_high = utility(availability=0.99, cost=100, tier=2, base_cost=100)
+
+        assert u_high > u_low
+
+    def test_utility_higher_cost_lower_utility(self):
+        """Higher cost should give lower utility."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            utility,
+        )
+
+        u_cheap = utility(availability=0.99, cost=100, tier=2, base_cost=100)
+        u_expensive = utility(availability=0.99, cost=200, tier=2, base_cost=100)
+
+        assert u_cheap > u_expensive
+
+    def test_utility_diminishing_returns(self):
+        """Going from 99% to 99.9% should have diminishing returns."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            utility,
+        )
+
+        # Same cost, different availability improvements
+        u_95 = utility(availability=0.95, cost=100, tier=2, base_cost=100)
+        u_99 = utility(availability=0.99, cost=100, tier=2, base_cost=100)
+        u_999 = utility(availability=0.999, cost=100, tier=2, base_cost=100)
+
+        # Marginal utility should decrease
+        delta_1 = u_99 - u_95  # 95% -> 99% (4% improvement)
+        delta_2 = u_999 - u_99  # 99% -> 99.9% (0.9% improvement)
+
+        # First improvement is larger, but second should still be positive
+        assert delta_1 > delta_2 > 0
+
+    def test_utility_tier_affects_cost_sensitivity(self):
+        """Higher tiers should be more cost-sensitive."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            utility,
+        )
+
+        # Same availability (above target for both), same cost increase
+        # Tier 3 should penalize cost more than tier 0
+        u_tier0 = utility(availability=0.999, cost=200, tier=0, base_cost=100)
+        u_tier3 = utility(availability=0.999, cost=200, tier=3, base_cost=100)
+
+        # Tier 3 has higher cost_sensitivity, so should have lower utility
+        # for the same cost increase
+        # Note: availability value differs due to different targets
+        # So we compare the impact of cost increase
+        u_tier0_base = utility(availability=0.999, cost=100, tier=0, base_cost=100)
+        u_tier3_base = utility(availability=0.999, cost=100, tier=3, base_cost=100)
+
+        cost_impact_tier0 = u_tier0_base - u_tier0
+        cost_impact_tier3 = u_tier3_base - u_tier3
+
+        assert cost_impact_tier3 > cost_impact_tier0, (
+            f"Tier 3 should penalize cost more: "
+            f"tier0={cost_impact_tier0}, tier3={cost_impact_tier3}"
+        )
+
+
+# =============================================================================
+# PART 7: Fault-tolerant search algorithm tests
+# =============================================================================
+
+
+class TestSearchWithFaultTolerance:
+    """Test the fault-tolerant search algorithm."""
+
+    def test_basic_search_returns_result(self):
+        """Basic search should return a valid result."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            search_with_fault_tolerance,
+        )
+
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        result = search_with_fault_tolerance(problem, tier=2, cost_per_node=100)
+
+        assert result is not None
+        assert result.node_count > 0
+        assert result.rf >= 2
+        assert 0 <= result.system_availability <= 1
+        assert result.cost > 0
+        assert result.zone_aware_cost > 0
+
+    def test_higher_tier_prefers_availability(self):
+        """Tier 0 should prefer higher availability than tier 3."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            search_with_fault_tolerance,
+        )
+
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        result_tier0 = search_with_fault_tolerance(problem, tier=0, cost_per_node=100)
+        result_tier3 = search_with_fault_tolerance(problem, tier=3, cost_per_node=100)
+
+        assert result_tier0 is not None
+        assert result_tier3 is not None
+
+        # Tier 0 should have higher or equal availability
+        assert result_tier0.system_availability >= result_tier3.system_availability
+
+    def test_result_satisfies_constraints(self):
+        """Result should satisfy all problem constraints."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            search_with_fault_tolerance,
+            get_tier_config,
+        )
+
+        problem = CapacityProblem(
+            n_partitions=200,
+            partition_size_gib=50,
+            disk_per_node_gib=1000,
+            min_rf=2,
+            cpu_needed=1600,
+            cpu_per_node=16,
+            max_nodes=500,
+        )
+
+        for tier in range(4):
+            result = search_with_fault_tolerance(problem, tier=tier, cost_per_node=100)
+
+            if result is None:
+                continue
+
+            config = get_tier_config(tier)
+
+            # CPU constraint
+            assert result.node_count * problem.cpu_per_node >= problem.cpu_needed
+
+            # Disk constraint
+            total_slots = result.node_count * result.partitions_per_node
+            total_replicas = problem.n_partitions * result.rf
+            assert total_slots >= total_replicas
+
+            # RF constraint
+            assert result.rf >= config.min_rf
+
+            # Max nodes constraint
+            assert result.node_count <= problem.max_nodes
+
+    def test_zone_aware_cost_is_lower_or_equal(self):
+        """Zone-aware cost should be <= random placement cost."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            search_with_fault_tolerance,
+        )
+
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        result = search_with_fault_tolerance(problem, tier=0, cost_per_node=100)
+
+        assert result is not None
+        # Zone-aware placement achieves same availability with lower RF
+        # so cost should be <= current cost
+        assert result.zone_aware_cost <= result.cost
+        assert result.zone_aware_savings >= 0
+
+    def test_many_partitions_needs_high_rf(self):
+        """With many partitions, system needs high RF for good availability."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            search_with_fault_tolerance,
+        )
+
+        # 500 partitions - with RF=2, availability would be very low
+        problem = CapacityProblem(
+            n_partitions=500,
+            partition_size_gib=10,
+            disk_per_node_gib=1000,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        result = search_with_fault_tolerance(problem, tier=0, cost_per_node=100)
+
+        assert result is not None
+        # For 500 partitions, tier 0 needs high RF to meet 99.9% target
+        # If RF is too low, availability won't meet target
+        # The algorithm should find a configuration that meets or gets close to target
+        assert result.system_availability > 0.5  # At least reasonable
+
+    def test_impossible_returns_none(self):
+        """If no config meets constraints, return None."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            search_with_fault_tolerance,
+        )
+
+        # Partition larger than disk
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=5000,  # Way bigger than disk
+            disk_per_node_gib=1000,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        result = search_with_fault_tolerance(problem, tier=2, cost_per_node=100)
+
+        assert result is None
+
+
+# =============================================================================
+# PART 8: Placement model tests
+# =============================================================================
+
+
+class TestPlacementModels:
+    """Test placement model abstraction."""
+
+    def test_uniform_random_uses_defaults(self):
+        """UniformRandomPlacement should use default implementations."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            UniformRandomPlacement,
+            per_partition_unavailability,
+            system_availability,
+        )
+
+        placement = UniformRandomPlacement()
+
+        # Should match the default functions
+        assert placement.per_partition_unavailability(
+            12, 3, 2
+        ) == per_partition_unavailability(12, 3, 2)
+        assert placement.system_availability(12, 3, 2, 100) == system_availability(
+            12, 3, 2, 100
+        )
+        assert placement.name() == "UniformRandomPlacement"
+
+    def test_zone_aware_rf2_gives_zero_unavailability(self):
+        """ZoneAwarePlacement with RF>=2 should give 0 unavailability."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            ZoneAwarePlacement,
+        )
+
+        placement = ZoneAwarePlacement()
+
+        # RF=2 or higher should give 0 unavailability
+        assert placement.per_partition_unavailability(12, 3, 2) == 0.0
+        assert placement.per_partition_unavailability(12, 3, 3) == 0.0
+        assert placement.per_partition_unavailability(12, 3, 5) == 0.0
+
+        # System availability should be 100%
+        assert placement.system_availability(12, 3, 2, 100) == 1.0
+        assert placement.system_availability(12, 3, 2, 1000) == 1.0
+
+    def test_zone_aware_rf1_has_unavailability(self):
+        """ZoneAwarePlacement with RF=1 still has unavailability."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            ZoneAwarePlacement,
+        )
+
+        placement = ZoneAwarePlacement()
+
+        # RF=1 has 1/n_zones unavailability
+        unavail = placement.per_partition_unavailability(12, 3, 1)
+        assert abs(unavail - 1 / 3) < 0.0001
+
+        # System availability = (1 - 1/3)^100 for 100 partitions
+        avail = placement.system_availability(12, 3, 1, 100)
+        expected = (2 / 3) ** 100
+        assert abs(avail - expected) < 0.0001
+
+    def test_zone_aware_always_better_than_random(self):
+        """ZoneAwarePlacement should always give >= availability than random."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            UniformRandomPlacement,
+            ZoneAwarePlacement,
+        )
+
+        random_placement = UniformRandomPlacement()
+        zone_aware = ZoneAwarePlacement()
+
+        test_cases = [
+            (12, 3, 2, 100),
+            (12, 3, 3, 200),
+            (24, 3, 4, 500),
+            (30, 3, 5, 1000),
+        ]
+
+        for n_nodes, n_zones, rf, n_partitions in test_cases:
+            random_avail = random_placement.system_availability(
+                n_nodes, n_zones, rf, n_partitions
+            )
+            zone_aware_avail = zone_aware.system_availability(
+                n_nodes, n_zones, rf, n_partitions
+            )
+
+            assert zone_aware_avail >= random_avail, (
+                f"Zone-aware should be >= random: "
+                f"random={random_avail}, zone_aware={zone_aware_avail}"
+            )
