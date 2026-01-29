@@ -1,7 +1,9 @@
 import math
 from typing import Any
 from typing import Dict
+from typing import List
 from typing import Optional
+from typing import Sequence
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -14,6 +16,7 @@ from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
@@ -26,7 +29,10 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import CostAwareModel
+from service_capacity_modeling.models.common import cluster_infra_cost
 from service_capacity_modeling.models.common import compute_stateless_region
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
@@ -110,24 +116,25 @@ def _estimate_java_app_region(  # pylint: disable=too-many-positional-arguments
         needed_network_mbps=requirement.network_mbps.mid,
         num_zones=zones_per_region,
     )
-    cluster.cluster_type = "nflx-java-app"
+    cluster.cluster_type = NflxJavaAppCapacityModel.cluster_type
     cluster.attached_drives = attached_drives
-
-    # Add drive cost (root volume is EBS and costs money)
-    drive_cost = sum(d.annual_cost for d in attached_drives) * cluster.count
-    cluster.annual_cost = cluster.annual_cost + drive_cost
 
     # Generally don't want giant clusters
     # Especially not above 1000 because some load balancers struggle
     # with such large clusters
 
     if cluster.count <= 256:
-        costs = {"nflx-java-app.regional-clusters": cluster.annual_cost}
-        # Assume stateless java stays in the same region but crosses a zone
-        network = network_services(
-            "nflx-java-app", RegionContext(num_regions=1), desires, copies_per_region=2
+        costs = NflxJavaAppCapacityModel.cluster_costs(
+            service_type=NflxJavaAppCapacityModel.service_name,
+            regional_clusters=[cluster],
         )
-        for s in network:
+        services = NflxJavaAppCapacityModel.service_costs(
+            service_type=NflxJavaAppCapacityModel.service_name,
+            context=context,
+            desires=desires,
+            extra_model_arguments={},
+        )
+        for s in services:
             costs[s.service_type] = s.annual_cost
 
         return CapacityPlan(
@@ -136,6 +143,7 @@ def _estimate_java_app_region(  # pylint: disable=too-many-positional-arguments
                 annual_costs=costs,
                 regional=[cluster],
                 zonal=[],
+                services=services,
             ),
         )
     return None
@@ -154,7 +162,41 @@ class NflxJavaAppArguments(BaseModel):
     )
 
 
-class NflxJavaAppCapacityModel(CapacityModel):
+class NflxJavaAppCapacityModel(CapacityModel, CostAwareModel):
+    service_name = "nflx-java-app"
+    cluster_type = "nflx-java-app"
+
+    @staticmethod
+    def cluster_costs(
+        service_type: str,
+        zonal_clusters: Sequence[ClusterCapacity] = (),
+        regional_clusters: Sequence[ClusterCapacity] = (),
+    ) -> Dict[str, float]:
+        return cluster_infra_cost(
+            service_type,
+            zonal_clusters,
+            regional_clusters,
+            cluster_type=NflxJavaAppCapacityModel.cluster_type,
+        )
+
+    @staticmethod
+    def service_costs(
+        service_type: str,
+        context: RegionContext,
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
+    ) -> List[ServiceCapacity]:
+        # TODO(matthewho): Currently returns empty because RegionContext is
+        # created without services. Need to determine if stateless apps should
+        # have cross-zone costs (copies_per_region=2 implies 1 cross-AZ hop).
+        _ = (context, extra_model_arguments)
+        return network_services(
+            service_type,
+            RegionContext(num_regions=1),
+            desires,
+            copies_per_region=2,
+        )
+
     @staticmethod
     def capacity_plan(
         instance: Instance,

@@ -1,14 +1,18 @@
 from typing import Any
 from typing import Callable
 from typing import Dict
+from typing import List
 from typing import Optional
+from typing import Sequence
 from typing import Tuple
 
 from .stateless_java import nflx_java_app_capacity_model
+from .stateless_java import NflxJavaAppCapacityModel
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
@@ -18,10 +22,16 @@ from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
+from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import CostAwareModel
+from service_capacity_modeling.models.common import cluster_infra_cost
 
 
-class NflxKeyValueCapacityModel(CapacityModel):
+class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
+    service_name = "key-value"
+    cluster_type = "dgwkv"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,
@@ -44,7 +54,7 @@ class NflxKeyValueCapacityModel(CapacityModel):
             return None
 
         for cluster in kv_app.candidate_clusters.regional:
-            cluster.cluster_type = "dgwkv"
+            cluster.cluster_type = NflxKeyValueCapacityModel.cluster_type
         return kv_app
 
     @staticmethod
@@ -122,6 +132,7 @@ class NflxKeyValueCapacityModel(CapacityModel):
     def default_desires(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> CapacityDesires:
+        _ = extra_model_arguments
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(
@@ -224,6 +235,37 @@ class NflxKeyValueCapacityModel(CapacityModel):
                     reserved_instance_app_mem_gib=8,
                 ),
             )
+
+    @staticmethod
+    def cluster_costs(
+        service_type: str,
+        zonal_clusters: Sequence[ClusterCapacity] = (),
+        regional_clusters: Sequence[ClusterCapacity] = (),
+    ) -> Dict[str, float]:
+        # Uses NflxJavaAppCapacityModel.service_name (not service_type param)
+        # because capacity_plan delegates to nflx_java_app_capacity_model
+        _ = service_type
+        return cluster_infra_cost(
+            service_type=NflxJavaAppCapacityModel.service_name,
+            zonal_clusters=zonal_clusters,
+            regional_clusters=regional_clusters,
+            cluster_type=NflxKeyValueCapacityModel.cluster_type,
+        )
+
+    @staticmethod
+    def service_costs(
+        service_type: str,
+        context: RegionContext,
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
+    ) -> List[ServiceCapacity]:
+        # Returns empty - dgwkv has no direct network costs:
+        # - DataStax driver selects local Cassandra coordinators (same AZ = free)
+        # - Coordinator→replica fan-out is counted in cassandra.net.intra.region
+        # - EVCache access uses local nodes (same AZ = free)
+        # Cassandra/EVCache service costs come from _sub_models() DAG traversal.
+        _ = (service_type, context, desires, extra_model_arguments)
+        return []
 
 
 nflx_key_value_capacity_model = NflxKeyValueCapacityModel()

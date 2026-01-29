@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# pylint: disable=too-many-lines
 import functools
 import logging
 import math
@@ -23,6 +24,9 @@ from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import ClusterCapacity
+from service_capacity_modeling.interface import Clusters
+from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Hardware
@@ -33,10 +37,15 @@ from service_capacity_modeling.interface import Lifecycle
 from service_capacity_modeling.interface import PlanExplanation
 from service_capacity_modeling.interface import Platform
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.interface import UncertainCapacityPlan
+from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import CostAwareModel
+from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.org import netflix
 from service_capacity_modeling.models.utils import reduce_by_family
@@ -211,6 +220,78 @@ def _set_instance_objects(
                 )
 
 
+def _extract_cluster_plan(
+    clusters: Sequence[CurrentClusterCapacity],
+    hardware: Hardware,
+    is_zonal: bool,
+) -> Tuple[List[ClusterCapacity], List[CapacityRequirement]]:
+    """Extract CapacityPlan components from current deployment.
+
+    Takes what's currently deployed and builds the ClusterCapacity and
+    CapacityRequirement objects needed for a CapacityPlan.
+
+    Drives are priced using hardware.price_drive() to get catalog pricing.
+    Cluster annual_cost is computed automatically from instance + drives.
+
+    Args:
+        clusters: Current cluster capacities (must have cluster_type set)
+        hardware: Hardware catalog for the region (used to price drives)
+        is_zonal: True for ZoneClusterCapacity, False for RegionClusterCapacity
+
+    Returns:
+        Tuple of (capacities, requirements) for building CapacityPlan
+
+    Raises:
+        ValueError: If any cluster is missing cluster_type
+    """
+    capacities: List[ClusterCapacity] = []
+    requirements: List[CapacityRequirement] = []
+
+    for current in clusters:
+        if current.cluster_type is None:
+            raise ValueError(
+                f"cluster_type is required for baseline extraction. "
+                f"Cluster '{current.cluster_instance_name}' is missing cluster_type."
+            )
+        cluster_type = current.cluster_type
+        instance = current.cluster_instance
+        if instance is None:
+            raise ValueError(
+                f"cluster_instance not resolved for '{current.cluster_instance_name}'"
+            )
+        count = int(current.cluster_instance_count.mid)
+
+        # Price the drive from hardware catalog (gets annual_cost_per_gib etc.)
+        attached_drives = []
+        if current.cluster_drive is not None:
+            attached_drives.append(hardware.price_drive(current.cluster_drive))
+
+        disk_gib = get_disk_size_gib(current.cluster_drive, instance)
+
+        capacity_cls = ZoneClusterCapacity if is_zonal else RegionClusterCapacity
+        capacities.append(
+            capacity_cls(
+                cluster_type=cluster_type,
+                count=count,
+                instance=instance,
+                attached_drives=attached_drives,
+            )
+        )
+
+        requirements.append(
+            CapacityRequirement(
+                requirement_type=cluster_type,
+                reference_shape=instance,
+                cpu_cores=certain_float(instance.cpu * count),
+                mem_gib=certain_float(instance.ram_gib * count),
+                network_mbps=certain_float(instance.net_mbps * count),
+                disk_gib=certain_float(disk_gib * count),
+            )
+        )
+
+    return capacities, requirements
+
+
 def _allow_instance(
     instance: Instance,
     allowed_names: Sequence[str],
@@ -340,6 +421,7 @@ class CapacityPlanner:
     ) -> None:
         self._shapes: HardwareShapes = shapes
         self._models: Dict[str, CapacityModel] = {}
+        self._cluster_types: Dict[str, str] = {}  # cluster_type -> model_name
 
         self._default_num_simulations = default_num_simulations
         self._default_num_results = default_num_results
@@ -351,6 +433,25 @@ class CapacityPlanner:
             self.register_model(name, model)
 
     def register_model(self, name: str, capacity_model: CapacityModel) -> None:
+        if isinstance(capacity_model, CostAwareModel):
+            # Validate required attributes
+            sn = getattr(capacity_model, "service_name", None)
+            ct = getattr(capacity_model, "cluster_type", None)
+            if not sn or not ct:
+                raise ValueError(
+                    f"CostAwareModel '{name}' must define service_name and "
+                    f"cluster_type (got service_name={sn!r}, cluster_type={ct!r})"
+                )
+
+            # Duplicate cluster_type would cause double-counting
+            if ct in self._cluster_types:
+                raise ValueError(
+                    f"Duplicate cluster_type '{ct}': '{name}' "
+                    f"conflicts with '{self._cluster_types[ct]}'. Must be unique "
+                    f"to avoid double-counting costs."
+                )
+            self._cluster_types[ct] = name
+
         self._models[name] = capacity_model
 
     @property
@@ -363,6 +464,23 @@ class CapacityPlanner:
 
     def instance(self, name: str, region: Optional[str] = None) -> Instance:
         return self.hardware_shapes.instance(name, region=region)
+
+    def _prepare_context(
+        self,
+        region: str,
+        num_regions: int,
+    ) -> Tuple[Hardware, RegionContext]:
+        """Prepare hardware and region context for capacity planning.
+
+        Loads hardware catalog for region and creates RegionContext.
+        """
+        hardware = self._shapes.region(region)
+        context = RegionContext(
+            zones_in_region=hardware.zones_in_region,
+            services={n: s.model_copy(deep=True) for n, s in hardware.services.items()},
+            num_regions=num_regions,
+        )
+        return hardware, context
 
     def _plan_percentiles(  # pylint: disable=too-many-positional-arguments
         self,
@@ -587,6 +705,146 @@ class CapacityPlanner:
             :num_results
         ]
 
+    def _get_model_costs(
+        self,
+        *,
+        model_name: str,
+        context: RegionContext,
+        desires: CapacityDesires,
+        zonal_clusters: Sequence[ClusterCapacity],
+        regional_clusters: Sequence[ClusterCapacity],
+        extra_model_arguments: Dict[str, Any],
+    ) -> Tuple[Dict[str, float], List[ServiceCapacity]]:
+        """Get total costs for a model and any models it composes with."""
+        costs: Dict[str, float] = {}
+        services: List[ServiceCapacity] = []
+
+        for sub_model_name, sub_desires in self._sub_models(
+            model_name, desires, extra_model_arguments
+        ):
+            sub_model = self._models[sub_model_name]
+            if not isinstance(sub_model, CostAwareModel):
+                raise TypeError(
+                    f"Sub-model '{sub_model_name}' does not implement CostAwareModel. "
+                    f"All models in the composition tree must implement cost methods."
+                )
+
+            model_costs = sub_model.cluster_costs(
+                service_type=sub_model.service_name,
+                zonal_clusters=zonal_clusters,
+                regional_clusters=regional_clusters,
+            )
+            costs.update(model_costs)
+
+            model_services = sub_model.service_costs(
+                service_type=sub_model.service_name,
+                context=context,
+                desires=sub_desires,
+                extra_model_arguments=extra_model_arguments,
+            )
+            for svc in model_services:
+                costs[svc.service_type] = svc.annual_cost
+            services.extend(model_services)
+
+        return costs, services
+
+    def extract_baseline_plan(  # pylint: disable=too-many-positional-arguments
+        self,
+        model_name: str,
+        region: str,
+        desires: CapacityDesires,
+        num_regions: int = 3,
+        extra_model_arguments: Optional[Dict[str, Any]] = None,
+    ) -> CapacityPlan:
+        """Extract baseline plan from current clusters using model cost methods.
+
+        This converts the current deployment (from desires.current_clusters) into
+        a CapacityPlan that can be compared against recommendations. Uses model-
+        specific cost methods for accurate pricing.
+
+        Note: Only works for models with CostAwareModel mixin (EVCache, Kafka,
+        Cassandra, Key-Value). Other models will raise AttributeError.
+
+        Supports composite models (like Key-Value) that have both zonal and
+        regional clusters - each model's cluster_costs filters by cluster_type.
+
+        Args:
+            model_name: Registered model name (e.g., "org.netflix.cassandra")
+            region: AWS region for pricing
+            desires: CapacityDesires with current_clusters populated
+            num_regions: For cross-region cost calculation (default: 3)
+            extra_model_arguments: Model-specific arguments (e.g., copies_per_region)
+
+        Returns:
+            CapacityPlan with costs from model.cluster_costs() and model.service_costs()
+
+        Raises:
+            ValueError: If model_name not found or current_clusters invalid
+            AttributeError: If model doesn't have CostAwareModel mixin
+        """
+        extra_model_arguments = extra_model_arguments or {}
+        if model_name not in self._models:
+            raise ValueError(
+                f"model_name={model_name} does not exist. "
+                f"Try {sorted(list(self._models.keys()))}"
+            )
+
+        model = self._models[model_name]
+        if not isinstance(model, CostAwareModel):
+            raise TypeError(f"Model '{model_name}' must implement CostAwareModel mixin")
+
+        if desires.current_clusters is None:
+            raise ValueError(
+                "Cannot extract baseline: desires.current_clusters is None. "
+                "This function requires an existing deployment to compare against."
+            )
+        if not desires.current_clusters.zonal and not desires.current_clusters.regional:
+            raise ValueError(
+                "Cannot extract baseline: desires.current_clusters has no zonal "
+                "or regional clusters defined."
+            )
+
+        hardware, context = self._prepare_context(region, num_regions)
+        _set_instance_objects(
+            desires, hardware
+        )  # Resolve instance refs in current_clusters
+
+        zonal_capacities: List[ClusterCapacity] = []
+        zonal_requirements: List[CapacityRequirement] = []
+        regional_capacities: List[ClusterCapacity] = []
+        regional_requirements: List[CapacityRequirement] = []
+
+        if desires.current_clusters.zonal:
+            zonal_capacities, zonal_requirements = _extract_cluster_plan(
+                desires.current_clusters.zonal, hardware, is_zonal=True
+            )
+        if desires.current_clusters.regional:
+            regional_capacities, regional_requirements = _extract_cluster_plan(
+                desires.current_clusters.regional, hardware, is_zonal=False
+            )
+
+        costs, services = self._get_model_costs(
+            model_name=model_name,
+            context=context,
+            desires=desires,
+            zonal_clusters=zonal_capacities,
+            regional_clusters=regional_capacities,
+            extra_model_arguments=extra_model_arguments,
+        )
+
+        return CapacityPlan(
+            requirements=Requirements(
+                zonal=zonal_requirements,
+                regional=regional_requirements,
+            ),
+            candidate_clusters=Clusters(
+                annual_costs=costs,
+                zonal=zonal_capacities,
+                regional=regional_capacities,
+                services=services,
+            ),
+        )
+
     # Calculates the minimum cpu, memory, and network requirements based on desires.
     def _per_instance_requirements(self, desires: CapacityDesires) -> Tuple[int, float]:
         # Applications often set fixed reservations of heap or OS memory
@@ -636,13 +894,10 @@ class CapacityPlanner:
         instance_families = instance_families or []
         drives = drives or []
 
-        hardware = self._shapes.region(region)
-
-        context = RegionContext(
-            zones_in_region=hardware.zones_in_region,
-            services={n: s.model_copy(deep=True) for n, s in hardware.services.items()},
-            num_regions=num_regions,
-        )
+        hardware, context = self._prepare_context(region, num_regions)
+        _set_instance_objects(
+            desires, hardware
+        )  # Resolve instance refs if current_clusters exists
 
         allowed_platforms: Set[Platform] = set(model.allowed_platforms())
         allowed_drives: Set[str] = set(drives or [])
@@ -653,9 +908,6 @@ class CapacityPlanner:
             allowed_drives.add(drive_name)
         if len(allowed_drives) == 0:
             allowed_drives.update(hardware.drives.keys())
-
-        # Set current instance object if exists
-        _set_instance_objects(desires, hardware)
 
         # We should not even bother with shapes that don't meet the minimums
         (

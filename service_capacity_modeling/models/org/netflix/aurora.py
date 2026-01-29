@@ -178,6 +178,10 @@ def _compute_aurora_region(  # pylint: disable=too-many-positional-arguments
         drive.annual_cost_per_read_io[0][1],
         drive.annual_cost_per_write_io[0][1],
     )
+
+    # TODO (homatthew): Should instance.annual_cost be multiplied by instance_count?
+    # Aurora has shared storage, so storage cost is correct (not multiplied).
+    # But compute cost should arguably be instance_count * instance.annual_cost.
     total_annual_cost = instance.annual_cost + attached_drive.annual_cost + io_cost
 
     logger.debug(
@@ -202,7 +206,8 @@ def _compute_aurora_region(  # pylint: disable=too-many-positional-arguments
         count=instance_count,
         instance=instance,
         attached_drives=attached_drives,
-        annual_cost=total_annual_cost,
+        # Aurora's cost model differs from standard (shared storage), so override
+        annual_cost_override=total_annual_cost,
         cluster_params={"instance_cost": instance.annual_cost},
     )
 

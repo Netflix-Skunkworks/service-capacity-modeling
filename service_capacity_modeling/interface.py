@@ -565,6 +565,30 @@ class Hardware(ExcludeUnsetModel):
     """Managed services available (e.g. service name -> Service with
     params, cost, etc.)"""
 
+    def price_drive(self, drive: Drive) -> Drive:
+        """Hydrate a drive with pricing information from the hardware catalog.
+
+        User-provided drives (e.g., from CurrentClusterCapacity.cluster_drive)
+        contain size/IOPS but lack pricing. This method looks up pricing by
+        drive name and returns a properly priced Drive instance.
+
+        Args:
+            drive: Drive with name, size_gib, read_io_per_s, write_io_per_s
+
+        Returns:
+            Drive with catalog pricing and input size/IO values
+
+        Raises:
+            ValueError: If drive.name not in hardware catalog
+        """
+        if drive.name not in self.drives:
+            raise ValueError(f"Cannot price drive '{drive.name}'")
+        priced = self.drives[drive.name].model_copy()
+        priced.size_gib = drive.size_gib
+        priced.read_io_per_s = drive.read_io_per_s
+        priced.write_io_per_s = drive.write_io_per_s
+        return priced
+
 
 class GlobalHardware(ExcludeUnsetModel):
     """Represents all possible hardware shapes in all regions
@@ -821,6 +845,10 @@ class CurrentClusterCapacity(ExcludeUnsetModel):
     cluster_instance: Optional[Instance] = None
     cluster_drive: Optional[Drive] = None
     cluster_instance_count: Interval
+    # Optional: if not set, extract_baseline_plan
+    # Required metadata for identifying which model
+    # this capacity belongs to
+    cluster_type: Optional[str] = None
     # The distribution cpu utilization in the cluster.
     cpu_utilization: Interval = certain_float(0.0)
     # The per node distribution of memory used in gib.
@@ -1122,11 +1150,30 @@ class ClusterCapacity(ExcludeUnsetModel):
     count: int
     instance: Instance
     attached_drives: Sequence[Drive] = ()
-    annual_cost: float
     # When provisioning services we might need to signal they
     # should have certain configuration, for example flags that
     # affect durability shut off
     cluster_params: Dict[str, Any] = {}
+    # Override for models with non-standard cost calculation (e.g., Aurora
+    # has shared storage so drive cost isn't multiplied by count)
+    annual_cost_override: Optional[float] = None
+
+    @computed_field(return_type=float)  # type: ignore
+    @property
+    def annual_cost(self) -> float:
+        """Compute annual cost from instance and attached drives.
+
+        Standard formula: count * instance.annual_cost + sum(drive.annual_cost * count)
+
+        Models with different cost structures (e.g., Aurora with shared storage)
+        can set annual_cost_override to bypass this calculation.
+        """
+        if self.annual_cost_override is not None:
+            return self.annual_cost_override
+        cost = self.count * self.instance.annual_cost
+        for drive in self.attached_drives:
+            cost += drive.annual_cost * self.count
+        return cost
 
 
 class ServiceCapacity(ExcludeUnsetModel):

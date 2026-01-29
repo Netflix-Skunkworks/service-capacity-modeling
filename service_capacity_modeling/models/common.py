@@ -8,6 +8,7 @@ from typing import Callable
 from typing import Dict
 from typing import List
 from typing import Optional
+from typing import Sequence
 from typing import Set
 from typing import Tuple
 
@@ -25,6 +26,7 @@ from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import CurrentClusters
@@ -46,6 +48,31 @@ from service_capacity_modeling.models.headroom_strategy import (
 logger = logging.getLogger(__name__)
 
 SECONDS_IN_YEAR = 31556926
+
+
+def cluster_infra_cost(
+    service_type: str,
+    zonal_clusters: Sequence[ClusterCapacity],
+    regional_clusters: Sequence[ClusterCapacity],
+    cluster_type: Optional[str] = None,
+) -> Dict[str, float]:
+    """Sum cluster annual_costs, optionally filtering by cluster_type."""
+    if cluster_type is not None:
+        zonal_clusters = [c for c in zonal_clusters if c.cluster_type == cluster_type]
+        regional_clusters = [
+            c for c in regional_clusters if c.cluster_type == cluster_type
+        ]
+
+    costs: Dict[str, float] = {}
+    if zonal_clusters:
+        costs[f"{service_type}.zonal-clusters"] = sum(
+            c.annual_cost for c in zonal_clusters
+        )
+    if regional_clusters:
+        costs[f"{service_type}.regional-clusters"] = sum(
+            c.annual_cost for c in regional_clusters
+        )
+    return costs
 
 
 # In square root staffing we have to take into account the QOS parameter
@@ -90,6 +117,17 @@ def _sqrt_staffed_cores(rps: float, latency_s: float, qos: float) -> int:
     # Square root staffing
     # s = a + Q*sqrt(a)
     return math.ceil((rps * latency_s) + qos * math.sqrt(rps * latency_s))
+
+
+def get_disk_size_gib(
+    cluster_drive: Optional[Drive],
+    instance: Instance,
+) -> float:
+    if cluster_drive is not None:
+        return cluster_drive.size_gib or 0.0
+    if instance.drive is not None:
+        return instance.drive.size_gib or 0.0
+    return 0.0
 
 
 def get_effective_disk_per_node_gib(
@@ -910,14 +948,8 @@ class RequirementFromCurrentCapacity(BaseModel):
             self.current_capacity.disk_utilization_gib.mid
             * self.current_capacity.cluster_instance_count.mid
         )
-        current_node_disk_gib = float(
-            self.current_instance.drive.max_size_gib
-            if self.current_instance.drive is not None
-            else (
-                self.current_capacity.cluster_drive.size_gib
-                if self.current_capacity.cluster_drive is not None
-                else 0
-            )
+        current_node_disk_gib = get_disk_size_gib(
+            self.current_capacity.cluster_drive, self.current_instance
         )
 
         zonal_disk_allocated = float(

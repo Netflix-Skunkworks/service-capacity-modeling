@@ -2,6 +2,8 @@ import logging
 import math
 from typing import Any
 from typing import Dict
+from typing import List
+from typing import Sequence
 from typing import Optional
 from typing import Tuple
 
@@ -28,10 +30,14 @@ from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import buffer_for_components
+from service_capacity_modeling.models.common import cluster_infra_cost
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
@@ -330,36 +336,29 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     if cluster.count > (max_regional_size // copies_per_region):
         return None
 
-    services = []
-    if cross_region_replication is Replication.sets:
-        services.extend(
-            network_services("evcache", context, desires, copies_per_region)
-        )
-    elif cross_region_replication is Replication.evicts:
-        modified = desires.model_copy(deep=True)
-        # Assume that DELETES replicating cross region mean 128 bytes
-        # of key per evict.
-        modified.query_pattern.estimated_mean_write_size_bytes = certain_int(128)
-        services.extend(
-            network_services("evcache", context, modified, copies_per_region)
-        )
+    # Calculate service costs (network transfer) using the model's service_costs method
+    services = NflxEVCacheCapacityModel.service_costs(
+        service_type=NflxEVCacheCapacityModel.service_name,
+        context=context,
+        desires=desires,
+        extra_model_arguments={
+            "copies_per_region": copies_per_region,
+            "cross_region_replication": cross_region_replication.value,
+        },
+    )
 
-    ec2_cost = copies_per_region * cluster.annual_cost
-    spread_cost = calculate_spread_cost(cluster.count)
+    cluster.cluster_type = NflxEVCacheCapacityModel.cluster_type
+    zonal_clusters = [cluster] * copies_per_region
 
-    # Account for the clusters and replication costs
-    evcache_costs = {
-        "evcache.zonal-clusters": ec2_cost,
-        "evcache.spread.cost": spread_cost,
-    }
+    evcache_costs = NflxEVCacheCapacityModel.cluster_costs(
+        service_type=NflxEVCacheCapacityModel.service_name,
+        zonal_clusters=zonal_clusters,
+    )
+    evcache_costs.update({s.service_type: s.annual_cost for s in services})
 
-    for s in services:
-        evcache_costs[f"{s.service_type}"] = s.annual_cost
-
-    cluster.cluster_type = "evcache"
     clusters = Clusters(
         annual_costs=evcache_costs,
-        zonal=[cluster] * copies_per_region,
+        zonal=zonal_clusters,
         regional=[],
         services=services,
     )
@@ -399,7 +398,69 @@ class NflxEVCacheArguments(BaseModel):
     )
 
 
-class NflxEVCacheCapacityModel(CapacityModel):
+class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
+    service_name = "evcache"
+    cluster_type = "evcache"
+
+    @staticmethod
+    def cluster_costs(
+        service_type: str,
+        zonal_clusters: Sequence[ClusterCapacity] = (),
+        regional_clusters: Sequence[ClusterCapacity] = (),
+    ) -> Dict[str, float]:
+        # Adds "{service_type}.spread.cost" penalty for small clusters
+        filtered_zonal = [
+            c
+            for c in zonal_clusters
+            if c.cluster_type == NflxEVCacheCapacityModel.cluster_type
+        ]
+
+        costs = cluster_infra_cost(
+            service_type,
+            filtered_zonal,
+            regional_clusters,
+            cluster_type=NflxEVCacheCapacityModel.cluster_type,
+        )
+
+        # Add spread cost penalty for small clusters
+        if filtered_zonal:
+            cluster_count = filtered_zonal[0].count
+            costs[f"{service_type}.spread.cost"] = calculate_spread_cost(cluster_count)
+
+        return costs
+
+    @staticmethod
+    def service_costs(
+        service_type: str,
+        context: RegionContext,
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
+    ) -> List[ServiceCapacity]:
+        # Network costs depend on cross_region_replication mode:
+        # - 'none': No network costs (default)
+        # - 'sets': Full write size replicated cross-region
+        # - 'evicts': Only 128-byte keys replicated (DELETE operations)
+        # Default to 'none' for composite models (like Key-Value) that compose
+        # EVCache without specifying cross_region_replication
+        cross_region_replication = Replication(
+            extra_model_arguments.get("cross_region_replication", "none")
+        )
+
+        match cross_region_replication:
+            case Replication.sets:
+                copies: int = extra_model_arguments["copies_per_region"]
+                return network_services(service_type, context, desires, copies)
+            case Replication.evicts:
+                copies = extra_model_arguments["copies_per_region"]
+                # For evicts mode, only replicate 128-byte keys (DELETE operations)
+                modified = desires.model_copy(deep=True)
+                modified.query_pattern.estimated_mean_write_size_bytes = certain_int(
+                    128
+                )
+                return network_services(service_type, context, modified, copies)
+            case Replication.none:
+                return []
+
     @staticmethod
     def capacity_plan(
         instance: Instance,

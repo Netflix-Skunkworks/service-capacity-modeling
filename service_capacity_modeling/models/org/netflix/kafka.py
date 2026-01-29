@@ -2,7 +2,9 @@ import logging
 import math
 from typing import Any
 from typing import Dict
+from typing import List
 from typing import Optional
+from typing import Sequence
 from typing import Tuple
 
 from pydantic import BaseModel
@@ -17,6 +19,7 @@ from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
@@ -33,8 +36,11 @@ from service_capacity_modeling.interface import MIB_IN_BYTES
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import buffer_for_components
+from service_capacity_modeling.models.common import cluster_infra_cost
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
@@ -388,15 +394,18 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     if cluster.count > (max_regional_size // zones_per_region):
         return None
 
-    ec2_cost = zones_per_region * cluster.annual_cost
+    cluster.cluster_type = NflxKafkaCapacityModel.cluster_type
+    zonal_clusters = [cluster] * zones_per_region
 
     # Account for the clusters and replication costs
-    kafka_costs = {"kafka.zonal-clusters": ec2_cost}
+    kafka_costs = NflxKafkaCapacityModel.cluster_costs(
+        service_type=NflxKafkaCapacityModel.service_name,
+        zonal_clusters=zonal_clusters,
+    )
 
-    cluster.cluster_type = "kafka"
     clusters = Clusters(
         annual_costs=kafka_costs,
-        zonal=[cluster] * zones_per_region,
+        zonal=zonal_clusters,
         regional=[],
         services=[],
     )
@@ -464,7 +473,9 @@ class NflxKafkaArguments(BaseModel):
     )
 
 
-class NflxKafkaCapacityModel(CapacityModel):
+class NflxKafkaCapacityModel(CapacityModel, CostAwareModel):
+    service_name = "kafka"
+    cluster_type = "kafka"
     HA_DEFAULT_REPLICATION_FACTOR = 2
     SC_DEFAULT_REPLICATION_FACTOR = 3
 
@@ -536,6 +547,29 @@ class NflxKafkaCapacityModel(CapacityModel):
             hot_retention_seconds=hot_retention_seconds,
             require_same_instance_family=require_same_instance_family,
         )
+
+    @staticmethod
+    def cluster_costs(
+        service_type: str,
+        zonal_clusters: Sequence[ClusterCapacity] = (),
+        regional_clusters: Sequence[ClusterCapacity] = (),
+    ) -> Dict[str, float]:
+        return cluster_infra_cost(
+            service_type,
+            zonal_clusters,
+            regional_clusters,
+            cluster_type=NflxKafkaCapacityModel.cluster_type,
+        )
+
+    @staticmethod
+    def service_costs(
+        service_type: str,
+        context: RegionContext,
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
+    ) -> List[ServiceCapacity]:
+        _ = (service_type, context, desires, extra_model_arguments)
+        return []
 
     @staticmethod
     def description() -> str:

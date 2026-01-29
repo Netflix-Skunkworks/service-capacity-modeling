@@ -1,7 +1,9 @@
 from typing import Any
 from typing import Callable
 from typing import Dict
+from typing import List
 from typing import Optional
+from typing import Sequence
 from typing import Tuple
 
 from service_capacity_modeling.interface import AccessConsistency
@@ -18,7 +20,9 @@ from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Platform
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import RegionContext
+from service_capacity_modeling.interface import ServiceCapacity
 
 __all__ = [
     "AccessConsistency",
@@ -37,6 +41,7 @@ __all__ = [
     "QueryPattern",
     "RegionContext",
     "CapacityModel",
+    "CostAwareModel",
 ]
 
 __common_regrets__ = frozenset(("spend", "disk", "mem"))
@@ -85,6 +90,47 @@ def _disk_regret(  # noqa: C901
                 (od - pd) * regret_params.disk.under_provision_cost
             ) ** regret_params.disk.exponent
     return regret
+
+
+class CostAwareModel:
+    """Mixin for models that implement cost calculation methods.
+
+    Models using this mixin MUST define:
+        service_name: str  # prefix for cost keys (e.g., "cassandra")
+        cluster_type: str  # filters which clusters this model costs
+
+    Example:
+        class MyModel(CapacityModel, CostAwareModel):
+            service_name = "myservice"
+            cluster_type = "myservice"
+    """
+
+    # Subclasses MUST override these (validated in register_model)
+    service_name: str
+    cluster_type: str
+
+    @staticmethod
+    def service_costs(
+        service_type: str,
+        context: RegionContext,
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
+    ) -> List[ServiceCapacity]:
+        """Calculate additional service costs (network, backup, etc)."""
+        raise NotImplementedError(
+            f"service_costs() must be implemented by {service_type} model"
+        )
+
+    @staticmethod
+    def cluster_costs(
+        service_type: str,
+        zonal_clusters: Sequence["ClusterCapacity"] = (),
+        regional_clusters: Sequence["ClusterCapacity"] = (),
+    ) -> Dict[str, float]:
+        """Calculate cluster infrastructure costs (instances, drives)."""
+        raise NotImplementedError(
+            f"cluster_costs() must be implemented by {service_type} model"
+        )
 
 
 class CapacityModel:
