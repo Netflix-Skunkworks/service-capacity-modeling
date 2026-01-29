@@ -172,10 +172,6 @@ class NflxJavaAppCapacityModel(CapacityModel, CostAwareModel):
         zonal_clusters: Sequence[ClusterCapacity] = (),
         regional_clusters: Sequence[ClusterCapacity] = (),
     ) -> Dict[str, float]:
-        """Calculate Java app cluster infrastructure costs.
-
-        Filters to only nflx-java-app cluster_type to support composite models.
-        """
         return cluster_infra_cost(
             service_type,
             zonal_clusters,
@@ -190,15 +186,9 @@ class NflxJavaAppCapacityModel(CapacityModel, CostAwareModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> List[ServiceCapacity]:
-        """Calculate Java app service costs (network transfer).
-
-        TODO(matthewho): This currently returns empty because RegionContext
-        is created without services, so network_services() finds no pricing
-        and returns []. The original comment said "Java apps incur network
-        costs for cross-zone traffic" but that's not happening. Need to
-        determine if stateless apps should have cross-zone costs (e.g.,
-        copies_per_region=2 implies 1 cross-AZ hop) or if this is intentional.
-        """
+        # TODO(matthewho): Currently returns empty because RegionContext is
+        # created without services. Need to determine if stateless apps should
+        # have cross-zone costs (copies_per_region=2 implies 1 cross-AZ hop).
         _ = (context, extra_model_arguments)
         return network_services(
             service_type,

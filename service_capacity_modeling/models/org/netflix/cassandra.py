@@ -201,11 +201,7 @@ def _estimate_cassandra_requirement(
     zones_per_region: int = 3,
     copies_per_region: int = 3,
 ) -> CapacityRequirement:
-    """Estimate the capacity required for one zone given a regional desire
-
-    The input desires should be the **regional** desire, and this function will
-    return the zonal capacity requirement
-    """
+    # Input: regional desires → Output: zonal requirement
     disk_buffer = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     )
@@ -747,17 +743,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> List[ServiceCapacity]:
-        """Calculate Cassandra-specific service costs (network + backup).
-
-        Adds:
-        - Network costs: inter-region and intra-region transfer based on
-          write throughput and replication factor
-        - Backup costs: S3 blob storage for durable clusters (durability >= 1000)
-
-        Note: copies_per_region defaults to _target_rf(desires) if not provided.
-        Backup disk is calculated from desires (not requirement) for consistency.
-        """
-        # Use _target_rf for default copies - same logic as capacity_plan
+        # C* service costs: network + backup
         copies_per_region: int = _target_rf(
             desires, extra_model_arguments.get("copies_per_region")
         )
@@ -797,10 +783,6 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         zonal_clusters: Sequence[ClusterCapacity] = (),
         regional_clusters: Sequence[ClusterCapacity] = (),
     ) -> Dict[str, float]:
-        """Calculate Cassandra cluster infrastructure costs.
-
-        Filters to only cassandra cluster_type to support composite models.
-        """
         return cluster_infra_cost(
             service_type,
             zonal_clusters,

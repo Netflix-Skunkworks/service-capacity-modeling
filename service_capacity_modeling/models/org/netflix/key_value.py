@@ -29,17 +29,6 @@ from service_capacity_modeling.models.common import cluster_infra_cost
 
 
 class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
-    """Netflix Streaming Key-Value capacity model.
-
-    This is a composite model that wraps the Java app model and composes
-    with Cassandra (always) and EVCache (for high-read + eventual consistency).
-
-    Cost calculation:
-    - Key-value owns dgwkv clusters (regional Java app layer)
-    - Delegates to Cassandra and EVCache for their cluster costs
-    - Aggregates service costs from all component models
-    """
-
     service_name = "key-value"
     cluster_type = "dgwkv"
 
@@ -253,12 +242,8 @@ class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
         zonal_clusters: Sequence[ClusterCapacity] = (),
         regional_clusters: Sequence[ClusterCapacity] = (),
     ) -> Dict[str, float]:
-        """Calculate costs for dgwkv clusters only.
-
-        Key-value only handles its own dgwkv clusters (regional Java app layer).
-        Uses NflxJavaAppCapacityModel.service_name to match capacity_plan,
-        which delegates to nflx_java_app_capacity_model internally.
-        """
+        # Uses NflxJavaAppCapacityModel.service_name (not service_type param)
+        # because capacity_plan delegates to nflx_java_app_capacity_model
         _ = service_type
         return cluster_infra_cost(
             service_type=NflxJavaAppCapacityModel.service_name,
@@ -274,15 +259,11 @@ class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> List[ServiceCapacity]:
-        """Calculate service costs for dgwkv layer.
-
-        Returns empty because dgwkv has no direct network costs:
-        - DataStax driver selects local Cassandra coordinators (same AZ = free)
-        - Coordinator→replica fan-out is counted in cassandra.net.intra.region
-        - EVCache access uses local nodes (same AZ = free)
-
-        Cassandra/EVCache service costs are handled via _sub_models() DAG traversal.
-        """
+        # Returns empty - dgwkv has no direct network costs:
+        # - DataStax driver selects local Cassandra coordinators (same AZ = free)
+        # - Coordinator→replica fan-out is counted in cassandra.net.intra.region
+        # - EVCache access uses local nodes (same AZ = free)
+        # Cassandra/EVCache service costs come from _sub_models() DAG traversal.
         _ = (service_type, context, desires, extra_model_arguments)
         return []
 

@@ -408,13 +408,7 @@ class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
         zonal_clusters: Sequence[ClusterCapacity] = (),
         regional_clusters: Sequence[ClusterCapacity] = (),
     ) -> Dict[str, float]:
-        """Calculate EVCache cluster infrastructure costs.
-
-        Filters to only evcache cluster_type to support composite models.
-        EVCache uses zonal clusters only. Includes:
-        - "{service_type}.zonal-clusters": sum of cluster annual costs (via base)
-        - "{service_type}.spread.cost": penalty for small clusters
-        """
+        # Adds "{service_type}.spread.cost" penalty for small clusters
         filtered_zonal = [
             c
             for c in zonal_clusters
@@ -442,16 +436,10 @@ class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> List[ServiceCapacity]:
-        """Calculate EVCache-specific service costs (network transfer).
-
-        Network costs depend on cross_region_replication mode:
-        - 'none': No network costs (default)
-        - 'sets': Full write size replicated cross-region
-        - 'evicts': Only 128-byte keys replicated (DELETE operations)
-
-        Note: copies_per_region is required when replication is enabled.
-        """
-
+        # Network costs depend on cross_region_replication mode:
+        # - 'none': No network costs (default)
+        # - 'sets': Full write size replicated cross-region
+        # - 'evicts': Only 128-byte keys replicated (DELETE operations)
         # Default to 'none' for composite models (like Key-Value) that compose
         # EVCache without specifying cross_region_replication
         cross_region_replication = Replication(

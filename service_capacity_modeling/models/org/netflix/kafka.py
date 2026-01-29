@@ -554,10 +554,6 @@ class NflxKafkaCapacityModel(CapacityModel, CostAwareModel):
         zonal_clusters: Sequence[ClusterCapacity] = (),
         regional_clusters: Sequence[ClusterCapacity] = (),
     ) -> Dict[str, float]:
-        """Calculate Kafka cluster infrastructure costs.
-
-        Filters to only kafka cluster_type to support composite models.
-        """
         return cluster_infra_cost(
             service_type,
             zonal_clusters,
@@ -572,7 +568,6 @@ class NflxKafkaCapacityModel(CapacityModel, CostAwareModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> List[ServiceCapacity]:
-        """Kafka has no additional service costs."""
         _ = (service_type, context, desires, extra_model_arguments)
         return []
 
