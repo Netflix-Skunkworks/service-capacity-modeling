@@ -50,6 +50,7 @@ from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.org.netflix.partition_capacity import (
     CapacityProblem,
     find_capacity_config,
+    search_with_fault_tolerance,
 )
 
 logger = logging.getLogger(__name__)
@@ -256,12 +257,13 @@ def _compute_read_only_kv_regional_cluster(
     instance: Instance,
     requirement: CapacityRequirement,
     args: NflxReadOnlyKVArguments,
+    tier: int,
 ) -> Optional[RegionClusterCapacity]:
     """Orchestrate: extract inputs → run algorithm → build cluster.
 
     This function is intentionally thin - it delegates to:
     - _extract_planning_inputs: model domain → algorithm domain
-    - find_capacity_config: pure algorithm (from partition_capacity module)
+    - search_with_fault_tolerance: find optimal (RF, node_count) for tier
     - Result building: algorithm output → RegionClusterCapacity
     """
     # ─────────────────────────────────────────────────────────────────────────
@@ -272,7 +274,7 @@ def _compute_read_only_kv_regional_cluster(
         return None
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Step 2: Run the partition-aware search algorithm
+    # Step 2: Run fault-tolerance-aware search algorithm
     # ─────────────────────────────────────────────────────────────────────────
     problem = CapacityProblem(
         n_partitions=inputs.total_partitions,
@@ -283,32 +285,64 @@ def _compute_read_only_kv_regional_cluster(
         cpu_per_node=inputs.cpu_per_node,
         max_nodes=inputs.max_nodes,
     )
-    config = find_capacity_config(problem)
 
-    if config is None:
-        return None
+    # Use fault-tolerance optimizer to find optimal (RF, node_count) for tier
+    ft_result = search_with_fault_tolerance(
+        problem=problem,
+        tier=tier,
+        cost_per_node=instance.annual_cost,
+        n_zones=3,  # Standard 3-AZ deployment
+        zone_aware=False,  # Random placement (conservative estimate)
+    )
+
+    if ft_result is None:
+        # Fallback to basic algorithm if fault tolerance search fails
+        config = find_capacity_config(problem)
+        if config is None:
+            return None
+        node_count = config.node_count
+        rf = config.rf
+        ppn = config.partitions_per_node
+        base_nodes = config.base_nodes
+        system_availability = None
+        zone_aware_savings = None
+    else:
+        node_count = ft_result.node_count
+        rf = ft_result.rf
+        ppn = ft_result.partitions_per_node
+        base_nodes = ft_result.base_nodes
+        system_availability = ft_result.system_availability
+        zone_aware_savings = ft_result.zone_aware_savings
 
     # ─────────────────────────────────────────────────────────────────────────
     # Step 3: Build the cluster result
     # ─────────────────────────────────────────────────────────────────────────
     nodes_for_cpu = math.ceil(inputs.cpu_needed / inputs.cpu_per_node)
-    cost = config.node_count * instance.annual_cost
+    cost = node_count * instance.annual_cost
 
     cluster = RegionClusterCapacity(
         cluster_type="read-only-kv",
-        count=config.node_count,
+        count=node_count,
         instance=instance,
         attached_drives=tuple(),
         annual_cost=cost,
     )
 
     params = {
-        "read-only-kv.replica_count": config.rf,
-        "read-only-kv.partitions_per_node": config.partitions_per_node,
+        "read-only-kv.replica_count": rf,
+        "read-only-kv.partitions_per_node": ppn,
         "read-only-kv.effective_disk_per_node_gib": inputs.effective_disk_per_node_gib,
-        "read-only-kv.nodes_for_one_copy": config.base_nodes,
+        "read-only-kv.nodes_for_one_copy": base_nodes,
         "read-only-kv.nodes_for_cpu": nodes_for_cpu,
+        "read-only-kv.service_tier": tier,
     }
+
+    # Add fault tolerance info if available
+    if system_availability is not None:
+        params["read-only-kv.system_availability"] = system_availability
+    if zone_aware_savings is not None:
+        params["read-only-kv.zone_aware_savings"] = zone_aware_savings
+
     _upsert_params(cluster, params)
 
     return cluster
@@ -359,11 +393,12 @@ def _estimate_read_only_kv_cluster(
         args=args,
     )
 
-    # Compute cluster
+    # Compute cluster with fault tolerance optimization
     cluster = _compute_read_only_kv_regional_cluster(
         instance=instance,
         requirement=requirement,
         args=args,
+        tier=desires.service_tier,
     )
 
     if cluster is None:
