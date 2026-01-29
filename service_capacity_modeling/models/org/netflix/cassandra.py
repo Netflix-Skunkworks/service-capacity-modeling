@@ -544,7 +544,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         service_type=NflxCassandraCapacityModel.service_name,
         context=context,
         desires=desires,
-        requirement=requirement,
         extra_model_arguments={"copies_per_region": copies_per_region},
     )
 
@@ -746,7 +745,6 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         service_type: str,
         context: RegionContext,
         desires: CapacityDesires,
-        requirement: CapacityRequirement,
         extra_model_arguments: Dict[str, Any],
     ) -> List[ServiceCapacity]:
         """Calculate Cassandra-specific service costs (network + backup).
@@ -759,7 +757,6 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         Note: copies_per_region defaults to _target_rf(desires) if not provided.
         Backup disk is calculated from desires (not requirement) for consistency.
         """
-        _ = requirement
         # Use _target_rf for default copies - same logic as capacity_plan
         copies_per_region: int = _target_rf(
             desires, extra_model_arguments.get("copies_per_region")

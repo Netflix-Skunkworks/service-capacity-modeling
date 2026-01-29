@@ -12,7 +12,6 @@ from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
-from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
@@ -273,7 +272,6 @@ class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
         service_type: str,
         context: RegionContext,
         desires: CapacityDesires,
-        requirement: CapacityRequirement,
         extra_model_arguments: Dict[str, Any],
     ) -> List[ServiceCapacity]:
         """Calculate service costs for dgwkv layer.
@@ -285,7 +283,7 @@ class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
 
         Cassandra/EVCache service costs are handled via _sub_models() DAG traversal.
         """
-        _ = (service_type, context, desires, requirement, extra_model_arguments)
+        _ = (service_type, context, desires, extra_model_arguments)
         return []
 
 

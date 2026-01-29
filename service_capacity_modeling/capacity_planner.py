@@ -43,10 +43,8 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.interface import UncertainCapacityPlan
 from service_capacity_modeling.interface import ZoneClusterCapacity
-from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
-from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.org import netflix
 from service_capacity_modeling.models.utils import reduce_by_family
@@ -237,7 +235,8 @@ def _convert_current_clusters(
     Args:
         clusters: Current cluster capacities from deployment
         hardware: Hardware catalog for the region (used to price drives)
-        default_cluster_type: Fallback cluster_type if not set on cluster
+        default_cluster_type: Default cluster type from the model. Used when
+            cluster.cluster_type is not set (e.g., single-model scenarios).
         is_zonal: True for ZoneClusterCapacity, False for RegionClusterCapacity
 
     Returns:
@@ -263,9 +262,7 @@ def _convert_current_clusters(
         if current.cluster_drive is not None:
             attached_drive = hardware.price_drive(current.cluster_drive)
             attached_drives.append(attached_drive)
-            # Only add drive cost for zonal (stateful) clusters
-            if is_zonal:
-                cost = cost + (attached_drive.annual_cost * count)
+            cost = cost + (attached_drive.annual_cost * count)
 
         disk_gib = 0.0
         if current.cluster_drive is not None:
@@ -427,6 +424,7 @@ class CapacityPlanner:
     ) -> None:
         self._shapes: HardwareShapes = shapes
         self._models: Dict[str, CapacityModel] = {}
+        self._cluster_types: Dict[str, str] = {}  # cluster_type -> model_name
 
         self._default_num_simulations = default_num_simulations
         self._default_num_results = default_num_results
@@ -449,14 +447,13 @@ class CapacityPlanner:
                 )
 
             # Duplicate cluster_type would cause double-counting
-            for existing_name, existing_model in self._models.items():
-                if isinstance(existing_model, CostAwareModel):
-                    if existing_model.cluster_type == ct:
-                        raise ValueError(
-                            f"Duplicate cluster_type '{ct}': '{name}' "
-                            f"conflicts with '{existing_name}'. Must be unique "
-                            f"to avoid double-counting costs."
-                        )
+            if ct in self._cluster_types:
+                raise ValueError(
+                    f"Duplicate cluster_type '{ct}': '{name}' "
+                    f"conflicts with '{self._cluster_types[ct]}'. Must be unique "
+                    f"to avoid double-counting costs."
+                )
+            self._cluster_types[ct] = name
 
         self._models[name] = capacity_model
 
@@ -702,7 +699,6 @@ class CapacityPlanner:
         desires: CapacityDesires,
         zonal_clusters: Sequence[ClusterCapacity],
         regional_clusters: Sequence[ClusterCapacity],
-        requirement: CapacityRequirement,
         extra_model_arguments: Dict[str, Any],
     ) -> Tuple[Dict[str, float], List[ServiceCapacity]]:
         """Get total costs for a model and any models it composes with."""
@@ -730,9 +726,10 @@ class CapacityPlanner:
                 service_type=sub_model.service_name,
                 context=context,
                 desires=sub_desires,
-                requirement=requirement,
                 extra_model_arguments=extra_model_arguments,
             )
+            for svc in model_services:
+                costs[svc.service_type] = svc.annual_cost
             services.extend(model_services)
 
         return costs, services
@@ -783,13 +780,6 @@ class CapacityPlanner:
 
         extra_model_arguments = extra_model_arguments or {}
 
-        # Merge with model's default_desires to match plan_certain behavior.
-        # This ensures service_costs gets the same defaults (e.g., write size)
-        # that plan_certain uses via _sub_models.
-        merged_desires = desires.merge_with(
-            model.default_desires(desires, extra_model_arguments)
-        )
-
         if desires.current_clusters is None:
             raise ValueError(
                 "Cannot extract baseline: desires.current_clusters is None. "
@@ -828,47 +818,14 @@ class CapacityPlanner:
                 is_zonal=False,
             )
 
-        # service_costs uses workload data size (e.g., for Cassandra backup to S3)
-        # Apply disk buffer, compression, and RF/zones to match original planning.
-        # Formula: state_size × copies_per_region × buffer / compression / zones
-        disk_buffer = buffer_for_components(
-            buffers=merged_desires.buffers, components=[BufferComponent.disk]
-        )
-        compression_ratio = merged_desires.data_shape.estimated_compression_ratio.mid
-        zones_per_region = context.zones_in_region
-        # RF defaults to zones_per_region if not explicitly set (matches model defaults)
-        copies_per_region = extra_model_arguments.get(
-            "copies_per_region", zones_per_region
-        )
-        # Use integer division to match the original planning code
-        regional_disk = math.ceil(
-            merged_desires.data_shape.estimated_state_size_gib.mid
-            * copies_per_region
-            * disk_buffer.ratio
-            / compression_ratio
-        )
-        workload_disk = max(1, regional_disk // zones_per_region)
-
-        aggregated_requirement = CapacityRequirement(
-            requirement_type=f"{model.service_name}-baseline",
-            cpu_cores=certain_float(0),
-            mem_gib=certain_float(0),
-            disk_gib=certain_float(workload_disk),
-            network_mbps=certain_float(0),
-        )
-
         costs, services = self._get_model_costs(
             model_name=model_name,
             context=context,
             desires=desires,
             zonal_clusters=zonal_capacities,
             regional_clusters=regional_capacities,
-            requirement=aggregated_requirement,
             extra_model_arguments=extra_model_arguments,
         )
-
-        for svc in services:
-            costs[svc.service_type] = svc.annual_cost
 
         return CapacityPlan(
             requirements=Requirements(

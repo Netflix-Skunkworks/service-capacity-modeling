@@ -845,8 +845,8 @@ class CurrentClusterCapacity(ExcludeUnsetModel):
     cluster_instance: Optional[Instance] = None
     cluster_drive: Optional[Drive] = None
     cluster_instance_count: Interval
-    # Optional cluster_type to preserve through baseline extraction.
-    # If not set, extract_baseline_plan uses model.cluster_type.
+    # Optional cluster_type for composite models with multiple cluster types.
+    # If set, extract_baseline_plan preserves this type for sub-model filtering.
     cluster_type: Optional[str] = None
     # The distribution cpu utilization in the cluster.
     cpu_utilization: Interval = certain_float(0.0)

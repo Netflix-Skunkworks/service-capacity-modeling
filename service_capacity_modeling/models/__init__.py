@@ -11,7 +11,6 @@ from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRegretParameters
-from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
@@ -115,7 +114,6 @@ class CostAwareModel:
         service_type: str,
         context: RegionContext,
         desires: CapacityDesires,
-        requirement: CapacityRequirement,
         extra_model_arguments: Dict[str, Any],
     ) -> List[ServiceCapacity]:
         """Calculate additional service costs (network, backup, etc)."""

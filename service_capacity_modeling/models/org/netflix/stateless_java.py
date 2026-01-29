@@ -136,7 +136,6 @@ def _estimate_java_app_region(  # pylint: disable=too-many-positional-arguments
             service_type=NflxJavaAppCapacityModel.service_name,
             context=context,
             desires=desires,
-            requirement=requirement,
             extra_model_arguments={},
         )
         for s in services:
@@ -193,7 +192,6 @@ class NflxJavaAppCapacityModel(CapacityModel, CostAwareModel):
         service_type: str,
         context: RegionContext,
         desires: CapacityDesires,
-        requirement: CapacityRequirement,
         extra_model_arguments: Dict[str, Any],
     ) -> List[ServiceCapacity]:
         """Calculate Java app service costs (network transfer).
@@ -205,7 +203,7 @@ class NflxJavaAppCapacityModel(CapacityModel, CostAwareModel):
         determine if stateless apps should have cross-zone costs (e.g.,
         copies_per_region=2 implies 1 cross-AZ hop) or if this is intentional.
         """
-        _ = (context, requirement, extra_model_arguments)
+        _ = (context, extra_model_arguments)
         return network_services(
             service_type,
             RegionContext(num_regions=1),

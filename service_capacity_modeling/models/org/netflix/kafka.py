@@ -570,11 +570,10 @@ class NflxKafkaCapacityModel(CapacityModel, CostAwareModel):
         service_type: str,
         context: RegionContext,
         desires: CapacityDesires,
-        requirement: CapacityRequirement,
         extra_model_arguments: Dict[str, Any],
     ) -> List[ServiceCapacity]:
         """Kafka has no additional service costs."""
-        _ = (service_type, context, desires, requirement, extra_model_arguments)
+        _ = (service_type, context, desires, extra_model_arguments)
         return []
 
     @staticmethod

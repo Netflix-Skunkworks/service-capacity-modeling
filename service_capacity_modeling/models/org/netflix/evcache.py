@@ -341,7 +341,6 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         service_type=NflxEVCacheCapacityModel.service_name,
         context=context,
         desires=desires,
-        requirement=requirement,
         extra_model_arguments={
             "copies_per_region": copies_per_region,
             "cross_region_replication": cross_region_replication.value,
@@ -441,7 +440,6 @@ class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
         service_type: str,
         context: RegionContext,
         desires: CapacityDesires,
-        requirement: CapacityRequirement,
         extra_model_arguments: Dict[str, Any],
     ) -> List[ServiceCapacity]:
         """Calculate EVCache-specific service costs (network transfer).
@@ -453,7 +451,6 @@ class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
 
         Note: copies_per_region is required when replication is enabled.
         """
-        _ = requirement
 
         # Default to 'none' for composite models (like Key-Value) that compose
         # EVCache without specifying cross_region_replication
