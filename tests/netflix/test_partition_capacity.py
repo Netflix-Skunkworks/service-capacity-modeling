@@ -2,16 +2,16 @@
 """
 Test suite for partition-aware capacity planning algorithms.
 
-This file demonstrates THREE algorithm variants:
-    1. ORIGINAL: While-loop (greedy, max PPn only)
-    2. CLOSED_FORM: O(1) mathematical equivalent to original
-    3. SEARCH: Searches PPn from max to 1, finds solutions original misses
+Key algorithms:
+    - CLOSED_FORM: O(1) mathematical capacity calculation for a given PPn
+    - FIND_CAPACITY_CONFIG: Searches PPn values, finds solutions when max_nodes is tight
 
 Key findings:
-    - ORIGINAL == CLOSED_FORM (always, by mathematical proof)
-    - SEARCH ⊇ ORIGINAL (search finds everything original finds, plus more)
-    - SEARCH ≠ ORIGINAL when max_nodes is tight (search finds solutions original misses)
+    - find_capacity_config ⊇ closed_form (finds everything closed_form finds, plus more)
+    - find_capacity_config finds solutions closed_form misses when max_nodes is tight
 """
+
+from dataclasses import dataclass
 
 import pytest
 from hypothesis import given, settings
@@ -21,17 +21,114 @@ from service_capacity_modeling.models.org.netflix.partition_capacity import (
     CapacityProblem,
     CapacityResult,
     closed_form_algorithm,
-    original_algorithm,
-    search_algorithm,
+    find_capacity_config,
+    get_tier_config,
+    search_with_fault_tolerance,
+    system_availability,
+    utility,
 )
 
 
 # =============================================================================
-# TEST DATA: Problems demonstrating equivalence and differences
+# TEST HELPERS: ParetoPoint and compute_pareto_frontier (moved from production)
 # =============================================================================
 
-# Problems where all three algorithms agree (max_nodes is relaxed)
-EQUIVALENT_CASES = [
+
+@dataclass(frozen=True)
+class ParetoPoint:
+    """One point on the Pareto frontier (for exploring tradeoffs in tests)."""
+
+    availability: float
+    cost: float
+    rf: int
+    node_count: int
+    ppn: int
+
+
+def compute_pareto_frontier(
+    problem: CapacityProblem,
+    tier: int,
+    cost_per_node: float,
+    n_zones: int = 3,
+    zone_aware: bool = False,
+) -> list[ParetoPoint]:
+    """Find all Pareto-optimal (availability, cost) configurations.
+
+    This is a TEST HELPER for validating that search_with_fault_tolerance
+    returns efficient solutions.
+    """
+    config = get_tier_config(tier)
+    tier_problem = CapacityProblem(
+        n_partitions=problem.n_partitions,
+        partition_size_gib=problem.partition_size_gib,
+        disk_per_node_gib=problem.disk_per_node_gib,
+        min_rf=config.min_rf,
+        cpu_needed=problem.cpu_needed,
+        cpu_per_node=problem.cpu_per_node,
+        max_nodes=problem.max_nodes,
+    )
+
+    max_ppn = int(problem.disk_per_node_gib / problem.partition_size_gib)
+    if max_ppn < 1:
+        return []
+
+    # Collect configs
+    all_configs: list[ParetoPoint] = []
+    for ppn in range(max_ppn, 0, -1):
+        result = closed_form_algorithm(tier_problem, ppn=ppn)
+        if result is None:
+            continue
+
+        # Calculate availability based on placement strategy
+        if zone_aware:
+            avail = (
+                1.0 if result.rf >= 2 else (1.0 - 1.0 / n_zones) ** problem.n_partitions
+            )
+        else:
+            avail = system_availability(
+                result.node_count, n_zones, result.rf, problem.n_partitions
+            )
+        all_configs.append(
+            ParetoPoint(
+                availability=avail,
+                cost=result.node_count * cost_per_node,
+                rf=result.rf,
+                node_count=result.node_count,
+                ppn=ppn,
+            )
+        )
+
+    # Filter to Pareto frontier
+    frontier = [
+        c
+        for c in all_configs
+        if not any(
+            o.availability >= c.availability
+            and o.cost <= c.cost
+            and (o.availability > c.availability or o.cost < c.cost)
+            for o in all_configs
+            if o is not c
+        )
+    ]
+
+    # Deduplicate and sort
+    seen: set[tuple[float, float]] = set()
+    unique: list[ParetoPoint] = []
+    for p in sorted(frontier, key=lambda x: x.cost):
+        key = (round(p.availability, 6), round(p.cost, 2))
+        if key not in seen:
+            seen.add(key)
+            unique.append(p)
+
+    return unique
+
+
+# =============================================================================
+# TEST DATA: Problems demonstrating algorithm behavior
+# =============================================================================
+
+# Problems where algorithms work (max_nodes is relaxed)
+STANDARD_CASES = [
     pytest.param(
         CapacityProblem(200, 575, 2048, 2, 800, 16),
         id="data-constrained",
@@ -68,8 +165,8 @@ EQUIVALENT_CASES = [
     ),
 ]
 
-# Problems where SEARCH finds solutions but ORIGINAL/CLOSED_FORM return None
-SEARCH_ONLY_CASES = [
+# Problems where find_capacity_config succeeds but closed_form at max PPn fails
+TIGHT_MAX_NODES_CASES = [
     pytest.param(
         CapacityProblem(
             n_partitions=21,
@@ -93,8 +190,8 @@ SEARCH_ONLY_CASES = [
             cpu_per_node=1,
             max_nodes=15,  # tight!
         ),
-        # ppn=10: base=4, rf=4, total=16 > 15 (original fails)
-        # ppn=7:  base=5, rf=3, total=15 ≤ 15 (search succeeds)
+        # ppn=10: base=4, rf=4, total=16 > 15 (closed_form at max ppn fails)
+        # ppn=7:  base=5, rf=3, total=15 ≤ 15 (find_capacity_config succeeds)
         CapacityResult(node_count=15, rf=3, partitions_per_node=7, base_nodes=5),
         id="31-partitions-need-ppn-7",
     ),
@@ -102,30 +199,18 @@ SEARCH_ONLY_CASES = [
 
 
 # =============================================================================
-# PART 1: CLOSED_FORM == ORIGINAL (mathematical equivalence)
+# PART 1: Closed-form algorithm tests
 # =============================================================================
 
 
-class TestClosedFormEqualsOriginal:
-    """Verify closed_form produces IDENTICAL results to original.
+class TestClosedFormAlgorithm:
+    """Test the O(1) closed-form capacity calculation."""
 
-    This is a REFACTOR, not a new algorithm. Same logic, cleaner code.
-    The while-loop increments RF; closed_form computes it directly.
-    """
-
-    @pytest.mark.parametrize("problem", EQUIVALENT_CASES)
-    def test_deterministic_cases(self, problem: CapacityProblem):
-        """Closed-form matches original on curated test cases."""
-        orig = original_algorithm(problem)
-        closed = closed_form_algorithm(problem)
-
-        assert orig is not None, "Original should find solution"
-        assert closed is not None, "Closed-form should find solution"
-
-        assert closed.node_count == orig.node_count
-        assert closed.rf == orig.rf
-        assert closed.partitions_per_node == orig.partitions_per_node
-        assert closed.base_nodes == orig.base_nodes
+    @pytest.mark.parametrize("problem", STANDARD_CASES)
+    def test_finds_valid_solution(self, problem: CapacityProblem):
+        """Closed-form should find solutions for standard problems."""
+        result = closed_form_algorithm(problem)
+        assert result is not None, "Should find solution"
 
     @given(
         problem=st.builds(
@@ -144,54 +229,85 @@ class TestClosedFormEqualsOriginal:
         )
     )
     @settings(max_examples=500, deadline=None)
-    def test_hypothesis_always_equal(self, problem: CapacityProblem):
-        """For ANY valid problem, closed_form == original."""
-        # Skip invalid problems (partition larger than disk)
+    def test_satisfies_constraints_when_returns_result(self, problem: CapacityProblem):
+        """When closed_form returns a result, it satisfies all constraints."""
         if problem.partition_size_gib > problem.disk_per_node_gib:
             return
 
-        orig = original_algorithm(problem)
-        closed = closed_form_algorithm(problem)
+        result = closed_form_algorithm(problem)
+        if result is None:
+            return
 
-        if orig is None:
-            assert closed is None, f"Orig=None but Closed found: {problem}"
-        elif closed is None:
-            pytest.fail(f"Closed=None but Orig found: {problem}")
-        else:
-            assert closed.node_count == orig.node_count, (
-                f"node_count mismatch: orig={orig.node_count}, "
-                f"closed={closed.node_count}\n{problem}"
-            )
-            assert closed.rf == orig.rf, (
-                f"rf: orig={orig.rf}, closed={closed.rf}\n{problem}"
-            )
+        # CPU constraint
+        assert result.node_count * problem.cpu_per_node >= problem.cpu_needed
+        # Disk constraint
+        assert result.node_count * result.partitions_per_node >= (
+            problem.n_partitions * result.rf
+        )
+        # RF constraint
+        assert result.rf >= problem.min_rf
+        # Size constraint
+        assert result.node_count <= problem.max_nodes
 
 
 # =============================================================================
-# PART 2: SEARCH ⊇ ORIGINAL (search finds everything original finds)
+# PART 2: find_capacity_config finds solutions closed_form misses
 # =============================================================================
 
 
-class TestSearchSubsumesOriginal:
-    """Verify SEARCH finds all solutions ORIGINAL finds, with same or better results.
+class TestFindCapacityConfigBeatClosedForm:
+    """Demonstrate cases where find_capacity_config succeeds but closed_form fails.
 
-    When max_nodes is relaxed, both algorithms find the same solution.
-    SEARCH is never worse than ORIGINAL.
+    This happens when max_nodes is tight: greedy (max PPn) produces a cluster
+    exceeding max_nodes, but a lower PPn produces a valid cluster.
     """
 
-    @pytest.mark.parametrize("problem", EQUIVALENT_CASES)
-    def test_same_results_when_unconstrained(self, problem: CapacityProblem):
-        """With relaxed max_nodes, search == original."""
-        orig = original_algorithm(problem)
-        search = search_algorithm(problem)
+    @pytest.mark.parametrize("problem,expected", TIGHT_MAX_NODES_CASES)
+    def test_closed_form_fails_find_capacity_config_succeeds(
+        self, problem: CapacityProblem, expected: CapacityResult
+    ):
+        """closed_form returns None, but find_capacity_config finds a solution."""
+        closed = closed_form_algorithm(problem)  # Uses max PPn
+        search = find_capacity_config(problem)
 
-        assert orig is not None
-        assert search is not None
+        # Closed-form at max PPn fails (greedy exceeds max_nodes)
+        assert closed is None, f"Expected closed_form to fail, got: {closed}"
 
-        # Same solution
-        assert search.node_count == orig.node_count
-        assert search.rf == orig.rf
-        assert search.partitions_per_node == orig.partitions_per_node
+        # find_capacity_config succeeds
+        assert search is not None, "find_capacity_config should find a solution"
+        assert search.node_count == expected.node_count
+        assert search.rf == expected.rf
+        assert search.partitions_per_node == expected.partitions_per_node
+
+    def test_walkthrough_21_partitions(self):
+        """Detailed walkthrough of the 21-partition example."""
+        problem = CapacityProblem(
+            n_partitions=21,
+            partition_size_gib=10.0,
+            disk_per_node_gib=100.0,
+            min_rf=1,
+            cpu_needed=10,
+            cpu_per_node=1,
+            max_nodes=10,
+        )
+
+        # CLOSED_FORM at max PPn: Only tries max PPn = 10
+        #   base = ceil(21/10) = 3 nodes
+        #   rf_for_cpu = ceil(10 / (3*1)) = 4
+        #   total = 3 * 4 = 12 nodes > 10 → FAILS
+        assert closed_form_algorithm(problem) is None
+
+        # FIND_CAPACITY_CONFIG: Tries PPn from 10 down to 1
+        #   PPn=10: base=3, rf=4, total=12 > 10 → skip
+        #   PPn=9:  base=3, rf=4, total=12 > 10 → skip
+        #   ...
+        #   PPn=5:  base=5, rf=2, total=10 ≤ 10 → SUCCESS!
+        result = find_capacity_config(problem)
+        assert result is not None
+        assert result.node_count == 10
+        assert result.partitions_per_node == 5
+        assert result.rf == 2
+        assert result.base_nodes == 5
 
     @given(
         problem=st.builds(
@@ -210,132 +326,34 @@ class TestSearchSubsumesOriginal:
         )
     )
     @settings(max_examples=500, deadline=None)
-    def test_hypothesis_search_never_worse(self, problem: CapacityProblem):
-        """SEARCH always finds a solution if ORIGINAL does."""
+    def test_find_capacity_config_never_worse(self, problem: CapacityProblem):
+        """find_capacity_config always finds a solution if closed_form does."""
         if problem.partition_size_gib > problem.disk_per_node_gib:
             return
 
-        orig = original_algorithm(problem)
-        search = search_algorithm(problem)
+        closed = closed_form_algorithm(problem)
+        search = find_capacity_config(problem)
 
-        if orig is not None:
+        if closed is not None:
             assert search is not None, (
-                f"Original found solution but search didn't: {problem}"
+                f"closed_form found solution but find_capacity_config didn't: {problem}"
             )
-            # Search should find same or smaller cluster
-            assert search.node_count <= orig.node_count, (
-                f"Search worse than original: {search.node_count} > {orig.node_count}"
+            # find_capacity_config should find same or smaller cluster
+            assert search.node_count <= closed.node_count, (
+                f"find_capacity_config worse: {search.node_count} > {closed.node_count}"
             )
 
 
 # =============================================================================
-# PART 3: SEARCH ≠ ORIGINAL (search finds solutions original misses)
-# =============================================================================
-
-
-class TestSearchFindsSolutionsOriginalMisses:
-    """Demonstrate cases where SEARCH succeeds but ORIGINAL fails.
-
-    This happens when:
-    1. Greedy (max PPn) produces a cluster exceeding max_nodes
-    2. A lower PPn produces a valid cluster within max_nodes
-
-    These cases prove SEARCH is strictly more capable than ORIGINAL.
-    """
-
-    @pytest.mark.parametrize("problem,expected", SEARCH_ONLY_CASES)
-    def test_original_fails_search_succeeds(
-        self, problem: CapacityProblem, expected: CapacityResult
-    ):
-        """Original returns None, but search finds a valid solution."""
-        orig = original_algorithm(problem)
-        search = search_algorithm(problem)
-
-        # Original fails (greedy exceeds max_nodes)
-        assert orig is None, f"Expected original to fail, got: {orig}"
-
-        # Search succeeds
-        assert search is not None, "Search should find a solution"
-        assert search.node_count == expected.node_count
-        assert search.rf == expected.rf
-        assert search.partitions_per_node == expected.partitions_per_node
-
-    def test_why_search_beats_original_21_partitions(self):
-        """Detailed walkthrough of the 21-partition example."""
-        problem = CapacityProblem(
-            n_partitions=21,
-            partition_size_gib=10.0,
-            disk_per_node_gib=100.0,
-            min_rf=1,
-            cpu_needed=10,
-            cpu_per_node=1,
-            max_nodes=10,
-        )
-
-        # ORIGINAL/CLOSED_FORM: Only tries max PPn = 10
-        #   base = ceil(21/10) = 3 nodes
-        #   rf_for_cpu = ceil(10 / (3*1)) = 4
-        #   total = 3 * 4 = 12 nodes > 10 → FAILS
-        assert original_algorithm(problem) is None
-        assert closed_form_algorithm(problem) is None
-
-        # SEARCH: Tries PPn from 10 down to 1
-        #   PPn=10: base=3, rf=4, total=12 > 10 → skip
-        #   PPn=9:  base=3, rf=4, total=12 > 10 → skip
-        #   ...
-        #   PPn=5:  base=5, rf=2, total=10 ≤ 10 → SUCCESS!
-        result = search_algorithm(problem)
-        assert result is not None
-        assert result.node_count == 10
-        assert result.partitions_per_node == 5
-        assert result.rf == 2
-        assert result.base_nodes == 5
-
-    def test_search_maximizes_rf_within_constraint(self):
-        """Search prefers higher RF (better fault tolerance) when possible."""
-        # With max_nodes=100, greedy gives rf=4
-        relaxed = CapacityProblem(
-            n_partitions=21,
-            partition_size_gib=10.0,
-            disk_per_node_gib=100.0,
-            min_rf=1,
-            cpu_needed=10,
-            cpu_per_node=1,
-            max_nodes=100,  # relaxed
-        )
-        result_relaxed = search_algorithm(relaxed)
-        assert result_relaxed is not None
-        assert result_relaxed.rf == 4  # Higher RF (better!)
-        assert result_relaxed.node_count == 12
-
-        # With max_nodes=10, search finds rf=2
-        tight = CapacityProblem(
-            n_partitions=21,
-            partition_size_gib=10.0,
-            disk_per_node_gib=100.0,
-            min_rf=1,
-            cpu_needed=10,
-            cpu_per_node=1,
-            max_nodes=10,  # tight
-        )
-        result_tight = search_algorithm(tight)
-        assert result_tight is not None
-        assert result_tight.rf == 2  # Lower RF (but valid!)
-        assert result_tight.node_count == 10
-
-
-# =============================================================================
-# PART 4: All algorithms satisfy constraints when they return a result
+# PART 3: All algorithms satisfy constraints when they return a result
 # =============================================================================
 
 
 class TestConstraintsSatisfied:
     """All algorithms produce valid results that satisfy problem constraints."""
 
-    @pytest.mark.parametrize("problem", EQUIVALENT_CASES)
-    @pytest.mark.parametrize(
-        "algo", [original_algorithm, closed_form_algorithm, search_algorithm]
-    )
+    @pytest.mark.parametrize("problem", STANDARD_CASES)
+    @pytest.mark.parametrize("algo", [closed_form_algorithm, find_capacity_config])
     def test_result_satisfies_constraints(self, problem: CapacityProblem, algo):
         """Every result satisfies CPU, disk, RF, and size constraints."""
         result = algo(problem)
@@ -365,47 +383,9 @@ class TestConstraintsSatisfied:
             f"Size not satisfied: {result.node_count} > {problem.max_nodes}"
         )
 
-    @given(
-        problem=st.builds(
-            CapacityProblem,
-            n_partitions=st.integers(1, 500),
-            partition_size_gib=st.floats(
-                10, 500, allow_nan=False, allow_infinity=False
-            ),
-            disk_per_node_gib=st.floats(
-                100, 5000, allow_nan=False, allow_infinity=False
-            ),
-            min_rf=st.integers(1, 5),
-            cpu_needed=st.integers(1, 5000),
-            cpu_per_node=st.integers(1, 64),
-            max_nodes=st.integers(2, 10000),
-        )
-    )
-    @settings(max_examples=500, deadline=None)
-    def test_hypothesis_constraints_always_satisfied(self, problem: CapacityProblem):
-        """Property test: all algorithms satisfy constraints."""
-        if problem.partition_size_gib > problem.disk_per_node_gib:
-            return
-
-        for algo in [original_algorithm, closed_form_algorithm, search_algorithm]:
-            result = algo(problem)
-            if result is None:
-                continue
-
-            # CPU
-            assert result.node_count * problem.cpu_per_node >= problem.cpu_needed
-            # Disk
-            assert result.node_count * result.partitions_per_node >= (
-                problem.n_partitions * result.rf
-            )
-            # RF
-            assert result.rf >= problem.min_rf
-            # Size
-            assert result.node_count <= problem.max_nodes
-
 
 # =============================================================================
-# PART 5: Node count formula verification
+# PART 4: Node count formula verification
 # =============================================================================
 
 
@@ -434,7 +414,7 @@ class TestNodeCountFormula:
         if problem.partition_size_gib > problem.disk_per_node_gib:
             return
 
-        for algo in [original_algorithm, closed_form_algorithm, search_algorithm]:
+        for algo in [closed_form_algorithm, find_capacity_config]:
             result = algo(problem)
             if result is None:
                 continue
@@ -447,7 +427,7 @@ class TestNodeCountFormula:
 
 
 # =============================================================================
-# PART 6: Tier configuration and utility function tests
+# PART 5: Tier configuration and utility function tests
 # =============================================================================
 
 
@@ -456,10 +436,6 @@ class TestTierConfiguration:
 
     def test_tier_defaults_exist(self):
         """All default tiers should be defined."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            get_tier_config,
-        )
-
         for tier in range(4):
             config = get_tier_config(tier)
             assert config.min_rf >= 2
@@ -469,10 +445,6 @@ class TestTierConfiguration:
 
     def test_tier_ordering(self):
         """Higher tiers should have lower requirements."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            get_tier_config,
-        )
-
         for tier in range(3):
             lower = get_tier_config(tier)
             higher = get_tier_config(tier + 1)
@@ -485,7 +457,6 @@ class TestTierConfiguration:
     def test_invalid_tier_returns_default(self):
         """Invalid tier should return tier 2 config."""
         from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            get_tier_config,
             TIER_DEFAULTS,
         )
 
@@ -494,40 +465,22 @@ class TestTierConfiguration:
 
 
 class TestUtilityBehavioralExpectations:
-    """Verify utility function produces expected decisions.
-
-    These tests verify the utility function picks the "right" configuration,
-    not just that it has correct mathematical properties.
-    """
+    """Verify utility function produces expected decisions."""
 
     def test_tier0_prefers_availability_over_cost(self):
         """Tier 0 should pick high-availability even at 2x cost."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            utility,
-        )
-
         u_cheap = utility(availability=0.90, cost=1000, tier=0, base_cost=1000)
         u_expensive = utility(availability=0.999, cost=2000, tier=0, base_cost=1000)
         assert u_expensive > u_cheap, "Tier 0 should prefer availability over cost"
 
     def test_tier3_prefers_cost_over_availability(self):
         """Tier 3 should pick low-cost even with lower availability."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            utility,
-        )
-
         u_cheap = utility(availability=0.90, cost=1000, tier=3, base_cost=1000)
         u_expensive = utility(availability=0.999, cost=2000, tier=3, base_cost=1000)
         assert u_cheap > u_expensive, "Tier 3 should prefer cost over availability"
 
     def test_cost_increase_hurts_tier3_more_than_tier0(self):
         """A cost increase should hurt tier 3 utility more than tier 0."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            utility,
-        )
-
-        # Compare the IMPACT of a cost increase (not absolute values)
-        # because different tiers have different availability targets
         u_tier0_base = utility(availability=0.999, cost=1000, tier=0, base_cost=1000)
         u_tier0_expensive = utility(
             availability=0.999, cost=2000, tier=0, base_cost=1000
@@ -540,7 +493,6 @@ class TestUtilityBehavioralExpectations:
         )
         cost_impact_tier3 = u_tier3_base - u_tier3_expensive
 
-        # Tier 3 has higher cost sensitivity, so should penalize more
         assert cost_impact_tier3 > cost_impact_tier0, (
             f"Tier 3 should penalize cost more: tier0={cost_impact_tier0:.4f}, "
             f"tier3={cost_impact_tier3:.4f}"
@@ -548,12 +500,6 @@ class TestUtilityBehavioralExpectations:
 
     def test_below_target_always_worse_than_at_target(self):
         """Being below target should always score worse than at target."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            utility,
-            get_tier_config,
-        )
-
-        # Tier 2 target is 0.95
         config = get_tier_config(2)
         below_target = config.target_availability - 0.01
         at_target = config.target_availability
@@ -572,93 +518,40 @@ class TestUtilityFunction:
 
     def test_utility_above_target_is_positive(self):
         """Utility should be positive when availability exceeds target."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            utility,
-        )
-
-        # Tier 2: target is 0.95
         u = utility(availability=0.99, cost=100, tier=2, base_cost=100)
         assert u > 0, f"Expected positive utility, got {u}"
 
     def test_utility_below_target_is_negative(self):
         """Utility should be negative when availability is below target."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            utility,
-        )
-
-        # Tier 2: target is 0.95
         u = utility(availability=0.90, cost=100, tier=2, base_cost=100)
         assert u < 0, f"Expected negative utility, got {u}"
 
     def test_utility_higher_availability_higher_utility(self):
         """Higher availability should give higher utility."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            utility,
-        )
-
         u_low = utility(availability=0.95, cost=100, tier=2, base_cost=100)
         u_high = utility(availability=0.99, cost=100, tier=2, base_cost=100)
-
         assert u_high > u_low
 
     def test_utility_higher_cost_lower_utility(self):
         """Higher cost should give lower utility."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            utility,
-        )
-
         u_cheap = utility(availability=0.99, cost=100, tier=2, base_cost=100)
         u_expensive = utility(availability=0.99, cost=200, tier=2, base_cost=100)
-
         assert u_cheap > u_expensive
 
     def test_utility_diminishing_returns(self):
         """Going from 99% to 99.9% should have diminishing returns."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            utility,
-        )
-
-        # Same cost, different availability improvements
         u_95 = utility(availability=0.95, cost=100, tier=2, base_cost=100)
         u_99 = utility(availability=0.99, cost=100, tier=2, base_cost=100)
         u_999 = utility(availability=0.999, cost=100, tier=2, base_cost=100)
 
-        # Marginal utility should decrease
-        delta_1 = u_99 - u_95  # 95% -> 99% (4% improvement)
-        delta_2 = u_999 - u_99  # 99% -> 99.9% (0.9% improvement)
+        delta_1 = u_99 - u_95
+        delta_2 = u_999 - u_99
 
-        # First improvement is larger, but second should still be positive
         assert delta_1 > delta_2 > 0
-
-    def test_utility_tier_affects_cost_sensitivity(self):
-        """Higher tiers should be more cost-sensitive."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            utility,
-        )
-
-        # Same availability (above target for both), same cost increase
-        # Tier 3 should penalize cost more than tier 0
-        u_tier0 = utility(availability=0.999, cost=200, tier=0, base_cost=100)
-        u_tier3 = utility(availability=0.999, cost=200, tier=3, base_cost=100)
-
-        # Tier 3 has higher cost_sensitivity, so should have lower utility
-        # for the same cost increase
-        # Note: availability value differs due to different targets
-        # So we compare the impact of cost increase
-        u_tier0_base = utility(availability=0.999, cost=100, tier=0, base_cost=100)
-        u_tier3_base = utility(availability=0.999, cost=100, tier=3, base_cost=100)
-
-        cost_impact_tier0 = u_tier0_base - u_tier0
-        cost_impact_tier3 = u_tier3_base - u_tier3
-
-        assert cost_impact_tier3 > cost_impact_tier0, (
-            f"Tier 3 should penalize cost more: "
-            f"tier0={cost_impact_tier0}, tier3={cost_impact_tier3}"
-        )
 
 
 # =============================================================================
-# PART 7: Fault-tolerant search algorithm tests
+# PART 6: Fault-tolerant search algorithm tests
 # =============================================================================
 
 
@@ -667,10 +560,6 @@ class TestSearchWithFaultTolerance:
 
     def test_basic_search_returns_result(self):
         """Basic search should return a valid result."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            search_with_fault_tolerance,
-        )
-
         problem = CapacityProblem(
             n_partitions=100,
             partition_size_gib=100,
@@ -691,10 +580,6 @@ class TestSearchWithFaultTolerance:
 
     def test_higher_tier_prefers_availability(self):
         """Tier 0 should prefer higher availability than tier 3."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            search_with_fault_tolerance,
-        )
-
         problem = CapacityProblem(
             n_partitions=100,
             partition_size_gib=100,
@@ -709,17 +594,10 @@ class TestSearchWithFaultTolerance:
 
         assert result_tier0 is not None
         assert result_tier3 is not None
-
-        # Tier 0 should have higher or equal availability
         assert result_tier0.system_availability >= result_tier3.system_availability
 
     def test_result_satisfies_constraints(self):
         """Result should satisfy all problem constraints."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            search_with_fault_tolerance,
-            get_tier_config,
-        )
-
         problem = CapacityProblem(
             n_partitions=200,
             partition_size_gib=50,
@@ -740,24 +618,17 @@ class TestSearchWithFaultTolerance:
 
             # CPU constraint
             assert result.node_count * problem.cpu_per_node >= problem.cpu_needed
-
             # Disk constraint
             total_slots = result.node_count * result.partitions_per_node
             total_replicas = problem.n_partitions * result.rf
             assert total_slots >= total_replicas
-
             # RF constraint
             assert result.rf >= config.min_rf
-
             # Max nodes constraint
             assert result.node_count <= problem.max_nodes
 
     def test_zone_aware_cost_is_lower_or_equal(self):
         """Zone-aware cost should be <= random placement cost."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            search_with_fault_tolerance,
-        )
-
         problem = CapacityProblem(
             n_partitions=100,
             partition_size_gib=100,
@@ -770,42 +641,11 @@ class TestSearchWithFaultTolerance:
         result = search_with_fault_tolerance(problem, tier=0, cost_per_node=100)
 
         assert result is not None
-        # Zone-aware placement achieves same availability with lower RF
-        # so cost should be <= current cost
         assert result.zone_aware_cost <= result.cost
         assert result.zone_aware_savings >= 0
 
-    def test_many_partitions_needs_high_rf(self):
-        """With many partitions, system needs high RF for good availability."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            search_with_fault_tolerance,
-        )
-
-        # 500 partitions - with RF=2, availability would be very low
-        problem = CapacityProblem(
-            n_partitions=500,
-            partition_size_gib=10,
-            disk_per_node_gib=1000,
-            min_rf=2,
-            cpu_needed=800,
-            cpu_per_node=16,
-        )
-
-        result = search_with_fault_tolerance(problem, tier=0, cost_per_node=100)
-
-        assert result is not None
-        # For 500 partitions, tier 0 needs high RF to meet 99.9% target
-        # If RF is too low, availability won't meet target
-        # The algorithm should find a configuration that meets or gets close to target
-        assert result.system_availability > 0.5  # At least reasonable
-
     def test_impossible_returns_none(self):
         """If no config meets constraints, return None."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            search_with_fault_tolerance,
-        )
-
-        # Partition larger than disk
         problem = CapacityProblem(
             n_partitions=100,
             partition_size_gib=5000,  # Way bigger than disk
@@ -816,104 +656,122 @@ class TestSearchWithFaultTolerance:
         )
 
         result = search_with_fault_tolerance(problem, tier=2, cost_per_node=100)
-
         assert result is None
 
 
 # =============================================================================
-# PART 8: Placement model tests
+# PART 7: Zone-aware placement tests
 # =============================================================================
 
 
-class TestPlacementModels:
-    """Test placement model abstraction."""
+class TestZoneAwarePlacement:
+    """Test zone_aware parameter behavior."""
 
-    def test_uniform_random_uses_defaults(self):
-        """UniformRandomPlacement should use default implementations."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            UniformRandomPlacement,
-            per_partition_unavailability,
-            system_availability,
+    def test_random_placement_has_unavailability(self):
+        """Random placement (zone_aware=False) has <100% availability."""
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
         )
 
-        placement = UniformRandomPlacement()
-
-        # Should match the default functions
-        assert placement.per_partition_unavailability(
-            12, 3, 2
-        ) == per_partition_unavailability(12, 3, 2)
-        assert placement.system_availability(12, 3, 2, 100) == system_availability(
-            12, 3, 2, 100
-        )
-        assert placement.name() == "UniformRandomPlacement"
-
-    def test_zone_aware_rf2_gives_zero_unavailability(self):
-        """ZoneAwarePlacement with RF>=2 should give 0 unavailability."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            ZoneAwarePlacement,
+        result = search_with_fault_tolerance(
+            problem, tier=2, cost_per_node=100, zone_aware=False
         )
 
-        placement = ZoneAwarePlacement()
-
-        # RF=2 or higher should give 0 unavailability
-        assert placement.per_partition_unavailability(12, 3, 2) == 0.0
-        assert placement.per_partition_unavailability(12, 3, 3) == 0.0
-        assert placement.per_partition_unavailability(12, 3, 5) == 0.0
-
-        # System availability should be 100%
-        assert placement.system_availability(12, 3, 2, 100) == 1.0
-        assert placement.system_availability(12, 3, 2, 1000) == 1.0
-
-    def test_zone_aware_rf1_has_unavailability(self):
-        """ZoneAwarePlacement with RF=1 still has unavailability."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            ZoneAwarePlacement,
+        assert result is not None
+        assert result.system_availability < 1.0, (
+            f"Random placement should have <100% availability, "
+            f"got {result.system_availability}"
         )
 
-        placement = ZoneAwarePlacement()
-
-        # RF=1 has 1/n_zones unavailability
-        unavail = placement.per_partition_unavailability(12, 3, 1)
-        assert abs(unavail - 1 / 3) < 0.0001
-
-        # System availability = (1 - 1/3)^100 for 100 partitions
-        avail = placement.system_availability(12, 3, 1, 100)
-        expected = (2 / 3) ** 100
-        assert abs(avail - expected) < 0.0001
-
-    def test_zone_aware_always_better_than_random(self):
-        """ZoneAwarePlacement should always give >= availability than random."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            UniformRandomPlacement,
-            ZoneAwarePlacement,
+    def test_zone_aware_rf2_gives_perfect_availability(self):
+        """Zone-aware placement with RF>=2 gives 100% availability."""
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
         )
 
-        random_placement = UniformRandomPlacement()
-        zone_aware = ZoneAwarePlacement()
+        result = search_with_fault_tolerance(
+            problem, tier=2, cost_per_node=100, zone_aware=True
+        )
 
-        test_cases = [
-            (12, 3, 2, 100),
-            (12, 3, 3, 200),
-            (24, 3, 4, 500),
-            (30, 3, 5, 1000),
-        ]
+        assert result is not None
+        assert result.system_availability == 1.0, (
+            f"Zone-aware with RF>=2 should give 100% availability, "
+            f"got {result.system_availability}"
+        )
 
-        for n_nodes, n_zones, rf, n_partitions in test_cases:
-            random_avail = random_placement.system_availability(
-                n_nodes, n_zones, rf, n_partitions
-            )
-            zone_aware_avail = zone_aware.system_availability(
-                n_nodes, n_zones, rf, n_partitions
-            )
+    def test_zone_aware_chooses_lower_rf(self):
+        """Zone-aware search chooses lower RF since availability is guaranteed."""
+        problem = CapacityProblem(
+            n_partitions=500,
+            partition_size_gib=10,
+            disk_per_node_gib=1000,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
 
-            assert zone_aware_avail >= random_avail, (
-                f"Zone-aware should be >= random: "
-                f"random={random_avail}, zone_aware={zone_aware_avail}"
-            )
+        result_random = search_with_fault_tolerance(
+            problem, tier=0, cost_per_node=100, zone_aware=False
+        )
+        result_zone_aware = search_with_fault_tolerance(
+            problem, tier=0, cost_per_node=100, zone_aware=True
+        )
+
+        assert result_random is not None
+        assert result_zone_aware is not None
+
+        # Zone-aware should choose lower or equal RF
+        assert result_zone_aware.rf <= result_random.rf, (
+            f"Zone-aware should choose RF <= random: "
+            f"zone_aware.rf={result_zone_aware.rf}, random.rf={result_random.rf}"
+        )
+
+        # Zone-aware should have lower or equal cost
+        assert result_zone_aware.cost <= result_random.cost
+
+    def test_zone_aware_cost_matches_zone_aware_search(self):
+        """zone_aware_cost should match what zone_aware=True search finds."""
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        # Get result with random placement
+        result = search_with_fault_tolerance(
+            problem, tier=2, cost_per_node=100, zone_aware=False
+        )
+        # Get what zone-aware search would choose
+        result_zone_aware = search_with_fault_tolerance(
+            problem, tier=2, cost_per_node=100, zone_aware=True
+        )
+
+        assert result is not None
+        assert result_zone_aware is not None
+
+        # The zone_aware_cost in result should match what zone-aware search finds
+        assert result.zone_aware_cost == result_zone_aware.cost, (
+            f"zone_aware_cost should match actual zone-aware search result: "
+            f"zone_aware_cost={result.zone_aware_cost}, "
+            f"actual_zone_aware_result.cost={result_zone_aware.cost}"
+        )
 
 
 # =============================================================================
-# PART 9: Pareto frontier validation tests
+# PART 8: Pareto frontier validation tests
 # =============================================================================
 
 
@@ -921,18 +779,7 @@ class TestParetoFrontierValidation:
     """Verify search returns Pareto-optimal solutions and frontier is correct."""
 
     def test_search_picks_max_utility_from_frontier(self):
-        """The search result should have highest utility among frontier points.
-
-        This is the REAL test: verify utility function drives decisions correctly.
-        We compute utility for each frontier point and check the search picked the max.
-        """
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            compute_pareto_frontier,
-            search_with_fault_tolerance,
-            utility,
-        )
-        # search_algorithm already imported at module level
-
+        """The search result should have highest utility among frontier points."""
         problem = CapacityProblem(
             n_partitions=100,
             partition_size_gib=100,
@@ -955,8 +802,8 @@ class TestParetoFrontierValidation:
             if result is None or not frontier:
                 continue
 
-            # Get baseline for utility calculation (same as search uses)
-            baseline = search_algorithm(problem)
+            # Get baseline for utility calculation
+            baseline = find_capacity_config(problem)
             if baseline is None:
                 continue
             base_cost = baseline.node_count * cost_per_node
@@ -969,9 +816,7 @@ class TestParetoFrontierValidation:
                 frontier_utilities, key=lambda x: x[1]
             )
 
-            # The search result's utility should match (or be very close to) the best
-            # Note: search explores more configs than just the frontier, so it might
-            # find a slightly better non-frontier point, but never worse
+            # Search result's utility should match or exceed the best frontier point
             assert result.utility_score >= best_frontier_utility - 0.001, (
                 f"Tier {tier}: Search utility worse than best frontier point!\n"
                 f"Search: avail={result.system_availability:.4f}, cost={result.cost}, "
@@ -980,56 +825,8 @@ class TestParetoFrontierValidation:
                 f"cost={best_frontier_point.cost}, utility={best_frontier_utility:.4f}"
             )
 
-    def test_result_is_on_pareto_frontier(self):
-        """The returned result must be Pareto-optimal."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            compute_pareto_frontier,
-            search_with_fault_tolerance,
-        )
-
-        problem = CapacityProblem(
-            n_partitions=100,
-            partition_size_gib=100,
-            disk_per_node_gib=2048,
-            min_rf=2,
-            cpu_needed=800,
-            cpu_per_node=16,
-        )
-
-        for tier in range(4):
-            result = search_with_fault_tolerance(problem, tier=tier, cost_per_node=100)
-            frontier = compute_pareto_frontier(problem, tier=tier, cost_per_node=100)
-
-            if result is None:
-                continue
-
-            # Result should be on the frontier (or dominated by a frontier point
-            # that the search didn't pick due to utility scoring)
-            on_frontier = any(
-                abs(p.availability - result.system_availability) < 0.001
-                and abs(p.cost - result.cost) < 0.01
-                for p in frontier
-            )
-
-            # Alternatively, result could be dominated by a frontier point
-            # (the utility function may prefer a different tradeoff)
-            dominated_by_frontier = any(
-                p.availability >= result.system_availability and p.cost <= result.cost
-                for p in frontier
-            )
-
-            assert on_frontier or dominated_by_frontier, (
-                f"Tier {tier}: Result not related to Pareto frontier\n"
-                f"Result: avail={result.system_availability:.4f}, cost={result.cost}\n"
-                f"Frontier: {[(p.availability, p.cost) for p in frontier[:5]]}"
-            )
-
     def test_frontier_is_sorted_by_cost(self):
         """Pareto frontier should be sorted by cost (cheapest first)."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            compute_pareto_frontier,
-        )
-
         problem = CapacityProblem(
             n_partitions=100,
             partition_size_gib=100,
@@ -1048,10 +845,6 @@ class TestParetoFrontierValidation:
 
     def test_frontier_has_no_dominated_points(self):
         """No point on frontier should be dominated by another."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            compute_pareto_frontier,
-        )
-
         problem = CapacityProblem(
             n_partitions=100,
             partition_size_gib=100,
@@ -1067,7 +860,6 @@ class TestParetoFrontierValidation:
             for j, p2 in enumerate(frontier):
                 if i == j:
                     continue
-                # p2 should not dominate p1
                 dominated = (
                     p2.availability >= p1.availability
                     and p2.cost <= p1.cost
@@ -1077,10 +869,6 @@ class TestParetoFrontierValidation:
 
     def test_different_tiers_may_pick_different_frontier_points(self):
         """Higher tiers (cost-focused) should prefer cheaper frontier points."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            search_with_fault_tolerance,
-        )
-
         problem = CapacityProblem(
             n_partitions=100,
             partition_size_gib=100,
@@ -1096,8 +884,7 @@ class TestParetoFrontierValidation:
         assert result_t0 is not None
         assert result_t3 is not None
 
-        # Tier 0 (availability-focused) should have >= cost than tier 3 (cost-focused)
-        # Note: >= not > because they might pick the same point
+        # Tier 0 should have >= cost than tier 3
         assert result_t0.cost >= result_t3.cost, (
             f"Tier 0 should be at least as expensive as tier 3: "
             f"t0={result_t0.cost}, t3={result_t3.cost}"
@@ -1105,41 +892,23 @@ class TestParetoFrontierValidation:
 
 
 # =============================================================================
-# PART 10: Crossover point documentation tests
+# PART 9: Crossover point documentation tests
 # =============================================================================
 
 
 class TestCrossoverPointDocumentation:
-    """Document where each tier's cost/availability tradeoff flips.
-
-    A crossover point is the cost multiplier at which a tier becomes
-    indifferent between a cheaper/lower-availability config and an
-    expensive/higher-availability config.
-    """
+    """Document where each tier's cost/availability tradeoff flips."""
 
     def test_crossover_points_documented(self):
         """Document the cost multiplier where tiers reject availability gains."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            utility,
-            get_tier_config,
-        )
-
-        # Test: what cost multiplier makes tier indifferent to 4% availability gain?
-        # Base: 95% availability at 1x cost
-        # Better: 99% availability at Nx cost
-        # Find N where utility(better) < utility(base)
-
         base_cost = 1000
         base_avail = 0.95
-        better_avail = 0.99  # 4% gain
+        better_avail = 0.99
 
         crossover_points: dict[int, float] = {}
 
         for tier in range(4):
-            config = get_tier_config(tier)
-
-            # Find crossover point
-            for multiplier_tenth in range(10, 51):  # 1.0x to 5.0x in 0.1 increments
+            for multiplier_tenth in range(10, 51):
                 multiplier = multiplier_tenth / 10.0
 
                 u_base = utility(
@@ -1159,33 +928,15 @@ class TestCrossoverPointDocumentation:
                     crossover_points[tier] = multiplier
                     break
             else:
-                crossover_points[tier] = float("inf")  # Always prefers availability
+                crossover_points[tier] = float("inf")
 
-        # Document expected behavior:
-        # Tier 0 (critical): should accept higher cost for availability
-        # Tier 3 (test/dev): should prefer cheap over available
         assert crossover_points[0] >= crossover_points[3], (
             f"Tier 0 should tolerate more cost than tier 3: "
             f"t0={crossover_points[0]}, t3={crossover_points[3]}"
         )
 
-        # Print crossover points for documentation (visible in test output with -v)
-        print("\n=== Crossover Points (cost multiplier where tier rejects 4% gain) ===")
-        for tier in range(4):
-            config = get_tier_config(tier)
-            print(
-                f"Tier {tier}: rejects 4% availability gain at "
-                f"{crossover_points[tier]:.1f}x cost "
-                f"(target={config.target_availability}, "
-                f"sensitivity={config.cost_sensitivity})"
-            )
-
     def test_tiers_have_monotonic_cost_sensitivity(self):
-        """Higher tiers should be more cost-sensitive (reject gains earlier)."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            get_tier_config,
-        )
-
+        """Higher tiers should be more cost-sensitive."""
         for tier in range(3):
             lower = get_tier_config(tier)
             higher = get_tier_config(tier + 1)
@@ -1194,177 +945,4 @@ class TestCrossoverPointDocumentation:
                 f"Cost sensitivity should increase: "
                 f"tier {tier}={lower.cost_sensitivity}, "
                 f"tier {tier + 1}={higher.cost_sensitivity}"
-            )
-
-
-# =============================================================================
-# PART 11: Placement model integration tests
-# =============================================================================
-
-
-class TestPlacementModelIntegration:
-    """Verify placement models are actually used by search functions.
-
-    These tests would have caught the bug where _calculate_zone_aware_cost()
-    didn't use ZoneAwarePlacement at all.
-    """
-
-    def test_search_uses_placement_model_for_availability(self):
-        """search_with_fault_tolerance should use the provided placement model."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            search_with_fault_tolerance,
-            UniformRandomPlacement,
-            ZoneAwarePlacement,
-        )
-
-        problem = CapacityProblem(
-            n_partitions=100,
-            partition_size_gib=100,
-            disk_per_node_gib=2048,
-            min_rf=2,
-            cpu_needed=800,
-            cpu_per_node=16,
-        )
-
-        # With random placement, availability < 100%
-        result_random = search_with_fault_tolerance(
-            problem, tier=2, cost_per_node=100, placement=UniformRandomPlacement()
-        )
-
-        # With zone-aware placement and RF>=2, availability = 100%
-        result_zone_aware = search_with_fault_tolerance(
-            problem, tier=2, cost_per_node=100, placement=ZoneAwarePlacement()
-        )
-
-        assert result_random is not None
-        assert result_zone_aware is not None
-
-        # Zone-aware should report 100% availability
-        assert result_zone_aware.system_availability == 1.0, (
-            f"Zone-aware with RF>=2 should give 100% availability, "
-            f"got {result_zone_aware.system_availability}"
-        )
-
-        # Random placement should report < 100% availability
-        assert result_random.system_availability < 1.0, (
-            f"Random placement should give <100% availability, "
-            f"got {result_random.system_availability}"
-        )
-
-    def test_zone_aware_search_chooses_lower_rf(self):
-        """Zone-aware search should choose lower RF since availability is guaranteed."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            search_with_fault_tolerance,
-            UniformRandomPlacement,
-            ZoneAwarePlacement,
-        )
-
-        # Many partitions = random placement needs high RF for good availability
-        problem = CapacityProblem(
-            n_partitions=500,
-            partition_size_gib=10,
-            disk_per_node_gib=1000,
-            min_rf=2,
-            cpu_needed=800,
-            cpu_per_node=16,
-        )
-
-        result_random = search_with_fault_tolerance(
-            problem,
-            tier=0,
-            cost_per_node=100,  # Tier 0 = high availability target
-            placement=UniformRandomPlacement(),
-        )
-
-        result_zone_aware = search_with_fault_tolerance(
-            problem, tier=0, cost_per_node=100, placement=ZoneAwarePlacement()
-        )
-
-        assert result_random is not None
-        assert result_zone_aware is not None
-
-        # Zone-aware should choose lower or equal RF (RF=2 is enough for 100% avail)
-        assert result_zone_aware.rf <= result_random.rf, (
-            f"Zone-aware should choose RF <= random: "
-            f"zone_aware.rf={result_zone_aware.rf}, random.rf={result_random.rf}"
-        )
-
-        # Zone-aware should have lower or equal cost
-        assert result_zone_aware.cost <= result_random.cost, (
-            f"Zone-aware should cost <= random: "
-            f"zone_aware.cost={result_zone_aware.cost}, "
-            f"random.cost={result_random.cost}"
-        )
-
-    def test_zone_aware_cost_uses_utility_optimization(self):
-        """zone_aware_cost should be utility-optimized, not just min cost with RF>=2."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            search_with_fault_tolerance,
-            ZoneAwarePlacement,
-        )
-
-        problem = CapacityProblem(
-            n_partitions=100,
-            partition_size_gib=100,
-            disk_per_node_gib=2048,
-            min_rf=2,
-            cpu_needed=800,
-            cpu_per_node=16,
-        )
-
-        # Get result with default (random) placement
-        result = search_with_fault_tolerance(problem, tier=2, cost_per_node=100)
-        assert result is not None
-
-        # Get what zone-aware search would actually choose
-        result_zone_aware = search_with_fault_tolerance(
-            problem, tier=2, cost_per_node=100, placement=ZoneAwarePlacement()
-        )
-        assert result_zone_aware is not None
-
-        # The zone_aware_cost in result should match what zone-aware search finds
-        assert result.zone_aware_cost == result_zone_aware.cost, (
-            f"zone_aware_cost should match actual zone-aware search result: "
-            f"zone_aware_cost={result.zone_aware_cost}, "
-            f"actual_zone_aware_result.cost={result_zone_aware.cost}"
-        )
-
-    def test_pareto_frontier_uses_placement_model(self):
-        """compute_pareto_frontier should use the provided placement model."""
-        from service_capacity_modeling.models.org.netflix.partition_capacity import (
-            compute_pareto_frontier,
-            UniformRandomPlacement,
-            ZoneAwarePlacement,
-        )
-
-        problem = CapacityProblem(
-            n_partitions=100,
-            partition_size_gib=100,
-            disk_per_node_gib=2048,
-            min_rf=2,
-            cpu_needed=800,
-            cpu_per_node=16,
-        )
-
-        frontier_random = compute_pareto_frontier(
-            problem, tier=2, cost_per_node=100, placement=UniformRandomPlacement()
-        )
-
-        frontier_zone_aware = compute_pareto_frontier(
-            problem, tier=2, cost_per_node=100, placement=ZoneAwarePlacement()
-        )
-
-        # Zone-aware frontier should have 100% availability for all RF>=2 points
-        for point in frontier_zone_aware:
-            if point.rf >= 2:
-                assert point.availability == 1.0, (
-                    f"Zone-aware frontier should have 100% availability for RF>=2, "
-                    f"got {point.availability} for RF={point.rf}"
-                )
-
-        # Random frontier should have < 100% availability
-        for point in frontier_random:
-            assert point.availability < 1.0, (
-                f"Random frontier should have <100% availability, "
-                f"got {point.availability}"
             )

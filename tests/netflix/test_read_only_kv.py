@@ -1077,10 +1077,10 @@ class TestAlgorithmBehavior:
         """
         from service_capacity_modeling.models.org.netflix.partition_capacity import (
             CapacityProblem,
-            search_algorithm,
+            find_capacity_config,
         )
 
-        config = search_algorithm(
+        config = find_capacity_config(
             CapacityProblem(
                 n_partitions=21,
                 partition_size_gib=100.0,  # disk/partition = 1000/100 = 10 max_ppn
@@ -1111,10 +1111,10 @@ class TestAlgorithmBehavior:
         """
         from service_capacity_modeling.models.org.netflix.partition_capacity import (
             CapacityProblem,
-            search_algorithm,
+            find_capacity_config,
         )
 
-        config = search_algorithm(
+        config = find_capacity_config(
             CapacityProblem(
                 n_partitions=21,
                 partition_size_gib=100.0,
@@ -1145,11 +1145,11 @@ class TestAlgorithmBehavior:
         """
         from service_capacity_modeling.models.org.netflix.partition_capacity import (
             CapacityProblem,
-            search_algorithm,
+            find_capacity_config,
         )
 
         # With relaxed max_nodes, first valid config (at max_ppn) is returned
-        config = search_algorithm(
+        config = find_capacity_config(
             CapacityProblem(
                 n_partitions=100,
                 partition_size_gib=50.0,  # 1000/50 = 20 max_ppn
