@@ -492,6 +492,80 @@ class TestTierConfiguration:
         assert get_tier_config(-1) == TIER_DEFAULTS[2]
 
 
+class TestUtilityBehavioralExpectations:
+    """Verify utility function produces expected decisions.
+
+    These tests verify the utility function picks the "right" configuration,
+    not just that it has correct mathematical properties.
+    """
+
+    def test_tier0_prefers_availability_over_cost(self):
+        """Tier 0 should pick high-availability even at 2x cost."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            utility,
+        )
+
+        u_cheap = utility(availability=0.90, cost=1000, tier=0, base_cost=1000)
+        u_expensive = utility(availability=0.999, cost=2000, tier=0, base_cost=1000)
+        assert u_expensive > u_cheap, "Tier 0 should prefer availability over cost"
+
+    def test_tier3_prefers_cost_over_availability(self):
+        """Tier 3 should pick low-cost even with lower availability."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            utility,
+        )
+
+        u_cheap = utility(availability=0.90, cost=1000, tier=3, base_cost=1000)
+        u_expensive = utility(availability=0.999, cost=2000, tier=3, base_cost=1000)
+        assert u_cheap > u_expensive, "Tier 3 should prefer cost over availability"
+
+    def test_cost_increase_hurts_tier3_more_than_tier0(self):
+        """A cost increase should hurt tier 3 utility more than tier 0."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            utility,
+        )
+
+        # Compare the IMPACT of a cost increase (not absolute values)
+        # because different tiers have different availability targets
+        u_tier0_base = utility(availability=0.999, cost=1000, tier=0, base_cost=1000)
+        u_tier0_expensive = utility(
+            availability=0.999, cost=2000, tier=0, base_cost=1000
+        )
+        cost_impact_tier0 = u_tier0_base - u_tier0_expensive
+
+        u_tier3_base = utility(availability=0.999, cost=1000, tier=3, base_cost=1000)
+        u_tier3_expensive = utility(
+            availability=0.999, cost=2000, tier=3, base_cost=1000
+        )
+        cost_impact_tier3 = u_tier3_base - u_tier3_expensive
+
+        # Tier 3 has higher cost sensitivity, so should penalize more
+        assert cost_impact_tier3 > cost_impact_tier0, (
+            f"Tier 3 should penalize cost more: tier0={cost_impact_tier0:.4f}, "
+            f"tier3={cost_impact_tier3:.4f}"
+        )
+
+    def test_below_target_always_worse_than_at_target(self):
+        """Being below target should always score worse than at target."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            utility,
+            get_tier_config,
+        )
+
+        # Tier 2 target is 0.95
+        config = get_tier_config(2)
+        below_target = config.target_availability - 0.01
+        at_target = config.target_availability
+
+        u_below = utility(availability=below_target, cost=1000, tier=2, base_cost=1000)
+        u_at = utility(availability=at_target, cost=1000, tier=2, base_cost=1000)
+
+        assert u_at > u_below, (
+            f"At-target should score better than below: "
+            f"at={u_at:.4f}, below={u_below:.4f}"
+        )
+
+
 class TestUtilityFunction:
     """Test the utility function for balancing availability and cost."""
 

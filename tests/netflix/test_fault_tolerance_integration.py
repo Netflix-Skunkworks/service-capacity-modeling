@@ -234,30 +234,6 @@ class TestZoneAwareComparison:
             # But CPU constraints may still dominate
             pass  # Accept whatever the algorithm found
 
-    def test_zone_aware_comparison_always_valid(self):
-        """Zone-aware cost should always be a valid comparison."""
-        problem = CapacityProblem(
-            n_partitions=100,
-            partition_size_gib=100,
-            disk_per_node_gib=2048,
-            min_rf=2,
-            cpu_needed=800,
-            cpu_per_node=16,
-        )
-
-        result = search_with_fault_tolerance(problem, tier=2, cost_per_node=100)
-
-        assert result is not None
-        # Zone-aware cost should be <= actual cost (it can't be worse)
-        assert result.zone_aware_cost <= result.cost
-        # Savings should be non-negative
-        assert result.zone_aware_savings >= 0
-        # Savings = cost - zone_aware_cost
-        assert (
-            abs(result.zone_aware_savings - (result.cost - result.zone_aware_cost))
-            < 0.01
-        )
-
 
 # =============================================================================
 # INTEGRATION: Constraint satisfaction

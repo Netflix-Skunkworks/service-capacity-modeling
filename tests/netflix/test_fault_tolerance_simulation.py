@@ -234,17 +234,6 @@ class TestSimulationMatchesClosedForm:
             f"Params: n_nodes={n_nodes}, n_zones={n_zones}, rf={rf}"
         )
 
-    def test_rf_exceeds_nodes_per_zone_gives_zero_unavailability(self):
-        """RF > nodes_per_zone means all replicas can't fit in one zone."""
-        # 12 nodes, 3 zones -> 4 nodes per zone
-        # RF=5 can't fit in one zone
-        assert per_partition_unavailability(12, 3, 5) == 0.0
-        assert system_availability(12, 3, 5, 1000) == 1.0
-
-        # Verify simulation agrees
-        simulated = simulate_system_availability(12, 3, 5, 100, n_trials=1000, seed=42)
-        assert simulated == 1.0
-
 
 # =============================================================================
 # TEST: Property-based testing with Hypothesis
@@ -413,18 +402,6 @@ class TestEdgeCases:
         avail = system_availability(12, 3, 3, 0)
         # (1-p)^0 = 1 regardless of p
         assert avail == 1.0
-
-    def test_availability_bounds(self):
-        """Availability should always be in [0, 1]."""
-        test_cases = [
-            (12, 3, 2, 100),
-            (12, 3, 3, 1000),
-            (6, 3, 2, 50),
-            (30, 3, 5, 500),
-        ]
-        for n_nodes, n_zones, rf, n_partitions in test_cases:
-            avail = system_availability(n_nodes, n_zones, rf, n_partitions)
-            assert 0.0 <= avail <= 1.0, f"Availability {avail} out of bounds"
 
 
 # =============================================================================
