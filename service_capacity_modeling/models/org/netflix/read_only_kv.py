@@ -141,8 +141,17 @@ def _estimate_read_only_kv_requirement(
     # Unreplicated data size
     unreplicated_data_gib = desires.data_shape.estimated_state_size_gib.mid
 
-    # Partition size (unreplicated)
+    # Partition size (unreplicated, then with buffer for binpacking)
     partition_size_gib = unreplicated_data_gib / args.total_num_partitions
+    partition_size_with_buffer_gib = partition_size_gib * disk_buffer.ratio
+
+    # Total disk = partitions × partition_size × min_rf (with buffer)
+    # This is the minimum disk needed before the algorithm potentially increases RF
+    total_disk_gib = (
+        args.total_num_partitions
+        * partition_size_with_buffer_gib
+        * args.min_replica_count
+    )
 
     # CPU calculation using sqrt staffing model (independent of replicas)
     raw_cores = sqrt_staffed_cores(desires)
@@ -166,13 +175,14 @@ def _estimate_read_only_kv_requirement(
         reference_shape=desires.reference_shape,
         cpu_cores=certain_int(int(needed_cores)),
         mem_gib=certain_float(0),  # Not used (see TODO at top of file)
-        disk_gib=certain_float(partition_size_gib * disk_buffer.ratio),
+        disk_gib=certain_float(total_disk_gib),
         network_mbps=certain_float(needed_network_mbps),
         context={
             "min_replica_count": args.min_replica_count,
             "total_num_partitions": args.total_num_partitions,
             "unreplicated_data_gib": round(unreplicated_data_gib, 2),
             "partition_size_gib": round(partition_size_gib, 2),
+            "partition_size_with_buffer_gib": round(partition_size_with_buffer_gib, 2),
             "raw_cores": round(raw_cores, 2),
             "compute_buffer_ratio": compute_buffer.ratio,
             "disk_buffer_ratio": disk_buffer.ratio,
@@ -231,7 +241,10 @@ def _extract_planning_inputs(
     if instance.drive is None:
         return None
 
-    partition_size_with_buffer_gib = requirement.disk_gib.mid
+    # Get partition size from context (disk_gib is total, not per-partition)
+    partition_size_with_buffer_gib = requirement.context.get(
+        "partition_size_with_buffer_gib", 0
+    )
     if partition_size_with_buffer_gib <= 0:
         return None
 
@@ -292,9 +305,12 @@ def _compute_read_only_kv_regional_cluster(
     # ─────────────────────────────────────────────────────────────────────────
     # Step 2: Run fault-tolerance-aware search algorithm
     # ─────────────────────────────────────────────────────────────────────────
+    # Get partition size from context (disk_gib is total, not per-partition)
+    partition_size_gib = requirement.context["partition_size_with_buffer_gib"]
+
     problem = CapacityProblem(
         n_partitions=inputs.total_partitions,
-        partition_size_gib=requirement.disk_gib.mid,
+        partition_size_gib=partition_size_gib,
         disk_per_node_gib=inputs.effective_disk_per_node_gib,
         min_rf=inputs.min_rf,
         cpu_needed=inputs.cpu_needed,
