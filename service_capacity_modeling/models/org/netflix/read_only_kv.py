@@ -65,13 +65,8 @@ def _upsert_params(cluster: Any, params: Dict[str, Any]) -> None:
         cluster.cluster_params = params
 
 
-@dataclass(frozen=True)
-class ReadOnlyKVContext:
-    """Type-safe context for read-only-kv capacity requirements.
-
-    This provides compile-time type checking for context fields that are
-    passed between requirement estimation and cluster computation.
-    """
+class ReadOnlyKVContext(BaseModel):
+    """Type-safe context passed from requirement estimation to cluster computation."""
 
     min_replica_count: int
     total_num_partitions: int
@@ -81,35 +76,6 @@ class ReadOnlyKVContext:
     raw_cores: float
     compute_buffer_ratio: float
     disk_buffer_ratio: float
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Serialize to Dict for CapacityRequirement.context."""
-        return {
-            "min_replica_count": self.min_replica_count,
-            "total_num_partitions": self.total_num_partitions,
-            "unreplicated_data_gib": round(self.unreplicated_data_gib, 2),
-            "partition_size_gib": round(self.partition_size_gib, 2),
-            "partition_size_with_buffer_gib": round(
-                self.partition_size_with_buffer_gib, 2
-            ),
-            "raw_cores": round(self.raw_cores, 2),
-            "compute_buffer_ratio": self.compute_buffer_ratio,
-            "disk_buffer_ratio": self.disk_buffer_ratio,
-        }
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ReadOnlyKVContext":
-        """Deserialize from CapacityRequirement.context."""
-        return cls(
-            min_replica_count=d["min_replica_count"],
-            total_num_partitions=d["total_num_partitions"],
-            unreplicated_data_gib=d["unreplicated_data_gib"],
-            partition_size_gib=d["partition_size_gib"],
-            partition_size_with_buffer_gib=d["partition_size_with_buffer_gib"],
-            raw_cores=d["raw_cores"],
-            compute_buffer_ratio=d["compute_buffer_ratio"],
-            disk_buffer_ratio=d["disk_buffer_ratio"],
-        )
 
 
 class NflxReadOnlyKVArguments(BaseModel):
@@ -236,7 +202,7 @@ def _estimate_read_only_kv_requirement(
         mem_gib=certain_float(0),  # Not used (see TODO at top of file)
         disk_gib=certain_float(total_disk_gib),
         network_mbps=certain_float(needed_network_mbps),
-        context=context.to_dict(),
+        context=context.model_dump(),
     )
 
 
@@ -292,7 +258,7 @@ def _extract_planning_inputs(
         return None
 
     # Get partition size from typed context (disk_gib is total, not per-partition)
-    ctx = ReadOnlyKVContext.from_dict(requirement.context)
+    ctx = ReadOnlyKVContext.model_validate(requirement.context)
     if ctx.partition_size_with_buffer_gib <= 0:
         return None
 
@@ -354,7 +320,7 @@ def _compute_read_only_kv_regional_cluster(
     # Step 3: Run fault-tolerance-aware search algorithm
     # ─────────────────────────────────────────────────────────────────────────
     # Get partition size from typed context (disk_gib is total, not per-partition)
-    ctx = ReadOnlyKVContext.from_dict(requirement.context)
+    ctx = ReadOnlyKVContext.model_validate(requirement.context)
 
     problem = CapacityProblem(
         n_partitions=inputs.total_partitions,
