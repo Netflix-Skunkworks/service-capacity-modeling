@@ -44,6 +44,7 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
+from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -216,6 +217,7 @@ def _extract_planning_inputs(
     instance: Instance,
     requirement: CapacityRequirement,
     args: NflxReadOnlyKVArguments,
+    buffers: Buffers,
 ) -> Optional[_PartitionSearchInputs]:
     """Transform model objects into pure algorithm inputs.
 
@@ -234,8 +236,16 @@ def _extract_planning_inputs(
     if partition_size_with_buffer_gib <= 0:
         return None
 
-    # Calculate effective disk capacity per node
-    effective_disk_per_node = min(instance.drive.size_gib, args.max_data_per_node_gib)
+    # Calculate effective disk capacity per node using the standard helper
+    disk_buffer = buffer_for_components(
+        buffers=buffers, components=[BufferComponent.disk]
+    )
+    effective_disk_per_node = get_effective_disk_per_node_gib(
+        instance=instance,
+        drive=instance.drive,
+        disk_buffer_ratio=disk_buffer.ratio,
+        max_local_data_per_node_gib=args.max_data_per_node_gib,
+    )
 
     # Calculate max partitions per node (disk capacity / partition size)
     max_ppn = int(effective_disk_per_node / partition_size_with_buffer_gib)
@@ -258,6 +268,7 @@ def _compute_read_only_kv_regional_cluster(
     requirement: CapacityRequirement,
     args: NflxReadOnlyKVArguments,
     tier: int,
+    buffers: Buffers,
 ) -> Optional[RegionClusterCapacity]:
     """Orchestrate: extract inputs → run algorithm → build cluster.
 
@@ -269,7 +280,7 @@ def _compute_read_only_kv_regional_cluster(
     # ─────────────────────────────────────────────────────────────────────────
     # Step 1: Extract planning inputs from model objects
     # ─────────────────────────────────────────────────────────────────────────
-    inputs = _extract_planning_inputs(instance, requirement, args)
+    inputs = _extract_planning_inputs(instance, requirement, args, buffers)
     if inputs is None:
         return None
 
@@ -399,6 +410,7 @@ def _estimate_read_only_kv_cluster(
         requirement=requirement,
         args=args,
         tier=desires.service_tier,
+        buffers=desires.buffers,
     )
 
     if cluster is None:
