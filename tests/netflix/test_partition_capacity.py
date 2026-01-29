@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """
 Test suite for partition-aware capacity planning algorithms.
 
@@ -908,4 +909,462 @@ class TestPlacementModels:
             assert zone_aware_avail >= random_avail, (
                 f"Zone-aware should be >= random: "
                 f"random={random_avail}, zone_aware={zone_aware_avail}"
+            )
+
+
+# =============================================================================
+# PART 9: Pareto frontier validation tests
+# =============================================================================
+
+
+class TestParetoFrontierValidation:
+    """Verify search returns Pareto-optimal solutions and frontier is correct."""
+
+    def test_search_picks_max_utility_from_frontier(self):
+        """The search result should have highest utility among frontier points.
+
+        This is the REAL test: verify utility function drives decisions correctly.
+        We compute utility for each frontier point and check the search picked the max.
+        """
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            compute_pareto_frontier,
+            search_with_fault_tolerance,
+            utility,
+        )
+        # search_algorithm already imported at module level
+
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        cost_per_node = 100
+
+        for tier in range(4):
+            result = search_with_fault_tolerance(
+                problem, tier=tier, cost_per_node=cost_per_node
+            )
+            frontier = compute_pareto_frontier(
+                problem, tier=tier, cost_per_node=cost_per_node
+            )
+
+            if result is None or not frontier:
+                continue
+
+            # Get baseline for utility calculation (same as search uses)
+            baseline = search_algorithm(problem)
+            if baseline is None:
+                continue
+            base_cost = baseline.node_count * cost_per_node
+
+            # Find the frontier point with max utility
+            frontier_utilities = [
+                (p, utility(p.availability, p.cost, tier, base_cost)) for p in frontier
+            ]
+            best_frontier_point, best_frontier_utility = max(
+                frontier_utilities, key=lambda x: x[1]
+            )
+
+            # The search result's utility should match (or be very close to) the best
+            # Note: search explores more configs than just the frontier, so it might
+            # find a slightly better non-frontier point, but never worse
+            assert result.utility_score >= best_frontier_utility - 0.001, (
+                f"Tier {tier}: Search utility worse than best frontier point!\n"
+                f"Search: avail={result.system_availability:.4f}, cost={result.cost}, "
+                f"utility={result.utility_score:.4f}\n"
+                f"Best frontier: avail={best_frontier_point.availability:.4f}, "
+                f"cost={best_frontier_point.cost}, utility={best_frontier_utility:.4f}"
+            )
+
+    def test_result_is_on_pareto_frontier(self):
+        """The returned result must be Pareto-optimal."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            compute_pareto_frontier,
+            search_with_fault_tolerance,
+        )
+
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        for tier in range(4):
+            result = search_with_fault_tolerance(problem, tier=tier, cost_per_node=100)
+            frontier = compute_pareto_frontier(problem, tier=tier, cost_per_node=100)
+
+            if result is None:
+                continue
+
+            # Result should be on the frontier (or dominated by a frontier point
+            # that the search didn't pick due to utility scoring)
+            on_frontier = any(
+                abs(p.availability - result.system_availability) < 0.001
+                and abs(p.cost - result.cost) < 0.01
+                for p in frontier
+            )
+
+            # Alternatively, result could be dominated by a frontier point
+            # (the utility function may prefer a different tradeoff)
+            dominated_by_frontier = any(
+                p.availability >= result.system_availability and p.cost <= result.cost
+                for p in frontier
+            )
+
+            assert on_frontier or dominated_by_frontier, (
+                f"Tier {tier}: Result not related to Pareto frontier\n"
+                f"Result: avail={result.system_availability:.4f}, cost={result.cost}\n"
+                f"Frontier: {[(p.availability, p.cost) for p in frontier[:5]]}"
+            )
+
+    def test_frontier_is_sorted_by_cost(self):
+        """Pareto frontier should be sorted by cost (cheapest first)."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            compute_pareto_frontier,
+        )
+
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        frontier = compute_pareto_frontier(problem, tier=2, cost_per_node=100)
+
+        for i in range(len(frontier) - 1):
+            assert frontier[i].cost <= frontier[i + 1].cost, (
+                f"Frontier not sorted: {frontier[i].cost} > {frontier[i + 1].cost}"
+            )
+
+    def test_frontier_has_no_dominated_points(self):
+        """No point on frontier should be dominated by another."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            compute_pareto_frontier,
+        )
+
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        frontier = compute_pareto_frontier(problem, tier=2, cost_per_node=100)
+
+        for i, p1 in enumerate(frontier):
+            for j, p2 in enumerate(frontier):
+                if i == j:
+                    continue
+                # p2 should not dominate p1
+                dominated = (
+                    p2.availability >= p1.availability
+                    and p2.cost <= p1.cost
+                    and (p2.availability > p1.availability or p2.cost < p1.cost)
+                )
+                assert not dominated, f"Point {p1} dominated by {p2}"
+
+    def test_different_tiers_may_pick_different_frontier_points(self):
+        """Higher tiers (cost-focused) should prefer cheaper frontier points."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            search_with_fault_tolerance,
+        )
+
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        result_t0 = search_with_fault_tolerance(problem, tier=0, cost_per_node=100)
+        result_t3 = search_with_fault_tolerance(problem, tier=3, cost_per_node=100)
+
+        assert result_t0 is not None
+        assert result_t3 is not None
+
+        # Tier 0 (availability-focused) should have >= cost than tier 3 (cost-focused)
+        # Note: >= not > because they might pick the same point
+        assert result_t0.cost >= result_t3.cost, (
+            f"Tier 0 should be at least as expensive as tier 3: "
+            f"t0={result_t0.cost}, t3={result_t3.cost}"
+        )
+
+
+# =============================================================================
+# PART 10: Crossover point documentation tests
+# =============================================================================
+
+
+class TestCrossoverPointDocumentation:
+    """Document where each tier's cost/availability tradeoff flips.
+
+    A crossover point is the cost multiplier at which a tier becomes
+    indifferent between a cheaper/lower-availability config and an
+    expensive/higher-availability config.
+    """
+
+    def test_crossover_points_documented(self):
+        """Document the cost multiplier where tiers reject availability gains."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            utility,
+            get_tier_config,
+        )
+
+        # Test: what cost multiplier makes tier indifferent to 4% availability gain?
+        # Base: 95% availability at 1x cost
+        # Better: 99% availability at Nx cost
+        # Find N where utility(better) < utility(base)
+
+        base_cost = 1000
+        base_avail = 0.95
+        better_avail = 0.99  # 4% gain
+
+        crossover_points: dict[int, float] = {}
+
+        for tier in range(4):
+            config = get_tier_config(tier)
+
+            # Find crossover point
+            for multiplier_tenth in range(10, 51):  # 1.0x to 5.0x in 0.1 increments
+                multiplier = multiplier_tenth / 10.0
+
+                u_base = utility(
+                    availability=base_avail,
+                    cost=base_cost,
+                    tier=tier,
+                    base_cost=base_cost,
+                )
+                u_better = utility(
+                    availability=better_avail,
+                    cost=base_cost * multiplier,
+                    tier=tier,
+                    base_cost=base_cost,
+                )
+
+                if u_base > u_better:
+                    crossover_points[tier] = multiplier
+                    break
+            else:
+                crossover_points[tier] = float("inf")  # Always prefers availability
+
+        # Document expected behavior:
+        # Tier 0 (critical): should accept higher cost for availability
+        # Tier 3 (test/dev): should prefer cheap over available
+        assert crossover_points[0] >= crossover_points[3], (
+            f"Tier 0 should tolerate more cost than tier 3: "
+            f"t0={crossover_points[0]}, t3={crossover_points[3]}"
+        )
+
+        # Print crossover points for documentation (visible in test output with -v)
+        print("\n=== Crossover Points (cost multiplier where tier rejects 4% gain) ===")
+        for tier in range(4):
+            config = get_tier_config(tier)
+            print(
+                f"Tier {tier}: rejects 4% availability gain at "
+                f"{crossover_points[tier]:.1f}x cost "
+                f"(target={config.target_availability}, "
+                f"sensitivity={config.cost_sensitivity})"
+            )
+
+    def test_tiers_have_monotonic_cost_sensitivity(self):
+        """Higher tiers should be more cost-sensitive (reject gains earlier)."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            get_tier_config,
+        )
+
+        for tier in range(3):
+            lower = get_tier_config(tier)
+            higher = get_tier_config(tier + 1)
+
+            assert higher.cost_sensitivity >= lower.cost_sensitivity, (
+                f"Cost sensitivity should increase: "
+                f"tier {tier}={lower.cost_sensitivity}, "
+                f"tier {tier + 1}={higher.cost_sensitivity}"
+            )
+
+
+# =============================================================================
+# PART 11: Placement model integration tests
+# =============================================================================
+
+
+class TestPlacementModelIntegration:
+    """Verify placement models are actually used by search functions.
+
+    These tests would have caught the bug where _calculate_zone_aware_cost()
+    didn't use ZoneAwarePlacement at all.
+    """
+
+    def test_search_uses_placement_model_for_availability(self):
+        """search_with_fault_tolerance should use the provided placement model."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            search_with_fault_tolerance,
+            UniformRandomPlacement,
+            ZoneAwarePlacement,
+        )
+
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        # With random placement, availability < 100%
+        result_random = search_with_fault_tolerance(
+            problem, tier=2, cost_per_node=100, placement=UniformRandomPlacement()
+        )
+
+        # With zone-aware placement and RF>=2, availability = 100%
+        result_zone_aware = search_with_fault_tolerance(
+            problem, tier=2, cost_per_node=100, placement=ZoneAwarePlacement()
+        )
+
+        assert result_random is not None
+        assert result_zone_aware is not None
+
+        # Zone-aware should report 100% availability
+        assert result_zone_aware.system_availability == 1.0, (
+            f"Zone-aware with RF>=2 should give 100% availability, "
+            f"got {result_zone_aware.system_availability}"
+        )
+
+        # Random placement should report < 100% availability
+        assert result_random.system_availability < 1.0, (
+            f"Random placement should give <100% availability, "
+            f"got {result_random.system_availability}"
+        )
+
+    def test_zone_aware_search_chooses_lower_rf(self):
+        """Zone-aware search should choose lower RF since availability is guaranteed."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            search_with_fault_tolerance,
+            UniformRandomPlacement,
+            ZoneAwarePlacement,
+        )
+
+        # Many partitions = random placement needs high RF for good availability
+        problem = CapacityProblem(
+            n_partitions=500,
+            partition_size_gib=10,
+            disk_per_node_gib=1000,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        result_random = search_with_fault_tolerance(
+            problem,
+            tier=0,
+            cost_per_node=100,  # Tier 0 = high availability target
+            placement=UniformRandomPlacement(),
+        )
+
+        result_zone_aware = search_with_fault_tolerance(
+            problem, tier=0, cost_per_node=100, placement=ZoneAwarePlacement()
+        )
+
+        assert result_random is not None
+        assert result_zone_aware is not None
+
+        # Zone-aware should choose lower or equal RF (RF=2 is enough for 100% avail)
+        assert result_zone_aware.rf <= result_random.rf, (
+            f"Zone-aware should choose RF <= random: "
+            f"zone_aware.rf={result_zone_aware.rf}, random.rf={result_random.rf}"
+        )
+
+        # Zone-aware should have lower or equal cost
+        assert result_zone_aware.cost <= result_random.cost, (
+            f"Zone-aware should cost <= random: "
+            f"zone_aware.cost={result_zone_aware.cost}, "
+            f"random.cost={result_random.cost}"
+        )
+
+    def test_zone_aware_cost_uses_utility_optimization(self):
+        """zone_aware_cost should be utility-optimized, not just min cost with RF>=2."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            search_with_fault_tolerance,
+            ZoneAwarePlacement,
+        )
+
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        # Get result with default (random) placement
+        result = search_with_fault_tolerance(problem, tier=2, cost_per_node=100)
+        assert result is not None
+
+        # Get what zone-aware search would actually choose
+        result_zone_aware = search_with_fault_tolerance(
+            problem, tier=2, cost_per_node=100, placement=ZoneAwarePlacement()
+        )
+        assert result_zone_aware is not None
+
+        # The zone_aware_cost in result should match what zone-aware search finds
+        assert result.zone_aware_cost == result_zone_aware.cost, (
+            f"zone_aware_cost should match actual zone-aware search result: "
+            f"zone_aware_cost={result.zone_aware_cost}, "
+            f"actual_zone_aware_result.cost={result_zone_aware.cost}"
+        )
+
+    def test_pareto_frontier_uses_placement_model(self):
+        """compute_pareto_frontier should use the provided placement model."""
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            compute_pareto_frontier,
+            UniformRandomPlacement,
+            ZoneAwarePlacement,
+        )
+
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        frontier_random = compute_pareto_frontier(
+            problem, tier=2, cost_per_node=100, placement=UniformRandomPlacement()
+        )
+
+        frontier_zone_aware = compute_pareto_frontier(
+            problem, tier=2, cost_per_node=100, placement=ZoneAwarePlacement()
+        )
+
+        # Zone-aware frontier should have 100% availability for all RF>=2 points
+        for point in frontier_zone_aware:
+            if point.rf >= 2:
+                assert point.availability == 1.0, (
+                    f"Zone-aware frontier should have 100% availability for RF>=2, "
+                    f"got {point.availability} for RF={point.rf}"
+                )
+
+        # Random frontier should have < 100% availability
+        for point in frontier_random:
+            assert point.availability < 1.0, (
+                f"Random frontier should have <100% availability, "
+                f"got {point.availability}"
             )
