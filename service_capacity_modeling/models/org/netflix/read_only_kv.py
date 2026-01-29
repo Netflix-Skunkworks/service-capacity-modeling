@@ -217,13 +217,12 @@ def _extract_planning_inputs(
     instance: Instance,
     requirement: CapacityRequirement,
     args: NflxReadOnlyKVArguments,
-    buffers: Buffers,
+    effective_disk_per_node: float,
 ) -> Optional[_PartitionSearchInputs]:
     """Transform model objects into pure algorithm inputs.
 
     This function handles:
     - Instance validation (must have local disk)
-    - Disk capacity calculation
     - Max partitions-per-node derivation
 
     Returns None if the instance is not viable for this workload.
@@ -235,17 +234,6 @@ def _extract_planning_inputs(
     partition_size_with_buffer_gib = requirement.disk_gib.mid
     if partition_size_with_buffer_gib <= 0:
         return None
-
-    # Calculate effective disk capacity per node using the standard helper
-    disk_buffer = buffer_for_components(
-        buffers=buffers, components=[BufferComponent.disk]
-    )
-    effective_disk_per_node = get_effective_disk_per_node_gib(
-        instance=instance,
-        drive=instance.drive,
-        disk_buffer_ratio=disk_buffer.ratio,
-        max_local_data_per_node_gib=args.max_data_per_node_gib,
-    )
 
     # Calculate max partitions per node (disk capacity / partition size)
     max_ppn = int(effective_disk_per_node / partition_size_with_buffer_gib)
@@ -267,8 +255,7 @@ def _compute_read_only_kv_regional_cluster(
     instance: Instance,
     requirement: CapacityRequirement,
     args: NflxReadOnlyKVArguments,
-    tier: int,
-    buffers: Buffers,
+    desires: CapacityDesires,
 ) -> Optional[RegionClusterCapacity]:
     """Orchestrate: extract inputs → run algorithm → build cluster.
 
@@ -278,9 +265,27 @@ def _compute_read_only_kv_regional_cluster(
     - Result building: algorithm output → RegionClusterCapacity
     """
     # ─────────────────────────────────────────────────────────────────────────
-    # Step 1: Extract planning inputs from model objects
+    # Step 1: Calculate effective disk capacity (idiomatic pattern)
     # ─────────────────────────────────────────────────────────────────────────
-    inputs = _extract_planning_inputs(instance, requirement, args, buffers)
+    if instance.drive is None:
+        return None
+
+    disk_buffer_ratio = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.disk]
+    ).ratio
+    effective_disk_per_node = get_effective_disk_per_node_gib(
+        instance=instance,
+        drive=instance.drive,
+        disk_buffer_ratio=disk_buffer_ratio,
+        max_local_data_per_node_gib=args.max_data_per_node_gib,
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Step 2: Extract planning inputs from model objects
+    # ─────────────────────────────────────────────────────────────────────────
+    inputs = _extract_planning_inputs(
+        instance, requirement, args, effective_disk_per_node
+    )
     if inputs is None:
         return None
 
@@ -300,7 +305,7 @@ def _compute_read_only_kv_regional_cluster(
     # Use fault-tolerance optimizer to find optimal (RF, node_count) for tier
     ft_result = search_with_fault_tolerance(
         problem=problem,
-        tier=tier,
+        tier=desires.service_tier,
         cost_per_node=instance.annual_cost,
         n_zones=3,  # Standard 3-AZ deployment
         zone_aware=False,  # Random placement (conservative estimate)
@@ -345,7 +350,7 @@ def _compute_read_only_kv_regional_cluster(
         "read-only-kv.effective_disk_per_node_gib": inputs.effective_disk_per_node_gib,
         "read-only-kv.nodes_for_one_copy": base_nodes,
         "read-only-kv.nodes_for_cpu": nodes_for_cpu,
-        "read-only-kv.service_tier": tier,
+        "read-only-kv.service_tier": desires.service_tier,
     }
 
     # Add fault tolerance info if available
@@ -409,8 +414,7 @@ def _estimate_read_only_kv_cluster(
         instance=instance,
         requirement=requirement,
         args=args,
-        tier=desires.service_tier,
-        buffers=desires.buffers,
+        desires=desires,
     )
 
     if cluster is None:
