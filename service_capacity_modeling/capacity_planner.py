@@ -45,6 +45,7 @@ from service_capacity_modeling.interface import UncertainCapacityPlan
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
+from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.org import netflix
 from service_capacity_modeling.models.utils import reduce_by_family
@@ -219,34 +220,40 @@ def _set_instance_objects(
                 )
 
 
-def _convert_current_clusters(
+def _extract_cluster_plan(
     clusters: Sequence[CurrentClusterCapacity],
     hardware: Hardware,
-    default_cluster_type: str,
     is_zonal: bool,
 ) -> Tuple[List[ClusterCapacity], List[CapacityRequirement]]:
-    """Convert current deployment to ClusterCapacity and CapacityRequirement.
+    """Extract CapacityPlan components from current deployment.
 
-    Follows the same cost calculation pattern as compute_stateful_zone():
-    - annual_cost = (instance.annual_cost + drive.annual_cost) × count
-    - Drives are priced using hardware.price_drive() to get catalog pricing
-    - Instance specs (CPU, RAM, network) are multiplied by count for requirements
+    Takes what's currently deployed and builds the ClusterCapacity and
+    CapacityRequirement objects needed for a CapacityPlan.
+
+    Drives are priced using hardware.price_drive() to get catalog pricing.
+    Cluster annual_cost is computed automatically from instance + drives.
 
     Args:
-        clusters: Current cluster capacities from deployment
+        clusters: Current cluster capacities (must have cluster_type set)
         hardware: Hardware catalog for the region (used to price drives)
-        default_cluster_type: Default cluster type from the model. Used when
-            cluster.cluster_type is not set (e.g., single-model scenarios).
         is_zonal: True for ZoneClusterCapacity, False for RegionClusterCapacity
 
     Returns:
-        Tuple of (capacities, requirements) lists for building CapacityPlan
+        Tuple of (capacities, requirements) for building CapacityPlan
+
+    Raises:
+        ValueError: If any cluster is missing cluster_type
     """
     capacities: List[ClusterCapacity] = []
     requirements: List[CapacityRequirement] = []
 
     for current in clusters:
-        cluster_type = current.cluster_type or default_cluster_type
+        if current.cluster_type is None:
+            raise ValueError(
+                f"cluster_type is required for baseline extraction. "
+                f"Cluster '{current.cluster_instance_name}' is missing cluster_type."
+            )
+        cluster_type = current.cluster_type
         instance = current.cluster_instance
         if instance is None:
             raise ValueError(
@@ -254,21 +261,12 @@ def _convert_current_clusters(
             )
         count = int(current.cluster_instance_count.mid)
 
-        # Calculate costs: stateful zonal includes drive, stateless regional doesn't
-        # This matches compute_stateful_zone vs compute_stateless_region behavior
-        cost = count * instance.annual_cost
-
+        # Price the drive from hardware catalog (gets annual_cost_per_gib etc.)
         attached_drives = []
         if current.cluster_drive is not None:
-            attached_drive = hardware.price_drive(current.cluster_drive)
-            attached_drives.append(attached_drive)
-            cost = cost + (attached_drive.annual_cost * count)
+            attached_drives.append(hardware.price_drive(current.cluster_drive))
 
-        disk_gib = 0.0
-        if current.cluster_drive is not None:
-            disk_gib = current.cluster_drive.size_gib or 0
-        elif instance.drive is not None:
-            disk_gib = instance.drive.size_gib or 0
+        disk_gib = get_disk_size_gib(current.cluster_drive, instance)
 
         capacity_cls = ZoneClusterCapacity if is_zonal else RegionClusterCapacity
         capacities.append(
@@ -277,7 +275,6 @@ def _convert_current_clusters(
                 count=count,
                 instance=instance,
                 attached_drives=attached_drives,
-                annual_cost=cost,
             )
         )
 
@@ -467,6 +464,23 @@ class CapacityPlanner:
 
     def instance(self, name: str, region: Optional[str] = None) -> Instance:
         return self.hardware_shapes.instance(name, region=region)
+
+    def _prepare_context(
+        self,
+        region: str,
+        num_regions: int,
+    ) -> Tuple[Hardware, RegionContext]:
+        """Prepare hardware and region context for capacity planning.
+
+        Loads hardware catalog for region and creates RegionContext.
+        """
+        hardware = self._shapes.region(region)
+        context = RegionContext(
+            zones_in_region=hardware.zones_in_region,
+            services={n: s.model_copy(deep=True) for n, s in hardware.services.items()},
+            num_regions=num_regions,
+        )
+        return hardware, context
 
     def _plan_percentiles(  # pylint: disable=too-many-positional-arguments
         self,
@@ -768,6 +782,7 @@ class CapacityPlanner:
             ValueError: If model_name not found or current_clusters invalid
             AttributeError: If model doesn't have CostAwareModel mixin
         """
+        extra_model_arguments = extra_model_arguments or {}
         if model_name not in self._models:
             raise ValueError(
                 f"model_name={model_name} does not exist. "
@@ -777,8 +792,6 @@ class CapacityPlanner:
         model = self._models[model_name]
         if not isinstance(model, CostAwareModel):
             raise TypeError(f"Model '{model_name}' must implement CostAwareModel mixin")
-
-        extra_model_arguments = extra_model_arguments or {}
 
         if desires.current_clusters is None:
             raise ValueError(
@@ -791,31 +804,23 @@ class CapacityPlanner:
                 "or regional clusters defined."
             )
 
-        hardware = self._shapes.region(region)
-        context = RegionContext(
-            zones_in_region=hardware.zones_in_region,
-            services={n: s.model_copy(deep=True) for n, s in hardware.services.items()},
-            num_regions=num_regions,
-        )
-        _set_instance_objects(desires, hardware)
+        hardware, context = self._prepare_context(region, num_regions)
+        _set_instance_objects(
+            desires, hardware
+        )  # Resolve instance refs in current_clusters
 
         zonal_capacities: List[ClusterCapacity] = []
         zonal_requirements: List[CapacityRequirement] = []
         regional_capacities: List[ClusterCapacity] = []
         regional_requirements: List[CapacityRequirement] = []
 
-        cluster_type = model.cluster_type
-
         if desires.current_clusters.zonal:
-            zonal_capacities, zonal_requirements = _convert_current_clusters(
-                desires.current_clusters.zonal, hardware, cluster_type, is_zonal=True
+            zonal_capacities, zonal_requirements = _extract_cluster_plan(
+                desires.current_clusters.zonal, hardware, is_zonal=True
             )
         if desires.current_clusters.regional:
-            regional_capacities, regional_requirements = _convert_current_clusters(
-                desires.current_clusters.regional,
-                hardware,
-                cluster_type,
-                is_zonal=False,
+            regional_capacities, regional_requirements = _extract_cluster_plan(
+                desires.current_clusters.regional, hardware, is_zonal=False
             )
 
         costs, services = self._get_model_costs(
@@ -889,13 +894,10 @@ class CapacityPlanner:
         instance_families = instance_families or []
         drives = drives or []
 
-        hardware = self._shapes.region(region)
-
-        context = RegionContext(
-            zones_in_region=hardware.zones_in_region,
-            services={n: s.model_copy(deep=True) for n, s in hardware.services.items()},
-            num_regions=num_regions,
-        )
+        hardware, context = self._prepare_context(region, num_regions)
+        _set_instance_objects(
+            desires, hardware
+        )  # Resolve instance refs if current_clusters exists
 
         allowed_platforms: Set[Platform] = set(model.allowed_platforms())
         allowed_drives: Set[str] = set(drives or [])
@@ -906,9 +908,6 @@ class CapacityPlanner:
             allowed_drives.add(drive_name)
         if len(allowed_drives) == 0:
             allowed_drives.update(hardware.drives.keys())
-
-        # Set current instance object if exists
-        _set_instance_objects(desires, hardware)
 
         # We should not even bother with shapes that don't meet the minimums
         (

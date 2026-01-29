@@ -119,6 +119,17 @@ def _sqrt_staffed_cores(rps: float, latency_s: float, qos: float) -> int:
     return math.ceil((rps * latency_s) + qos * math.sqrt(rps * latency_s))
 
 
+def get_disk_size_gib(
+    cluster_drive: Optional[Drive],
+    instance: Instance,
+) -> float:
+    if cluster_drive is not None:
+        return cluster_drive.size_gib or 0.0
+    if instance.drive is not None:
+        return instance.drive.size_gib or 0.0
+    return 0.0
+
+
 def get_effective_disk_per_node_gib(
     instance: Instance,
     drive: Drive,
@@ -937,14 +948,8 @@ class RequirementFromCurrentCapacity(BaseModel):
             self.current_capacity.disk_utilization_gib.mid
             * self.current_capacity.cluster_instance_count.mid
         )
-        current_node_disk_gib = float(
-            self.current_instance.drive.max_size_gib
-            if self.current_instance.drive is not None
-            else (
-                self.current_capacity.cluster_drive.size_gib
-                if self.current_capacity.cluster_drive is not None
-                else 0
-            )
+        current_node_disk_gib = get_disk_size_gib(
+            self.current_capacity.cluster_drive, self.current_instance
         )
 
         zonal_disk_allocated = float(

@@ -845,8 +845,9 @@ class CurrentClusterCapacity(ExcludeUnsetModel):
     cluster_instance: Optional[Instance] = None
     cluster_drive: Optional[Drive] = None
     cluster_instance_count: Interval
-    # Optional cluster_type for composite models with multiple cluster types.
-    # If set, extract_baseline_plan preserves this type for sub-model filtering.
+    # Optional: if not set, extract_baseline_plan
+    # Required metadata for identifying which model
+    # this capacity belongs to
     cluster_type: Optional[str] = None
     # The distribution cpu utilization in the cluster.
     cpu_utilization: Interval = certain_float(0.0)
@@ -1149,11 +1150,30 @@ class ClusterCapacity(ExcludeUnsetModel):
     count: int
     instance: Instance
     attached_drives: Sequence[Drive] = ()
-    annual_cost: float
     # When provisioning services we might need to signal they
     # should have certain configuration, for example flags that
     # affect durability shut off
     cluster_params: Dict[str, Any] = {}
+    # Override for models with non-standard cost calculation (e.g., Aurora
+    # has shared storage so drive cost isn't multiplied by count)
+    annual_cost_override: Optional[float] = None
+
+    @computed_field(return_type=float)  # type: ignore
+    @property
+    def annual_cost(self) -> float:
+        """Compute annual cost from instance and attached drives.
+
+        Standard formula: count * instance.annual_cost + sum(drive.annual_cost * count)
+
+        Models with different cost structures (e.g., Aurora with shared storage)
+        can set annual_cost_override to bypass this calculation.
+        """
+        if self.annual_cost_override is not None:
+            return self.annual_cost_override
+        cost = self.count * self.instance.annual_cost
+        for drive in self.attached_drives:
+            cost += drive.annual_cost * self.count
+        return cost
 
 
 class ServiceCapacity(ExcludeUnsetModel):

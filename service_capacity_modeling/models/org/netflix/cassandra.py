@@ -763,12 +763,9 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         )
 
         services: List[ServiceCapacity] = []
-
-        network_costs = network_services(
-            service_type, context, desires, copies_per_region
+        services.extend(
+            network_services(service_type, context, desires, copies_per_region)
         )
-        if network_costs:
-            services.extend(network_costs)
 
         if desires.data_shape.durability_slo_order.mid >= 1000:
             blob = context.services.get("blob.standard", None)

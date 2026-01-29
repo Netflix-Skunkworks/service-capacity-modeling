@@ -31,10 +31,10 @@ from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import (
     CapacityDesires,
     CapacityPlan,
+    certain_int,
     CurrentClusters,
     CurrentRegionClusterCapacity,
     CurrentZoneClusterCapacity,
-    Interval,
 )
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling import tools as scm_tools
@@ -93,13 +93,7 @@ def _clusters_to_current(cap_plan: CapacityPlan) -> CurrentClusters:
         current_zonal.append(
             CurrentZoneClusterCapacity(
                 cluster_instance_name=cluster.instance.name,
-                cluster_instance=None,
-                cluster_instance_count=Interval(
-                    low=cluster.count,
-                    mid=cluster.count,
-                    high=cluster.count,
-                    confidence=1.0,
-                ),
+                cluster_instance_count=certain_int(cluster.count),
                 cluster_drive=_get_single_drive(
                     cluster.attached_drives, cluster.cluster_type
                 ),
@@ -112,13 +106,7 @@ def _clusters_to_current(cap_plan: CapacityPlan) -> CurrentClusters:
         current_regional.append(
             CurrentRegionClusterCapacity(
                 cluster_instance_name=cluster.instance.name,
-                cluster_instance=None,
-                cluster_instance_count=Interval(
-                    low=cluster.count,
-                    mid=cluster.count,
-                    high=cluster.count,
-                    confidence=1.0,
-                ),
+                cluster_instance_count=certain_int(cluster.count),
                 cluster_drive=_get_single_drive(
                     cluster.attached_drives, cluster.cluster_type
                 ),
@@ -247,7 +235,7 @@ class TestExtractBaselinePlanValidation:
         current = CurrentZoneClusterCapacity(
             cluster_instance_name="m5.xlarge",
             cluster_instance=None,
-            cluster_instance_count=Interval(low=3, mid=3, high=3, confidence=1.0),
+            cluster_instance_count=certain_int(3),
         )
         desires = CapacityDesires(current_clusters=CurrentClusters(zonal=[current]))
         with pytest.raises(ValueError, match="does not exist"):
@@ -262,7 +250,7 @@ class TestExtractBaselinePlanValidation:
         current = CurrentZoneClusterCapacity(
             cluster_instance_name="nonexistent-instance-type",
             cluster_instance=None,
-            cluster_instance_count=Interval(low=3, mid=3, high=3, confidence=1.0),
+            cluster_instance_count=certain_int(3),
         )
         desires = CapacityDesires(current_clusters=CurrentClusters(zonal=[current]))
         with pytest.raises(ValueError, match="nonexistent-instance-type"):
@@ -277,7 +265,8 @@ class TestExtractBaselinePlanValidation:
         current = CurrentZoneClusterCapacity(
             cluster_instance_name="m5.xlarge",
             cluster_instance=None,
-            cluster_instance_count=Interval(low=3, mid=3, high=3, confidence=1.0),
+            cluster_instance_count=certain_int(3),
+            cluster_type="cassandra",
         )
         desires = CapacityDesires(current_clusters=CurrentClusters(zonal=[current]))
 
@@ -294,7 +283,8 @@ class TestExtractBaselinePlanValidation:
         current = CurrentZoneClusterCapacity(
             cluster_instance_name="m5.xlarge",
             cluster_instance=None,
-            cluster_instance_count=Interval(low=4, mid=4, high=4, confidence=1.0),
+            cluster_instance_count=certain_int(4),
+            cluster_type="cassandra",
         )
         desires = CapacityDesires(current_clusters=CurrentClusters(zonal=[current]))
 

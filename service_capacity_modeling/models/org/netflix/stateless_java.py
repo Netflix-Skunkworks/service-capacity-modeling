@@ -119,10 +119,6 @@ def _estimate_java_app_region(  # pylint: disable=too-many-positional-arguments
     cluster.cluster_type = NflxJavaAppCapacityModel.cluster_type
     cluster.attached_drives = attached_drives
 
-    # Add drive cost (root volume is EBS and costs money)
-    drive_cost = sum(d.annual_cost for d in attached_drives) * cluster.count
-    cluster.annual_cost = cluster.annual_cost + drive_cost
-
     # Generally don't want giant clusters
     # Especially not above 1000 because some load balancers struggle
     # with such large clusters
