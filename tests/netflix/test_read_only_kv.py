@@ -740,71 +740,36 @@ class TestReadOnlyKVStandardizedAlgorithm:
     def _run_actual_algorithm(
         self, problem: StandardizedProblem
     ) -> Optional[CapacityResult]:
-        """Run the actual implementation and return standardized result."""
-        from service_capacity_modeling.interface import (
-            CapacityRequirement,
-            Drive,
-            DriveType,
-            Instance,
-        )
-        from service_capacity_modeling.models.org.netflix.read_only_kv import (
-            NflxReadOnlyKVArguments,
-            _compute_read_only_kv_regional_cluster,
+        """Run the basic capacity algorithm and return standardized result.
+
+        Uses find_capacity_config directly (not search_with_fault_tolerance)
+        to test the core algorithm without fault-tolerance optimization.
+        """
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            CapacityProblem,
+            find_capacity_config,
         )
 
-        # Create mock instance
-        mock_instance = Instance(
-            name="test-instance",
-            cpu=problem.cpu_per_node,
-            cpu_ghz=3.0,
-            ram_gib=128,
-            net_mbps=10000,
-            drive=Drive(
-                name="local-nvme",
-                drive_type=DriveType.local_ssd,
-                size_gib=int(problem.disk_per_node_gib),
-            ),
-            annual_cost=5000,
+        capacity_problem = CapacityProblem(
+            n_partitions=problem.n_partitions,
+            partition_size_gib=problem.partition_size_gib,
+            disk_per_node_gib=problem.disk_per_node_gib,
+            min_rf=problem.min_replicas,
+            cpu_needed=problem.cpu_needed,
+            cpu_per_node=problem.cpu_per_node,
+            max_nodes=problem.max_nodes,
         )
 
-        # Create requirement with pre-computed values
-        requirement = CapacityRequirement(
-            requirement_type="read-only-kv-regional",
-            cpu_cores=certain_int(problem.cpu_needed),
-            mem_gib=certain_float(0),
-            disk_gib=certain_float(problem.partition_size_gib),
-            network_mbps=certain_float(100),
-            context={
-                "min_replica_count": problem.min_replicas,
-                "total_num_partitions": problem.n_partitions,
-            },
-        )
+        result = find_capacity_config(capacity_problem)
 
-        args = NflxReadOnlyKVArguments(
-            total_num_partitions=problem.n_partitions,
-            min_replica_count=problem.min_replicas,
-            max_regional_size=problem.max_nodes,
-            max_data_per_node_gib=int(problem.disk_per_node_gib),
-        )
-
-        cluster = _compute_read_only_kv_regional_cluster(
-            instance=mock_instance,
-            requirement=requirement,
-            args=args,
-        )
-
-        if cluster is None:
+        if result is None:
             return None
 
         return CapacityResult(
-            node_count=cluster.count,
-            replica_count=cluster.cluster_params["read-only-kv.replica_count"],
-            partitions_per_node=cluster.cluster_params[
-                "read-only-kv.partitions_per_node"
-            ],
-            nodes_for_one_copy=cluster.cluster_params[
-                "read-only-kv.nodes_for_one_copy"
-            ],
+            node_count=result.node_count,
+            replica_count=result.rf,
+            partitions_per_node=result.partitions_per_node,
+            nodes_for_one_copy=result.base_nodes,
         )
 
     # ========================================================================
@@ -1032,16 +997,190 @@ class TestReadOnlyKVStandardizedAlgorithm:
 
     @given(problem=valid_problems())
     @settings(max_examples=200, deadline=None)
-    def test_hypothesis_uses_max_ppn(self, problem: StandardizedProblem):
-        """PROPERTY: Greedy algorithm always uses maximum PPn that fits on disk."""
+    def test_hypothesis_ppn_in_valid_range(self, problem: StandardizedProblem):
+        """PROPERTY: PPn is always in [1, max_ppn] range."""
         result = self._run_actual_algorithm(problem)
         if result is None:
             return
 
         max_ppn = int(problem.disk_per_node_gib / problem.partition_size_gib)
-        assert result.partitions_per_node == max_ppn, (
-            f"Didn't use max PPn: used {result.partitions_per_node}, max is {max_ppn}"
+        assert 1 <= result.partitions_per_node <= max_ppn, (
+            f"PPn {result.partitions_per_node} not in valid range [1, {max_ppn}]"
         )
+
+
+# ============================================================================
+# ALGORITHM BEHAVIOR TESTS
+# ============================================================================
+#
+# These tests demonstrate HOW and WHY the algorithm works, making it easier
+# for engineers to understand the partition-aware capacity planning logic.
+# ============================================================================
+
+
+class TestAlgorithmBehavior:
+    """
+    Educational tests demonstrating algorithm behavior.
+
+    These tests show:
+    1. How the algorithm finds optimal (highest RF) solutions
+    2. When/why it falls back to lower RF solutions
+    3. The relationship between PPn, RF, and node_count
+    """
+
+    def test_optimal_rf_when_max_nodes_relaxed(self):
+        """
+        When max_nodes is not a constraint, algorithm finds highest RF.
+
+        Hand calculation for 21 partitions, 10 CPU, 1 CPU/node:
+            max_ppn = 1000/100 = 10
+            base = ceil(21/10) = 3 nodes for one copy
+            rf_for_cpu = ceil(10 / (3*1)) = 4
+            node_count = 3 × 4 = 12
+
+        Result: rf=4 (optimal fault tolerance)
+        """
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            CapacityProblem,
+            find_capacity_config,
+        )
+
+        config = find_capacity_config(
+            CapacityProblem(
+                n_partitions=21,
+                partition_size_gib=100.0,  # disk/partition = 1000/100 = 10 max_ppn
+                disk_per_node_gib=1000.0,
+                cpu_needed=10,
+                cpu_per_node=1,
+                min_rf=2,
+                max_nodes=100,  # Relaxed - not a constraint
+            )
+        )
+
+        assert config is not None
+        assert config.partitions_per_node == 10  # Uses max PPn
+        assert config.base_nodes == 3  # ceil(21/10)
+        assert config.rf == 4  # Highest RF for CPU
+        assert config.node_count == 12  # 3 × 4
+
+    def test_fallback_rf_when_max_nodes_tight(self):
+        """
+        When max_nodes is tight, algorithm finds lower RF that fits.
+
+        Same setup, but max_nodes=10:
+            At max_ppn=10: base=3, rf=4 → 12 nodes > 10 (doesn't fit!)
+
+        Search finds: ppn=5 → base=5, rf=2 → 10 nodes ≤ 10 ✓
+
+        Result: rf=2 (lower but fits within constraint)
+        """
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            CapacityProblem,
+            find_capacity_config,
+        )
+
+        config = find_capacity_config(
+            CapacityProblem(
+                n_partitions=21,
+                partition_size_gib=100.0,
+                disk_per_node_gib=1000.0,
+                cpu_needed=10,
+                cpu_per_node=1,
+                min_rf=2,
+                max_nodes=10,  # Tight constraint!
+            )
+        )
+
+        assert config is not None
+        assert config.partitions_per_node == 5  # Lower than max (fallback)
+        assert config.base_nodes == 5  # ceil(21/5)
+        assert config.rf == 2  # Lower RF
+        assert config.node_count == 10  # 5 × 2 (fits!)
+
+    def test_why_search_order_matters(self):
+        """
+        Searching from max PPn down naturally finds highest RF first.
+
+        The algorithm searches PPn = [10, 9, 8, ..., 1]:
+        - Higher PPn → fewer base nodes → need higher RF for CPU
+        - We WANT high RF (better fault tolerance for immutable data)
+        - First valid config found is optimal (highest RF that fits)
+
+        If we searched 1 → max, we'd find low RF first (suboptimal).
+        """
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            CapacityProblem,
+            find_capacity_config,
+        )
+
+        # With relaxed max_nodes, first valid config (at max_ppn) is returned
+        config = find_capacity_config(
+            CapacityProblem(
+                n_partitions=100,
+                partition_size_gib=50.0,  # 1000/50 = 20 max_ppn
+                disk_per_node_gib=1000.0,
+                cpu_needed=50,
+                cpu_per_node=2,
+                min_rf=2,
+                max_nodes=1000,
+            )
+        )
+
+        assert config is not None
+        assert config.partitions_per_node == 20  # Max PPn (searched first)
+
+        # Verify this gives higher RF than if we used lower PPn
+        # At ppn=20: base=5, rf=ceil(50/(5*2))=5
+        # At ppn=10: base=10, rf=ceil(50/(10*2))=3
+        # At ppn=5: base=20, rf=ceil(50/(20*2))=2
+        assert config.rf == 5  # Higher than alternatives
+
+    def test_non_monotonic_node_count(self):
+        """
+        Demonstrates why we use linear search: node_count(ppn) is non-monotonic.
+
+        Due to ceiling effects, lowering PPn doesn't always increase node_count.
+        This means we can't use binary search.
+        """
+        import math
+
+        def find_min_rf_for_cpu(base, cpu_needed, cpu_per_node, min_rf):
+            """Inline helper to demonstrate the RF calculation."""
+            baseline_nodes = max(2, base * min_rf)
+            if baseline_nodes * cpu_per_node >= cpu_needed:
+                return baseline_nodes, min_rf
+            target_nodes = math.ceil(cpu_needed / cpu_per_node)
+            target_rf = math.ceil(target_nodes / base)
+            return max(2, base * target_rf), target_rf
+
+        total_partitions = 21
+        cpu_needed = 10
+        cpu_per_node = 1
+        min_rf = 2
+
+        # Calculate node_count for different PPn values
+        results = []
+        for ppn in range(10, 0, -1):
+            base = math.ceil(total_partitions / ppn)
+            count, rf = find_min_rf_for_cpu(base, cpu_needed, cpu_per_node, min_rf)
+            results.append((ppn, base, rf, count))
+
+        # PPn=10: base=3, rf=4, count=12
+        # PPn=9:  base=3, rf=4, count=12 (same)
+        # PPn=8:  base=3, rf=4, count=12 (same)
+        # PPn=7:  base=3, rf=4, count=12 (same)
+        # PPn=6:  base=4, rf=3, count=12 (same)
+        # PPn=5:  base=5, rf=2, count=10 (DROPS!)
+        # PPn=4:  base=6, rf=2, count=12 (jumps back!)
+        # PPn=3:  base=7, rf=2, count=14 (increases)
+
+        counts = [r[3] for r in results]
+
+        # Verify non-monotonicity: count goes 12 → 10 → 12
+        assert 10 in counts and 12 in counts
+        idx_10 = counts.index(10)
+        assert counts[idx_10 - 1] == 12  # Before 10 was 12
+        assert counts[idx_10 + 1] == 12  # After 10 goes back to 12
 
 
 class TestReadOnlyKVExploration:
@@ -1321,3 +1460,203 @@ class TestReadOnlyKVExploration:
         }
 
         self._run_capacity_exploration(workload, extra_args, actual_cluster)
+
+
+# ============================================================================
+# FAULT TOLERANCE OPTIMIZATION TESTS
+# ============================================================================
+#
+# These tests verify that the fault tolerance optimizer:
+# 1. Uses tier-based utility scoring to balance availability vs cost
+# 2. Picks higher RF for critical tiers (tier 0) vs dev tiers (tier 3)
+# 3. Surfaces availability information in cluster params
+# ============================================================================
+
+
+class TestReadOnlyKVFaultTolerance:
+    """
+    Tests for fault tolerance optimization in the capacity model.
+
+    The optimizer uses a utility function that balances:
+    - Availability (higher RF = exponentially better fault tolerance)
+    - Cost (more nodes = higher cost)
+
+    Critical tiers (tier 0) prioritize availability, while dev tiers (tier 3)
+    prioritize cost savings.
+    """
+
+    def test_tier0_picks_higher_rf_than_tier3(self):
+        """
+        Test that tier 0 (critical) picks higher RF than tier 3 (dev).
+
+        Key insight: For the same workload, tier 0 should favor availability
+        (higher RF) while tier 3 should favor cost (minimum RF).
+        """
+        # A workload that could benefit from higher RF (enough CPU headroom)
+        desires_tier0 = CapacityDesires(
+            service_tier=0,  # Critical tier - prioritize availability
+            query_pattern=QueryPattern(
+                access_pattern=AccessPattern.latency,
+                estimated_read_per_second=certain_int(10_000),
+                estimated_write_per_second=certain_int(0),
+                estimated_mean_read_latency_ms=certain_float(2.0),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(100),
+            ),
+        )
+
+        desires_tier3 = CapacityDesires(
+            service_tier=3,  # Dev tier - prioritize cost
+            query_pattern=QueryPattern(
+                access_pattern=AccessPattern.latency,
+                estimated_read_per_second=certain_int(10_000),
+                estimated_write_per_second=certain_int(0),
+                estimated_mean_read_latency_ms=certain_float(2.0),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(100),
+            ),
+        )
+
+        # Plan for both tiers
+        plan_tier0 = planner.plan_certain(
+            model_name="org.netflix.read-only-kv",
+            region="us-east-1",
+            desires=desires_tier0,
+            extra_model_arguments={"total_num_partitions": 8},
+        )
+
+        plan_tier3 = planner.plan_certain(
+            model_name="org.netflix.read-only-kv",
+            region="us-east-1",
+            desires=desires_tier3,
+            extra_model_arguments={"total_num_partitions": 8},
+        )
+
+        assert len(plan_tier0) > 0
+        assert len(plan_tier3) > 0
+
+        rf_tier0 = (
+            plan_tier0[0]
+            .candidate_clusters.regional[0]
+            .cluster_params["read-only-kv.replica_count"]
+        )
+        rf_tier3 = (
+            plan_tier3[0]
+            .candidate_clusters.regional[0]
+            .cluster_params["read-only-kv.replica_count"]
+        )
+
+        # Tier 0 should have >= RF as tier 3 (higher availability requirement)
+        assert rf_tier0 >= rf_tier3, (
+            f"Tier 0 RF ({rf_tier0}) should be >= tier 3 RF ({rf_tier3})"
+        )
+
+    def test_capacity_model_surfaces_availability(self):
+        """
+        Test that the capacity model surfaces availability in cluster params.
+
+        The availability metric (e.g., 99.9%) helps operators understand
+        the fault tolerance provided by the chosen configuration.
+        """
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                access_pattern=AccessPattern.latency,
+                estimated_read_per_second=certain_int(10_000),
+                estimated_write_per_second=certain_int(0),
+                estimated_mean_read_latency_ms=certain_float(2.0),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(100),
+            ),
+        )
+
+        plans = planner.plan_certain(
+            model_name="org.netflix.read-only-kv",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={"total_num_partitions": 8},
+        )
+
+        assert len(plans) > 0
+
+        cluster_params = plans[0].candidate_clusters.regional[0].cluster_params
+
+        # Availability should be surfaced in cluster params
+        assert "read-only-kv.system_availability" in cluster_params, (
+            "Expected system_availability in cluster_params"
+        )
+
+        availability = cluster_params["read-only-kv.system_availability"]
+        # Availability should be a probability between 0 and 1
+        assert 0 < availability <= 1, (
+            f"Availability {availability} should be between 0 and 1"
+        )
+
+    def test_basic_algorithm_returns_minimum_rf(self):
+        """
+        Test that the basic algorithm (find_capacity_config) returns minimum RF.
+
+        This verifies that without fault tolerance optimization, the algorithm
+        returns the minimum RF that satisfies constraints. The optimizer then
+        increases RF based on tier requirements.
+        """
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            CapacityProblem,
+            find_capacity_config,
+        )
+
+        # A problem where minimum RF is achievable
+        problem = CapacityProblem(
+            n_partitions=8,
+            partition_size_gib=12.5,  # 100GB / 8 partitions
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=16,  # Low CPU requirement
+            cpu_per_node=16,
+        )
+
+        result = find_capacity_config(problem)
+
+        assert result is not None
+        # Basic algorithm should return minimum RF (2)
+        assert result.rf == 2, (
+            f"Basic algorithm should return min RF=2, got RF={result.rf}"
+        )
+
+    def test_fault_tolerance_optimizer_may_increase_rf(self):
+        """
+        Test that the fault tolerance optimizer may increase RF above minimum.
+
+        For critical tiers (tier 0), the optimizer should consider increasing
+        RF to improve availability, even if minimum RF satisfies constraints.
+        """
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            CapacityProblem,
+            search_with_fault_tolerance,
+        )
+
+        # A problem where there's headroom to increase RF
+        problem = CapacityProblem(
+            n_partitions=8,
+            partition_size_gib=12.5,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=16,
+            cpu_per_node=16,
+        )
+
+        # Tier 0 = critical, should favor availability
+        result = search_with_fault_tolerance(
+            problem=problem,
+            tier=0,  # Critical tier
+            cost_per_node=10000,  # $10k/year per node
+            n_zones=3,
+        )
+
+        assert result is not None
+        # For tier 0 with headroom, optimizer may increase RF > 2
+        # (At minimum, it should return a valid result)
+        assert result.rf >= 2, f"RF should be >= minimum (2), got {result.rf}"
