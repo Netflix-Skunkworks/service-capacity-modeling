@@ -678,6 +678,13 @@ class NflxCassandraArguments(BaseModel):
         "Note that if there are more than 100k writes this will "
         "automatically adjust to 0.2",
     )
+    same_family_bias: Optional[float] = Field(
+        default=None,
+        description="Cost multiplier applied when switching to a different instance "
+        "family from the current cluster. Higher values (e.g., 2.0) more strongly "
+        "prefer staying on the same family. Only applies when current_clusters "
+        "is provided in desires.",
+    )
 
     @classmethod
     def from_extra_model_arguments(
