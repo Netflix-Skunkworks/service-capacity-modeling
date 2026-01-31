@@ -32,6 +32,7 @@ from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Hardware
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
+from service_capacity_modeling.interface import normalized_aws_size
 from service_capacity_modeling.interface import interval
 from service_capacity_modeling.interface import Lifecycle
 from service_capacity_modeling.interface import PlanExplanation
@@ -82,6 +83,33 @@ def simulate_interval(
             return [interval] * count
 
         return sim_certain
+
+
+def _compute_max_instance_size_per_family(
+    hardware: Hardware,
+) -> Dict[str, str]:
+    """Compute the largest instance size for each family in the hardware catalog.
+
+    Returns a dict mapping family name to the largest instance size
+    (e.g., "i4i" -> "16xlarge"). Uses normalized_aws_size() to compare
+    sizes correctly across different naming conventions.
+    """
+    family_max: Dict[
+        str, Tuple[str, float]
+    ] = {}  # family -> (max_size, max_normalized)
+
+    for instance_name, instance in hardware.instances.items():
+        family = instance.family
+        try:
+            size_normalized = float(normalized_aws_size(instance_name))
+        except (ValueError, KeyError):
+            # Skip instances we can't parse
+            continue
+
+        if family not in family_max or size_normalized > family_max[family][1]:
+            family_max[family] = (instance.size, size_normalized)
+
+    return {family: max_info[0] for family, max_info in family_max.items()}
 
 
 # Take uncertain inputs and simulate a desired number of certain inputs
@@ -697,8 +725,47 @@ class CapacityPlanner:
             if plan is not None:
                 plans.append(plan)
 
-        # lowest cost first
-        plans.sort(key=lambda p: (p.rank, p.candidate_clusters.total_annual_cost))
+        # Extract large_instance_bias for sorting and regret calculation
+        large_instance_bias = extra_model_arguments.get("large_instance_bias")
+        max_sizes_per_family: Optional[Dict[str, str]] = None
+        if large_instance_bias is not None:
+            hardware = self._shapes.region(region)
+            max_sizes_per_family = _compute_max_instance_size_per_family(hardware)
+
+            # Annotate plans with large_instance metadata for regret calculation
+            for plan in plans:
+                if plan.candidate_clusters.zonal:
+                    instance = plan.candidate_clusters.zonal[0].instance
+                    family = instance.family
+                    max_size = max_sizes_per_family.get(family)
+                    is_largest = max_size is not None and instance.size == max_size
+                    # Store metadata in cluster_params for regret function access
+                    for cluster in plan.candidate_clusters.zonal:
+                        cluster.cluster_params["large_instance_bias"] = (
+                            large_instance_bias
+                        )
+                        cluster.cluster_params["is_largest_in_family"] = is_largest
+
+        def sort_key(plan: CapacityPlan) -> Tuple[float, float]:
+            effective_rank = float(plan.rank)
+            cost = float(plan.candidate_clusters.total_annual_cost)
+
+            # Apply large_instance_bias as a rank penalty for largest instances
+            if (
+                large_instance_bias is not None
+                and max_sizes_per_family is not None
+                and plan.candidate_clusters.zonal
+            ):
+                instance = plan.candidate_clusters.zonal[0].instance
+                family = instance.family
+                max_size = max_sizes_per_family.get(family)
+                if max_size is not None and instance.size == max_size:
+                    effective_rank += large_instance_bias
+
+            return (effective_rank, cost)
+
+        # lowest rank and cost first
+        plans.sort(key=sort_key)
 
         num_results = num_results or self._default_num_results
         return reduce_by_family(plans, max_results_per_family=max_results_per_family)[
