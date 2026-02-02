@@ -130,13 +130,13 @@ class TestTierTargets:
         assert result is not None
 
         # The algorithm should at least try to meet the target
-        # Tier targets are now EXPECTED ANNUAL availability
-        if result.utility_score > 0:
-            # Positive utility means target was met
-            assert result.expected_availability >= config.target_availability
+        # New target-based model uses target_met and achieved_nines
+        if result.target_met:
+            # Target was met - achieved_nines >= target_nines
+            assert result.achieved_nines >= config.target_nines
         else:
-            # Negative utility means target wasn't met
-            # but we should still have a reasonable configuration
+            # Target wasn't met, but we should still have a reasonable config
+            # The algorithm picks the best available config in this case
             assert result.rf >= config.min_rf
 
     def test_tier0_with_few_partitions_meets_target(self):

@@ -8,6 +8,21 @@ that balances availability against cost. Higher RF = better fault tolerance
 but more nodes/cost. The challenge: random partition placement means even RF=3
 might have all replicas land in the same AZ (then fail together).
 
+SELECTION STRATEGY
+------------------
+Score each configuration: score = (nines × value_per_nine) - cost
+
+Example for tier 2 (value_per_nine=$1000):
+    Config A: 2 nines, $500  → score = 2×1000 - 500  = 1500
+    Config B: 3 nines, $1200 → score = 3×1000 - 1200 = 1800  ← wins
+    Config C: 4 nines, $3000 → score = 4×1000 - 3000 = 1000
+
+B wins because the extra nine is worth the extra $700.
+C loses because 3→4 nines costs $1800 but only adds $1000 of value.
+
+Note: Tier reflects SERVICE CRITICALITY, not cluster size. A small tier-0
+cluster values availability highly; a large tier-3 cluster may not.
+
 ALGORITHM OVERVIEW
 ------------------
 1. Enumerate all valid (base_nodes, RF) configurations
@@ -15,8 +30,8 @@ ALGORITHM OVERVIEW
    - node_count = max(2, base_nodes × RF)
    - availability = P(all partitions survive 1 AZ failure)
    - cost = node_count × cost_per_node
-3. Score each with: utility = availability_value - cost_penalty
-4. Return the config with highest utility
+3. Filter by constraints: RF >= tier's min_rf, cost <= max_cost
+4. Select config with highest score
 
 KEY INSIGHT: The PPn Optimization
 ---------------------------------
@@ -25,7 +40,7 @@ disk_size/partition_size (could be 20,000+). But:
 
     base_nodes = ceil(n_partitions / ppn)
 
-Many PPn values give the SAME base_nodes. Since utility depends only on
+Many PPn values give the SAME base_nodes. Since selection depends only on
 (base_nodes, RF), not PPn itself, we skip redundant PPn values.
 
 For n_partitions=12, instead of checking 20,000 PPn values, we check just 6:
@@ -68,7 +83,7 @@ __all__ = [
     "FailureModel",
     # Configuration
     "TIER_DEFAULTS",
-    "FaultToleranceConfig",
+    "TierConfig",
     "get_tier_config",
     "HOURS_PER_YEAR",
     # Probability functions
@@ -78,7 +93,6 @@ __all__ = [
     "expected_annual_availability",
     "recovery_hours",
     "nines",
-    "utility",
 ]
 
 
@@ -169,29 +183,42 @@ DEFAULT_FAILURE_MODEL = FailureModel()
 
 
 @dataclass(frozen=True)
-class FaultTolerantResult:
+class FaultTolerantResult:  # pylint: disable=too-many-instance-attributes
     """Output: What to provision.
 
     Attributes:
         node_count: Total nodes to deploy
         rf: Replication factor to use
-        expected_availability: Expected annual availability
-        az_failure_availability: P(survive | AZ fails)
         cost: Total cost (node_count * cost_per_node)
-        zone_aware_savings: Savings with zone-aware placement
+
+        # Availability reporting (tells user what they got)
+        expected_availability: Expected annual availability (e.g., 0.9995)
+        achieved_nines: Actual nines achieved (e.g., 3.3 nines)
+        target_nines: Target nines for the tier (e.g., 3)
+        target_met: True if achieved_nines >= target_nines
+
+        # Additional context
+        az_failure_availability: P(survive | AZ fails)
+        zone_aware_savings: "Could save $X with zone-aware"
     """
 
     node_count: int
     rf: int
     partitions_per_node: int
     base_nodes: int
+    cost: float
+
+    # Availability reporting
     expected_availability: float  # Expected annual availability
+    achieved_nines: float  # Actual nines achieved (e.g., 3.3)
+    target_nines: int  # Target nines for the tier (e.g., 3)
+    target_met: bool  # True if achieved >= target
+
+    # Additional context
     az_failure_availability: float  # P(survive | AZ fails)
     per_partition_unavail: float
-    cost: float
     zone_aware_cost: float
     zone_aware_savings: float
-    utility_score: float
     tier: int
 
 
@@ -201,59 +228,39 @@ class FaultTolerantResult:
 
 
 @dataclass(frozen=True)
-class FaultToleranceConfig:
+class TierConfig:
     """Configuration for a service tier.
 
-    The utility function scores configurations as:
-        utility = (excess_nines × value_per_nine) - cost
+    Three knobs users need to understand:
+        - min_rf: Minimum replication factor (copies of data)
+        - max_cost_multiplier: Budget ceiling (multiple of baseline cost)
+        - target_nines: Availability goal (3 = 99.9%, 4 = 99.99%)
 
-    Where excess_nines = nines(expected_availability) - nines(target_availability)
-
-    This means:
-        - value_per_nine = $10000: Willing to pay $10k/year for one extra nine
-        - value_per_nine = $1000: More cost-conscious, only $1k/year per nine
+    Selection logic:
+        1. Find cheapest config that reaches target_nines
+        2. If no config reaches target → pick highest availability within budget
+        3. Report whether target was met so user can decide what to do
     """
 
     min_rf: int  # Minimum replication factor
-    target_availability: float  # Target expected annual availability (e.g., 0.9999)
-    value_per_nine: float  # Dollar value per additional nine of availability
     max_cost_multiplier: float  # Max cost as multiple of baseline
+    target_nines: int  # Availability goal (3 = 99.9%, 4 = 99.99%)
 
 
-# Tier 0: Critical (99.99%), Tier 1: Important (99.9%), Tier 2: Standard (99%)
-# Tier 3: Dev (90%)
-#
-# Note: These are EXPECTED ANNUAL availability targets, not conditional.
-# With 2% AZ failure rate, even 90% conditional → 99.9%+ expected.
-TIER_DEFAULTS: dict[int, FaultToleranceConfig] = {
-    0: FaultToleranceConfig(
-        min_rf=3,
-        target_availability=0.9999,  # 4 nines expected annual
-        value_per_nine=10000.0,  # Pay $10k/year for extra nine
-        max_cost_multiplier=3.0,
-    ),
-    1: FaultToleranceConfig(
-        min_rf=3,
-        target_availability=0.999,  # 3 nines expected annual
-        value_per_nine=5000.0,  # Pay $5k/year for extra nine
-        max_cost_multiplier=2.5,
-    ),
-    2: FaultToleranceConfig(
-        min_rf=2,
-        target_availability=0.99,  # 2 nines expected annual
-        value_per_nine=1000.0,  # Pay $1k/year for extra nine
-        max_cost_multiplier=2.0,
-    ),
-    3: FaultToleranceConfig(
-        min_rf=2,
-        target_availability=0.9,  # 1 nine expected annual
-        value_per_nine=100.0,  # Only $100/year for extra nine
-        max_cost_multiplier=1.5,
-    ),
+# Tier 0: Critical, Tier 1: Important, Tier 2: Standard, Tier 3: Dev
+TIER_DEFAULTS: dict[int, TierConfig] = {
+    0: TierConfig(
+        min_rf=3, max_cost_multiplier=3.0, target_nines=4
+    ),  # Critical: 99.99%
+    1: TierConfig(
+        min_rf=3, max_cost_multiplier=2.5, target_nines=4
+    ),  # Important: 99.99%
+    2: TierConfig(min_rf=2, max_cost_multiplier=2.0, target_nines=3),  # Standard: 99.9%
+    3: TierConfig(min_rf=2, max_cost_multiplier=1.5, target_nines=3),  # Dev: 99.9%
 }
 
 
-def get_tier_config(tier: int) -> FaultToleranceConfig:
+def get_tier_config(tier: int) -> TierConfig:
     """Get config for tier (0-3). Defaults to tier 2 if out of range."""
     return TIER_DEFAULTS.get(tier, TIER_DEFAULTS[2])
 
@@ -396,25 +403,30 @@ def _search_with_fault_tolerance_impl(
 ) -> Optional[FaultTolerantResult]:
     """Core implementation of fault-tolerance search.
 
+    Target-based selection:
+        1. Find cheapest config that reaches target_nines
+        2. If no config reaches target → pick highest availability within budget
+        3. Report whether target was met so user can decide what to do
+
     Pseudocode:
         baseline = find_minimum_viable_config(problem)
         max_cost = baseline.cost × tier.max_cost_multiplier
 
+        viable_configs = []
         for each (ppn, base_nodes) in interesting_ppn_values:
             for rf in range(min_rf_for_cpu, max_rf_for_cost):
                 node_count = max(2, base_nodes × rf)
                 if node_count exceeds constraints: skip
+                viable_configs.append((node_count, rf, cost, availability))
 
-                expected_avail = expected_annual_availability(...)
-                cost = node_count × cost_per_node
-                score = utility(expected_avail, cost, tier)
-
-                if score > best_score (or equal score with lower cost):
-                    best = this config
-
-        return best
+        reached_target = [c for c in viable if nines(c.availability) >= target_nines]
+        if reached_target:
+            return min(reached_target, key=cost)  # Cheapest that hits target
+        else:
+            return max(viable, key=availability)  # Best we can do
     """
     config = get_tier_config(tier)
+    target_nines = config.target_nines
 
     max_ppn = int(problem.disk_per_node_gib / problem.partition_size_gib)
     if max_ppn < 1:
@@ -427,9 +439,9 @@ def _search_with_fault_tolerance_impl(
     base_cost = baseline_result.node_count * cost_per_node
     max_cost = base_cost * config.max_cost_multiplier
 
-    best_result: Optional[FaultTolerantResult] = None
-    best_utility = float("-inf")
-    best_cost = float("inf")  # For tie-breaking
+    # Collect viable configs as tuples, convert to result later
+    # (node_count, rf, ppn, base_nodes, cost, expected_avail, conditional_avail)
+    viable_configs: list[tuple[int, int, int, int, float, float, float]] = []
 
     # Effective min_rf: respect both tier requirement and problem constraint
     effective_min_rf = max(config.min_rf, problem.min_rf)
@@ -478,32 +490,70 @@ def _search_with_fault_tolerance_impl(
                     failure_model,
                 )
 
-            u = utility(expected_avail, cost, tier)
-
-            # Tie-breaking: prefer lower cost when utility is equal
-            if u > best_utility or (u == best_utility and cost < best_cost):
-                best_utility = u
-                best_cost = cost
-                # For zone-aware search, zone_aware_cost equals the result cost
-                actual_zone_aware_cost = cost if zone_aware else zone_aware_cost
-                best_result = FaultTolerantResult(
-                    node_count=node_count,
-                    rf=rf,
-                    partitions_per_node=ppn,
-                    base_nodes=base_nodes,
-                    expected_availability=expected_avail,
-                    az_failure_availability=conditional_avail,
-                    per_partition_unavail=_per_partition_unavail_for_placement(
-                        node_count, n_zones, rf, zone_aware
-                    ),
-                    cost=cost,
-                    zone_aware_cost=actual_zone_aware_cost,
-                    zone_aware_savings=cost - actual_zone_aware_cost,
-                    utility_score=u,
-                    tier=tier,
+            viable_configs.append(
+                (
+                    node_count,
+                    rf,
+                    ppn,
+                    base_nodes,
+                    cost,
+                    expected_avail,
+                    conditional_avail,
                 )
+            )
 
-    return best_result
+    if not viable_configs:
+        return None
+
+    # Target-based selection:
+    # 1. Find configs that reach target_nines
+    # 2. If any reach target, pick cheapest
+    # 3. If none reach target, pick highest availability (lenient mode)
+    reached_target = [
+        c
+        for c in viable_configs
+        if nines(c[5]) >= target_nines  # c[5] = expected_avail
+    ]
+
+    if reached_target:
+        # Cheapest config that hits target
+        # Tie-break by higher availability
+        selected = min(
+            reached_target, key=lambda c: (c[4], -c[5])
+        )  # c[4]=cost, c[5]=avail
+    else:
+        # Best availability we can achieve within budget
+        # Tie-break by lower cost
+        selected = max(
+            viable_configs, key=lambda c: (c[5], -c[4])
+        )  # c[5]=avail, c[4]=cost
+
+    # Unpack selected config
+    node_count, rf, ppn, base_nodes, cost, expected_avail, conditional_avail = selected
+    achieved = nines(expected_avail)
+    target_met = achieved >= target_nines
+
+    # For zone-aware search, zone_aware_cost equals the result cost
+    actual_zone_aware_cost = cost if zone_aware else zone_aware_cost
+
+    return FaultTolerantResult(
+        node_count=node_count,
+        rf=rf,
+        partitions_per_node=ppn,
+        base_nodes=base_nodes,
+        cost=cost,
+        expected_availability=expected_avail,
+        achieved_nines=achieved,
+        target_nines=target_nines,
+        target_met=target_met,
+        az_failure_availability=conditional_avail,
+        per_partition_unavail=_per_partition_unavail_for_placement(
+            node_count, n_zones, rf, zone_aware
+        ),
+        zone_aware_cost=actual_zone_aware_cost,
+        zone_aware_savings=cost - actual_zone_aware_cost,
+        tier=tier,
+    )
 
 
 # =============================================================================
@@ -645,51 +695,6 @@ def system_availability(
         total_avail += (1.0 - p_unavail) ** n_partitions if p_unavail < 1.0 else 0.0
 
     return total_avail / n_zones
-
-
-# =============================================================================
-# Utility Function (AIMA Ch 16)
-# =============================================================================
-
-
-def utility(
-    expected_avail: float, cost: float, tier: int, base_cost: float = 0.0
-) -> float:
-    """Score a configuration using nines-based value.
-
-    Formula:
-        utility = (excess_nines × value_per_nine) - cost
-
-    Where:
-        excess_nines = nines(expected_availability) - nines(target_availability)
-
-    DESIGN RATIONALE
-    ----------------
-    - Uses expected annual availability (not conditional)
-    - Value is linear in nines (each nine worth same dollar amount)
-    - This makes trade-offs explicit: "Is one more nine worth $X?"
-
-    Args:
-        expected_avail: Expected annual availability (not conditional)
-        cost: Annual cost of this configuration
-        tier: Service tier (0=critical, 3=dev)
-        base_cost: Unused (kept for API compatibility during transition)
-
-    Returns:
-        Utility score (higher is better)
-    """
-    _ = base_cost  # Unused - kept for API compatibility
-    config = get_tier_config(tier)
-
-    # Convert to nines and calculate excess
-    avail_nines = nines(expected_avail)
-    target_nines = nines(config.target_availability)
-    excess_nines = avail_nines - target_nines
-
-    # Value from excess availability (can be negative if below target)
-    availability_value = excess_nines * config.value_per_nine
-
-    return availability_value - cost
 
 
 # Convenience function: system unavailability = 1 - system availability
