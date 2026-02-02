@@ -20,12 +20,14 @@ from hypothesis import strategies as st
 from service_capacity_modeling.models.org.netflix.partition_capacity import (
     CapacityProblem,
     CapacityResult,
+    FailureModel,
     closed_form_algorithm,
+    expected_annual_availability,
     find_capacity_config,
     get_tier_config,
+    nines,
     search_with_fault_tolerance,
     system_availability,
-    utility,
 )
 
 
@@ -52,10 +54,13 @@ def compute_pareto_frontier(
     n_zones: int = 3,
     zone_aware: bool = False,
 ) -> list[ParetoPoint]:
-    """Find all Pareto-optimal (availability, cost) configurations.
+    """Find all Pareto-optimal (expected_availability, cost) configurations.
 
     This is a TEST HELPER for validating that search_with_fault_tolerance
     returns efficient solutions.
+
+    Note: availability in ParetoPoint is now EXPECTED annual availability,
+    not conditional availability.
     """
     config = get_tier_config(tier)
     tier_problem = CapacityProblem(
@@ -79,18 +84,24 @@ def compute_pareto_frontier(
         if result is None:
             continue
 
-        # Calculate availability based on placement strategy
+        # Calculate expected annual availability based on placement strategy
+        # Data per node = partitions_per_node × partition_size
+        data_per_node_gib = ppn * problem.partition_size_gib
         if zone_aware:
-            avail = (
+            expected_avail = (
                 1.0 if result.rf >= 2 else (1.0 - 1.0 / n_zones) ** problem.n_partitions
             )
         else:
-            avail = system_availability(
-                result.node_count, n_zones, result.rf, problem.n_partitions
+            expected_avail = expected_annual_availability(
+                result.node_count,
+                n_zones,
+                result.rf,
+                problem.n_partitions,
+                data_per_node_gib,
             )
         all_configs.append(
             ParetoPoint(
-                availability=avail,
+                availability=expected_avail,  # Now expected annual, not conditional
                 cost=result.node_count * cost_per_node,
                 rf=result.rf,
                 node_count=result.node_count,
@@ -427,32 +438,31 @@ class TestNodeCountFormula:
 
 
 # =============================================================================
-# PART 5: Tier configuration and utility function tests
+# PART 5: Tier configuration tests
 # =============================================================================
 
 
 class TestTierConfiguration:
-    """Test tier configuration and utility function."""
+    """Test tier configuration with target-based model."""
 
     def test_tier_defaults_exist(self):
-        """All default tiers should be defined."""
+        """All default tiers should be defined with correct fields."""
         for tier in range(4):
             config = get_tier_config(tier)
             assert config.min_rf >= 2
-            assert 0 < config.target_availability <= 1
-            assert config.cost_sensitivity > 0
+            assert config.target_nines >= 3  # At least 99.9%
             assert config.max_cost_multiplier >= 1
 
     def test_tier_ordering(self):
-        """Higher tiers should have lower requirements."""
+        """Higher tiers should have lower or equal requirements."""
         for tier in range(3):
             lower = get_tier_config(tier)
             higher = get_tier_config(tier + 1)
 
-            # Higher tier should have lower or equal availability target
-            assert higher.target_availability <= lower.target_availability
-            # Higher tier should have higher cost sensitivity (more cost-focused)
-            assert higher.cost_sensitivity >= lower.cost_sensitivity
+            # Higher tier should have lower or equal target_nines
+            assert higher.target_nines <= lower.target_nines
+            # Higher tier should have lower or equal max_cost_multiplier
+            assert higher.max_cost_multiplier <= lower.max_cost_multiplier
 
     def test_invalid_tier_returns_default(self):
         """Invalid tier should return tier 2 config."""
@@ -463,91 +473,14 @@ class TestTierConfiguration:
         assert get_tier_config(99) == TIER_DEFAULTS[2]
         assert get_tier_config(-1) == TIER_DEFAULTS[2]
 
-
-class TestUtilityBehavioralExpectations:
-    """Verify utility function produces expected decisions."""
-
-    def test_tier0_prefers_availability_over_cost(self):
-        """Tier 0 should pick high-availability even at 2x cost."""
-        u_cheap = utility(availability=0.90, cost=1000, tier=0, base_cost=1000)
-        u_expensive = utility(availability=0.999, cost=2000, tier=0, base_cost=1000)
-        assert u_expensive > u_cheap, "Tier 0 should prefer availability over cost"
-
-    def test_tier3_prefers_cost_over_availability(self):
-        """Tier 3 should pick low-cost even with lower availability."""
-        u_cheap = utility(availability=0.90, cost=1000, tier=3, base_cost=1000)
-        u_expensive = utility(availability=0.999, cost=2000, tier=3, base_cost=1000)
-        assert u_cheap > u_expensive, "Tier 3 should prefer cost over availability"
-
-    def test_cost_increase_hurts_tier3_more_than_tier0(self):
-        """A cost increase should hurt tier 3 utility more than tier 0."""
-        u_tier0_base = utility(availability=0.999, cost=1000, tier=0, base_cost=1000)
-        u_tier0_expensive = utility(
-            availability=0.999, cost=2000, tier=0, base_cost=1000
-        )
-        cost_impact_tier0 = u_tier0_base - u_tier0_expensive
-
-        u_tier3_base = utility(availability=0.999, cost=1000, tier=3, base_cost=1000)
-        u_tier3_expensive = utility(
-            availability=0.999, cost=2000, tier=3, base_cost=1000
-        )
-        cost_impact_tier3 = u_tier3_base - u_tier3_expensive
-
-        assert cost_impact_tier3 > cost_impact_tier0, (
-            f"Tier 3 should penalize cost more: tier0={cost_impact_tier0:.4f}, "
-            f"tier3={cost_impact_tier3:.4f}"
-        )
-
-    def test_below_target_always_worse_than_at_target(self):
-        """Being below target should always score worse than at target."""
-        config = get_tier_config(2)
-        below_target = config.target_availability - 0.01
-        at_target = config.target_availability
-
-        u_below = utility(availability=below_target, cost=1000, tier=2, base_cost=1000)
-        u_at = utility(availability=at_target, cost=1000, tier=2, base_cost=1000)
-
-        assert u_at > u_below, (
-            f"At-target should score better than below: "
-            f"at={u_at:.4f}, below={u_below:.4f}"
-        )
-
-
-class TestUtilityFunction:
-    """Test the utility function for balancing availability and cost."""
-
-    def test_utility_above_target_is_positive(self):
-        """Utility should be positive when availability exceeds target."""
-        u = utility(availability=0.99, cost=100, tier=2, base_cost=100)
-        assert u > 0, f"Expected positive utility, got {u}"
-
-    def test_utility_below_target_is_negative(self):
-        """Utility should be negative when availability is below target."""
-        u = utility(availability=0.90, cost=100, tier=2, base_cost=100)
-        assert u < 0, f"Expected negative utility, got {u}"
-
-    def test_utility_higher_availability_higher_utility(self):
-        """Higher availability should give higher utility."""
-        u_low = utility(availability=0.95, cost=100, tier=2, base_cost=100)
-        u_high = utility(availability=0.99, cost=100, tier=2, base_cost=100)
-        assert u_high > u_low
-
-    def test_utility_higher_cost_lower_utility(self):
-        """Higher cost should give lower utility."""
-        u_cheap = utility(availability=0.99, cost=100, tier=2, base_cost=100)
-        u_expensive = utility(availability=0.99, cost=200, tier=2, base_cost=100)
-        assert u_cheap > u_expensive
-
-    def test_utility_diminishing_returns(self):
-        """Going from 99% to 99.9% should have diminishing returns."""
-        u_95 = utility(availability=0.95, cost=100, tier=2, base_cost=100)
-        u_99 = utility(availability=0.99, cost=100, tier=2, base_cost=100)
-        u_999 = utility(availability=0.999, cost=100, tier=2, base_cost=100)
-
-        delta_1 = u_99 - u_95
-        delta_2 = u_999 - u_99
-
-        assert delta_1 > delta_2 > 0
+    def test_tier_target_nines_values(self):
+        """Verify expected target_nines for each tier."""
+        # Critical tiers (0-1) should target 4 nines (99.99%)
+        assert get_tier_config(0).target_nines == 4
+        assert get_tier_config(1).target_nines == 4
+        # Standard tiers (2-3) should target 3 nines (99.9%)
+        assert get_tier_config(2).target_nines == 3
+        assert get_tier_config(3).target_nines == 3
 
 
 # =============================================================================
@@ -559,7 +492,7 @@ class TestSearchWithFaultTolerance:
     """Test the fault-tolerant search algorithm."""
 
     def test_basic_search_returns_result(self):
-        """Basic search should return a valid result."""
+        """Basic search should return a valid result with all expected fields."""
         problem = CapacityProblem(
             n_partitions=100,
             partition_size_gib=100,
@@ -574,9 +507,17 @@ class TestSearchWithFaultTolerance:
         assert result is not None
         assert result.node_count > 0
         assert result.rf >= 2
-        assert 0 <= result.system_availability <= 1
+        assert 0 <= result.expected_availability <= 1
+        assert 0 <= result.az_failure_availability <= 1
         assert result.cost > 0
         assert result.zone_aware_cost > 0
+
+        # New target-based fields
+        assert result.achieved_nines >= 0
+        assert result.target_nines == get_tier_config(2).target_nines
+        assert isinstance(result.target_met, bool)
+        # achieved_nines should match nines(expected_availability)
+        assert abs(result.achieved_nines - nines(result.expected_availability)) < 0.001
 
     def test_higher_tier_prefers_availability(self):
         """Tier 0 should prefer higher availability than tier 3."""
@@ -594,7 +535,7 @@ class TestSearchWithFaultTolerance:
 
         assert result_tier0 is not None
         assert result_tier3 is not None
-        assert result_tier0.system_availability >= result_tier3.system_availability
+        assert result_tier0.expected_availability >= result_tier3.expected_availability
 
     def test_result_satisfies_constraints(self):
         """Result should satisfy all problem constraints."""
@@ -668,7 +609,7 @@ class TestZoneAwarePlacement:
     """Test zone_aware parameter behavior."""
 
     def test_random_placement_has_unavailability(self):
-        """Random placement (zone_aware=False) has <100% availability."""
+        """Random placement (zone_aware=False) has <100% conditional availability."""
         problem = CapacityProblem(
             n_partitions=100,
             partition_size_gib=100,
@@ -683,9 +624,9 @@ class TestZoneAwarePlacement:
         )
 
         assert result is not None
-        assert result.system_availability < 1.0, (
-            f"Random placement should have <100% availability, "
-            f"got {result.system_availability}"
+        assert result.az_failure_availability < 1.0, (
+            f"Random placement should have <100% conditional availability, "
+            f"got {result.az_failure_availability}"
         )
 
     def test_zone_aware_rf2_gives_perfect_availability(self):
@@ -704,9 +645,9 @@ class TestZoneAwarePlacement:
         )
 
         assert result is not None
-        assert result.system_availability == 1.0, (
-            f"Zone-aware with RF>=2 should give 100% availability, "
-            f"got {result.system_availability}"
+        assert result.expected_availability == 1.0, (
+            f"Zone-aware with RF>=2 should give 100% expected availability, "
+            f"got {result.expected_availability}"
         )
 
     def test_zone_aware_chooses_lower_rf(self):
@@ -778,8 +719,13 @@ class TestZoneAwarePlacement:
 class TestParetoFrontierValidation:
     """Verify search returns Pareto-optimal solutions and frontier is correct."""
 
-    def test_search_picks_max_utility_from_frontier(self):
-        """The search result should have highest utility among frontier points."""
+    def test_search_respects_target_based_selection(self):
+        """The search result should follow target-based selection rules.
+
+        With target-based selection:
+        1. If any config reaches target_nines, pick the cheapest
+        2. If no config reaches target, pick highest availability
+        """
         problem = CapacityProblem(
             n_partitions=100,
             partition_size_gib=100,
@@ -802,28 +748,31 @@ class TestParetoFrontierValidation:
             if result is None or not frontier:
                 continue
 
-            # Get baseline for utility calculation
-            baseline = find_capacity_config(problem)
-            if baseline is None:
-                continue
-            base_cost = baseline.node_count * cost_per_node
+            config = get_tier_config(tier)
 
-            # Find the frontier point with max utility
-            frontier_utilities = [
-                (p, utility(p.availability, p.cost, tier, base_cost)) for p in frontier
+            # Filter frontier to configs that reach target
+            reaching_target = [
+                p for p in frontier if nines(p.availability) >= config.target_nines
             ]
-            best_frontier_point, best_frontier_utility = max(
-                frontier_utilities, key=lambda x: x[1]
-            )
 
-            # Search result's utility should match or exceed the best frontier point
-            assert result.utility_score >= best_frontier_utility - 0.001, (
-                f"Tier {tier}: Search utility worse than best frontier point!\n"
-                f"Search: avail={result.system_availability:.4f}, cost={result.cost}, "
-                f"utility={result.utility_score:.4f}\n"
-                f"Best frontier: avail={best_frontier_point.availability:.4f}, "
-                f"cost={best_frontier_point.cost}, utility={best_frontier_utility:.4f}"
-            )
+            if reaching_target:
+                # If any reach target, result should be cheapest that does
+                cheapest_reaching = min(reaching_target, key=lambda p: p.cost)
+                assert result.target_met, (
+                    f"Tier {tier}: target should be met when configs reach it"
+                )
+                assert result.cost <= cheapest_reaching.cost + 0.01, (
+                    f"Tier {tier}: should pick cheapest config reaching target"
+                )
+            else:
+                # If none reach target, result should be highest availability
+                best_avail = max(frontier, key=lambda p: p.availability)
+                assert not result.target_met, (
+                    f"Tier {tier}: target should not be met when no config reaches it"
+                )
+                assert (
+                    result.expected_availability >= best_avail.availability - 0.0001
+                ), f"Tier {tier}: should pick highest availability"
 
     def test_frontier_is_sorted_by_cost(self):
         """Pareto frontier should be sorted by cost (cheapest first)."""
@@ -892,57 +841,257 @@ class TestParetoFrontierValidation:
 
 
 # =============================================================================
-# PART 9: Crossover point documentation tests
+# PART 9: Target-Based Selection Tests
 # =============================================================================
 
 
-class TestCrossoverPointDocumentation:
-    """Document where each tier's cost/availability tradeoff flips."""
+class TestTargetBasedSelection:
+    """Test the target-based selection model.
 
-    def test_crossover_points_documented(self):
-        """Document the cost multiplier where tiers reject availability gains."""
-        base_cost = 1000
-        base_avail = 0.95
-        better_avail = 0.99
+    With target-based selection:
+    1. Find cheapest config that reaches target_nines
+    2. If no config reaches target, pick highest availability (lenient mode)
+    3. Report whether target was met via target_met field
+    """
 
-        crossover_points: dict[int, float] = {}
-
-        for tier in range(4):
-            for multiplier_tenth in range(10, 51):
-                multiplier = multiplier_tenth / 10.0
-
-                u_base = utility(
-                    availability=base_avail,
-                    cost=base_cost,
-                    tier=tier,
-                    base_cost=base_cost,
-                )
-                u_better = utility(
-                    availability=better_avail,
-                    cost=base_cost * multiplier,
-                    tier=tier,
-                    base_cost=base_cost,
-                )
-
-                if u_base > u_better:
-                    crossover_points[tier] = multiplier
-                    break
-            else:
-                crossover_points[tier] = float("inf")
-
-        assert crossover_points[0] >= crossover_points[3], (
-            f"Tier 0 should tolerate more cost than tier 3: "
-            f"t0={crossover_points[0]}, t3={crossover_points[3]}"
+    def test_result_has_target_fields(self):
+        """Results should have achieved_nines, target_nines, and target_met."""
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
         )
 
-    def test_tiers_have_monotonic_cost_sensitivity(self):
-        """Higher tiers should be more cost-sensitive."""
-        for tier in range(3):
-            lower = get_tier_config(tier)
-            higher = get_tier_config(tier + 1)
+        result = search_with_fault_tolerance(problem, tier=2, cost_per_node=100)
 
-            assert higher.cost_sensitivity >= lower.cost_sensitivity, (
-                f"Cost sensitivity should increase: "
-                f"tier {tier}={lower.cost_sensitivity}, "
-                f"tier {tier + 1}={higher.cost_sensitivity}"
+        assert result is not None
+        assert hasattr(result, "achieved_nines")
+        assert hasattr(result, "target_nines")
+        assert hasattr(result, "target_met")
+
+        # achieved_nines should match nines(expected_availability)
+        assert abs(result.achieved_nines - nines(result.expected_availability)) < 0.001
+
+        # target_nines should match tier config
+        config = get_tier_config(2)
+        assert result.target_nines == config.target_nines
+
+        # target_met should be correct
+        assert result.target_met == (result.achieved_nines >= result.target_nines)
+
+    def test_target_met_when_reaching_target(self):
+        """When achieved_nines >= target_nines, target_met should be True."""
+        # Use zone-aware placement which guarantees 100% availability
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        result = search_with_fault_tolerance(
+            problem, tier=3, cost_per_node=100, zone_aware=True
+        )
+
+        assert result is not None
+        # Zone-aware with RF>=2 gives infinite nines (100% availability)
+        # Should easily meet tier 3's target of 3 nines
+        assert result.target_met, (
+            f"Zone-aware should meet target: "
+            f"achieved={result.achieved_nines:.2f}, target={result.target_nines}"
+        )
+
+    def test_cheapest_config_selected_when_target_met(self):
+        """When multiple configs reach target, cheapest should be selected."""
+        # Use a problem where multiple configs exist
+        problem = CapacityProblem(
+            n_partitions=50,
+            partition_size_gib=50,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=400,
+            cpu_per_node=16,
+        )
+
+        # Tier 3 has target of 3 nines and lowest cost multiplier
+        result = search_with_fault_tolerance(problem, tier=3, cost_per_node=100)
+
+        assert result is not None
+        if result.target_met:
+            # If target is met, we should have the cheapest config that does so
+            # The result should NOT overspend on availability we don't need
+            config = get_tier_config(3)
+            # Any config with more nines should be more expensive or equal
+            # (This is validated by the Pareto selection test)
+            assert result.achieved_nines >= config.target_nines
+
+    def test_tier0_versus_tier3_selection(self):
+        """Tier 0 (4 nines target) may spend more than tier 3 (3 nines target)."""
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        result_tier0 = search_with_fault_tolerance(problem, tier=0, cost_per_node=100)
+        result_tier3 = search_with_fault_tolerance(problem, tier=3, cost_per_node=100)
+
+        assert result_tier0 is not None
+        assert result_tier3 is not None
+
+        # Tier 0 should have higher or equal cost (needs 4 nines vs 3)
+        assert result_tier0.cost >= result_tier3.cost, (
+            f"Tier 0 should spend at least as much as tier 3: "
+            f"t0=${result_tier0.cost}, t3=${result_tier3.cost}"
+        )
+
+        # Tier 0 should achieve higher or equal availability
+        assert result_tier0.achieved_nines >= result_tier3.achieved_nines
+
+
+# =============================================================================
+# PART 10: Expected vs Conditional Availability Tests
+# =============================================================================
+
+
+class TestExpectedAvailabilityModel:
+    """Test the expected availability model that incorporates failure probabilities.
+
+    Key insight: AZ failures are rare (~2%/year), so even "bad" conditional
+    availability (90%) translates to very high expected availability (99.9%+).
+    """
+
+    def test_sanity_check_90_conditional_is_999_expected(self):
+        """90% conditional availability should be ~99.9%+ expected availability.
+
+        This is the key sanity check from the design document:
+        A service showing 90% conditional availability (bad!) is actually
+        99.9%+ expected availability (good!) because AZ failures are rare.
+        """
+        from service_capacity_modeling.models.org.netflix.partition_capacity import (
+            HOURS_PER_YEAR,
+            recovery_hours,
+        )
+
+        # Test with explicit calculation
+        conditional = 0.90  # 90% survival if AZ fails
+
+        # With default failure model: 2% AZ failure rate
+        # Recovery time depends on data size - assume 500 GiB per node
+        failure_model = FailureModel()
+        data_per_node_gib = 500.0  # Typical data size
+        recover_time = recovery_hours(data_per_node_gib, failure_model)
+
+        # Expected downtime = az_rate × p_loss × recovery_hours / HOURS_PER_YEAR
+        p_loss = 1.0 - conditional  # 10% chance of loss given AZ failure
+        expected_downtime_fraction = (
+            failure_model.az_failure_rate_per_year
+            * p_loss
+            * recover_time
+            / HOURS_PER_YEAR
+        )
+        expected_avail = 1.0 - expected_downtime_fraction
+
+        # Should be 99.9%+ (3 nines or more)
+        assert expected_avail > 0.999, (
+            f"90% conditional should give >99.9% expected, got {expected_avail:.6f}"
+        )
+
+        # In nines: should be ~3+ nines
+        expected_nines = nines(expected_avail)
+        assert expected_nines >= 3.0, (
+            f"90% conditional should give 3+ nines expected, got {expected_nines:.2f}"
+        )
+
+    def test_expected_annual_availability_function(self):
+        """Test the expected_annual_availability function directly."""
+        # Parameters that give roughly 90% conditional availability
+        # This is a worst-case scenario for random placement
+        conditional = system_availability(n_nodes=6, n_zones=3, rf=2, n_partitions=100)
+
+        # Get expected availability using the function
+        # Assume 100 GiB per node (typical for small dataset)
+        expected = expected_annual_availability(
+            n_nodes=6, n_zones=3, rf=2, n_partitions=100, data_per_node_gib=100.0
+        )
+
+        # Expected should always be >= conditional (since AZ failures are rare)
+        assert expected >= conditional, (
+            f"Expected ({expected:.6f}) should be >= conditional ({conditional:.6f})"
+        )
+
+        # Expected should be very high even if conditional is low
+        if conditional < 0.99:
+            assert expected > 0.999, (
+                f"With low conditional ({conditional:.4f}), "
+                f"expected should be >99.9%, got {expected:.6f}"
             )
+
+    def test_nines_conversion(self):
+        """Test the nines() helper function."""
+        # 0.9 = 1 nine
+        assert abs(nines(0.9) - 1.0) < 0.01
+        # 0.99 = 2 nines
+        assert abs(nines(0.99) - 2.0) < 0.01
+        # 0.999 = 3 nines
+        assert abs(nines(0.999) - 3.0) < 0.01
+        # 0.9999 = 4 nines
+        assert abs(nines(0.9999) - 4.0) < 0.01
+
+    def test_failure_model_parameters(self):
+        """Test that failure model parameters affect expected availability."""
+        # Higher AZ failure rate should decrease expected availability
+        high_rate_model = FailureModel(az_failure_rate_per_year=0.10)
+        low_rate_model = FailureModel(az_failure_rate_per_year=0.01)
+
+        expected_high = expected_annual_availability(
+            n_nodes=6,
+            n_zones=3,
+            rf=2,
+            n_partitions=100,
+            data_per_node_gib=100.0,
+            failure_model=high_rate_model,
+        )
+        expected_low = expected_annual_availability(
+            n_nodes=6,
+            n_zones=3,
+            rf=2,
+            n_partitions=100,
+            data_per_node_gib=100.0,
+            failure_model=low_rate_model,
+        )
+
+        assert expected_low > expected_high, (
+            "Lower failure rate should give higher expected availability"
+        )
+
+    def test_search_returns_expected_and_conditional(self):
+        """Search should return both expected and conditional availability."""
+        problem = CapacityProblem(
+            n_partitions=100,
+            partition_size_gib=100,
+            disk_per_node_gib=2048,
+            min_rf=2,
+            cpu_needed=800,
+            cpu_per_node=16,
+        )
+
+        result = search_with_fault_tolerance(problem, tier=2, cost_per_node=100)
+
+        assert result is not None
+        assert hasattr(result, "expected_availability")
+        assert hasattr(result, "az_failure_availability")
+
+        # Expected should be >= conditional
+        assert result.expected_availability >= result.az_failure_availability, (
+            f"Expected ({result.expected_availability:.6f}) should be >= "
+            f"conditional ({result.az_failure_availability:.6f})"
+        )

@@ -50,7 +50,6 @@ from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.org.netflix.partition_capacity import (
     CapacityProblem,
-    find_capacity_config,
     search_with_fault_tolerance,
 )
 
@@ -105,7 +104,8 @@ class NflxReadOnlyKVArguments(BaseModel):
     max_data_per_node_gib: int = Field(
         default=2048,
         description="Maximum data per node (GiB). "
-        "Prevents overloading nodes with too much data.",
+        "Controls recovery time: recovery_hrs ≈ data / 500 GiB/hr. "
+        "Lower = faster recovery = higher availability.",
     )
     reserved_memory_gib: float = Field(
         default=8.0,
@@ -342,52 +342,33 @@ def _compute_read_only_kv_regional_cluster(
     )
 
     if ft_result is None:
-        # Fallback to basic algorithm if fault tolerance search fails
-        config = find_capacity_config(problem)
-        if config is None:
-            return None
-        node_count = config.node_count
-        rf = config.rf
-        ppn = config.partitions_per_node
-        base_nodes = config.base_nodes
-        system_availability = None
-        zone_aware_savings = None
-    else:
-        node_count = ft_result.node_count
-        rf = ft_result.rf
-        ppn = ft_result.partitions_per_node
-        base_nodes = ft_result.base_nodes
-        system_availability = ft_result.system_availability
-        zone_aware_savings = ft_result.zone_aware_savings
+        return None
 
     # ─────────────────────────────────────────────────────────────────────────
     # Step 3: Build the cluster result
     # ─────────────────────────────────────────────────────────────────────────
     nodes_for_cpu = math.ceil(inputs.cpu_needed / inputs.cpu_per_node)
-    cost = node_count * instance.annual_cost
+    cost = ft_result.node_count * instance.annual_cost
 
     cluster = RegionClusterCapacity(
         cluster_type="read-only-kv",
-        count=node_count,
+        count=ft_result.node_count,
         instance=instance,
         attached_drives=tuple(),
         annual_cost=cost,
     )
 
     params = {
-        "read-only-kv.replica_count": rf,
-        "read-only-kv.partitions_per_node": ppn,
+        "read-only-kv.replica_count": ft_result.rf,
+        "read-only-kv.partitions_per_node": ft_result.partitions_per_node,
         "read-only-kv.effective_disk_per_node_gib": inputs.effective_disk_per_node_gib,
-        "read-only-kv.nodes_for_one_copy": base_nodes,
+        "read-only-kv.nodes_for_one_copy": ft_result.base_nodes,
         "read-only-kv.nodes_for_cpu": nodes_for_cpu,
         "read-only-kv.service_tier": desires.service_tier,
+        "read-only-kv.expected_availability": ft_result.expected_availability,
+        "read-only-kv.az_failure_availability": ft_result.az_failure_availability,
+        "read-only-kv.zone_aware_savings": ft_result.zone_aware_savings,
     }
-
-    # Add fault tolerance info if available
-    if system_availability is not None:
-        params["read-only-kv.system_availability"] = system_availability
-    if zone_aware_savings is not None:
-        params["read-only-kv.zone_aware_savings"] = zone_aware_savings
 
     _upsert_params(cluster, params)
 

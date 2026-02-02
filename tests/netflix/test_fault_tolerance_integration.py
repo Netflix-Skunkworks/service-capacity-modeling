@@ -43,7 +43,7 @@ class TestEndToEndScenarios:
         result = search_with_fault_tolerance(problem, tier=2, cost_per_node=100)
 
         assert result is not None
-        assert result.system_availability >= 0.90  # Should be decent
+        assert result.az_failure_availability >= 0.90  # Should be decent
         assert result.rf >= 2
         assert result.zone_aware_savings >= 0
 
@@ -130,14 +130,13 @@ class TestTierTargets:
         assert result is not None
 
         # The algorithm should at least try to meet the target
-        # For very high partition counts, it may not be achievable
-        # but it should get as close as possible
-        if result.utility_score > 0:
-            # Positive utility means target was met
-            assert result.system_availability >= config.target_availability
+        # New target-based model uses target_met and achieved_nines
+        if result.target_met:
+            # Target was met - achieved_nines >= target_nines
+            assert result.achieved_nines >= config.target_nines
         else:
-            # Negative utility means target wasn't met
-            # but we should still have a reasonable configuration
+            # Target wasn't met, but we should still have a reasonable config
+            # The algorithm picks the best available config in this case
             assert result.rf >= config.min_rf
 
     def test_tier0_with_few_partitions_meets_target(self):
@@ -155,7 +154,7 @@ class TestTierTargets:
 
         assert result is not None
         # With only 10 partitions, 99.9% should be achievable
-        assert result.system_availability >= 0.999
+        assert result.az_failure_availability >= 0.999
 
     def test_tier3_optimizes_for_cost(self):
         """Tier 3 should optimize for cost over availability."""
@@ -334,10 +333,14 @@ class TestParetoFrontier:
 
                 # Check if this dominates the result
                 # (better availability AND lower cost)
-                if alt_avail > result.system_availability and alt_cost < result.cost:
+                if (
+                    alt_avail > result.az_failure_availability
+                    and alt_cost < result.cost
+                ):
                     pytest.fail(
                         f"Found dominating solution: "
-                        f"avail={alt_avail:.4f} > {result.system_availability:.4f}, "
+                        f"avail={alt_avail:.4f} > "
+                        f"{result.az_failure_availability:.4f}, "
                         f"cost={alt_cost} < {result.cost}"
                     )
 
@@ -380,8 +383,8 @@ class TestSimulationAgreement:
         )
 
         # Should match within 5% (simulation variance)
-        tolerance = max(0.05, abs(result.system_availability) * 0.1)
-        assert abs(result.system_availability - simulated) < tolerance, (
-            f"Closed-form {result.system_availability:.4f} doesn't match "
+        tolerance = max(0.05, abs(result.az_failure_availability) * 0.1)
+        assert abs(result.az_failure_availability - simulated) < tolerance, (
+            f"Closed-form {result.az_failure_availability:.4f} doesn't match "
             f"simulation {simulated:.4f}"
         )
