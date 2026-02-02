@@ -49,7 +49,7 @@ from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.org.netflix.partition_capacity import (
     CapacityProblem,
-    search_algorithm,
+    find_capacity_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -186,7 +186,7 @@ def _estimate_read_only_kv_requirement(
 # See that module for:
 #   - CapacityProblem: input specification
 #   - CapacityResult: output (node_count, rf, partitions_per_node, base_nodes)
-#   - search_algorithm: finds highest RF that fits within max_nodes
+#   - find_capacity_config: finds highest RF that fits within max_nodes
 #
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -261,7 +261,7 @@ def _compute_read_only_kv_regional_cluster(
 
     This function is intentionally thin - it delegates to:
     - _extract_planning_inputs: model domain → algorithm domain
-    - search_algorithm: pure algorithm (from partition_capacity module)
+    - find_capacity_config: pure algorithm (from partition_capacity module)
     - Result building: algorithm output → RegionClusterCapacity
     """
     # ─────────────────────────────────────────────────────────────────────────
@@ -283,7 +283,7 @@ def _compute_read_only_kv_regional_cluster(
         cpu_per_node=inputs.cpu_per_node,
         max_nodes=inputs.max_nodes,
     )
-    config = search_algorithm(problem)
+    config = find_capacity_config(problem)
 
     if config is None:
         return None
