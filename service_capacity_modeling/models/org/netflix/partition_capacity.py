@@ -199,13 +199,16 @@ def search_with_fault_tolerance(
     best_result: Optional[FaultTolerantResult] = None
     best_utility = float("-inf")
 
+    # Effective min_rf: respect both tier requirement and problem constraint
+    effective_min_rf = max(config.min_rf, problem.min_rf)
+
     # Enumerate all (PPn, RF) configurations
     for ppn in range(max_ppn, 0, -1):
         base_nodes = math.ceil(problem.n_partitions / ppn)
 
-        # Minimum RF to meet CPU
+        # Minimum RF to meet CPU (also respects effective_min_rf)
         min_rf_for_cpu = _min_rf_for_cpu(
-            base_nodes, config.min_rf, problem.cpu_needed, problem.cpu_per_node
+            base_nodes, effective_min_rf, problem.cpu_needed, problem.cpu_per_node
         )
 
         # Maximum RF limited by cost
@@ -342,11 +345,14 @@ def _calculate_zone_aware_cost(
     best_cost = float("inf")
     best_utility = float("-inf")
 
+    # Effective min_rf: respect both tier requirement and problem constraint
+    effective_min_rf = max(config.min_rf, problem.min_rf)
+
     # Same search loop, but using zone-aware availability
     for ppn in range(max_ppn, 0, -1):
         base_nodes = math.ceil(problem.n_partitions / ppn)
         min_rf_for_cpu = _min_rf_for_cpu(
-            base_nodes, config.min_rf, problem.cpu_needed, problem.cpu_per_node
+            base_nodes, effective_min_rf, problem.cpu_needed, problem.cpu_per_node
         )
         max_rf_for_cost = int(max_cost / (base_nodes * cost_per_node))
         max_rf = max(min_rf_for_cpu, min(10, max_rf_for_cost))

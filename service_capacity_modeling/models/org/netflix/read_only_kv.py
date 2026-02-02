@@ -44,12 +44,14 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
+from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.org.netflix.partition_capacity import (
     CapacityProblem,
     find_capacity_config,
+    search_with_fault_tolerance,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,6 +63,19 @@ def _upsert_params(cluster: Any, params: Dict[str, Any]) -> None:
         cluster.cluster_params.update(params)
     else:
         cluster.cluster_params = params
+
+
+class ReadOnlyKVContext(BaseModel):
+    """Type-safe context passed from requirement estimation to cluster computation."""
+
+    min_replica_count: int
+    total_num_partitions: int
+    unreplicated_data_gib: float
+    partition_size_gib: float
+    partition_size_with_buffer_gib: float
+    raw_cores: float
+    compute_buffer_ratio: float
+    disk_buffer_ratio: float
 
 
 class NflxReadOnlyKVArguments(BaseModel):
@@ -139,8 +154,17 @@ def _estimate_read_only_kv_requirement(
     # Unreplicated data size
     unreplicated_data_gib = desires.data_shape.estimated_state_size_gib.mid
 
-    # Partition size (unreplicated)
+    # Partition size (unreplicated, then with buffer for binpacking)
     partition_size_gib = unreplicated_data_gib / args.total_num_partitions
+    partition_size_with_buffer_gib = partition_size_gib * disk_buffer.ratio
+
+    # Total disk = partitions × partition_size × min_rf (with buffer)
+    # This is the minimum disk needed before the algorithm potentially increases RF
+    total_disk_gib = (
+        args.total_num_partitions
+        * partition_size_with_buffer_gib
+        * args.min_replica_count
+    )
 
     # CPU calculation using sqrt staffing model (independent of replicas)
     raw_cores = sqrt_staffed_cores(desires)
@@ -159,22 +183,26 @@ def _estimate_read_only_kv_requirement(
     # Independent of replicas
     needed_network_mbps = simple_network_mbps(desires)
 
+    # Build typed context for downstream algorithm
+    context = ReadOnlyKVContext(
+        min_replica_count=args.min_replica_count,
+        total_num_partitions=args.total_num_partitions,
+        unreplicated_data_gib=unreplicated_data_gib,
+        partition_size_gib=partition_size_gib,
+        partition_size_with_buffer_gib=partition_size_with_buffer_gib,
+        raw_cores=raw_cores,
+        compute_buffer_ratio=compute_buffer.ratio,
+        disk_buffer_ratio=disk_buffer.ratio,
+    )
+
     return CapacityRequirement(
         requirement_type="read-only-kv-regional",
         reference_shape=desires.reference_shape,
         cpu_cores=certain_int(int(needed_cores)),
         mem_gib=certain_float(0),  # Not used (see TODO at top of file)
-        disk_gib=certain_float(partition_size_gib * disk_buffer.ratio),
+        disk_gib=certain_float(total_disk_gib),
         network_mbps=certain_float(needed_network_mbps),
-        context={
-            "min_replica_count": args.min_replica_count,
-            "total_num_partitions": args.total_num_partitions,
-            "unreplicated_data_gib": round(unreplicated_data_gib, 2),
-            "partition_size_gib": round(partition_size_gib, 2),
-            "raw_cores": round(raw_cores, 2),
-            "compute_buffer_ratio": compute_buffer.ratio,
-            "disk_buffer_ratio": disk_buffer.ratio,
-        },
+        context=context.model_dump(),
     )
 
 
@@ -215,12 +243,12 @@ def _extract_planning_inputs(
     instance: Instance,
     requirement: CapacityRequirement,
     args: NflxReadOnlyKVArguments,
+    effective_disk_per_node: float,
 ) -> Optional[_PartitionSearchInputs]:
     """Transform model objects into pure algorithm inputs.
 
     This function handles:
     - Instance validation (must have local disk)
-    - Disk capacity calculation
     - Max partitions-per-node derivation
 
     Returns None if the instance is not viable for this workload.
@@ -229,15 +257,13 @@ def _extract_planning_inputs(
     if instance.drive is None:
         return None
 
-    partition_size_with_buffer_gib = requirement.disk_gib.mid
-    if partition_size_with_buffer_gib <= 0:
+    # Get partition size from typed context (disk_gib is total, not per-partition)
+    ctx = ReadOnlyKVContext.model_validate(requirement.context)
+    if ctx.partition_size_with_buffer_gib <= 0:
         return None
 
-    # Calculate effective disk capacity per node
-    effective_disk_per_node = min(instance.drive.size_gib, args.max_data_per_node_gib)
-
     # Calculate max partitions per node (disk capacity / partition size)
-    max_ppn = int(effective_disk_per_node / partition_size_with_buffer_gib)
+    max_ppn = int(effective_disk_per_node / ctx.partition_size_with_buffer_gib)
     if max_ppn < 1:
         return None
 
@@ -256,59 +282,113 @@ def _compute_read_only_kv_regional_cluster(
     instance: Instance,
     requirement: CapacityRequirement,
     args: NflxReadOnlyKVArguments,
+    desires: CapacityDesires,
 ) -> Optional[RegionClusterCapacity]:
     """Orchestrate: extract inputs → run algorithm → build cluster.
 
     This function is intentionally thin - it delegates to:
     - _extract_planning_inputs: model domain → algorithm domain
-    - find_capacity_config: pure algorithm (from partition_capacity module)
+    - search_with_fault_tolerance: find optimal (RF, node_count) for tier
     - Result building: algorithm output → RegionClusterCapacity
     """
     # ─────────────────────────────────────────────────────────────────────────
-    # Step 1: Extract planning inputs from model objects
+    # Step 1: Calculate effective disk capacity (idiomatic pattern)
     # ─────────────────────────────────────────────────────────────────────────
-    inputs = _extract_planning_inputs(instance, requirement, args)
+    if instance.drive is None:
+        return None
+
+    disk_buffer_ratio = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.disk]
+    ).ratio
+    effective_disk_per_node = get_effective_disk_per_node_gib(
+        instance=instance,
+        drive=instance.drive,
+        disk_buffer_ratio=disk_buffer_ratio,
+        max_local_data_per_node_gib=args.max_data_per_node_gib,
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Step 2: Extract planning inputs from model objects
+    # ─────────────────────────────────────────────────────────────────────────
+    inputs = _extract_planning_inputs(
+        instance, requirement, args, effective_disk_per_node
+    )
     if inputs is None:
         return None
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Step 2: Run the partition-aware search algorithm
+    # Step 3: Run fault-tolerance-aware search algorithm
     # ─────────────────────────────────────────────────────────────────────────
+    # Get partition size from typed context (disk_gib is total, not per-partition)
+    ctx = ReadOnlyKVContext.model_validate(requirement.context)
+
     problem = CapacityProblem(
         n_partitions=inputs.total_partitions,
-        partition_size_gib=requirement.disk_gib.mid,
+        partition_size_gib=ctx.partition_size_with_buffer_gib,
         disk_per_node_gib=inputs.effective_disk_per_node_gib,
         min_rf=inputs.min_rf,
         cpu_needed=inputs.cpu_needed,
         cpu_per_node=inputs.cpu_per_node,
         max_nodes=inputs.max_nodes,
     )
-    config = find_capacity_config(problem)
 
-    if config is None:
-        return None
+    # Use fault-tolerance optimizer to find optimal (RF, node_count) for tier
+    ft_result = search_with_fault_tolerance(
+        problem=problem,
+        tier=desires.service_tier,
+        cost_per_node=instance.annual_cost,
+        n_zones=3,  # Standard 3-AZ deployment
+        zone_aware=False,  # Random placement (conservative estimate)
+    )
+
+    if ft_result is None:
+        # Fallback to basic algorithm if fault tolerance search fails
+        config = find_capacity_config(problem)
+        if config is None:
+            return None
+        node_count = config.node_count
+        rf = config.rf
+        ppn = config.partitions_per_node
+        base_nodes = config.base_nodes
+        system_availability = None
+        zone_aware_savings = None
+    else:
+        node_count = ft_result.node_count
+        rf = ft_result.rf
+        ppn = ft_result.partitions_per_node
+        base_nodes = ft_result.base_nodes
+        system_availability = ft_result.system_availability
+        zone_aware_savings = ft_result.zone_aware_savings
 
     # ─────────────────────────────────────────────────────────────────────────
     # Step 3: Build the cluster result
     # ─────────────────────────────────────────────────────────────────────────
     nodes_for_cpu = math.ceil(inputs.cpu_needed / inputs.cpu_per_node)
-    cost = config.node_count * instance.annual_cost
+    cost = node_count * instance.annual_cost
 
     cluster = RegionClusterCapacity(
         cluster_type="read-only-kv",
-        count=config.node_count,
+        count=node_count,
         instance=instance,
         attached_drives=tuple(),
         annual_cost=cost,
     )
 
     params = {
-        "read-only-kv.replica_count": config.rf,
-        "read-only-kv.partitions_per_node": config.partitions_per_node,
+        "read-only-kv.replica_count": rf,
+        "read-only-kv.partitions_per_node": ppn,
         "read-only-kv.effective_disk_per_node_gib": inputs.effective_disk_per_node_gib,
-        "read-only-kv.nodes_for_one_copy": config.base_nodes,
+        "read-only-kv.nodes_for_one_copy": base_nodes,
         "read-only-kv.nodes_for_cpu": nodes_for_cpu,
+        "read-only-kv.service_tier": desires.service_tier,
     }
+
+    # Add fault tolerance info if available
+    if system_availability is not None:
+        params["read-only-kv.system_availability"] = system_availability
+    if zone_aware_savings is not None:
+        params["read-only-kv.zone_aware_savings"] = zone_aware_savings
+
     _upsert_params(cluster, params)
 
     return cluster
@@ -359,11 +439,12 @@ def _estimate_read_only_kv_cluster(
         args=args,
     )
 
-    # Compute cluster
+    # Compute cluster with fault tolerance optimization
     cluster = _compute_read_only_kv_regional_cluster(
         instance=instance,
         requirement=requirement,
         args=args,
+        desires=desires,
     )
 
     if cluster is None:
