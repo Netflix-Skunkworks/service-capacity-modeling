@@ -1584,15 +1584,20 @@ class TestReadOnlyKVFaultTolerance:
 
         cluster_params = plans[0].candidate_clusters.regional[0].cluster_params
 
-        # Availability should be surfaced in cluster params
-        assert "read-only-kv.system_availability" in cluster_params, (
-            "Expected system_availability in cluster_params"
+        # Expected availability should be surfaced in cluster params
+        assert "read-only-kv.expected_availability" in cluster_params, (
+            "Expected expected_availability in cluster_params"
         )
 
-        availability = cluster_params["read-only-kv.system_availability"]
+        availability = cluster_params["read-only-kv.expected_availability"]
         # Availability should be a probability between 0 and 1
         assert 0 < availability <= 1, (
             f"Availability {availability} should be between 0 and 1"
+        )
+
+        # Conditional availability should also be present
+        assert "read-only-kv.az_failure_availability" in cluster_params, (
+            "Expected az_failure_availability in cluster_params"
         )
 
     def test_basic_algorithm_returns_minimum_rf(self):
