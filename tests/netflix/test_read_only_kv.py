@@ -9,6 +9,7 @@ A read-only data serving layer backed by RocksDB that:
 - Deploys regionally with configurable replication (RF=2 default)
 """
 
+import math
 from dataclasses import dataclass
 from typing import Optional
 
@@ -772,11 +773,12 @@ class TestReadOnlyKVStandardizedAlgorithm:
             requirement_type="read-only-kv-regional",
             cpu_cores=certain_int(problem.cpu_needed),
             mem_gib=certain_float(0),
-            disk_gib=certain_float(problem.partition_size_gib),
+            disk_gib=certain_float(0),  # Not used; see partition_size_with_buffer_gib
             network_mbps=certain_float(100),
             context={
                 "min_replica_count": problem.min_replicas,
                 "total_num_partitions": problem.n_partitions,
+                "partition_size_with_buffer_gib": problem.partition_size_gib,
                 "disk_buffer_ratio": 1.0,  # Partition size already includes buffer
             },
         )
@@ -842,15 +844,19 @@ class TestReadOnlyKVStandardizedAlgorithm:
         assert result.node_count == 134  # 67 * 2
 
     def test_cpu_constrained_workload(self):
-        """Test CPU-constrained workload where RF increases to satisfy CPU.
+        """Test CPU-constrained workload where algorithm finds optimal PPn.
 
-        Hand calculation:
-        - ppn = floor(2048 / 575) = 3
-        - nodes_for_one_copy = ceil(200 / 3) = 67
+        Hand calculation (comparing PPn options):
+        - max_ppn = floor(2048 / 575) = 3
         - cpu_needed = 3200, cpu_per_node = 16
-        - nodes_for_cpu = ceil(3200 / 16) = 200
-        - rf=2: 67*2=134 nodes, 134*16=2144 CPU < 3200 (not enough)
-        - rf=3: 67*3=201 nodes, 201*16=3216 CPU >= 3200 (satisfied)
+
+        PPn=3: base=ceil(200/3)=67, cpu_per_copy=67*16=1072
+               min_rf=ceil(3200/1072)=3, nodes=67*3=201
+
+        PPn=2: base=ceil(200/2)=100, cpu_per_copy=100*16=1600
+               min_rf=ceil(3200/1600)=2, nodes=100*2=200 ← fewer nodes!
+
+        Algorithm picks PPn=2 because it results in fewer total nodes.
         """
         problem = StandardizedProblem(
             n_partitions=200,
@@ -865,10 +871,10 @@ class TestReadOnlyKVStandardizedAlgorithm:
         result = self._run_actual_algorithm(problem)
 
         assert result is not None
-        assert result.partitions_per_node == 3
-        assert result.nodes_for_one_copy == 67
-        assert result.replica_count == 3  # Increased to satisfy CPU
-        assert result.node_count == 201  # 67 * 3
+        assert result.partitions_per_node == 2  # Not max (3), but optimal
+        assert result.nodes_for_one_copy == 100
+        assert result.replica_count == 2
+        assert result.node_count == 200  # Better than 201 with PPn=3
 
     def test_single_partition_per_node(self):
         """Test when only 1 partition fits per node.
@@ -926,6 +932,38 @@ class TestReadOnlyKVStandardizedAlgorithm:
 
         result = self._run_actual_algorithm(problem)
         assert result is None
+
+    def test_fallback_ppn_when_greedy_exceeds_max_nodes(self):
+        """Test that algorithm finds solution when greedy PPn exceeds max_nodes.
+
+        This is the key case where greedy max PPn fails but a smaller PPn works:
+
+        N=21 partitions, max_nodes=10, cpu_per_node=2, cpu_needed=19
+        disk=1000, partition_size=100 → max_ppn=10
+
+        Greedy (PPn=10): base=ceil(21/10)=3, cpu_per_copy=6
+                         min_rf=ceil(19/6)=4, nodes=3*4=12 > 10 ❌
+
+        Fallback (PPn=5): base=ceil(21/5)=5, cpu_per_copy=10
+                          min_rf=ceil(19/10)=2, nodes=5*2=10 ≤ 10 ✅
+        """
+        problem = StandardizedProblem(
+            n_partitions=21,
+            partition_size_gib=100,
+            disk_per_node_gib=1000,  # max_ppn = 10
+            min_replicas=2,
+            cpu_needed=19,
+            cpu_per_node=2,
+            max_nodes=10,
+        )
+
+        result = self._run_actual_algorithm(problem)
+
+        assert result is not None
+        assert result.partitions_per_node == 5  # Not greedy (10), but fallback
+        assert result.nodes_for_one_copy == 5  # ceil(21/5)
+        assert result.replica_count == 2
+        assert result.node_count == 10  # Fits within max_nodes
 
     # ========================================================================
     # CONSTRAINT VALIDATION TESTS
@@ -1033,16 +1071,31 @@ class TestReadOnlyKVStandardizedAlgorithm:
 
     @given(problem=valid_problems())
     @settings(max_examples=200, deadline=None)
-    def test_hypothesis_uses_max_ppn(self, problem: StandardizedProblem):
-        """PROPERTY: Greedy algorithm always uses maximum PPn that fits on disk."""
+    def test_hypothesis_finds_minimum_nodes(self, problem: StandardizedProblem):
+        """PROPERTY: Algorithm finds the PPn that minimizes total node count."""
         result = self._run_actual_algorithm(problem)
         if result is None:
             return
 
+        # Verify that no other valid PPn gives fewer nodes
         max_ppn = int(problem.disk_per_node_gib / problem.partition_size_gib)
-        assert result.partitions_per_node == max_ppn, (
-            f"Didn't use max PPn: used {result.partitions_per_node}, max is {max_ppn}"
-        )
+        for ppn in range(1, max_ppn + 1):
+            base = math.ceil(problem.n_partitions / ppn)
+            cpu_per_copy = base * problem.cpu_per_node
+            if cpu_per_copy >= problem.cpu_needed:
+                min_rf = 1
+            else:
+                min_rf = math.ceil(problem.cpu_needed / cpu_per_copy)
+            rf = max(problem.min_replicas, min_rf)
+            nodes = max(2, base * rf)
+
+            if nodes <= problem.max_nodes:
+                # This is a valid solution; result should be at least as good
+                assert result.node_count <= nodes, (
+                    f"Found better solution: PPn={ppn} gives {nodes} nodes, "
+                    f"but algorithm chose PPn={result.partitions_per_node} "
+                    f"with {result.node_count} nodes"
+                )
 
 
 class TestReadOnlyKVExploration:
