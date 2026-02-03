@@ -43,6 +43,7 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
+from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -123,122 +124,90 @@ def _estimate_read_only_kv_requirement(
     Returns:
         CapacityRequirement for the regional cluster
     """
-    # Get buffers for each component
+    # Get compute buffer for CPU calculation
     compute_buffer = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.cpu]
     )
-    disk_buffer = buffer_for_components(
-        buffers=desires.buffers, components=[BufferComponent.disk]
-    )
-
-    # Unreplicated data size
-    unreplicated_data_gib = desires.data_shape.estimated_state_size_gib.mid
-
-    # Partition size (unreplicated)
-    partition_size_gib = unreplicated_data_gib / args.total_num_partitions
 
     # CPU calculation using sqrt staffing model (independent of replicas)
-    raw_cores = sqrt_staffed_cores(desires)
-    raw_cores = normalize_cores(
-        core_count=raw_cores,
+    # Apply buffer first, then normalize to target instance shape
+    needed_cores = math.ceil(sqrt_staffed_cores(desires) * compute_buffer.ratio)
+    needed_cores = normalize_cores(
+        core_count=needed_cores,
         target_shape=instance,
         reference_shape=desires.reference_shape,
     )
-    # Apply compute buffer
-    needed_cores = raw_cores * compute_buffer.ratio
 
     # Memory: not used as sizing constraint (see TODO at top of file)
     # Instances are filtered to require 64+ GiB RAM
 
     # Network calculation (read-only, so only outbound read traffic)
-    # Independent of replicas
     needed_network_mbps = simple_network_mbps(desires)
 
-    # Note: disk_gib is not used idiomatically here. The partition-aware algorithm
-    # calculates disk needs from partition_size_with_buffer_gib in context.
     return CapacityRequirement(
         requirement_type="read-only-kv-regional",
         reference_shape=desires.reference_shape,
-        cpu_cores=certain_int(int(needed_cores)),
+        cpu_cores=certain_int(needed_cores),
         mem_gib=certain_float(0),  # Not used (see TODO at top of file)
-        disk_gib=certain_float(
-            0
-        ),  # Not used; see partition_size_with_buffer_gib in context
+        disk_gib=certain_float(0),  # Disk computed via partition-aware algorithm
         network_mbps=certain_float(needed_network_mbps),
-        context={
-            "min_replica_count": args.min_replica_count,
-            "total_num_partitions": args.total_num_partitions,
-            "unreplicated_data_gib": round(unreplicated_data_gib, 2),
-            "partition_size_gib": round(partition_size_gib, 2),
-            "partition_size_with_buffer_gib": partition_size_gib * disk_buffer.ratio,
-            "raw_cores": round(raw_cores, 2),
-            "compute_buffer_ratio": compute_buffer.ratio,
-            "disk_buffer_ratio": disk_buffer.ratio,
-        },
+        context={},
     )
 
 
-def _find_optimal_ppn(
-    args: NflxReadOnlyKVArguments,
+def _find_first_valid_ppn(
+    n_partitions: int,
     max_ppn: int,
     cpu_per_node: int,
     total_needed_cores: int,
+    *,
+    min_replica_count: int,
+    max_regional_size: int,
 ) -> Optional[Tuple[int, int, int, int]]:
-    """Find the optimal (ppn, n1c, replica_count, node_count) that minimizes nodes.
+    """Find the first valid (ppn, n1c, replica_count, node_count) starting from max PPn.
 
-    Iterates over distinct nodes_for_one_copy values instead of all PPn values,
-    reducing complexity from O(max_ppn) to O(n_partitions).
+    Strategy: Start with max PPn (highest RF = best fault tolerance). If that exceeds
+    max_nodes, try lower PPn values until one fits.
+
+    Why start from max PPn?
+        Higher PPn → fewer base nodes → higher RF for same CPU → better fault tolerance
 
     Returns:
         Tuple of (ppn, nodes_for_one_copy, replica_count, node_count) or None
     """
-    n_partitions = args.total_num_partitions
-    best_solution = None
-    best_node_count = float("inf")
-    seen_n1c: set[int] = set()
+    for ppn in range(max_ppn, 0, -1):
+        base = math.ceil(n_partitions / ppn)
 
-    for target_n1c in range(1, n_partitions + 1):
-        # Calculate max PPn that gives this target_n1c
-        if target_n1c == 1:
-            ppn = min(max_ppn, n_partitions)
+        # Calculate minimum RF for CPU
+        if base >= 2:
+            min_rf_for_cpu = max(
+                1, math.ceil(total_needed_cores / (base * cpu_per_node))
+            )
+            replica_count = max(min_replica_count, min_rf_for_cpu)
+            node_count = base * replica_count
         else:
-            ppn = min((n_partitions - 1) // (target_n1c - 1), max_ppn)
+            # base == 1: special case
+            if 2 * cpu_per_node >= total_needed_cores:
+                replica_count = min_replica_count
+                node_count = max(2, replica_count)
+            else:
+                replica_count = max(
+                    min_replica_count, math.ceil(total_needed_cores / cpu_per_node)
+                )
+                node_count = replica_count
 
-        if ppn < 1:
-            break
+        if node_count <= max_regional_size:
+            return (ppn, base, replica_count, node_count)
 
-        # Actual n1c may differ if ppn was capped by max_ppn
-        nodes_for_one_copy = math.ceil(n_partitions / ppn)
-
-        if nodes_for_one_copy in seen_n1c:
-            continue
-        seen_n1c.add(nodes_for_one_copy)
-
-        # Calculate minimum RF needed for CPU
-        cpu_per_copy = nodes_for_one_copy * cpu_per_node
-        min_rf_for_cpu = (
-            1
-            if cpu_per_copy >= total_needed_cores
-            else math.ceil(total_needed_cores / cpu_per_copy)
-        )
-
-        replica_count = max(args.min_replica_count, min_rf_for_cpu)
-        node_count = max(2, nodes_for_one_copy * replica_count)
-
-        if node_count > args.max_regional_size:
-            continue
-
-        if node_count < best_node_count:
-            best_solution = (ppn, nodes_for_one_copy, replica_count, node_count)
-            best_node_count = node_count
-
-    return best_solution
+    return None
 
 
 def _compute_read_only_kv_regional_cluster(
     instance: Instance,
     requirement: CapacityRequirement,
     args: NflxReadOnlyKVArguments,
+    partition_size_with_buffer_gib: float,
+    disk_buffer_ratio: float,
 ) -> Optional[RegionClusterCapacity]:
     """Compute the regional cluster configuration using the partition-aware algorithm.
 
@@ -254,8 +223,10 @@ def _compute_read_only_kv_regional_cluster(
 
     Args:
         instance: The compute instance being considered (must have local disk)
-        requirement: Calculated capacity requirement (with per-replica values)
+        requirement: Calculated capacity requirement
         args: Read-only KV specific arguments
+        partition_size_with_buffer_gib: Size of one partition with disk buffer applied
+        disk_buffer_ratio: Disk buffer ratio for headroom
 
     Returns:
         RegionClusterCapacity or None if configuration is not viable
@@ -265,42 +236,30 @@ def _compute_read_only_kv_regional_cluster(
         return None
 
     total_needed_cores = int(requirement.cpu_cores.mid)
-    partition_size_with_buffer_gib = requirement.context[
-        "partition_size_with_buffer_gib"
-    ]
 
-    # Step 1 (DISK): Calculate effective disk capacity per node
-    # max_data_per_node_gib is in terms of actual data, so multiply by buffer
-    # to get the raw disk space needed to hold that much data
-    disk_buffer_ratio = requirement.context["disk_buffer_ratio"]
-    max_disk_for_data_limit = args.max_data_per_node_gib * disk_buffer_ratio
-    effective_disk_per_node = min(instance.drive.size_gib, max_disk_for_data_limit)
+    # Step 1 (DISK): Calculate effective disk capacity per node using helper
+    effective_disk_per_node = get_effective_disk_per_node_gib(
+        instance=instance,
+        drive=instance.drive,
+        disk_buffer_ratio=disk_buffer_ratio,
+        max_local_data_per_node_gib=args.max_data_per_node_gib,
+    )
 
     # Step 2 (DISK): Calculate max partitions_per_node
-    # We divide raw disk by buffered partition size to leave disk headroom.
-    # Example: 2048 GiB disk / 115 GiB buffered partition = 17 partitions
-    #          17 partitions × 100 GiB actual = 1700 GiB used (83% utilization)
     if partition_size_with_buffer_gib <= 0:
         return None
     max_ppn = int(effective_disk_per_node / partition_size_with_buffer_gib)
     if max_ppn < 1:
-        # This instance type cannot fit even one partition
         return None
 
-    # Step 3: Find optimal (ppn, replica_count) that minimizes node count
-    #
-    # Greedy max PPn isn't always optimal. Example:
-    #   N=21 partitions, max_nodes=10, CPU needs RF=4 at PPn=10
-    #   Greedy: PPn=10 → base=3 → RF=4 → 12 nodes ❌ (exceeds max)
-    #   Fallback: PPn=5 → base=5 → RF=2 → 10 nodes ✅
-    #
-    # Why? Higher PPn means fewer base nodes, but fewer base nodes may require
-    # higher RF to satisfy CPU, potentially exceeding max_nodes.
-    result = _find_optimal_ppn(
-        args=args,
+    # Step 3: Find first valid configuration starting from max PPn (highest RF)
+    result = _find_first_valid_ppn(
+        n_partitions=args.total_num_partitions,
         max_ppn=max_ppn,
         cpu_per_node=instance.cpu,
         total_needed_cores=total_needed_cores,
+        min_replica_count=args.min_replica_count,
+        max_regional_size=args.max_regional_size,
     )
 
     if result is None:
@@ -380,11 +339,21 @@ def _estimate_read_only_kv_cluster(
         args=args,
     )
 
+    # Compute disk buffer values inline (not via context)
+    disk_buffer = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.disk]
+    )
+    unreplicated_data_gib = desires.data_shape.estimated_state_size_gib.mid
+    partition_size_gib = unreplicated_data_gib / args.total_num_partitions
+    partition_size_with_buffer_gib = partition_size_gib * disk_buffer.ratio
+
     # Compute cluster
     cluster = _compute_read_only_kv_regional_cluster(
         instance=instance,
         requirement=requirement,
         args=args,
+        partition_size_with_buffer_gib=partition_size_with_buffer_gib,
+        disk_buffer_ratio=disk_buffer.ratio,
     )
 
     if cluster is None:
@@ -449,16 +418,13 @@ class NflxReadOnlyKVCapacityModel(CapacityModel):
     @staticmethod
     def default_buffers() -> Buffers:
         return Buffers(
-            default=Buffer(ratio=1.25),
             desired={
                 # No background work, just traffic spikes
                 "compute": Buffer(
                     ratio=1.5, components=[BufferComponent.compute]
-                ),  # 67%
+                ),  # 67% utilization target
                 # Read-only: can run at high disk utilization
                 "disk": Buffer(ratio=1.15, components=[BufferComponent.disk]),  # 87%
-                # Memory headroom for RocksDB block cache
-                "memory": Buffer(ratio=1.2, components=[BufferComponent.memory]),  # 83%
             },
         )
 

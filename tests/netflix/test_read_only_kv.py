@@ -208,10 +208,6 @@ class TestReadOnlyKVReplication:
         )[0]
 
         result = cap_plan.candidate_clusters.regional[0]
-        requirement = cap_plan.requirements.regional[0]
-
-        # Check min RF is recorded in context
-        assert requirement.context["min_replica_count"] == 2
 
         # Check actual replica_count in cluster_params (may be >= min)
         actual_rf = result.cluster_params["read-only-kv.replica_count"]
@@ -236,10 +232,6 @@ class TestReadOnlyKVReplication:
         )[0]
 
         result = cap_plan.candidate_clusters.regional[0]
-        requirement = cap_plan.requirements.regional[0]
-
-        # Check min RF is recorded in context
-        assert requirement.context["min_replica_count"] == 3
 
         # Check actual replica_count in cluster_params (may be >= min)
         actual_rf = result.cluster_params["read-only-kv.replica_count"]
@@ -773,14 +765,9 @@ class TestReadOnlyKVStandardizedAlgorithm:
             requirement_type="read-only-kv-regional",
             cpu_cores=certain_int(problem.cpu_needed),
             mem_gib=certain_float(0),
-            disk_gib=certain_float(0),  # Not used; see partition_size_with_buffer_gib
+            disk_gib=certain_float(0),
             network_mbps=certain_float(100),
-            context={
-                "min_replica_count": problem.min_replicas,
-                "total_num_partitions": problem.n_partitions,
-                "partition_size_with_buffer_gib": problem.partition_size_gib,
-                "disk_buffer_ratio": 1.0,  # Partition size already includes buffer
-            },
+            context={},
         )
 
         args = NflxReadOnlyKVArguments(
@@ -794,6 +781,8 @@ class TestReadOnlyKVStandardizedAlgorithm:
             instance=mock_instance,
             requirement=requirement,
             args=args,
+            partition_size_with_buffer_gib=problem.partition_size_gib,
+            disk_buffer_ratio=1.0,  # Partition size already includes buffer
         )
 
         if cluster is None:
@@ -844,19 +833,17 @@ class TestReadOnlyKVStandardizedAlgorithm:
         assert result.node_count == 134  # 67 * 2
 
     def test_cpu_constrained_workload(self):
-        """Test CPU-constrained workload where algorithm finds optimal PPn.
+        """Test CPU-constrained workload where algorithm uses max PPn (highest RF).
 
-        Hand calculation (comparing PPn options):
+        Hand calculation:
         - max_ppn = floor(2048 / 575) = 3
         - cpu_needed = 3200, cpu_per_node = 16
 
         PPn=3: base=ceil(200/3)=67, cpu_per_copy=67*16=1072
                min_rf=ceil(3200/1072)=3, nodes=67*3=201
 
-        PPn=2: base=ceil(200/2)=100, cpu_per_copy=100*16=1600
-               min_rf=ceil(3200/1600)=2, nodes=100*2=200 ← fewer nodes!
-
-        Algorithm picks PPn=2 because it results in fewer total nodes.
+        Algorithm picks PPn=3 (max) because it prioritizes higher RF
+        for fault tolerance.
         """
         problem = StandardizedProblem(
             n_partitions=200,
@@ -871,10 +858,10 @@ class TestReadOnlyKVStandardizedAlgorithm:
         result = self._run_actual_algorithm(problem)
 
         assert result is not None
-        assert result.partitions_per_node == 2  # Not max (3), but optimal
-        assert result.nodes_for_one_copy == 100
-        assert result.replica_count == 2
-        assert result.node_count == 200  # Better than 201 with PPn=3
+        assert result.partitions_per_node == 3  # Max PPn for highest RF
+        assert result.nodes_for_one_copy == 67
+        assert result.replica_count == 3
+        assert result.node_count == 201
 
     def test_single_partition_per_node(self):
         """Test when only 1 partition fits per node.
@@ -1071,31 +1058,42 @@ class TestReadOnlyKVStandardizedAlgorithm:
 
     @given(problem=valid_problems())
     @settings(max_examples=200, deadline=None)
-    def test_hypothesis_finds_minimum_nodes(self, problem: StandardizedProblem):
-        """PROPERTY: Algorithm finds the PPn that minimizes total node count."""
+    def test_hypothesis_uses_first_valid_ppn(self, problem: StandardizedProblem):
+        """PROPERTY: Algorithm returns first valid PPn (max PPn = highest RF)."""
         result = self._run_actual_algorithm(problem)
         if result is None:
             return
 
-        # Verify that no other valid PPn gives fewer nodes
+        # Verify that the chosen PPn is the highest valid one
         max_ppn = int(problem.disk_per_node_gib / problem.partition_size_gib)
-        for ppn in range(1, max_ppn + 1):
-            base = math.ceil(problem.n_partitions / ppn)
-            cpu_per_copy = base * problem.cpu_per_node
-            if cpu_per_copy >= problem.cpu_needed:
-                min_rf = 1
-            else:
-                min_rf = math.ceil(problem.cpu_needed / cpu_per_copy)
-            rf = max(problem.min_replicas, min_rf)
-            nodes = max(2, base * rf)
 
-            if nodes <= problem.max_nodes:
-                # This is a valid solution; result should be at least as good
-                assert result.node_count <= nodes, (
-                    f"Found better solution: PPn={ppn} gives {nodes} nodes, "
-                    f"but algorithm chose PPn={result.partitions_per_node} "
-                    f"with {result.node_count} nodes"
+        # No higher PPn should be valid
+        for ppn in range(max_ppn, result.partitions_per_node, -1):
+            base = math.ceil(problem.n_partitions / ppn)
+            if base >= 2:
+                min_rf = max(
+                    1, math.ceil(problem.cpu_needed / (base * problem.cpu_per_node))
                 )
+                rf = max(problem.min_replicas, min_rf)
+                nodes = base * rf
+            else:
+                if 2 * problem.cpu_per_node >= problem.cpu_needed:
+                    rf = problem.min_replicas
+                    nodes = max(2, rf)
+                else:
+                    rf = max(
+                        problem.min_replicas,
+                        math.ceil(problem.cpu_needed / problem.cpu_per_node),
+                    )
+                    nodes = rf
+
+            # This higher PPn should exceed max_nodes
+            # (otherwise algorithm would have chosen it)
+            assert nodes > problem.max_nodes, (
+                f"Higher PPn={ppn} gives {nodes} nodes "
+                f"<= max_nodes={problem.max_nodes}, "
+                f"but algorithm chose PPn={result.partitions_per_node}"
+            )
 
 
 class TestReadOnlyKVExploration:
