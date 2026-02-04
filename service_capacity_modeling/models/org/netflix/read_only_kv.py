@@ -47,6 +47,10 @@ from service_capacity_modeling.models.common import get_effective_disk_per_node_
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
+from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
+    CapacityProblem,
+    find_first_valid_configuration,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +112,6 @@ class NflxReadOnlyKVArguments(BaseModel):
 def _estimate_read_only_kv_requirement(
     instance: Instance,
     desires: CapacityDesires,
-    args: NflxReadOnlyKVArguments,
 ) -> CapacityRequirement:
     """Estimate the capacity requirement for the read-only KV regional cluster.
 
@@ -119,7 +122,6 @@ def _estimate_read_only_kv_requirement(
     Args:
         instance: The compute instance being considered
         desires: User's capacity desires
-        args: Read-only KV specific arguments
 
     Returns:
         CapacityRequirement for the regional cluster
@@ -153,53 +155,6 @@ def _estimate_read_only_kv_requirement(
         network_mbps=certain_float(needed_network_mbps),
         context={},
     )
-
-
-def _find_first_valid_ppn(
-    n_partitions: int,
-    max_ppn: int,
-    cpu_per_node: int,
-    total_needed_cores: int,
-    *,
-    min_replica_count: int,
-    max_regional_size: int,
-) -> Optional[Tuple[int, int, int, int]]:
-    """Find the first valid (ppn, n1c, replica_count, node_count) starting from max PPn.
-
-    Strategy: Start with max PPn (highest RF = best fault tolerance). If that exceeds
-    max_nodes, try lower PPn values until one fits.
-
-    Why start from max PPn?
-        Higher PPn → fewer base nodes → higher RF for same CPU → better fault tolerance
-
-    Returns:
-        Tuple of (ppn, nodes_for_one_copy, replica_count, node_count) or None
-    """
-    for ppn in range(max_ppn, 0, -1):
-        base = math.ceil(n_partitions / ppn)
-
-        # Calculate minimum RF for CPU
-        if base >= 2:
-            min_rf_for_cpu = max(
-                1, math.ceil(total_needed_cores / (base * cpu_per_node))
-            )
-            replica_count = max(min_replica_count, min_rf_for_cpu)
-            node_count = base * replica_count
-        else:
-            # base == 1: special case
-            if 2 * cpu_per_node >= total_needed_cores:
-                replica_count = min_replica_count
-                node_count = max(2, replica_count)
-            else:
-                replica_count = max(
-                    min_replica_count, math.ceil(total_needed_cores / cpu_per_node)
-                )
-                node_count = replica_count
-
-        if node_count <= max_regional_size:
-            return (ppn, base, replica_count, node_count)
-
-    return None
 
 
 def _compute_read_only_kv_regional_cluster(
@@ -245,27 +200,28 @@ def _compute_read_only_kv_regional_cluster(
         max_local_data_per_node_gib=args.max_data_per_node_gib,
     )
 
-    # Step 2 (DISK): Calculate max partitions_per_node
+    # Step 2: Use partition-aware algorithm to find optimal configuration
     if partition_size_with_buffer_gib <= 0:
         return None
-    max_ppn = int(effective_disk_per_node / partition_size_with_buffer_gib)
-    if max_ppn < 1:
-        return None
 
-    # Step 3: Find first valid configuration starting from max PPn (highest RF)
-    result = _find_first_valid_ppn(
+    problem = CapacityProblem(
         n_partitions=args.total_num_partitions,
-        max_ppn=max_ppn,
+        partition_size_gib=partition_size_with_buffer_gib,
+        disk_per_node_gib=effective_disk_per_node,
         cpu_per_node=instance.cpu,
-        total_needed_cores=total_needed_cores,
-        min_replica_count=args.min_replica_count,
-        max_regional_size=args.max_regional_size,
+        cpu_needed=total_needed_cores,
+        min_rf=args.min_replica_count,
+        max_nodes=args.max_regional_size,
     )
 
+    result = find_first_valid_configuration(problem)
     if result is None:
         return None
 
-    partitions_per_node, nodes_for_one_copy, replica_count, count = result
+    partitions_per_node = result.partitions_per_node
+    nodes_for_one_copy = result.nodes_for_one_copy
+    replica_count = result.replica_count
+    count = result.node_count
 
     # Calculate nodes needed for CPU constraint (for debugging)
     nodes_for_cpu = math.ceil(total_needed_cores / instance.cpu)
@@ -333,11 +289,7 @@ def _estimate_read_only_kv_cluster(
         return None
 
     # Calculate requirements
-    requirement = _estimate_read_only_kv_requirement(
-        instance=instance,
-        desires=desires,
-        args=args,
-    )
+    requirement = _estimate_read_only_kv_requirement(instance=instance, desires=desires)
 
     # Compute disk buffer values inline (not via context)
     disk_buffer = buffer_for_components(
