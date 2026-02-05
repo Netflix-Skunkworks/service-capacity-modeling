@@ -43,13 +43,14 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
+from service_capacity_modeling.models.common import cluster_infra_cost
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
     CapacityProblem,
-    find_first_valid_configuration,
+    search_for_max_rf,
 )
 
 logger = logging.getLogger(__name__)
@@ -190,7 +191,7 @@ def _compute_read_only_kv_regional_cluster(
     if instance.drive is None:
         return None
 
-    total_needed_cores = int(requirement.cpu_cores.mid)
+    total_needed_cores = math.ceil(requirement.cpu_cores.mid)
 
     # Step 1 (DISK): Calculate effective disk capacity per node using helper
     effective_disk_per_node = get_effective_disk_per_node_gib(
@@ -201,9 +202,6 @@ def _compute_read_only_kv_regional_cluster(
     )
 
     # Step 2: Use partition-aware algorithm to find optimal configuration
-    if partition_size_with_buffer_gib <= 0:
-        return None
-
     problem = CapacityProblem(
         n_partitions=args.total_num_partitions,
         partition_size_gib=partition_size_with_buffer_gib,
@@ -214,36 +212,24 @@ def _compute_read_only_kv_regional_cluster(
         max_nodes=args.max_regional_size,
     )
 
-    result = find_first_valid_configuration(problem)
+    result = search_for_max_rf(problem)
     if result is None:
         return None
 
-    partitions_per_node = result.partitions_per_node
-    nodes_for_one_copy = result.nodes_for_one_copy
-    replica_count = result.replica_count
-    count = result.node_count
-
-    # Calculate nodes needed for CPU constraint (for debugging)
-    nodes_for_cpu = math.ceil(total_needed_cores / instance.cpu)
-
-    # Calculate cost (local disks only, no EBS cost)
-    cost = count * instance.annual_cost
-
     cluster = RegionClusterCapacity(
         cluster_type="read-only-kv",
-        count=count,
+        count=result.node_count,
         instance=instance,
         attached_drives=tuple(),  # No attached drives
-        annual_cost=cost,
     )
 
     # Add cluster parameters for provisioning
     params = {
-        "read-only-kv.replica_count": replica_count,
-        "read-only-kv.partitions_per_node": partitions_per_node,
+        "read-only-kv.replica_count": result.replica_count,
+        "read-only-kv.partitions_per_node": result.partitions_per_node,
         "read-only-kv.effective_disk_per_node_gib": effective_disk_per_node,
-        "read-only-kv.nodes_for_one_copy": nodes_for_one_copy,
-        "read-only-kv.nodes_for_cpu": nodes_for_cpu,
+        "read-only-kv.nodes_for_one_copy": result.nodes_for_one_copy,
+        "read-only-kv.nodes_for_cpu": math.ceil(total_needed_cores / instance.cpu),
     }
     _upsert_params(cluster, params)
 
@@ -312,7 +298,11 @@ def _estimate_read_only_kv_cluster(
         return None
 
     # Build cost breakdown
-    rokv_costs = {"read-only-kv.regional-cluster": cluster.annual_cost}
+    rokv_costs = cluster_infra_cost(
+        service_type="read-only-kv",
+        zonal_clusters=[],
+        regional_clusters=[cluster],
+    )
 
     clusters = Clusters(
         annual_costs=rokv_costs,

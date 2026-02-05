@@ -10,12 +10,12 @@ fault tolerance.
 """
 
 import math
-from dataclasses import dataclass
 from typing import Optional
 
+from pydantic import BaseModel
 
-@dataclass
-class CapacityProblem:
+
+class CapacityProblem(BaseModel):
     """Input parameters for the partition-aware capacity algorithm."""
 
     n_partitions: int  # Total number of partitions
@@ -27,8 +27,7 @@ class CapacityProblem:
     max_nodes: int  # Maximum allowed nodes in cluster
 
 
-@dataclass
-class CapacityResult:
+class CapacityResult(BaseModel):
     """Output of the partition-aware capacity algorithm."""
 
     node_count: int  # Total nodes in cluster
@@ -37,33 +36,25 @@ class CapacityResult:
     nodes_for_one_copy: int  # Nodes needed for one complete copy of data
 
 
-def find_first_valid_configuration(
+def search_for_max_rf(
     problem: CapacityProblem,
 ) -> Optional[CapacityResult]:
     """
-    Search algorithm: tries PPn from max down to 1, returns first valid config.
+    Find the configuration with the highest RF (replication factor) that fits
+    within max_nodes.
 
-    Strategy: Start with max PPn (highest RF, best fault tolerance). If that
-    exceeds max_nodes, try lower PPn values until one fits.
+    Higher RF = better fault tolerance. The algorithm searches from max PPn
+    down to 1, returning the first valid configuration found.
 
-    Why start from max PPn?
-        Higher PPn → fewer base nodes → higher RF for same CPU → better fault
-        tolerance. This is the key optimization: we ALWAYS prefer configurations
-        with higher RF when they fit within max_nodes.
-
-    Why linear search?
-        node_count(ppn) is NON-MONOTONIC due to ceiling effects:
-            PPn=10: count=12
-            PPn=5:  count=10  ← drops!
-            PPn=4:  count=12  ← jumps back!
-        Binary search doesn't work. Linear is O(max_ppn) ≈ O(100) in practice.
-
+    Why higher PPn gives higher RF:
+        Higher PPn → fewer nodes_for_one_copy → less CPU per copy →
+        need more copies (higher RF) to meet CPU requirements.
 
     Args:
         problem: The capacity planning problem parameters
 
     Returns:
-        CapacityResult with the optimal configuration, or None if no valid
+        CapacityResult with the highest RF configuration, or None if no valid
         configuration exists within the constraints.
     """
     max_ppn = int(problem.disk_per_node_gib / problem.partition_size_gib)
@@ -71,33 +62,22 @@ def find_first_valid_configuration(
         return None
 
     for ppn in range(max_ppn, 0, -1):
-        base = math.ceil(problem.n_partitions / ppn)
+        nodes_for_one_copy = math.ceil(problem.n_partitions / ppn)
 
-        # Calculate minimum RF for CPU (same math as closed_form)
-        if base >= 2:
-            rf = max(
-                problem.min_rf,
-                math.ceil(problem.cpu_needed / (base * problem.cpu_per_node)),
-            )
-            total = base * rf
-        else:
-            # base == 1: special case - need at least 2 nodes for availability
-            if 2 * problem.cpu_per_node >= problem.cpu_needed:
-                rf = problem.min_rf
-                total = max(2, rf)
-            else:
-                rf = max(
-                    problem.min_rf,
-                    math.ceil(problem.cpu_needed / problem.cpu_per_node),
-                )
-                total = rf
+        # Calculate minimum RF for CPU
+        rf = max(
+            problem.min_rf,
+            math.ceil(problem.cpu_needed / (nodes_for_one_copy * problem.cpu_per_node)),
+        )
+        # Ensure at least 2 nodes for availability
+        total_nodes = max(nodes_for_one_copy * rf, 2)
 
-        if total <= problem.max_nodes:
+        if total_nodes <= problem.max_nodes:
             return CapacityResult(
-                node_count=total,
+                node_count=total_nodes,
                 replica_count=rf,
                 partitions_per_node=ppn,
-                nodes_for_one_copy=base,
+                nodes_for_one_copy=nodes_for_one_copy,
             )
 
     return None

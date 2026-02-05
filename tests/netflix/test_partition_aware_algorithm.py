@@ -12,7 +12,7 @@ from hypothesis import strategies as st
 
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
     CapacityProblem,
-    find_first_valid_configuration,
+    search_for_max_rf,
 )
 
 
@@ -30,7 +30,7 @@ class TestAlgorithmBasics:
             min_rf=2,
             max_nodes=100,
         )
-        result = find_first_valid_configuration(problem)
+        result = search_for_max_rf(problem)
         assert result is None
 
     def test_returns_none_when_exceeds_max_nodes(self):
@@ -44,7 +44,7 @@ class TestAlgorithmBasics:
             min_rf=2,
             max_nodes=10,  # Very restrictive
         )
-        result = find_first_valid_configuration(problem)
+        result = search_for_max_rf(problem)
         assert result is None
 
     def test_simple_case_returns_valid_result(self):
@@ -58,7 +58,7 @@ class TestAlgorithmBasics:
             min_rf=2,
             max_nodes=100,
         )
-        result = find_first_valid_configuration(problem)
+        result = search_for_max_rf(problem)
 
         assert result is not None
         assert result.node_count <= problem.max_nodes
@@ -82,7 +82,7 @@ class TestHigherRFBias:
             min_rf=2,
             max_nodes=1000,  # Relaxed constraint
         )
-        result = find_first_valid_configuration(problem)
+        result = search_for_max_rf(problem)
 
         assert result is not None
         # With max_ppn=10, base=ceil(100/10)=10, cpu_per_copy=160 >= 64
@@ -109,7 +109,7 @@ class TestHigherRFBias:
             min_rf=2,
             max_nodes=10000,
         )
-        result = find_first_valid_configuration(problem)
+        result = search_for_max_rf(problem)
 
         assert result is not None
         assert result.partitions_per_node == 3  # Max PPn, not 2
@@ -139,7 +139,7 @@ class TestHigherRFBias:
         # PPn=3: base=7, cpu_per_copy=56, needs RF=3, nodes=21 > 10 ❌
         # PPn=2: base=11, cpu_per_copy=88, needs RF=2, nodes=22 > 10 ❌
 
-        result = find_first_valid_configuration(problem)
+        result = search_for_max_rf(problem)
         # All configurations exceed max_nodes
         assert result is None
 
@@ -157,7 +157,7 @@ class TestHigherRFBias:
         # PPn=5: base=20, cpu_per_copy=320, needs RF=3, nodes=60 ✓ FIRST VALID
         # PPn=4: base=25, cpu_per_copy=400, needs RF=2, nodes=50 ✓ (fewer nodes)
 
-        result = find_first_valid_configuration(problem)
+        result = search_for_max_rf(problem)
 
         assert result is not None
         # Algorithm returns PPn=5 (first valid from max), not PPn=4 (fewer nodes)
@@ -179,7 +179,7 @@ class TestHigherRFBias:
         # PPn=10: base=3, cpu_per_copy=48, needs RF=2, nodes=6 ✓
         # But PPn=10 is first, so we get RF=2
 
-        result = find_first_valid_configuration(problem)
+        result = search_for_max_rf(problem)
 
         assert result is not None
         assert result.partitions_per_node == 10
@@ -208,7 +208,7 @@ class TestAlgorithmProperties:
     @settings(max_examples=500, deadline=None)
     def test_result_satisfies_all_constraints(self, problem: CapacityProblem):
         """PROPERTY: Any result returned satisfies all constraints."""
-        result = find_first_valid_configuration(problem)
+        result = search_for_max_rf(problem)
         if result is None:
             return
 
@@ -234,7 +234,7 @@ class TestAlgorithmProperties:
         This confirms the algorithm returns the FIRST valid configuration
         starting from max PPn (i.e., it prefers higher RF).
         """
-        result = find_first_valid_configuration(problem)
+        result = search_for_max_rf(problem)
         if result is None:
             return
 
@@ -272,7 +272,7 @@ class TestAlgorithmProperties:
     @settings(max_examples=500, deadline=None)
     def test_node_count_formula_is_correct(self, problem: CapacityProblem):
         """PROPERTY: node_count = nodes_for_one_copy * replica_count."""
-        result = find_first_valid_configuration(problem)
+        result = search_for_max_rf(problem)
         if result is None:
             return
 
@@ -302,7 +302,7 @@ class TestEdgeCases:
             min_rf=2,
             max_nodes=100,
         )
-        result = find_first_valid_configuration(problem)
+        result = search_for_max_rf(problem)
 
         assert result is not None
         # Algorithm returns first valid PPn from max (5), not 1
@@ -322,7 +322,7 @@ class TestEdgeCases:
             min_rf=1,
             max_nodes=100,
         )
-        result = find_first_valid_configuration(problem)
+        result = search_for_max_rf(problem)
 
         assert result is not None
         assert result.replica_count >= 1
@@ -338,7 +338,7 @@ class TestEdgeCases:
             min_rf=2,
             max_nodes=4,  # Exactly fits 2 nodes * 2 RF
         )
-        result = find_first_valid_configuration(problem)
+        result = search_for_max_rf(problem)
 
         assert result is not None
         assert result.node_count == 4
