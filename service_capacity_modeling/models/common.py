@@ -216,9 +216,13 @@ def normalize_cores(
 ) -> int:
     """Calculates equivalent CPU on a target shape relative to a reference
 
+    Converts core_count FROM reference_shape TO target_shape.
+
     Takes into account relative core frequency and IPC factor from the hardware
     description to give a rough estimate of how many equivalent cores you need
-    in a target_shape to have the core_count number of cores on the reference_shape
+    in a target_shape to have the core_count number of cores on the reference_shape.
+
+    Faster target → fewer cores needed; Slower target → more cores needed.
     """
     # Normalize the core count the same as CPUs
     return _normalize_cpu(
