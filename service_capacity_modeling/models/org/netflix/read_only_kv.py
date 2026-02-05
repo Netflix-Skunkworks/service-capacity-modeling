@@ -16,13 +16,17 @@ import logging
 import math
 from typing import Any
 from typing import Dict
+from typing import List
 from typing import Optional
+from typing import Sequence
 from typing import Tuple
 
 from pydantic import BaseModel
 from pydantic import Field
 
-from service_capacity_modeling.interface import Buffer, AccessPattern
+from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
@@ -41,7 +45,9 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import cluster_infra_cost
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
@@ -113,6 +119,7 @@ class NflxReadOnlyKVArguments(BaseModel):
 def _estimate_read_only_kv_requirement(
     instance: Instance,
     desires: CapacityDesires,
+    args: NflxReadOnlyKVArguments,
 ) -> CapacityRequirement:
     """Estimate the capacity requirement for the read-only KV regional cluster.
 
@@ -147,6 +154,8 @@ def _estimate_read_only_kv_requirement(
     # Network calculation (read-only, so only outbound read traffic)
     needed_network_mbps = simple_network_mbps(desires)
 
+    # TODO(matthewho): Add more cost context (e.g., network costs) if we become
+    # zonally aware. Currently regional-only so no cross-zone traffic.
     return CapacityRequirement(
         requirement_type="read-only-kv-regional",
         reference_shape=desires.reference_shape,
@@ -216,20 +225,30 @@ def _compute_read_only_kv_regional_cluster(
     if result is None:
         return None
 
+    partitions_per_node = result.partitions_per_node
+    nodes_for_one_copy = result.nodes_for_one_copy
+    replica_count = result.replica_count
+    count = result.node_count
+
+    # Calculate nodes needed for CPU constraint (for debugging)
+    nodes_for_cpu = math.ceil(total_needed_cores / instance.cpu)
+
     cluster = RegionClusterCapacity(
         cluster_type="read-only-kv",
-        count=result.node_count,
+        count=count,
         instance=instance,
         attached_drives=tuple(),  # No attached drives
     )
 
     # Add cluster parameters for provisioning
     params = {
-        "read-only-kv.replica_count": result.replica_count,
-        "read-only-kv.partitions_per_node": result.partitions_per_node,
+        "read-only-kv.total_num_partitions": args.total_num_partitions,
+        "read-only-kv.min_replica_count": args.min_replica_count,
+        "read-only-kv.replica_count": replica_count,
+        "read-only-kv.partitions_per_node": partitions_per_node,
+        "read-only-kv.nodes_for_one_copy": nodes_for_one_copy,
+        "read-only-kv.nodes_for_cpu": nodes_for_cpu,
         "read-only-kv.effective_disk_per_node_gib": effective_disk_per_node,
-        "read-only-kv.nodes_for_one_copy": result.nodes_for_one_copy,
-        "read-only-kv.nodes_for_cpu": math.ceil(total_needed_cores / instance.cpu),
     }
     _upsert_params(cluster, params)
 
@@ -275,7 +294,9 @@ def _estimate_read_only_kv_cluster(
         return None
 
     # Calculate requirements
-    requirement = _estimate_read_only_kv_requirement(instance=instance, desires=desires)
+    requirement = _estimate_read_only_kv_requirement(
+        instance=instance, desires=desires, args=args
+    )
 
     # Compute disk buffer values inline (not via context)
     disk_buffer = buffer_for_components(
@@ -297,10 +318,9 @@ def _estimate_read_only_kv_cluster(
     if cluster is None:
         return None
 
-    # Build cost breakdown
-    rokv_costs = cluster_infra_cost(
-        service_type="read-only-kv",
-        zonal_clusters=[],
+    # Build cost breakdown using cluster_costs (consistent with CostAwareModel)
+    rokv_costs = NflxReadOnlyKVCapacityModel.cluster_costs(
+        service_type=NflxReadOnlyKVCapacityModel.service_name,
         regional_clusters=[cluster],
     )
 
@@ -317,15 +337,41 @@ def _estimate_read_only_kv_cluster(
     )
 
 
-class NflxReadOnlyKVCapacityModel(CapacityModel):
+class NflxReadOnlyKVCapacityModel(CapacityModel, CostAwareModel):
     """Netflix Read-Only Key-Value Capacity Model.
 
     A read-only data serving layer that:
     - Loads data from offline sources (data warehouse, batch processing)
     - Serves read traffic with low latency using RocksDB
     - Deploys regionally with configurable replication factor
-    - Supports both local (ephemeral) and attached (EBS) drives
+    - Local (ephemeral) disks only - EBS not supported
     """
+
+    service_name = "read-only-kv"
+    cluster_type = "read-only-kv"
+
+    @staticmethod
+    def service_costs(
+        service_type: str,
+        context: RegionContext,
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
+    ) -> List[ServiceCapacity]:
+        # No additional service costs (read-only: no network replication, no backup)
+        return []
+
+    @staticmethod
+    def cluster_costs(
+        service_type: str,
+        zonal_clusters: Sequence[ClusterCapacity] = (),
+        regional_clusters: Sequence[ClusterCapacity] = (),
+    ) -> Dict[str, float]:
+        return cluster_infra_cost(
+            service_type,
+            zonal_clusters,
+            regional_clusters,
+            cluster_type=NflxReadOnlyKVCapacityModel.cluster_type,
+        )
 
     @staticmethod
     def capacity_plan(
