@@ -154,8 +154,6 @@ def _estimate_read_only_kv_requirement(
     # Network calculation (read-only, so only outbound read traffic)
     needed_network_mbps = simple_network_mbps(desires)
 
-    # TODO(matthewho): Add more cost context (e.g., network costs) if we become
-    # zonally aware. Currently regional-only so no cross-zone traffic.
     return CapacityRequirement(
         requirement_type="read-only-kv-regional",
         reference_shape=desires.reference_shape,
@@ -225,17 +223,9 @@ def _compute_read_only_kv_regional_cluster(
     if result is None:
         return None
 
-    partitions_per_node = result.partitions_per_node
-    nodes_for_one_copy = result.nodes_for_one_copy
-    replica_count = result.replica_count
-    count = result.node_count
-
-    # Calculate nodes needed for CPU constraint (for debugging)
-    nodes_for_cpu = math.ceil(total_needed_cores / instance.cpu)
-
     cluster = RegionClusterCapacity(
         cluster_type="read-only-kv",
-        count=count,
+        count=result.node_count,
         instance=instance,
         attached_drives=tuple(),  # No attached drives
     )
@@ -244,10 +234,10 @@ def _compute_read_only_kv_regional_cluster(
     params = {
         "read-only-kv.total_num_partitions": args.total_num_partitions,
         "read-only-kv.min_replica_count": args.min_replica_count,
-        "read-only-kv.replica_count": replica_count,
-        "read-only-kv.partitions_per_node": partitions_per_node,
-        "read-only-kv.nodes_for_one_copy": nodes_for_one_copy,
-        "read-only-kv.nodes_for_cpu": nodes_for_cpu,
+        "read-only-kv.replica_count": result.replica_count,
+        "read-only-kv.partitions_per_node": result.partitions_per_node,
+        "read-only-kv.nodes_for_one_copy": result.nodes_for_one_copy,
+        "read-only-kv.nodes_for_cpu": math.ceil(total_needed_cores / instance.cpu),
         "read-only-kv.effective_disk_per_node_gib": effective_disk_per_node,
     }
     _upsert_params(cluster, params)

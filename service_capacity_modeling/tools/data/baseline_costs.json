@@ -53,6 +53,9 @@
         "attached_drives": [
           "aurora : 60GB"
         ],
+        "cluster_params": {
+          "instance_cost": 1585.33
+        },
         "cluster_type": "aurora-cluster",
         "count": 2,
         "deployment": "regional",
@@ -75,6 +78,9 @@
         "attached_drives": [
           "aurora : 240GB"
         ],
+        "cluster_params": {
+          "instance_cost": 1585.33
+        },
         "cluster_type": "aurora-cluster",
         "count": 1,
         "deployment": "regional",
@@ -97,6 +103,13 @@
     "clusters": [
       {
         "annual_cost": 9836.0,
+        "cluster_params": {
+          "cassandra.compaction.min_threshold": 4,
+          "cassandra.heap.gib": 15.0,
+          "cassandra.heap.table.percent": 0.11,
+          "cassandra.heap.write.percent": 0.25,
+          "cassandra.keyspace.rf": 3
+        },
         "cluster_type": "cassandra",
         "count": 4,
         "deployment": "zonal",
@@ -104,6 +117,13 @@
       },
       {
         "annual_cost": 9836.0,
+        "cluster_params": {
+          "cassandra.compaction.min_threshold": 4,
+          "cassandra.heap.gib": 15.0,
+          "cassandra.heap.table.percent": 0.11,
+          "cassandra.heap.write.percent": 0.25,
+          "cassandra.keyspace.rf": 3
+        },
         "cluster_type": "cassandra",
         "count": 4,
         "deployment": "zonal",
@@ -111,6 +131,13 @@
       },
       {
         "annual_cost": 9836.0,
+        "cluster_params": {
+          "cassandra.compaction.min_threshold": 4,
+          "cassandra.heap.gib": 15.0,
+          "cassandra.heap.table.percent": 0.11,
+          "cassandra.heap.write.percent": 0.25,
+          "cassandra.keyspace.rf": 3
+        },
         "cluster_type": "cassandra",
         "count": 4,
         "deployment": "zonal",
@@ -136,6 +163,13 @@
         "attached_drives": [
           "gp3 : 100GB"
         ],
+        "cluster_params": {
+          "cassandra.compaction.min_threshold": 4,
+          "cassandra.heap.gib": 15.0,
+          "cassandra.heap.table.percent": 0.2,
+          "cassandra.heap.write.percent": 0.5,
+          "cassandra.keyspace.rf": 2
+        },
         "cluster_type": "cassandra",
         "count": 8,
         "deployment": "zonal",
@@ -146,6 +180,13 @@
         "attached_drives": [
           "gp3 : 100GB"
         ],
+        "cluster_params": {
+          "cassandra.compaction.min_threshold": 4,
+          "cassandra.heap.gib": 15.0,
+          "cassandra.heap.table.percent": 0.2,
+          "cassandra.heap.write.percent": 0.5,
+          "cassandra.keyspace.rf": 2
+        },
         "cluster_type": "cassandra",
         "count": 8,
         "deployment": "zonal",
@@ -156,6 +197,13 @@
         "attached_drives": [
           "gp3 : 100GB"
         ],
+        "cluster_params": {
+          "cassandra.compaction.min_threshold": 4,
+          "cassandra.heap.gib": 15.0,
+          "cassandra.heap.table.percent": 0.2,
+          "cassandra.heap.write.percent": 0.5,
+          "cassandra.keyspace.rf": 2
+        },
         "cluster_type": "cassandra",
         "count": 8,
         "deployment": "zonal",
@@ -175,6 +223,9 @@
     "clusters": [
       {
         "annual_cost": 4498.0199999999995,
+        "cluster_params": {
+          "kafka.copies": 2
+        },
         "cluster_type": "kafka",
         "count": 6,
         "deployment": "zonal",
@@ -182,6 +233,9 @@
       },
       {
         "annual_cost": 4498.0199999999995,
+        "cluster_params": {
+          "kafka.copies": 2
+        },
         "cluster_type": "kafka",
         "count": 6,
         "deployment": "zonal",
@@ -189,6 +243,9 @@
       },
       {
         "annual_cost": 4498.0199999999995,
+        "cluster_params": {
+          "kafka.copies": 2
+        },
         "cluster_type": "kafka",
         "count": 6,
         "deployment": "zonal",
@@ -209,6 +266,9 @@
     "clusters": [
       {
         "annual_cost": 830.0,
+        "cluster_params": {
+          "evcache.copies": 3
+        },
         "cluster_type": "evcache",
         "count": 2,
         "deployment": "zonal",
@@ -216,6 +276,9 @@
       },
       {
         "annual_cost": 830.0,
+        "cluster_params": {
+          "evcache.copies": 3
+        },
         "cluster_type": "evcache",
         "count": 2,
         "deployment": "zonal",
@@ -223,6 +286,9 @@
       },
       {
         "annual_cost": 830.0,
+        "cluster_params": {
+          "evcache.copies": 3
+        },
         "cluster_type": "evcache",
         "count": 2,
         "deployment": "zonal",
@@ -243,6 +309,9 @@
     "clusters": [
       {
         "annual_cost": 10421.71,
+        "cluster_params": {
+          "evcache.copies": 3
+        },
         "cluster_type": "evcache",
         "count": 13,
         "deployment": "zonal",
@@ -250,6 +319,9 @@
       },
       {
         "annual_cost": 10421.71,
+        "cluster_params": {
+          "evcache.copies": 3
+        },
         "cluster_type": "evcache",
         "count": 13,
         "deployment": "zonal",
@@ -257,6 +329,9 @@
       },
       {
         "annual_cost": 10421.71,
+        "cluster_params": {
+          "evcache.copies": 3
+        },
         "cluster_type": "evcache",
         "count": 13,
         "deployment": "zonal",
@@ -279,6 +354,9 @@
     "clusters": [
       {
         "annual_cost": 50102.130000000005,
+        "cluster_params": {
+          "evcache.copies": 2
+        },
         "cluster_type": "evcache",
         "count": 39,
         "deployment": "zonal",
@@ -286,6 +364,9 @@
       },
       {
         "annual_cost": 50102.130000000005,
+        "cluster_params": {
+          "evcache.copies": 2
+        },
         "cluster_type": "evcache",
         "count": 39,
         "deployment": "zonal",
@@ -311,6 +392,9 @@
     "clusters": [
       {
         "annual_cost": 50102.130000000005,
+        "cluster_params": {
+          "evcache.copies": 3
+        },
         "cluster_type": "evcache",
         "count": 39,
         "deployment": "zonal",
@@ -318,6 +402,9 @@
       },
       {
         "annual_cost": 50102.130000000005,
+        "cluster_params": {
+          "evcache.copies": 3
+        },
         "cluster_type": "evcache",
         "count": 39,
         "deployment": "zonal",
@@ -325,6 +412,9 @@
       },
       {
         "annual_cost": 50102.130000000005,
+        "cluster_params": {
+          "evcache.copies": 3
+        },
         "cluster_type": "evcache",
         "count": 39,
         "deployment": "zonal",
@@ -332,6 +422,13 @@
       },
       {
         "annual_cost": 14753.34,
+        "cluster_params": {
+          "cassandra.compaction.min_threshold": 4,
+          "cassandra.heap.gib": 30,
+          "cassandra.heap.table.percent": 0.11,
+          "cassandra.heap.write.percent": 0.25,
+          "cassandra.keyspace.rf": 3
+        },
         "cluster_type": "cassandra",
         "count": 2,
         "deployment": "zonal",
@@ -339,6 +436,13 @@
       },
       {
         "annual_cost": 14753.34,
+        "cluster_params": {
+          "cassandra.compaction.min_threshold": 4,
+          "cassandra.heap.gib": 30,
+          "cassandra.heap.table.percent": 0.11,
+          "cassandra.heap.write.percent": 0.25,
+          "cassandra.keyspace.rf": 3
+        },
         "cluster_type": "cassandra",
         "count": 2,
         "deployment": "zonal",
@@ -346,6 +450,13 @@
       },
       {
         "annual_cost": 14753.34,
+        "cluster_params": {
+          "cassandra.compaction.min_threshold": 4,
+          "cassandra.heap.gib": 30,
+          "cassandra.heap.table.percent": 0.11,
+          "cassandra.heap.write.percent": 0.25,
+          "cassandra.keyspace.rf": 3
+        },
         "cluster_type": "cassandra",
         "count": 2,
         "deployment": "zonal",
@@ -367,5 +478,89 @@
     "scenario": "kv_with_cache",
     "service_tier": 1,
     "total_annual_cost": 363357.17
+  },
+  {
+    "annual_costs": {
+      "read-only-kv.regional-clusters": 449867.0
+    },
+    "clusters": [
+      {
+        "annual_cost": 449867.0,
+        "cluster_params": {
+          "read-only-kv.effective_disk_per_node_gib": 2355.2,
+          "read-only-kv.min_replica_count": 4,
+          "read-only-kv.nodes_for_cpu": 5,
+          "read-only-kv.nodes_for_one_copy": 25,
+          "read-only-kv.partitions_per_node": 21,
+          "read-only-kv.replica_count": 4,
+          "read-only-kv.total_num_partitions": 512
+        },
+        "cluster_type": "read-only-kv",
+        "count": 100,
+        "deployment": "regional",
+        "instance": "i3en.3xlarge"
+      }
+    ],
+    "model": "org.netflix.read-only-kv",
+    "region": "us-east-1",
+    "scenario": "read_only_kv_large",
+    "service_tier": 1,
+    "total_annual_cost": 449867.0
+  },
+  {
+    "annual_costs": {
+      "read-only-kv.regional-clusters": 14525.01
+    },
+    "clusters": [
+      {
+        "annual_cost": 14525.01,
+        "cluster_params": {
+          "read-only-kv.effective_disk_per_node_gib": 2355.2,
+          "read-only-kv.min_replica_count": 3,
+          "read-only-kv.nodes_for_cpu": 3,
+          "read-only-kv.nodes_for_one_copy": 1,
+          "read-only-kv.partitions_per_node": 11,
+          "read-only-kv.replica_count": 3,
+          "read-only-kv.total_num_partitions": 8
+        },
+        "cluster_type": "read-only-kv",
+        "count": 3,
+        "deployment": "regional",
+        "instance": "i4i.4xlarge"
+      }
+    ],
+    "model": "org.netflix.read-only-kv",
+    "region": "us-east-1",
+    "scenario": "read_only_kv_medium",
+    "service_tier": 1,
+    "total_annual_cost": 14525.01
+  },
+  {
+    "annual_costs": {
+      "read-only-kv.regional-clusters": 15177.32
+    },
+    "clusters": [
+      {
+        "annual_cost": 15177.32,
+        "cluster_params": {
+          "read-only-kv.effective_disk_per_node_gib": 559,
+          "read-only-kv.min_replica_count": 4,
+          "read-only-kv.nodes_for_cpu": 4,
+          "read-only-kv.nodes_for_one_copy": 1,
+          "read-only-kv.partitions_per_node": 129,
+          "read-only-kv.replica_count": 4,
+          "read-only-kv.total_num_partitions": 16
+        },
+        "cluster_type": "read-only-kv",
+        "count": 4,
+        "deployment": "regional",
+        "instance": "r5d.4xlarge"
+      }
+    ],
+    "model": "org.netflix.read-only-kv",
+    "region": "us-east-1",
+    "scenario": "read_only_kv_small",
+    "service_tier": 1,
+    "total_annual_cost": 15177.32
   }
 ]
