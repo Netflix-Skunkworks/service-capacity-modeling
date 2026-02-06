@@ -247,8 +247,6 @@ def _compute_read_only_kv_regional_cluster(
 
 def _estimate_read_only_kv_cluster(
     instance: Instance,
-    drive: Drive,
-    context: RegionContext,
     desires: CapacityDesires,
     args: NflxReadOnlyKVArguments,
 ) -> Optional[CapacityPlan]:
@@ -260,17 +258,12 @@ def _estimate_read_only_kv_cluster(
 
     Args:
         instance: The compute instance being considered (must have local disk)
-        drive: The drive configuration (unused - local disks only)
-        context: Regional context (unused - read-only KV is not zone-balanced)
         desires: User's capacity desires
         args: Read-only KV specific arguments
 
     Returns:
         CapacityPlan or None if configuration is not viable
     """
-    # Mark unused parameters (required by CapacityModel interface)
-    _ = drive  # Local disks only - use instance.drive
-    _ = context  # Read-only KV is not zone-balanced
 
     # Validate instance constraints
     # Minimum 64 GiB RAM: ensures sufficient memory for RocksDB block cache
@@ -373,10 +366,13 @@ class NflxReadOnlyKVCapacityModel(CapacityModel, CostAwareModel):
     ) -> Optional[CapacityPlan]:
         args = NflxReadOnlyKVArguments.model_validate(extra_model_arguments)
 
+        # drive and context are unused: read-only KV uses instance.drive
+        # (local disks only) and is not zone-balanced.
+        _ = drive
+        _ = context
+
         return _estimate_read_only_kv_cluster(
             instance=instance,
-            drive=drive,
-            context=context,
             desires=desires,
             args=args,
         )
