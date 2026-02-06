@@ -46,6 +46,10 @@ def _format_cluster(cluster: ClusterCapacity, deployment: str) -> dict[str, Any]
             drives.append(f"{drive.name} : {size_gib}GB")
         info["attached_drives"] = sorted(drives)
 
+    # Add cluster_params if present (e.g., replica_count, partitions_per_node)
+    if cluster.cluster_params:
+        info["cluster_params"] = dict(sorted(cluster.cluster_params.items()))
+
     return info
 
 
@@ -327,6 +331,69 @@ scenarios.extend(
             kv_with_cache,
             None,
             "kv_with_cache",
+        ),
+    ]
+)
+
+# Read-Only KV scenarios (partition-aware algorithm)
+# Large dataset with many partitions
+read_only_kv_large = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=certain_int(20_000),
+        estimated_mean_read_latency_ms=certain_float(2.0),
+    ),
+    data_shape=DataShape(
+        estimated_state_size_gib=certain_int(48_000),
+    ),
+)
+
+# Medium dataset
+read_only_kv_medium = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=certain_int(20_000),
+        estimated_mean_read_latency_ms=certain_float(2.0),
+    ),
+    data_shape=DataShape(
+        estimated_state_size_gib=certain_int(1397),
+    ),
+)
+
+# Small dataset
+read_only_kv_small = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=certain_int(17_000),
+        estimated_mean_read_latency_ms=certain_float(2.0),
+    ),
+    data_shape=DataShape(
+        estimated_state_size_gib=certain_int(60),
+    ),
+)
+
+scenarios.extend(
+    [
+        (
+            "org.netflix.read-only-kv",
+            "us-east-1",
+            read_only_kv_large,
+            {"total_num_partitions": 512, "min_replica_count": 4},
+            "read_only_kv_large",
+        ),
+        (
+            "org.netflix.read-only-kv",
+            "us-east-1",
+            read_only_kv_medium,
+            {"total_num_partitions": 8, "min_replica_count": 3},
+            "read_only_kv_medium",
+        ),
+        (
+            "org.netflix.read-only-kv",
+            "us-east-1",
+            read_only_kv_small,
+            {"total_num_partitions": 16, "min_replica_count": 4},
+            "read_only_kv_small",
         ),
     ]
 )
