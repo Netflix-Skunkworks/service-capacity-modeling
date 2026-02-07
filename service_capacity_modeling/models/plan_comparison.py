@@ -63,6 +63,7 @@ from service_capacity_modeling.interface import (
     ExcludeUnsetModel,
     Instance,
 )
+from service_capacity_modeling.models.common import get_disk_size_gib
 
 
 @enum_docstrings
@@ -412,13 +413,12 @@ def to_reference_cores(core_count: float, instance: Instance) -> float:
 
 
 def _aggregate_resources(plan: CapacityPlan) -> dict[ResourceType, float]:
-    """Aggregate resource values from a plan, normalizing CPU to reference shape.
+    """Aggregate resource values from a plan's candidate_clusters.
 
-    CPU is computed from candidate_clusters and normalized to default_reference_shape
-    using IPC and frequency factors. This ensures consistent comparison even when
-    plans use different instance types with varying CPU performance characteristics.
-
-    Memory, disk, and network are summed from requirements (no normalization needed).
+    All resources are computed from candidate_clusters (the actual provisioned
+    instances), NOT from requirements (the demand). CPU is normalized to
+    default_reference_shape using IPC and frequency factors for consistent
+    comparison across different instance types.
     """
     totals: dict[ResourceType, float] = {
         ResourceType.cpu: 0.0,
@@ -427,19 +427,18 @@ def _aggregate_resources(plan: CapacityPlan) -> dict[ResourceType, float]:
         ResourceType.network_mbps: 0.0,
     }
 
-    # CPU: compute from candidate_clusters, normalized to reference shape
     for cluster in chain(
         plan.candidate_clusters.zonal, plan.candidate_clusters.regional
     ):
         totals[ResourceType.cpu] += to_reference_cores(
             cluster.instance.cpu * cluster.count, cluster.instance
         )
-
-    # Other resources: sum from requirements
-    for req in chain(plan.requirements.zonal, plan.requirements.regional):
-        totals[ResourceType.mem_gib] += req.mem_gib.mid
-        totals[ResourceType.disk_gib] += req.disk_gib.mid
-        totals[ResourceType.network_mbps] += req.network_mbps.mid
+        totals[ResourceType.mem_gib] += cluster.instance.ram_gib * cluster.count
+        totals[ResourceType.network_mbps] += cluster.instance.net_mbps * cluster.count
+        cluster_drive = cluster.attached_drives[0] if cluster.attached_drives else None
+        totals[ResourceType.disk_gib] += (
+            get_disk_size_gib(cluster_drive, cluster.instance) * cluster.count
+        )
 
     return totals
 
@@ -476,46 +475,24 @@ def compare_plans(
     if tolerances is None:
         tolerances = ResourceTolerances()
 
-    baseline_cost = float(baseline.candidate_clusters.total_annual_cost)
-    comparison_cost = float(comparison.candidate_clusters.total_annual_cost)
     baseline_resources = _aggregate_resources(baseline)
     comparison_resources = _aggregate_resources(comparison)
 
-    def make_comparison(
-        resource: ResourceType, baseline_val: float, comparison_val: float
-    ) -> ResourceComparison:
-        return ResourceComparison(
-            resource=resource,
-            baseline_value=baseline_val,
-            comparison_value=comparison_val,
-            tolerance=tolerances.get_tolerance(resource),
-        )
-
     comparisons = {
-        ResourceType.annual_cost: make_comparison(
-            ResourceType.annual_cost, baseline_cost, comparison_cost
-        ),
-        ResourceType.cpu: make_comparison(
-            ResourceType.cpu,
-            baseline_resources[ResourceType.cpu],
-            comparison_resources[ResourceType.cpu],
-        ),
-        ResourceType.mem_gib: make_comparison(
-            ResourceType.mem_gib,
-            baseline_resources[ResourceType.mem_gib],
-            comparison_resources[ResourceType.mem_gib],
-        ),
-        ResourceType.disk_gib: make_comparison(
-            ResourceType.disk_gib,
-            baseline_resources[ResourceType.disk_gib],
-            comparison_resources[ResourceType.disk_gib],
-        ),
-        ResourceType.network_mbps: make_comparison(
-            ResourceType.network_mbps,
-            baseline_resources[ResourceType.network_mbps],
-            comparison_resources[ResourceType.network_mbps],
-        ),
+        rt: ResourceComparison(
+            resource=rt,
+            baseline_value=b_val,
+            comparison_value=comparison_resources[rt],
+            tolerance=tolerances.get_tolerance(rt),
+        )
+        for rt, b_val in baseline_resources.items()
     }
+    comparisons[ResourceType.annual_cost] = ResourceComparison(
+        resource=ResourceType.annual_cost,
+        baseline_value=float(baseline.candidate_clusters.total_annual_cost),
+        comparison_value=float(comparison.candidate_clusters.total_annual_cost),
+        tolerance=tolerances.get_tolerance(ResourceType.annual_cost),
+    )
 
     return PlanComparisonResult(
         is_equivalent=all(c.is_equivalent for c in comparisons.values()),
