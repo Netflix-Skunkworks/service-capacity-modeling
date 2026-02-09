@@ -1,4 +1,4 @@
-"""Tests for plan comparison utility - minimal test suite."""
+"""Tests for plan comparison utility."""
 
 import pytest
 from decimal import Decimal
@@ -38,10 +38,14 @@ from service_capacity_modeling.models.plan_comparison import (
 
 
 def _create_instance(
+    *,
     name: str = "test.xlarge",
     cpu: int = 8,
     cpu_ghz: float = 2.3,  # Same as default_reference_shape for 1:1 normalization
     cpu_ipc_scale: float = 1.0,
+    ram_gib: float = 32,
+    net_mbps: float = 10000,
+    drive: Drive | None = None,
 ) -> Instance:
     """Helper to create a test instance."""
     return Instance(
@@ -49,38 +53,52 @@ def _create_instance(
         cpu=cpu,
         cpu_ghz=cpu_ghz,
         cpu_ipc_scale=cpu_ipc_scale,
-        ram_gib=32,
-        net_mbps=10000,
+        ram_gib=ram_gib,
+        net_mbps=net_mbps,
+        drive=drive,
         lifecycle=Lifecycle.stable,
         platforms=[Platform.amd64],
     )
 
 
 def _create_plan(
+    *,
     cpu_cores: int = 100,
     mem_gib: float = 200.0,
     disk_gib: float = 1000.0,
     network_mbps: float = 5000.0,
     annual_cost: float = 10000.0,
+    count: int = 1,
 ) -> CapacityPlan:
     """Helper to create test plans with specified resources.
 
     CPU is computed from candidate_clusters, so cpu_cores sets the instance CPU
     with count=1. The instance uses default_reference_shape IPC/GHz for 1:1
     normalization (cpu_cores directly equals reference-equivalent cores).
+
+    Memory, disk, and network are set on the instance so that cluster-based
+    aggregation produces the expected values. Requirements use decoy values
+    (9999) so that reading from the wrong source produces obvious failures.
     """
-    # Instance with same IPC/GHz as default_reference_shape for 1:1 normalization
-    instance = _create_instance(cpu=cpu_cores)
+    drive = Drive(name="test-drive", size_gib=int(disk_gib)) if disk_gib else None
+    instance = _create_instance(
+        cpu=cpu_cores,
+        ram_gib=mem_gib,
+        net_mbps=network_mbps,
+        drive=drive,
+    )
+    # Decoy requirement values — if _aggregate_resources reads from requirements
+    # instead of clusters, tests asserting baseline_value/comparison_value will fail.
     requirement = CapacityRequirement(
         requirement_type="test",
-        cpu_cores=certain_int(cpu_cores),
-        mem_gib=certain_float(mem_gib),
-        disk_gib=certain_float(disk_gib),
-        network_mbps=certain_float(network_mbps),
+        cpu_cores=certain_int(9999),
+        mem_gib=certain_float(9999.0),
+        disk_gib=certain_float(9999.0),
+        network_mbps=certain_float(9999.0),
     )
     cluster = ZoneClusterCapacity(
         cluster_type="test",
-        count=1,  # count=1 so instance.cpu equals total CPU
+        count=count,
         instance=instance,
         annual_cost=annual_cost,
     )
@@ -90,49 +108,6 @@ def _create_plan(
             annual_costs={"test": Decimal(str(annual_cost))},
             zonal=[cluster],
         ),
-    )
-
-
-def _create_instance_with_local_drive(
-    cpu: int = 4,
-    ram_gib: float = 30.5,
-    net_mbps: float = 10000,
-    drive_size_gib: int = 950,
-    annual_cost: float = 2500.0,
-) -> Instance:
-    """Helper to create an instance with local (NVMe) storage."""
-    return Instance(
-        name="i3.xlarge",
-        cpu=cpu,
-        cpu_ghz=2.4,
-        cpu_ipc_scale=1.0,
-        ram_gib=ram_gib,
-        net_mbps=net_mbps,
-        drive=Drive(name="local-nvme", size_gib=drive_size_gib),
-        annual_cost=annual_cost,
-        lifecycle=Lifecycle.stable,
-        platforms=[Platform.amd64],
-    )
-
-
-def _create_instance_without_local_drive(
-    cpu: int = 4,
-    ram_gib: float = 16.0,
-    net_mbps: float = 10000,
-    annual_cost: float = 2000.0,
-) -> Instance:
-    """Helper to create an instance without local storage."""
-    return Instance(
-        name="m5.xlarge",
-        cpu=cpu,
-        cpu_ghz=2.4,
-        cpu_ipc_scale=1.0,
-        ram_gib=ram_gib,
-        net_mbps=net_mbps,
-        drive=None,
-        annual_cost=annual_cost,
-        lifecycle=Lifecycle.stable,
-        platforms=[Platform.amd64],
     )
 
 
@@ -375,12 +350,23 @@ class TestResourceComparison:
 class TestComparePlans:
     """Tests for compare_plans function."""
 
-    def test_identical_plans_are_equivalent(self):
-        """Identical plans should be equivalent."""
-        plan = _create_plan()
+    @pytest.mark.parametrize("count", [1, 3])
+    def test_identical_plans_are_equivalent(self, count):
+        """Identical plans should be equivalent.
+
+        Also verifies that resource values are aggregated from candidate_clusters
+        (not requirements, which use decoy value 9999), and scaled by count.
+        """
+        plan = _create_plan(count=count)
         result = compare_plans(plan, plan)
         assert result.is_equivalent
         assert all(c.is_equivalent for c in result.comparisons.values())
+        # Verify values come from clusters (scaled by count), not decoy reqs (9999)
+        assert result.cpu.baseline_value == 100.0 * count
+        assert result.memory.baseline_value == 200.0 * count
+        assert result.disk.baseline_value == 1000.0 * count
+        assert result.network.baseline_value == 5000.0 * count
+        assert result.annual_cost.baseline_value == 10000.0
 
     def test_within_tolerance_is_equivalent(self):
         """Plans within default tolerance are equivalent."""
@@ -389,12 +375,15 @@ class TestComparePlans:
         result = compare_plans(baseline, comparison)
         assert result.is_equivalent
 
-    def test_exceeding_tolerance_is_not_equivalent(self):
-        baseline = _create_plan(cpu_cores=100)
-        comparison = _create_plan(cpu_cores=120)
+    @pytest.mark.parametrize("count", [1, 3])
+    def test_exceeding_tolerance_is_not_equivalent(self, count):
+        baseline = _create_plan(cpu_cores=100, count=count)
+        comparison = _create_plan(cpu_cores=120, count=count)
         result = compare_plans(baseline, comparison)
         assert not result.is_equivalent
         assert result.cpu.exceeds_upper_bound
+        assert result.cpu.baseline_value == 100.0 * count
+        assert result.cpu.comparison_value == 120.0 * count
 
     @pytest.mark.parametrize(
         "resource_kwarg,accessor",
@@ -546,12 +535,9 @@ class TestComparePlans:
         assert 1.0 < result.cpu.ratio < 1.1  # 104.3/100 ≈ 1.043
 
         # Case 4: IPC difference exceeds tolerance (NOT equivalent)
-        #   - Baseline: 100 cores @ 2.3 GHz, IPC 1.0 → 100 ref
-        #   - Comparison: 100 cores @ 2.3 GHz, IPC 0.5 → 100 × 1.15/2.3 = 50 ref
-        #   Ratio = 0.5 → under-provisioned (outside ±10%)
         baseline = make_plan(cpu=100, cpu_ghz=2.3, cpu_ipc_scale=1.0)
         comparison = make_plan(cpu=100, cpu_ghz=2.3, cpu_ipc_scale=0.5)
         result = compare_plans(baseline, comparison)
         assert not result.cpu.is_equivalent
-        assert result.cpu.exceeds_lower_bound  # ratio < 0.9 = under-provisioned
+        assert result.cpu.exceeds_lower_bound
         assert 0.49 < result.cpu.ratio < 0.51  # Exactly 0.5
