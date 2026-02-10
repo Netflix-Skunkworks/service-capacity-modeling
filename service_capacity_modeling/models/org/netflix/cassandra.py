@@ -19,6 +19,7 @@ from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
@@ -674,6 +675,12 @@ class NflxCassandraArguments(BaseModel):
         "Note that if there are more than 100k writes this will "
         "automatically adjust to 0.2",
     )
+    large_instance_bias: Optional[float] = Field(
+        default=None,
+        description="Cost multiplier applied when the selected instance is the largest "
+        "available in its family. Reserves largest instances for emergency scale-ups. "
+        "E.g., 2.0 makes the max-size instance appear 2x more expensive.",
+    )
 
     @classmethod
     def from_extra_model_arguments(
@@ -835,6 +842,31 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_write_buffer_percent=max_write_buffer_percent,
             max_table_buffer_percent=max_table_buffer_percent,
         )
+
+    @staticmethod
+    def regret(
+        regret_params: CapacityRegretParameters,
+        optimal_plan: CapacityPlan,
+        proposed_plan: CapacityPlan,
+    ) -> Dict[str, float]:
+        """Compute regret with large_instance_bias penalty.
+
+        Adds regret when proposed plan uses the largest instance in its family,
+        discouraging selection of max-size instances to reserve them for
+        emergency scale-ups.
+        """
+        # Start with base regret calculation
+        regret = CapacityModel.regret(regret_params, optimal_plan, proposed_plan)
+
+        # Add large_instance regret if applicable
+        if proposed_plan.candidate_clusters.zonal:
+            cluster = proposed_plan.candidate_clusters.zonal[0]
+            params = cluster.cluster_params
+            if params.get("is_largest_in_family", False):
+                bias = params.get("large_instance_bias", 0.0)
+                regret["large_instance"] = bias
+
+        return regret
 
     @staticmethod
     def description() -> str:
