@@ -29,12 +29,13 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
-from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
@@ -127,13 +128,6 @@ def _estimate_cockroachdb_requirement(  # noqa=E501 pylint: disable=too-many-pos
             "read_per_second": reads_per_second,
         },
     )
-
-
-def _upsert_params(cluster: ZoneClusterCapacity, params: Dict[str, Any]) -> None:
-    if cluster.cluster_params:
-        cluster.cluster_params.update(params)
-    else:
-        cluster.cluster_params = params
 
 
 # pylint: disable=too-many-locals
@@ -231,8 +225,11 @@ def _estimate_cockroachdb_cluster_zonal(  # noqa=E501 pylint: disable=too-many-p
     )
 
     # Communicate to the actual provision that if we want reduced RF
-    params = {"cockroachdb.copies": copies_per_region}
-    _upsert_params(cluster, params)
+    params = {
+        "cockroachdb.copies": copies_per_region,
+        EFFECTIVE_DISK_PER_NODE_GIB: max_data_per_node_gib,
+    }
+    upsert_params(cluster, params)
 
     # cockroachdb clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as

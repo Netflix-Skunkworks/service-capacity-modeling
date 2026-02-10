@@ -64,6 +64,7 @@ from service_capacity_modeling.interface import (
     ExcludeUnsetModel,
     Instance,
 )
+from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_disk_size_gib
 
 
@@ -442,9 +443,13 @@ def _aggregate_resources(plan: CapacityPlan) -> dict[ResourceType, float]:
         totals[ResourceType.mem_gib] += cluster.instance.ram_gib * cluster.count
         totals[ResourceType.network_mbps] += cluster.instance.net_mbps * cluster.count
         cluster_drive = cluster.attached_drives[0] if cluster.attached_drives else None
-        totals[ResourceType.disk_gib] += (
-            get_disk_size_gib(cluster_drive, cluster.instance) * cluster.count
-        )
+        effective_disk = cluster.cluster_params.get(EFFECTIVE_DISK_PER_NODE_GIB)
+        if effective_disk is not None:
+            totals[ResourceType.disk_gib] += effective_disk * cluster.count
+        else:
+            totals[ResourceType.disk_gib] += (
+                get_disk_size_gib(cluster_drive, cluster.instance) * cluster.count
+            )
 
     return totals
 

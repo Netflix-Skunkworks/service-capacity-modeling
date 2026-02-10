@@ -108,7 +108,8 @@
           "cassandra.heap.gib": 15.0,
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
-          "cassandra.keyspace.rf": 3
+          "cassandra.keyspace.rf": 3,
+          "effective_disk_per_node_gib": 373
         },
         "cluster_type": "cassandra",
         "count": 4,
@@ -122,7 +123,8 @@
           "cassandra.heap.gib": 15.0,
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
-          "cassandra.keyspace.rf": 3
+          "cassandra.keyspace.rf": 3,
+          "effective_disk_per_node_gib": 373
         },
         "cluster_type": "cassandra",
         "count": 4,
@@ -136,7 +138,8 @@
           "cassandra.heap.gib": 15.0,
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
-          "cassandra.keyspace.rf": 3
+          "cassandra.keyspace.rf": 3,
+          "effective_disk_per_node_gib": 373
         },
         "cluster_type": "cassandra",
         "count": 4,
@@ -168,7 +171,8 @@
           "cassandra.heap.gib": 15.0,
           "cassandra.heap.table.percent": 0.2,
           "cassandra.heap.write.percent": 0.5,
-          "cassandra.keyspace.rf": 2
+          "cassandra.keyspace.rf": 2,
+          "effective_disk_per_node_gib": 8200
         },
         "cluster_type": "cassandra",
         "count": 8,
@@ -185,7 +189,8 @@
           "cassandra.heap.gib": 15.0,
           "cassandra.heap.table.percent": 0.2,
           "cassandra.heap.write.percent": 0.5,
-          "cassandra.keyspace.rf": 2
+          "cassandra.keyspace.rf": 2,
+          "effective_disk_per_node_gib": 8200
         },
         "cluster_type": "cassandra",
         "count": 8,
@@ -202,7 +207,8 @@
           "cassandra.heap.gib": 15.0,
           "cassandra.heap.table.percent": 0.2,
           "cassandra.heap.write.percent": 0.5,
-          "cassandra.keyspace.rf": 2
+          "cassandra.keyspace.rf": 2,
+          "effective_disk_per_node_gib": 8200
         },
         "cluster_type": "cassandra",
         "count": 8,
@@ -224,6 +230,7 @@
       {
         "annual_cost": 4498.0199999999995,
         "cluster_params": {
+          "effective_disk_per_node_gib": 1164,
           "kafka.copies": 2
         },
         "cluster_type": "kafka",
@@ -234,6 +241,7 @@
       {
         "annual_cost": 4498.0199999999995,
         "cluster_params": {
+          "effective_disk_per_node_gib": 1164,
           "kafka.copies": 2
         },
         "cluster_type": "kafka",
@@ -244,6 +252,7 @@
       {
         "annual_cost": 4498.0199999999995,
         "cluster_params": {
+          "effective_disk_per_node_gib": 1164,
           "kafka.copies": 2
         },
         "cluster_type": "kafka",
@@ -267,6 +276,7 @@
       {
         "annual_cost": 830.0,
         "cluster_params": {
+          "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3
         },
         "cluster_type": "evcache",
@@ -277,6 +287,7 @@
       {
         "annual_cost": 830.0,
         "cluster_params": {
+          "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3
         },
         "cluster_type": "evcache",
@@ -287,6 +298,7 @@
       {
         "annual_cost": 830.0,
         "cluster_params": {
+          "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3
         },
         "cluster_type": "evcache",
@@ -310,6 +322,7 @@
       {
         "annual_cost": 10421.71,
         "cluster_params": {
+          "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3
         },
         "cluster_type": "evcache",
@@ -320,6 +333,7 @@
       {
         "annual_cost": 10421.71,
         "cluster_params": {
+          "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3
         },
         "cluster_type": "evcache",
@@ -330,6 +344,7 @@
       {
         "annual_cost": 10421.71,
         "cluster_params": {
+          "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3
         },
         "cluster_type": "evcache",
@@ -355,6 +370,7 @@
       {
         "annual_cost": 50102.130000000005,
         "cluster_params": {
+          "effective_disk_per_node_gib": 441,
           "evcache.copies": 2
         },
         "cluster_type": "evcache",
@@ -365,6 +381,7 @@
       {
         "annual_cost": 50102.130000000005,
         "cluster_params": {
+          "effective_disk_per_node_gib": 441,
           "evcache.copies": 2
         },
         "cluster_type": "evcache",
@@ -393,6 +410,7 @@
       {
         "annual_cost": 50102.130000000005,
         "cluster_params": {
+          "effective_disk_per_node_gib": 441,
           "evcache.copies": 3
         },
         "cluster_type": "evcache",
@@ -403,6 +421,7 @@
       {
         "annual_cost": 50102.130000000005,
         "cluster_params": {
+          "effective_disk_per_node_gib": 441,
           "evcache.copies": 3
         },
         "cluster_type": "evcache",
@@ -413,6 +432,7 @@
       {
         "annual_cost": 50102.130000000005,
         "cluster_params": {
+          "effective_disk_per_node_gib": 441,
           "evcache.copies": 3
         },
         "cluster_type": "evcache",
@@ -427,7 +447,8 @@
           "cassandra.heap.gib": 30,
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
-          "cassandra.keyspace.rf": 3
+          "cassandra.keyspace.rf": 3,
+          "effective_disk_per_node_gib": 1676
         },
         "cluster_type": "cassandra",
         "count": 2,
@@ -441,7 +462,8 @@
           "cassandra.heap.gib": 30,
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
-          "cassandra.keyspace.rf": 3
+          "cassandra.keyspace.rf": 3,
+          "effective_disk_per_node_gib": 1676
         },
         "cluster_type": "cassandra",
         "count": 2,
@@ -455,7 +477,8 @@
           "cassandra.heap.gib": 30,
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
-          "cassandra.keyspace.rf": 3
+          "cassandra.keyspace.rf": 3,
+          "effective_disk_per_node_gib": 1676
         },
         "cluster_type": "cassandra",
         "count": 2,
@@ -487,7 +510,7 @@
       {
         "annual_cost": 449867.0,
         "cluster_params": {
-          "read-only-kv.effective_disk_per_node_gib": 2355.2,
+          "effective_disk_per_node_gib": 2355.2,
           "read-only-kv.min_replica_count": 4,
           "read-only-kv.nodes_for_cpu": 5,
           "read-only-kv.nodes_for_one_copy": 25,
@@ -515,7 +538,7 @@
       {
         "annual_cost": 14525.01,
         "cluster_params": {
-          "read-only-kv.effective_disk_per_node_gib": 2355.2,
+          "effective_disk_per_node_gib": 2355.2,
           "read-only-kv.min_replica_count": 3,
           "read-only-kv.nodes_for_cpu": 3,
           "read-only-kv.nodes_for_one_copy": 1,
@@ -543,7 +566,7 @@
       {
         "annual_cost": 15177.32,
         "cluster_params": {
-          "read-only-kv.effective_disk_per_node_gib": 559,
+          "effective_disk_per_node_gib": 559,
           "read-only-kv.min_replica_count": 4,
           "read-only-kv.nodes_for_cpu": 4,
           "read-only-kv.nodes_for_one_copy": 1,

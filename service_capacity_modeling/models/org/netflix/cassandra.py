@@ -42,9 +42,11 @@ from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import cluster_infra_cost
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import DerivedBuffers
+from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
@@ -350,13 +352,6 @@ def _get_current_capacity(desires: CapacityDesires) -> Optional[CurrentClusterCa
     return current_capacity
 
 
-def _upsert_params(cluster: Any, params: Dict[str, Any]) -> None:
-    if cluster.cluster_params:
-        cluster.cluster_params.update(params)
-    else:
-        cluster.cluster_params = params
-
-
 def _get_cluster_size_lambda(
     current_cluster_size: int,
     required_cluster_size: Optional[int],
@@ -516,8 +511,9 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         "cassandra.heap.write.percent": max_write_buffer_percent,
         "cassandra.heap.table.percent": max_table_buffer_percent,
         "cassandra.compaction.min_threshold": requirement.context["min_threshold"],
+        EFFECTIVE_DISK_PER_NODE_GIB: disk_per_node_gib,
     }
-    _upsert_params(cluster, params)
+    upsert_params(cluster, params)
 
     # Sometimes we don't want modify cluster topology, so only allow
     # topologies that match the desired zone size

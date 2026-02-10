@@ -42,8 +42,10 @@ from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import cluster_infra_cost
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import zonal_requirements_from_current
 from service_capacity_modeling.models.org.netflix.iso_date_math import iso_to_seconds
@@ -219,13 +221,6 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
     )
 
 
-def _upsert_params(cluster: Any, params: Dict[str, Any]) -> None:
-    if cluster.cluster_params:
-        cluster.cluster_params.update(params)
-    else:
-        cluster.cluster_params = params
-
-
 def _kafka_read_io(
     rps: float, io_size_kib: float, size_gib: float, recovery_seconds: int
 ) -> float:
@@ -365,8 +360,11 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     )
 
     # Communicate to the actual provision that if we want reduced RF
-    params = {"kafka.copies": copies_per_region}
-    _upsert_params(cluster, params)
+    params = {
+        "kafka.copies": copies_per_region,
+        EFFECTIVE_DISK_PER_NODE_GIB: max_disk_per_node_gib,
+    }
+    upsert_params(cluster, params)
 
     # This is roughly the disk we would have tried to provision with the current
     # cluster's instance count (or required_zone_size)
