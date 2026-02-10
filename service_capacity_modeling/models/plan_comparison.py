@@ -52,6 +52,7 @@ Example usage::
 from functools import lru_cache
 from itertools import chain
 
+from pydantic import computed_field
 from pydantic import ConfigDict
 
 from service_capacity_modeling.enum_utils import enum_docstrings
@@ -63,6 +64,7 @@ from service_capacity_modeling.interface import (
     ExcludeUnsetModel,
     Instance,
 )
+from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_disk_size_gib
 
 
@@ -286,6 +288,7 @@ class ResourceComparison(ExcludeUnsetModel):
     tolerance: Tolerance
     """The tolerance bounds that were applied for this comparison"""
 
+    @computed_field(return_type=float)  # type: ignore
     @property
     def ratio(self) -> float:
         """Ratio: comparison / baseline.
@@ -304,6 +307,7 @@ class ResourceComparison(ExcludeUnsetModel):
             return float("inf")  # comparison > 0, baseline = 0
         return self.comparison_value / self.baseline_value
 
+    @computed_field(return_type=bool)  # type: ignore
     @property
     def is_equivalent(self) -> bool:
         """True if the ratio is within tolerance bounds."""
@@ -345,11 +349,14 @@ class ResourceComparison(ExcludeUnsetModel):
 class PlanComparisonResult(ExcludeUnsetModel):
     """Result of comparing two capacity plans for equivalence."""
 
-    is_equivalent: bool
-    """True if plans are within tolerance, False if significant differences"""
-
     comparisons: dict[ResourceType, ResourceComparison] = {}
     """Resource comparisons keyed by resource type"""
+
+    @computed_field(return_type=bool)  # type: ignore
+    @property
+    def is_equivalent(self) -> bool:
+        """True if plans are within tolerance, False if significant differences."""
+        return all(c.is_equivalent for c in self.comparisons.values())
 
     @property
     def cpu(self) -> ResourceComparison:
@@ -436,9 +443,13 @@ def _aggregate_resources(plan: CapacityPlan) -> dict[ResourceType, float]:
         totals[ResourceType.mem_gib] += cluster.instance.ram_gib * cluster.count
         totals[ResourceType.network_mbps] += cluster.instance.net_mbps * cluster.count
         cluster_drive = cluster.attached_drives[0] if cluster.attached_drives else None
-        totals[ResourceType.disk_gib] += (
-            get_disk_size_gib(cluster_drive, cluster.instance) * cluster.count
-        )
+        effective_disk = cluster.cluster_params.get(EFFECTIVE_DISK_PER_NODE_GIB)
+        if effective_disk is not None:
+            totals[ResourceType.disk_gib] += effective_disk * cluster.count
+        else:
+            totals[ResourceType.disk_gib] += (
+                get_disk_size_gib(cluster_drive, cluster.instance) * cluster.count
+            )
 
     return totals
 
@@ -495,6 +506,5 @@ def compare_plans(
     )
 
     return PlanComparisonResult(
-        is_equivalent=all(c.is_equivalent for c in comparisons.values()),
         comparisons=comparisons,
     )

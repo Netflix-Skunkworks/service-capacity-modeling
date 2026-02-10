@@ -39,9 +39,11 @@ from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import cluster_infra_cost
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -204,13 +206,6 @@ def _estimate_evcache_requirement(
     )
 
 
-def _upsert_params(cluster: Any, params: Dict[str, Any]) -> None:
-    if cluster.cluster_params:
-        cluster.cluster_params.update(params)
-    else:
-        cluster.cluster_params = params
-
-
 # pylint: disable=too-many-locals
 def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many-positional-arguments
     instance: Instance,
@@ -322,8 +317,11 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         read_write_ratio=read_write_ratio,
     )
     # Communicate to the actual provision that if we want reduced RF
-    params = {"evcache.copies": copies_per_region}
-    _upsert_params(cluster, params)
+    params = {
+        "evcache.copies": copies_per_region,
+        EFFECTIVE_DISK_PER_NODE_GIB: max_data_per_node_gib,
+    }
+    upsert_params(cluster, params)
 
     # evcache clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as

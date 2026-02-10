@@ -32,8 +32,10 @@ from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
@@ -151,13 +153,6 @@ def _estimate_elasticsearch_requirement(  # noqa: E501 pylint: disable=too-many-
             "read_per_second": reads_per_second,
         },
     )
-
-
-def _upsert_params(cluster: ZoneClusterCapacity, params: Dict[str, Any]) -> None:
-    if cluster.cluster_params:
-        cluster.cluster_params.update(params)
-    else:
-        cluster.cluster_params = params
 
 
 # pylint: disable=too-many-locals
@@ -321,8 +316,11 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         data_cluster.cluster_type = "elasticsearch-data"
 
         # Communicate to the actual provision that if we want reduced RF
-        params = {"elasticsearch.copies": copies_per_region}
-        _upsert_params(data_cluster, params)
+        params = {
+            "elasticsearch.copies": copies_per_region,
+            EFFECTIVE_DISK_PER_NODE_GIB: max_data_per_node_gib,
+        }
+        upsert_params(data_cluster, params)
 
         # Elasticsearch clusters generally should try to stay under some total number
         # of nodes. Orgs do this for all kinds of reasons such as

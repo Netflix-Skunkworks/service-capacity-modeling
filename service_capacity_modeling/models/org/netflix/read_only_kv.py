@@ -50,7 +50,9 @@ from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import cluster_infra_cost
+from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
+from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -60,14 +62,6 @@ from service_capacity_modeling.models.org.netflix.partition_aware_algorithm impo
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _upsert_params(cluster: Any, params: Dict[str, Any]) -> None:
-    """Update or set cluster parameters."""
-    if cluster.cluster_params:
-        cluster.cluster_params.update(params)
-    else:
-        cluster.cluster_params = params
 
 
 class NflxReadOnlyKVArguments(BaseModel):
@@ -238,9 +232,9 @@ def _compute_read_only_kv_regional_cluster(
         "read-only-kv.partitions_per_node": result.partitions_per_node,
         "read-only-kv.nodes_for_one_copy": result.nodes_for_one_copy,
         "read-only-kv.nodes_for_cpu": math.ceil(total_needed_cores / instance.cpu),
-        "read-only-kv.effective_disk_per_node_gib": effective_disk_per_node,
+        EFFECTIVE_DISK_PER_NODE_GIB: effective_disk_per_node,
     }
-    _upsert_params(cluster, params)
+    upsert_params(cluster, params)
 
     return cluster
 
