@@ -5,6 +5,8 @@ These tests verify fundamental properties that should hold for every model,
 such as determinism, feasibility, and basic scaling behavior.
 """
 
+import pytest
+
 import hypothesis.strategies as st
 from hypothesis import assume
 from hypothesis import given
@@ -125,8 +127,11 @@ def test_all_models_scale_cpu_with_qps(model_name, data):
     are tested at their appropriate scales (e.g., 10000-50000 QPS).
     """
 
-    # Get model's valid QPS range
     from tests.netflix.property_test_utils import _get_model_config
+
+    skip_tests = _get_model_config(model_name, "skip_tests", default=[])
+    if "test_all_models_scale_cpu_with_qps" in skip_tests:
+        pytest.skip(f"{model_name} opts out of CPU monotonicity test")
 
     # Check for separate read/write QPS ranges (for models with asymmetric workloads)
     read_qps_range = _get_model_config(model_name, "read_qps_range")
@@ -193,12 +198,111 @@ def test_all_models_scale_cpu_with_qps(model_name, data):
     low_cpu = get_total_cpu(low_plan)
     high_cpu = get_total_cpu(high_plan)
 
-    read_multiplier = high_read_qps / low_read_qps
-    write_multiplier = high_write_qps / low_write_qps
+    read_multiplier = high_read_qps / low_read_qps if low_read_qps else float("inf")
+    write_multiplier = high_write_qps / low_write_qps if low_write_qps else float("inf")
 
     # Higher QPS should require at least as much CPU (allow equal for over-provisioning)
     assert high_cpu >= low_cpu, (
         f"{model_name}: Higher QPS should require >= CPU\n"
+        f"Read multiplier: {read_multiplier:.1f}x, "
+        f"Write multiplier: {write_multiplier:.1f}x\n"
+        f"\nLow QPS (R:{low_read_qps} W:{low_write_qps}) plan:\n"
+        f"{plan_summary(low_plan)}\n"
+        f"\nHigh QPS (R:{high_read_qps} W:{high_write_qps}) plan:\n"
+        f"{plan_summary(high_plan)}"
+    )
+
+
+# ============================================================================
+# Universal Property: Cost Monotonicity
+# ============================================================================
+
+
+@settings(
+    max_examples=15, deadline=20000, suppress_health_check=[HealthCheck.filter_too_much]
+)
+@given(data=st.data())
+def test_all_models_scale_cost_with_qps(model_name, data):
+    """
+    Property: Higher QPS should cost more (or same).
+
+    The planner selects the cheapest plan that satisfies requirements.
+    Higher requirements can't make the cheapest valid plan cheaper, so
+    cost should be monotonically non-decreasing with QPS.
+
+    This test uses the same QPS generation as the CPU test but is more
+    robust because cost is what the planner actually optimizes for.
+    """
+    from tests.netflix.property_test_utils import _get_model_config
+
+    skip_tests = _get_model_config(model_name, "skip_tests", default=[])
+    if "test_all_models_scale_cost_with_qps" in skip_tests:
+        pytest.skip(f"{model_name} opts out of cost monotonicity test")
+
+    # Check for separate read/write QPS ranges (for models with asymmetric workloads)
+    read_qps_range = _get_model_config(model_name, "read_qps_range")
+    write_qps_range = _get_model_config(model_name, "write_qps_range")
+    qps_range = _get_model_config(model_name, "qps_range")
+
+    if read_qps_range and write_qps_range:
+        min_read_qps, max_read_qps = read_qps_range
+        min_write_qps, max_write_qps = write_qps_range
+    elif qps_range:
+        min_read_qps, max_read_qps = qps_range
+        min_write_qps, max_write_qps = qps_range
+    else:
+        min_read_qps, max_read_qps = 1000, 50_000
+        min_write_qps, max_write_qps = 1000, 50_000
+
+    low_read_qps = data.draw(
+        st.integers(min_value=min_read_qps, max_value=max_read_qps // 2)
+    )
+    high_read_qps = data.draw(
+        st.integers(min_value=low_read_qps * 2, max_value=max_read_qps)
+    )
+
+    low_write_qps = data.draw(
+        st.integers(min_value=min_write_qps, max_value=max_write_qps // 2)
+    )
+    high_write_qps = data.draw(
+        st.integers(min_value=low_write_qps * 2, max_value=max_write_qps)
+    )
+
+    data_gib_range = _get_model_config(model_name, "data_range_gib", default=(100, 100))
+    data_gib = data_gib_range[0] if isinstance(data_gib_range, tuple) else 100
+
+    low_qps_desires = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(low_read_qps),
+            estimated_write_per_second=certain_int(low_write_qps),
+        ),
+        data_shape=DataShape(estimated_state_size_gib=certain_int(data_gib)),
+    )
+
+    high_qps_desires = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(high_read_qps),
+            estimated_write_per_second=certain_int(high_write_qps),
+        ),
+        data_shape=DataShape(estimated_state_size_gib=certain_int(data_gib)),
+    )
+
+    low_plan = plan_model(model_name, low_qps_desires)
+    high_plan = plan_model(model_name, high_qps_desires)
+
+    assume(low_plan is not None)
+    assume(high_plan is not None)
+
+    low_cost = get_total_cost(low_plan)
+    high_cost = get_total_cost(high_plan)
+
+    read_multiplier = high_read_qps / low_read_qps if low_read_qps else float("inf")
+    write_multiplier = high_write_qps / low_write_qps if low_write_qps else float("inf")
+
+    assert high_cost >= low_cost, (
+        f"{model_name}: Higher QPS should cost >= baseline\n"
         f"Read multiplier: {read_multiplier:.1f}x, "
         f"Write multiplier: {write_multiplier:.1f}x\n"
         f"\nLow QPS (R:{low_read_qps} W:{low_write_qps}) plan:\n"

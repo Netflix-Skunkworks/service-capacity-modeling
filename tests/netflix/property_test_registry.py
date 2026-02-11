@@ -26,6 +26,7 @@ def register_property_test_config(model_name: str, config: Dict[str, Any]):
             - supports_tier_0: Set to False if model doesn't support tier 0
             - qps_range: Tuple of (min_qps, max_qps) for property test generation
             - data_range_gib: Tuple of (min_gib, max_gib) for property test generation
+            - skip_tests: List of test function names to skip for this model
     """
     _PROPERTY_TEST_CONFIGS[model_name] = config
 
