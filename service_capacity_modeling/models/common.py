@@ -221,35 +221,51 @@ def normalize_cores(
     target_shape: Instance,
     reference_shape: Optional[Instance] = None,
 ) -> int:
-    """Calculates equivalent CPU on a target shape relative to a reference
+    """Calculates equivalent CPU on a target shape relative to a reference.
 
-    Converts core_count FROM reference_shape TO target_shape.
+    Converts core_count FROM reference_shape TO target_shape. Returns a
+    ceiling int suitable for provisioning (you can't provision half a core).
 
     Takes into account relative core frequency and IPC factor from the hardware
     description to give a rough estimate of how many equivalent cores you need
     in a target_shape to have the core_count number of cores on the reference_shape.
 
     Faster target → fewer cores needed; Slower target → more cores needed.
+
+    See normalize_cores_float() for a float variant used in comparisons.
     """
-    # Normalize the core count the same as CPUs
-    return _normalize_cpu(
-        cpu_count=core_count,
-        target_shape=target_shape,
-        reference_shape=reference_shape,
-    )
+    # "cores" is the legacy naming; we now prefer "cpu" (which could mean
+    # cores or threads depending on context). The public API keeps "cores"
+    # for backwards compatibility; _normalize_cpu is the shared private
+    # implementation with the preferred naming.
+    return math.ceil(_normalize_cpu(core_count, target_shape, reference_shape))
+
+
+def normalize_cores_float(
+    core_count: float,
+    target_shape: Instance,
+    reference_shape: Optional[Instance] = None,
+) -> float:
+    """Like normalize_cores(), but returns exact float for comparisons.
+
+    Use this when comparing compute capacity across different instance types
+    (e.g., plan comparison, property tests). The ceiling in normalize_cores()
+    distorts ratios by up to ~3%, which matters for equivalence checks.
+    """
+    return _normalize_cpu(core_count, target_shape, reference_shape)
 
 
 def _normalize_cpu(
     cpu_count: float,
     target_shape: Instance,
     reference_shape: Optional[Instance] = None,
-) -> int:
+) -> float:
     if reference_shape is None:
         reference_shape = default_reference_shape
 
     target_speed = target_shape.cpu_ghz * target_shape.cpu_ipc_scale
     reference_speed = reference_shape.cpu_ghz * reference_shape.cpu_ipc_scale
-    return max(1, math.ceil(cpu_count / (target_speed / reference_speed)))
+    return cpu_count * (reference_speed / target_speed)
 
 
 def _reserved_headroom(
@@ -1023,10 +1039,12 @@ def zonal_requirements_from_current(
             current_capacity=current_capacity,
             buffers=buffers,
         )
-        normalized_cpu = _normalize_cpu(
-            requirement.cpu(instance),
-            instance,
-            reference_shape,
+        normalized_cpu = math.ceil(
+            _normalize_cpu(
+                requirement.cpu(instance),
+                instance,
+                reference_shape,
+            )
         )
 
         needed_network_mbps = requirement.network_mbps

@@ -193,8 +193,8 @@ def test_all_models_scale_cpu_with_qps(model_name, data):
     low_cpu = get_total_cpu(low_plan)
     high_cpu = get_total_cpu(high_plan)
 
-    read_multiplier = high_read_qps / low_read_qps
-    write_multiplier = high_write_qps / low_write_qps
+    read_multiplier = high_read_qps / low_read_qps if low_read_qps else float("inf")
+    write_multiplier = high_write_qps / low_write_qps if low_write_qps else float("inf")
 
     # Higher QPS should require at least as much CPU (allow equal for over-provisioning)
     assert high_cpu >= low_cpu, (
