@@ -238,7 +238,7 @@ def normalize_cores(
     # cores or threads depending on context). The public API keeps "cores"
     # for backwards compatibility; _normalize_cpu is the shared private
     # implementation with the preferred naming.
-    return math.ceil(_normalize_cpu(core_count, target_shape, reference_shape))
+    return max(1, math.ceil(_normalize_cpu(core_count, target_shape, reference_shape)))
 
 
 def normalize_cores_float(
