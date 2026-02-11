@@ -19,6 +19,8 @@ from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.interface import default_reference_shape
+from service_capacity_modeling.models.common import normalize_cores_float
 
 GiB = 1024 * 1024 * 1024
 
@@ -227,14 +229,27 @@ def capacity_desires_for_model(model_name, **overrides):
 
 
 def get_total_cpu(plan):
-    """Get total CPU cores from all clusters in a capacity plan."""
-    total = 0
+    """Get total CPU in reference-equivalent cores from all clusters.
+
+    Uses normalize_cores_float() to normalize across instance types, so
+    comparisons are meaningful even when plans use different families
+    (e.g., c5d vs m6id with different IPC/clock speeds).
+    """
+    total = 0.0
     if plan.candidate_clusters.zonal:
         for cluster in plan.candidate_clusters.zonal:
-            total += cluster.count * cluster.instance.cpu
+            total += normalize_cores_float(
+                cluster.count * cluster.instance.cpu,
+                target_shape=default_reference_shape,
+                reference_shape=cluster.instance,
+            )
     if plan.candidate_clusters.regional:
         for cluster in plan.candidate_clusters.regional:
-            total += cluster.count * cluster.instance.cpu
+            total += normalize_cores_float(
+                cluster.count * cluster.instance.cpu,
+                target_shape=default_reference_shape,
+                reference_shape=cluster.instance,
+            )
     return total
 
 
