@@ -410,7 +410,7 @@ class PlanComparisonResult(ExcludeUnsetModel):
         return [c for c in self.comparisons.values() if not c.is_equivalent]
 
 
-def _to_ref_cores(core_count: float, instance: Instance) -> float:
+def to_reference_cores(core_count: float, instance: Instance) -> float:
     """Convert instance cores to reference-equivalent cores (float precision).
 
     Convenience wrapper for normalize_cores_float() with

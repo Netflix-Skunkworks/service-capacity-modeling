@@ -17,7 +17,6 @@ from service_capacity_modeling.interface import (
     ZoneClusterCapacity,
     certain_float,
     certain_int,
-    default_reference_shape,
 )
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import normalize_cores_float
