@@ -204,7 +204,7 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
 
     return (
         CapacityRequirement(
-            requirement_type="kafka-zonal",
+            requirement_type=NflxKafkaCapacityModel.cluster_type,
             reference_shape=desires.reference_shape,
             cpu_cores=certain_int(needed_cores),
             mem_gib=certain_float(needed_memory),
