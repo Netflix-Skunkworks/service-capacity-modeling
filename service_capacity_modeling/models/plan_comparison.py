@@ -7,6 +7,8 @@ Example usage::
 
     from service_capacity_modeling.models.plan_comparison import (
         compare_plans,
+        ComparisonStrategy,
+        gte,
         ignore_resource,
         lte,
         plus_or_minus,
@@ -14,15 +16,13 @@ Example usage::
     )
 
     # Get recommendation from planner
-    recommendations = planner.plan_certain(
+    recommendation = planner.plan_certain(
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=desires,
-    )
-    recommendation = recommendations[0]
+    )[0]
 
-    # Get current deployment as baseline using CapacityPlanner
-    # This uses model-specific cost methods for accurate comparison
+    # Get current deployment as baseline
     baseline = planner.extract_baseline_plan(
         model_name="org.netflix.cassandra",
         region="us-east-1",
@@ -30,7 +30,11 @@ Example usage::
         extra_model_arguments={"copies_per_region": 3},
     )
 
-    # Compare with custom tolerances
+Two comparison strategies are available:
+
+**Provisioned** (default) — compare aggregate cluster resources::
+
+    # "Is the new recommendation similar to what we have deployed?"
     result = compare_plans(
         baseline,
         recommendation,
@@ -40,6 +44,22 @@ Example usage::
             disk=plus_or_minus(0.10),      # Storage within ±10%
         ),
     )
+
+**Requirements** — compare a plan's clusters against requirements::
+
+    # "Does my current cluster satisfy the requirements without a
+    #  significant change in cost?"
+    result = compare_plans(
+        baseline,                                   # provides clusters
+        recommendation,                             # provides requirements
+        strategy=ComparisonStrategy.requirements,
+        tolerances=ResourceTolerances(
+            default=gte(1.0),               # clusters must meet requirements
+            annual_cost=plus_or_minus(0.10), # cost within ±10%
+        ),
+    )
+
+Checking the result::
 
     if result.is_equivalent:
         print("Current capacity is sufficient")
@@ -422,13 +442,13 @@ def to_reference_cores(core_count: float, instance: Instance) -> float:
 
 
 class ComparisonStrategy(StrEnum):
-    """Strategy for how baseline values are extracted in compare_plans."""
+    """Strategy for how baseline and comparison values are extracted."""
 
     requirements = "requirements"
-    """Compare comparison's clusters against baseline's CapacityRequirements."""
+    """Baseline's clusters vs comparison's requirements (matched by cluster_type)."""
 
     provisioned = "provisioned"
-    """Compare aggregate cluster resources from both plans."""
+    """Aggregate cluster resources from both plans."""
 
 
 def _find_matching_requirement(
@@ -525,15 +545,21 @@ def compare_plans(
     Strategy controls what each plan contributes:
 
     - **provisioned** (default): Compare aggregate cluster resources from both
-      plans. This is a whole-plan comparison across all cluster types.
+      plans. Answers: "how does the recommendation compare to what's deployed?"
 
-    - **requirements**: Compare the comparison plan's requirements against the
-      baseline plan's clusters, matched by type. Answers: "does the baseline's
+    - **requirements**: Compare baseline's clusters against comparison's
+      requirements, matched by cluster_type. Answers: "does the baseline's
       deployment satisfy the comparison's requirements?"
 
+      Resource ratios are ``cluster / requirement`` — values ≥ 1.0 mean the
+      cluster meets or exceeds the requirement. Cost ratios are
+      ``baseline_cost / comparison_cost``.
+
     Args:
-        baseline: The reference plan (e.g., current production deployment).
-        comparison: The plan to compare against baseline (e.g., new recommendation).
+        baseline: The plan providing clusters (e.g., current deployment).
+        comparison: The plan providing the reference to compare against.
+            For provisioned: provides clusters.
+            For requirements: provides requirements (and clusters for cost).
         tolerances: Per-resource tolerance configuration. If None, uses defaults.
         strategy: How to extract and match values between the plans.
 
