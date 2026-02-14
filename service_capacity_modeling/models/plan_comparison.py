@@ -508,19 +508,8 @@ def _aggregate_resources(plan: CapacityPlan) -> dict[ResourceType, float]:
     for cluster in chain(
         plan.candidate_clusters.zonal, plan.candidate_clusters.regional
     ):
-        totals[ResourceType.cpu] += to_reference_cores(
-            cluster.instance.cpu * cluster.count, cluster.instance
-        )
-        totals[ResourceType.mem_gib] += cluster.instance.ram_gib * cluster.count
-        totals[ResourceType.network_mbps] += cluster.instance.net_mbps * cluster.count
-        cluster_drive = cluster.attached_drives[0] if cluster.attached_drives else None
-        effective_disk = cluster.cluster_params.get(EFFECTIVE_DISK_PER_NODE_GIB)
-        if effective_disk is not None:
-            totals[ResourceType.disk_gib] += effective_disk * cluster.count
-        else:
-            totals[ResourceType.disk_gib] += (
-                get_disk_size_gib(cluster_drive, cluster.instance) * cluster.count
-            )
+        for resource_type, val in _single_cluster_resources(cluster).items():
+            totals[resource_type] += val
 
     return totals
 
@@ -591,13 +580,13 @@ def compare_plans(
 
     # Build comparisons from extracted resources
     comparisons = {
-        rt: ResourceComparison(
-            resource=rt,
+        resource_type: ResourceComparison(
+            resource=resource_type,
             baseline_value=b_val,
-            comparison_value=comparison_resources[rt],
-            tolerance=tolerances.get_tolerance(rt),
+            comparison_value=comparison_resources[resource_type],
+            tolerance=tolerances.get_tolerance(resource_type),
         )
-        for rt, b_val in baseline_resources.items()
+        for resource_type, b_val in baseline_resources.items()
     }
     if baseline_cost is not None:
         comparisons[ResourceType.annual_cost] = ResourceComparison(
