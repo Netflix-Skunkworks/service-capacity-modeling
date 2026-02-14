@@ -70,7 +70,6 @@ Checking the result::
 """
 
 from functools import lru_cache
-from itertools import chain
 
 from pydantic import computed_field
 from pydantic import ConfigDict
@@ -455,7 +454,7 @@ def _find_matching_requirement(
     cluster_type: str, plan: CapacityPlan
 ) -> CapacityRequirement | None:
     """Find first requirement where requirement_type == cluster_type."""
-    for req in chain(plan.requirements.zonal, plan.requirements.regional):
+    for req in [*plan.requirements.zonal, *plan.requirements.regional]:
         if req.requirement_type == cluster_type:
             return req
     return None
@@ -465,9 +464,7 @@ def _find_matching_cluster(
     cluster_type: str, plan: CapacityPlan
 ) -> ClusterCapacity | None:
     """Find first plan cluster where cluster_type matches."""
-    for cluster in chain(
-        plan.candidate_clusters.zonal, plan.candidate_clusters.regional
-    ):
+    for cluster in [*plan.candidate_clusters.zonal, *plan.candidate_clusters.regional]:
         if cluster.cluster_type == cluster_type:
             return cluster
     return None
@@ -525,13 +522,86 @@ def _aggregate_resources(plan: CapacityPlan) -> dict[ResourceType, float]:
         ResourceType.network_mbps: 0.0,
     }
 
-    for cluster in chain(
-        plan.candidate_clusters.zonal, plan.candidate_clusters.regional
-    ):
+    for cluster in [*plan.candidate_clusters.zonal, *plan.candidate_clusters.regional]:
         for resource_type, val in _single_cluster_resources(cluster).items():
             totals[resource_type] += val
 
     return totals
+
+
+def _compare_requirements(
+    baseline: CapacityPlan,
+    comparison: CapacityPlan,
+    tolerances: ResourceTolerances,
+) -> PlanComparisonResult:
+    """Compare baseline's clusters against comparison's requirements.
+
+    Uses demand/supply naming: ratio is supply (cluster) / demand (requirement).
+    Ratios >= 1.0 mean the cluster meets or exceeds the requirement.
+    """
+    supply_clusters = [
+        *baseline.candidate_clusters.zonal,
+        *baseline.candidate_clusters.regional,
+    ]
+    if not supply_clusters:
+        return PlanComparisonResult()
+    cluster = supply_clusters[0]
+
+    demand = _find_matching_requirement(cluster.cluster_type, comparison)
+    if demand is None:
+        raise ValueError(f"No requirement with type '{cluster.cluster_type}' in plan")
+
+    demand_resources = _requirement_resources(demand)
+    supply_resources = _single_cluster_resources(cluster)
+
+    comparisons = {
+        resource_type: ResourceComparison(
+            resource=resource_type,
+            baseline_value=demand_val,
+            comparison_value=supply_resources[resource_type],
+            tolerance=tolerances.get_tolerance(resource_type),
+        )
+        for resource_type, demand_val in demand_resources.items()
+    }
+
+    comp_cluster = _find_matching_cluster(cluster.cluster_type, comparison)
+    if comp_cluster:
+        comparisons[ResourceType.annual_cost] = ResourceComparison(
+            resource=ResourceType.annual_cost,
+            baseline_value=comp_cluster.annual_cost,
+            comparison_value=cluster.annual_cost,
+            tolerance=tolerances.get_tolerance(ResourceType.annual_cost),
+        )
+
+    return PlanComparisonResult(comparisons=comparisons)
+
+
+def _compare_provisioned(
+    baseline: CapacityPlan,
+    comparison: CapacityPlan,
+    tolerances: ResourceTolerances,
+) -> PlanComparisonResult:
+    """Compare aggregate cluster resources from both plans."""
+    baseline_resources = _aggregate_resources(baseline)
+    comparison_resources = _aggregate_resources(comparison)
+
+    comparisons = {
+        resource_type: ResourceComparison(
+            resource=resource_type,
+            baseline_value=b_val,
+            comparison_value=comparison_resources[resource_type],
+            tolerance=tolerances.get_tolerance(resource_type),
+        )
+        for resource_type, b_val in baseline_resources.items()
+    }
+    comparisons[ResourceType.annual_cost] = ResourceComparison(
+        resource=ResourceType.annual_cost,
+        baseline_value=float(baseline.candidate_clusters.total_annual_cost),
+        comparison_value=float(comparison.candidate_clusters.total_annual_cost),
+        tolerance=tolerances.get_tolerance(ResourceType.annual_cost),
+    )
+
+    return PlanComparisonResult(comparisons=comparisons)
 
 
 def compare_plans(
@@ -573,53 +643,8 @@ def compare_plans(
     if tolerances is None:
         tolerances = ResourceTolerances()
 
-    # Extract resources based on strategy
-    if strategy == ComparisonStrategy.requirements:
-        clusters = list(
-            chain(
-                baseline.candidate_clusters.zonal,
-                baseline.candidate_clusters.regional,
-            )
-        )
-        if not clusters:
-            return PlanComparisonResult()
-        cluster = clusters[0]
-
-        requirement = _find_matching_requirement(cluster.cluster_type, comparison)
-        if requirement is None:
-            raise ValueError(
-                f"No requirement with type '{cluster.cluster_type}' in plan"
-            )
-
-        baseline_resources = _requirement_resources(requirement)
-        comparison_resources = _single_cluster_resources(cluster)
-
-        # Cost from comparison's matching cluster (if available)
-        comp_cluster = _find_matching_cluster(cluster.cluster_type, comparison)
-        baseline_cost = comp_cluster.annual_cost if comp_cluster else None
-        comparison_cost = cluster.annual_cost if comp_cluster else None
-    else:
-        baseline_resources = _aggregate_resources(baseline)
-        comparison_resources = _aggregate_resources(comparison)
-        baseline_cost = float(baseline.candidate_clusters.total_annual_cost)
-        comparison_cost = float(comparison.candidate_clusters.total_annual_cost)
-
-    # Build comparisons from extracted resources
-    comparisons = {
-        resource_type: ResourceComparison(
-            resource=resource_type,
-            baseline_value=b_val,
-            comparison_value=comparison_resources[resource_type],
-            tolerance=tolerances.get_tolerance(resource_type),
-        )
-        for resource_type, b_val in baseline_resources.items()
-    }
-    if baseline_cost is not None:
-        comparisons[ResourceType.annual_cost] = ResourceComparison(
-            resource=ResourceType.annual_cost,
-            baseline_value=baseline_cost,
-            comparison_value=comparison_cost,
-            tolerance=tolerances.get_tolerance(ResourceType.annual_cost),
-        )
-
-    return PlanComparisonResult(comparisons=comparisons)
+    match strategy:
+        case ComparisonStrategy.requirements:
+            return _compare_requirements(baseline, comparison, tolerances)
+        case ComparisonStrategy.provisioned:
+            return _compare_provisioned(baseline, comparison, tolerances)
