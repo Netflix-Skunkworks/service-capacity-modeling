@@ -55,7 +55,7 @@ def test_eventual_counter_storage_targets():
         },
     )
 
-    assert extract_storage_types(cap_plan) == {"cassandra-zonal", "java-app"}
+    assert extract_storage_types(cap_plan) == {"cassandra", "nflx-java-app"}
 
 
 def test_best_eff_counter_storage_targets():
@@ -90,7 +90,7 @@ def test_best_eff_counter_storage_targets():
         },
     )
 
-    assert extract_storage_types(cap_plan) == {"evcache-zonal", "java-app"}
+    assert extract_storage_types(cap_plan) == {"evcache", "nflx-java-app"}
 
 
 def extract_storage_types(cap_plan: UncertainCapacityPlan) -> Set[str]:

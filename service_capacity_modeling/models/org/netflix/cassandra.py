@@ -185,7 +185,7 @@ def _zonal_requirement_for_new_cluster(
     needed_disk = max(1, needed_disk // zones_per_region)
 
     return CapacityRequirement(
-        requirement_type="zonal-capacity",
+        requirement_type=NflxCassandraCapacityModel.cluster_type,
         cpu_cores=certain_int(needed_cores),
         disk_gib=certain_float(needed_disk),
         network_mbps=certain_float(needed_network_mbps),
@@ -311,7 +311,7 @@ def _estimate_cassandra_requirement(
     )
 
     return CapacityRequirement(
-        requirement_type="cassandra-zonal",
+        requirement_type=NflxCassandraCapacityModel.cluster_type,
         reference_shape=reference_shape,
         cpu_cores=certain_int(needed_cores),
         mem_gib=certain_float(needed_memory),

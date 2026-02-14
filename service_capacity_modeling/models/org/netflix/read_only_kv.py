@@ -149,7 +149,7 @@ def _estimate_read_only_kv_requirement(
     needed_network_mbps = simple_network_mbps(desires)
 
     return CapacityRequirement(
-        requirement_type="read-only-kv-regional",
+        requirement_type=NflxReadOnlyKVCapacityModel.cluster_type,
         reference_shape=desires.reference_shape,
         cpu_cores=certain_int(needed_cores),
         mem_gib=certain_float(0),  # Not used (see TODO at top of file)

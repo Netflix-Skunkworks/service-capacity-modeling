@@ -191,7 +191,7 @@ def _estimate_evcache_requirement(
 
     return (
         CapacityRequirement(
-            requirement_type="evcache-zonal",
+            requirement_type=NflxEVCacheCapacityModel.cluster_type,
             reference_shape=desires.reference_shape,
             cpu_cores=certain_int(needed_cores),
             mem_gib=certain_float(needed_memory),
