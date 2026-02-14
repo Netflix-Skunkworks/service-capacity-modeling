@@ -440,6 +440,7 @@ def to_reference_cores(core_count: float, instance: Instance) -> float:
     return core_count * (instance_speed / ref_speed)
 
 
+@enum_docstrings
 class ComparisonStrategy(StrEnum):
     """Strategy for how baseline and comparison values are extracted."""
 
