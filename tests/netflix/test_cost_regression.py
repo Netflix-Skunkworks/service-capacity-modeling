@@ -37,6 +37,14 @@ from service_capacity_modeling.interface import (
     CurrentZoneClusterCapacity,
 )
 from service_capacity_modeling.models import CostAwareModel
+from service_capacity_modeling.models.plan_comparison import (
+    compare_plans,
+    ComparisonStrategy,
+    exact_match,
+    gte,
+    ignore_resource,
+    ResourceTolerances,
+)
 from service_capacity_modeling import tools as scm_tools
 from service_capacity_modeling.tools.capture_baseline_costs import SCENARIOS
 
@@ -172,6 +180,21 @@ class TestBaselineDrift:
         # _sub_models() DAG - the planner automatically routes costs to each model
         model = planner.models[scenario["model"]]
         if isinstance(model, CostAwareModel):
+            # Clusters should satisfy the model's own requirements
+            self_check = compare_plans(
+                cap_plan,
+                cap_plan,
+                strategy=ComparisonStrategy.requirements,
+                tolerances=ResourceTolerances(
+                    default=gte(1.0),
+                    annual_cost=exact_match(),
+                ),
+            )
+            assert self_check.is_equivalent, (
+                f"Recommendation self-consistency failed for {scenario_name}: "
+                + "; ".join(str(d) for d in self_check.get_out_of_tolerance())
+            )
+
             current_clusters = _clusters_to_current(cap_plan)
             desires_with_current = scenario["desires"].model_copy(deep=True)
             desires_with_current.current_clusters = current_clusters
@@ -205,6 +228,21 @@ class TestBaselineDrift:
                     f"original=${float(original_costs[key]):,.2f}, "
                     f"extracted=${float(extracted_costs[key]):,.2f}"
                 )
+
+            # Extracted baseline's clusters should satisfy original requirements
+            roundtrip = compare_plans(
+                extracted,
+                cap_plan,
+                strategy=ComparisonStrategy.requirements,
+                tolerances=ResourceTolerances(
+                    default=gte(1.0),
+                    annual_cost=ignore_resource(),
+                ),
+            )
+            assert roundtrip.is_equivalent, (
+                f"Baseline round-trip failed for {scenario_name}: "
+                + "; ".join(str(d) for d in roundtrip.get_out_of_tolerance())
+            )
 
 
 class TestExtractBaselinePlanValidation:

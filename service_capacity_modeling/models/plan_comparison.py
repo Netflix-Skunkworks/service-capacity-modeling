@@ -7,6 +7,8 @@ Example usage::
 
     from service_capacity_modeling.models.plan_comparison import (
         compare_plans,
+        ComparisonStrategy,
+        gte,
         ignore_resource,
         lte,
         plus_or_minus,
@@ -14,15 +16,13 @@ Example usage::
     )
 
     # Get recommendation from planner
-    recommendations = planner.plan_certain(
+    recommendation = planner.plan_certain(
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=desires,
-    )
-    recommendation = recommendations[0]
+    )[0]
 
-    # Get current deployment as baseline using CapacityPlanner
-    # This uses model-specific cost methods for accurate comparison
+    # Get current deployment as baseline
     baseline = planner.extract_baseline_plan(
         model_name="org.netflix.cassandra",
         region="us-east-1",
@@ -30,7 +30,11 @@ Example usage::
         extra_model_arguments={"copies_per_region": 3},
     )
 
-    # Compare with custom tolerances
+Two comparison strategies are available:
+
+**Provisioned** (default) — compare aggregate cluster resources::
+
+    # "Is the new recommendation similar to what we have deployed?"
     result = compare_plans(
         baseline,
         recommendation,
@@ -41,6 +45,22 @@ Example usage::
         ),
     )
 
+**Requirements** — compare a plan's clusters against requirements::
+
+    # "Does my current cluster satisfy the requirements without a
+    #  significant change in cost?"
+    result = compare_plans(
+        baseline,                                   # provides clusters
+        recommendation,                             # provides requirements
+        strategy=ComparisonStrategy.requirements,
+        tolerances=ResourceTolerances(
+            default=gte(1.0),               # clusters must meet requirements
+            annual_cost=plus_or_minus(0.10), # cost within ±10%
+        ),
+    )
+
+Checking the result::
+
     if result.is_equivalent:
         print("Current capacity is sufficient")
     else:
@@ -50,7 +70,6 @@ Example usage::
 """
 
 from functools import lru_cache
-from itertools import chain
 
 from pydantic import computed_field
 from pydantic import ConfigDict
@@ -60,6 +79,8 @@ from service_capacity_modeling.enum_utils import StrEnum
 
 from service_capacity_modeling.interface import (
     CapacityPlan,
+    CapacityRequirement,
+    ClusterCapacity,
     default_reference_shape,
     ExcludeUnsetModel,
     Instance,
@@ -419,6 +440,74 @@ def to_reference_cores(core_count: float, instance: Instance) -> float:
     return core_count * (instance_speed / ref_speed)
 
 
+@enum_docstrings
+class ComparisonStrategy(StrEnum):
+    """Strategy for how baseline and comparison values are extracted."""
+
+    requirements = "requirements"
+    """Baseline's clusters vs comparison's requirements (matched by cluster_type)."""
+
+    provisioned = "provisioned"
+    """Aggregate cluster resources from both plans."""
+
+
+def _find_matching_requirement(
+    cluster_type: str, plan: CapacityPlan
+) -> CapacityRequirement | None:
+    """Find first requirement where requirement_type == cluster_type."""
+    for req in [*plan.requirements.zonal, *plan.requirements.regional]:
+        if req.requirement_type == cluster_type:
+            return req
+    return None
+
+
+def _find_matching_cluster(
+    cluster_type: str, plan: CapacityPlan
+) -> ClusterCapacity | None:
+    """Find first plan cluster where cluster_type matches."""
+    for cluster in [*plan.candidate_clusters.zonal, *plan.candidate_clusters.regional]:
+        if cluster.cluster_type == cluster_type:
+            return cluster
+    return None
+
+
+def _single_cluster_resources(cluster: ClusterCapacity) -> dict[ResourceType, float]:
+    """Extract resource totals from a single cluster."""
+    cluster_drive = cluster.attached_drives[0] if cluster.attached_drives else None
+    effective_disk = cluster.cluster_params.get(EFFECTIVE_DISK_PER_NODE_GIB)
+    if effective_disk is not None:
+        disk = effective_disk * cluster.count
+    else:
+        disk = get_disk_size_gib(cluster_drive, cluster.instance) * cluster.count
+
+    return {
+        ResourceType.cpu: to_reference_cores(
+            cluster.instance.cpu * cluster.count, cluster.instance
+        ),
+        ResourceType.mem_gib: cluster.instance.ram_gib * cluster.count,
+        ResourceType.disk_gib: disk,
+        ResourceType.network_mbps: cluster.instance.net_mbps * cluster.count,
+    }
+
+
+def _requirement_resources(
+    requirement: CapacityRequirement,
+) -> dict[ResourceType, float]:
+    """Extract resource values from a CapacityRequirement.
+
+    CPU cores are normalized from the requirement's reference_shape to
+    default_reference_shape, giving the same basis as cluster CPU.
+    """
+    return {
+        ResourceType.cpu: to_reference_cores(
+            requirement.cpu_cores.mid, requirement.reference_shape
+        ),
+        ResourceType.mem_gib: requirement.mem_gib.mid,
+        ResourceType.disk_gib: requirement.disk_gib.mid,
+        ResourceType.network_mbps: requirement.network_mbps.mid,
+    }
+
+
 def _aggregate_resources(plan: CapacityPlan) -> dict[ResourceType, float]:
     """Aggregate resource values from a plan's candidate_clusters.
 
@@ -434,69 +523,77 @@ def _aggregate_resources(plan: CapacityPlan) -> dict[ResourceType, float]:
         ResourceType.network_mbps: 0.0,
     }
 
-    for cluster in chain(
-        plan.candidate_clusters.zonal, plan.candidate_clusters.regional
-    ):
-        totals[ResourceType.cpu] += to_reference_cores(
-            cluster.instance.cpu * cluster.count, cluster.instance
-        )
-        totals[ResourceType.mem_gib] += cluster.instance.ram_gib * cluster.count
-        totals[ResourceType.network_mbps] += cluster.instance.net_mbps * cluster.count
-        cluster_drive = cluster.attached_drives[0] if cluster.attached_drives else None
-        effective_disk = cluster.cluster_params.get(EFFECTIVE_DISK_PER_NODE_GIB)
-        if effective_disk is not None:
-            totals[ResourceType.disk_gib] += effective_disk * cluster.count
-        else:
-            totals[ResourceType.disk_gib] += (
-                get_disk_size_gib(cluster_drive, cluster.instance) * cluster.count
-            )
+    for cluster in [*plan.candidate_clusters.zonal, *plan.candidate_clusters.regional]:
+        for resource_type, val in _single_cluster_resources(cluster).items():
+            totals[resource_type] += val
 
     return totals
 
 
-def compare_plans(
+def _compare_requirements(
     baseline: CapacityPlan,
     comparison: CapacityPlan,
-    tolerances: ResourceTolerances | None = None,
+    tolerances: ResourceTolerances,
 ) -> PlanComparisonResult:
-    """Compare two capacity plans to determine if they are roughly equivalent.
+    """Compare baseline's clusters against comparison's requirements.
 
-    This function compares plans across multiple dimensions (cost, CPU, memory,
-    disk, network) and determines if the differences are significant based on
-    the provided tolerance bounds.
-
-    Args:
-        baseline: The reference plan (e.g., current production deployment)
-        comparison: The plan to compare against baseline (e.g., new recommendation)
-        tolerances: Per-resource tolerance configuration. If None, uses defaults.
-
-    Returns:
-        PlanComparisonResult containing:
-        - is_equivalent: True if all resources within tolerance, False otherwise
-        - differences: Dict of ResourceDifference for ALL resources (use
-          get_out_of_tolerance() to filter to only problematic ones)
-
-    Example:
-        >>> result = compare_plans(baseline, recommended)
-        >>> if result.cpu.exceeds_lower_bound:
-        ...     print("Current has excess CPU capacity")
-        >>> for diff in result.get_out_of_tolerance():
-        ...     print(diff)  # Human-readable explanation
+    Uses demand/supply naming: ratio is supply (cluster) / demand (requirement).
+    Ratios >= 1.0 mean the cluster meets or exceeds the requirement.
     """
-    if tolerances is None:
-        tolerances = ResourceTolerances()
+    supply_clusters = [
+        *baseline.candidate_clusters.zonal,
+        *baseline.candidate_clusters.regional,
+    ]
+    if not supply_clusters:
+        return PlanComparisonResult()
+    cluster = supply_clusters[0]
 
+    demand = _find_matching_requirement(cluster.cluster_type, comparison)
+    if demand is None:
+        raise ValueError(f"No requirement with type '{cluster.cluster_type}' in plan")
+
+    demand_resources = _requirement_resources(demand)
+    supply_resources = _single_cluster_resources(cluster)
+
+    comparisons = {
+        resource_type: ResourceComparison(
+            resource=resource_type,
+            baseline_value=demand_val,
+            comparison_value=supply_resources[resource_type],
+            tolerance=tolerances.get_tolerance(resource_type),
+        )
+        for resource_type, demand_val in demand_resources.items()
+    }
+
+    comp_cluster = _find_matching_cluster(cluster.cluster_type, comparison)
+    if comp_cluster:
+        comparisons[ResourceType.annual_cost] = ResourceComparison(
+            resource=ResourceType.annual_cost,
+            baseline_value=comp_cluster.annual_cost,
+            comparison_value=cluster.annual_cost,
+            tolerance=tolerances.get_tolerance(ResourceType.annual_cost),
+        )
+
+    return PlanComparisonResult(comparisons=comparisons)
+
+
+def _compare_provisioned(
+    baseline: CapacityPlan,
+    comparison: CapacityPlan,
+    tolerances: ResourceTolerances,
+) -> PlanComparisonResult:
+    """Compare aggregate cluster resources from both plans."""
     baseline_resources = _aggregate_resources(baseline)
     comparison_resources = _aggregate_resources(comparison)
 
     comparisons = {
-        rt: ResourceComparison(
-            resource=rt,
+        resource_type: ResourceComparison(
+            resource=resource_type,
             baseline_value=b_val,
-            comparison_value=comparison_resources[rt],
-            tolerance=tolerances.get_tolerance(rt),
+            comparison_value=comparison_resources[resource_type],
+            tolerance=tolerances.get_tolerance(resource_type),
         )
-        for rt, b_val in baseline_resources.items()
+        for resource_type, b_val in baseline_resources.items()
     }
     comparisons[ResourceType.annual_cost] = ResourceComparison(
         resource=ResourceType.annual_cost,
@@ -505,6 +602,50 @@ def compare_plans(
         tolerance=tolerances.get_tolerance(ResourceType.annual_cost),
     )
 
-    return PlanComparisonResult(
-        comparisons=comparisons,
-    )
+    return PlanComparisonResult(comparisons=comparisons)
+
+
+def compare_plans(
+    baseline: CapacityPlan,
+    comparison: CapacityPlan,
+    tolerances: ResourceTolerances | None = None,
+    strategy: ComparisonStrategy = ComparisonStrategy.provisioned,
+) -> PlanComparisonResult:
+    """Compare two capacity plans.
+
+    Strategy controls what each plan contributes:
+
+    - **provisioned** (default): Compare aggregate cluster resources from both
+      plans. Answers: "how does the recommendation compare to what's deployed?"
+
+    - **requirements**: Compare baseline's clusters against comparison's
+      requirements, matched by cluster_type. Answers: "does the baseline's
+      deployment satisfy the comparison's requirements?"
+
+      Resource ratios are ``cluster / requirement`` — values ≥ 1.0 mean the
+      cluster meets or exceeds the requirement. Cost ratios are
+      ``baseline_cost / comparison_cost``.
+
+    Args:
+        baseline: The plan providing clusters (e.g., current deployment).
+        comparison: The plan providing the reference to compare against.
+            For provisioned: provides clusters.
+            For requirements: provides requirements (and clusters for cost).
+        tolerances: Per-resource tolerance configuration. If None, uses defaults.
+        strategy: How to extract and match values between the plans.
+
+    Returns:
+        PlanComparisonResult with per-resource comparisons.
+
+    Raises:
+        ValueError: With requirements strategy, if no matching requirement
+            is found for the baseline cluster's type.
+    """
+    if tolerances is None:
+        tolerances = ResourceTolerances()
+
+    match strategy:
+        case ComparisonStrategy.requirements:
+            return _compare_requirements(baseline, comparison, tolerances)
+        case ComparisonStrategy.provisioned:
+            return _compare_provisioned(baseline, comparison, tolerances)

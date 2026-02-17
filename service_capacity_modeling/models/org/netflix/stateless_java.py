@@ -76,7 +76,7 @@ def _estimate_java_app_requirement(
     needed_memory_gib = network_heap
 
     return CapacityRequirement(
-        requirement_type="java-app",
+        requirement_type=NflxJavaAppCapacityModel.cluster_type,
         reference_shape=desires.reference_shape,
         cpu_cores=certain_int(needed_cores),
         mem_gib=certain_float(needed_memory_gib),

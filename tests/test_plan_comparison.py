@@ -7,17 +7,21 @@ from service_capacity_modeling.interface import (
     CapacityPlan,
     CapacityRequirement,
     Clusters,
+    default_reference_shape,
     Drive,
     Instance,
     Lifecycle,
     Platform,
+    RegionClusterCapacity,
     Requirements,
     ZoneClusterCapacity,
     certain_float,
     certain_int,
 )
+from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.plan_comparison import (
     compare_plans,
+    ComparisonStrategy,
     exact_match,
     gte,
     ignore_resource,
@@ -541,3 +545,429 @@ class TestComparePlans:
         assert not result.cpu.is_equivalent
         assert result.cpu.exceeds_lower_bound
         assert 0.49 < result.cpu.ratio < 0.51  # Exactly 0.5
+
+
+# -----------------------------------------------------------------------------
+# compare_plans requirements strategy tests
+# -----------------------------------------------------------------------------
+
+
+def _make_requirement_plan(
+    *,
+    cluster_type: str = "cassandra",
+    req_cpu: int = 100,
+    req_mem: float = 200.0,
+    req_disk: float = 1000.0,
+    req_net: float = 5000.0,
+    req_reference_shape: Instance = default_reference_shape,
+    cluster_annual_cost: float | None = None,
+) -> CapacityPlan:
+    """Build a plan with requirements (and optionally a matching cluster for cost)."""
+    requirement = CapacityRequirement(
+        requirement_type=cluster_type,
+        reference_shape=req_reference_shape,
+        cpu_cores=certain_int(req_cpu),
+        mem_gib=certain_float(req_mem),
+        disk_gib=certain_float(req_disk),
+        network_mbps=certain_float(req_net),
+    )
+    zonal_clusters = []
+    annual_costs = {}
+    if cluster_annual_cost is not None:
+        zonal_clusters.append(
+            ZoneClusterCapacity(
+                cluster_type=cluster_type,
+                count=1,
+                instance=_create_instance(),
+                annual_cost_override=cluster_annual_cost,
+            )
+        )
+        annual_costs[cluster_type] = Decimal(str(cluster_annual_cost))
+    return CapacityPlan(
+        requirements=Requirements(zonal=[requirement]),
+        candidate_clusters=Clusters(
+            annual_costs=annual_costs,
+            zonal=zonal_clusters,
+        ),
+    )
+
+
+def _wrap_cluster(cluster: ZoneClusterCapacity) -> CapacityPlan:
+    """Wrap a single cluster in a minimal CapacityPlan."""
+    return CapacityPlan(
+        requirements=Requirements(),
+        candidate_clusters=Clusters(
+            annual_costs={cluster.cluster_type: Decimal(str(cluster.annual_cost))},
+            zonal=[cluster],
+        ),
+    )
+
+
+class TestCompareRequirementsStrategy:
+    """Tests for compare_plans with strategy=requirements."""
+
+    def test_exact_match(self):
+        """Cluster matching plan requirement exactly → is_equivalent=True.
+
+        Plan requires 100 ref-cores, 200 GiB mem, 1000 GiB disk, 5000 Mbps.
+        Cluster provides exactly those values.
+        """
+        req_plan = _make_requirement_plan(
+            req_cpu=100,
+            req_mem=200.0,
+            req_disk=1000.0,
+            req_net=5000.0,
+            cluster_annual_cost=15000.0,
+        )
+        cluster_plan = _wrap_cluster(
+            ZoneClusterCapacity(
+                cluster_type="cassandra",
+                count=1,
+                instance=_create_instance(
+                    cpu=100,
+                    ram_gib=200.0,
+                    net_mbps=5000.0,
+                    drive=Drive(name="d", size_gib=1000),
+                ),
+                annual_cost_override=15000.0,
+            )
+        )
+        result = compare_plans(
+            cluster_plan,
+            req_plan,
+            strategy=ComparisonStrategy.requirements,
+        )
+        assert result.is_equivalent
+        assert result.cpu.ratio == pytest.approx(1.0)
+        assert result.memory.ratio == pytest.approx(1.0)
+
+    def test_under_provisioned(self):
+        """Cluster with less CPU than requirement → exceeds_lower_bound.
+
+        Plan requires 100 ref-cores. Cluster has 50 cores at same GHz/IPC.
+        ratio = 50/100 = 0.5, outside default ±10% tolerance.
+        """
+        req_plan = _make_requirement_plan(req_cpu=100)
+        cluster_plan = _wrap_cluster(
+            ZoneClusterCapacity(
+                cluster_type="cassandra",
+                count=1,
+                instance=_create_instance(
+                    cpu=50,
+                    ram_gib=200.0,
+                    net_mbps=5000.0,
+                    drive=Drive(name="d", size_gib=1000),
+                ),
+            )
+        )
+        result = compare_plans(
+            cluster_plan,
+            req_plan,
+            strategy=ComparisonStrategy.requirements,
+        )
+        assert not result.is_equivalent
+        assert result.cpu.exceeds_lower_bound
+        assert result.cpu.ratio == pytest.approx(0.5)
+
+    def test_cpu_normalization(self):
+        """i3en cluster vs m6id-reference requirement, normalized to default.
+
+        Requirement: 100 cores in default_reference_shape (2.3 GHz, IPC 1.0)
+        Cluster: 77 cores @ 3.0 GHz, IPC 1.0 → 77 × 3.0/2.3 = 100.4 ref cores
+        ratio = 100.4/100 ≈ 1.004 → equivalent
+        """
+        req_plan = _make_requirement_plan(req_cpu=100)
+        cluster_plan = _wrap_cluster(
+            ZoneClusterCapacity(
+                cluster_type="cassandra",
+                count=1,
+                instance=_create_instance(
+                    cpu=77,
+                    cpu_ghz=3.0,
+                    cpu_ipc_scale=1.0,
+                    ram_gib=200.0,
+                    net_mbps=5000.0,
+                    drive=Drive(name="d", size_gib=1000),
+                ),
+            )
+        )
+        result = compare_plans(
+            cluster_plan,
+            req_plan,
+            strategy=ComparisonStrategy.requirements,
+        )
+        assert result.cpu.is_equivalent
+        assert 0.99 < result.cpu.ratio < 1.05
+
+    def test_cost_comparison(self):
+        """Cost compared against requirement plan's matching cluster.
+
+        annual_cost on ClusterCapacity is a computed field.
+        Use annual_cost_override to set specific cost values for testing.
+        """
+        req_plan = _make_requirement_plan(cluster_annual_cost=10000.0)
+        cluster_plan = _wrap_cluster(
+            ZoneClusterCapacity(
+                cluster_type="cassandra",
+                count=1,
+                instance=_create_instance(
+                    cpu=100,
+                    ram_gib=200.0,
+                    net_mbps=5000.0,
+                    drive=Drive(name="d", size_gib=1000),
+                ),
+                annual_cost_override=10500.0,
+            )
+        )
+        result = compare_plans(
+            cluster_plan,
+            req_plan,
+            strategy=ComparisonStrategy.requirements,
+        )
+        assert ResourceType.annual_cost in result.comparisons
+        assert result.annual_cost.baseline_value == 10000.0
+        assert result.annual_cost.comparison_value == 10500.0
+        assert result.annual_cost.ratio == pytest.approx(1.05)
+
+    def test_cost_omitted_when_no_matching_cluster(self):
+        """No matching cluster in requirement plan → no cost in result."""
+        # Requirement plan has cassandra requirement but no cassandra cluster
+        req_plan = _make_requirement_plan()  # no cluster_annual_cost
+        cluster_plan = _wrap_cluster(
+            ZoneClusterCapacity(
+                cluster_type="cassandra",
+                count=1,
+                instance=_create_instance(
+                    cpu=100,
+                    ram_gib=200.0,
+                    net_mbps=5000.0,
+                    drive=Drive(name="d", size_gib=1000),
+                ),
+                annual_cost_override=12000.0,
+            )
+        )
+        result = compare_plans(
+            cluster_plan,
+            req_plan,
+            strategy=ComparisonStrategy.requirements,
+        )
+        assert ResourceType.annual_cost not in result.comparisons
+
+    def test_matching_by_cluster_type(self):
+        """Correct requirement selected when plan has multiple types."""
+        cass_req = CapacityRequirement(
+            requirement_type="cassandra",
+            cpu_cores=certain_int(100),
+            mem_gib=certain_float(200.0),
+            disk_gib=certain_float(1000.0),
+            network_mbps=certain_float(5000.0),
+        )
+        evcache_req = CapacityRequirement(
+            requirement_type="evcache",
+            cpu_cores=certain_int(50),
+            mem_gib=certain_float(400.0),
+            disk_gib=certain_float(0.0),
+            network_mbps=certain_float(8000.0),
+        )
+        req_plan = CapacityPlan(
+            requirements=Requirements(zonal=[cass_req, evcache_req]),
+            candidate_clusters=Clusters(annual_costs={}, zonal=[]),
+        )
+        cluster_plan = _wrap_cluster(
+            ZoneClusterCapacity(
+                cluster_type="cassandra",
+                count=1,
+                instance=_create_instance(
+                    cpu=105,
+                    ram_gib=200.0,
+                    net_mbps=5000.0,
+                    drive=Drive(name="d", size_gib=1000),
+                ),
+            )
+        )
+        result = compare_plans(
+            cluster_plan,
+            req_plan,
+            strategy=ComparisonStrategy.requirements,
+        )
+        # CPU baseline should be 100 (cassandra req), not 50 (evcache req)
+        assert result.cpu.baseline_value == 100.0
+        assert result.cpu.is_equivalent
+
+    def test_cassandra_64_node_scenario(self):
+        """Motivating case: 64-node i3en cluster vs plan with different shape.
+
+        Plan requires 500 ref-cores total.
+        Cluster: 64 × i3en.xlarge (4 vCPU @ 3.1 GHz, IPC 1.0)
+          → 64 × 4 = 256 actual cores
+          → 256 × 3.1/2.3 = 345.0 ref-cores
+        ratio = 345/500 = 0.69 → under-provisioned
+        """
+        req_plan = _make_requirement_plan(
+            req_cpu=500,
+            req_mem=4096.0,
+            req_disk=64000.0,
+            req_net=640000.0,
+        )
+        i3en = _create_instance(
+            name="i3en.xlarge",
+            cpu=4,
+            cpu_ghz=3.1,
+            cpu_ipc_scale=1.0,
+            ram_gib=32.0,
+            net_mbps=25000,
+            drive=Drive(name="nvme", size_gib=2500),
+        )
+        cluster_plan = _wrap_cluster(
+            ZoneClusterCapacity(
+                cluster_type="cassandra",
+                count=64,
+                instance=i3en,
+            )
+        )
+        result = compare_plans(
+            cluster_plan,
+            req_plan,
+            strategy=ComparisonStrategy.requirements,
+        )
+        assert not result.cpu.is_equivalent
+        assert result.cpu.exceeds_lower_bound
+        expected_ref_cores = 64 * 4 * (3.1 / 2.3)
+        assert result.cpu.comparison_value == pytest.approx(expected_ref_cores)
+        assert result.cpu.baseline_value == 500.0
+
+    def test_over_provisioned(self):
+        """Cluster with more CPU than requirement → exceeds_upper_bound.
+
+        Plan requires 100 ref-cores. Cluster has 150 cores at same GHz/IPC.
+        ratio = 150/100 = 1.5, outside default ±10% tolerance.
+        """
+        req_plan = _make_requirement_plan(req_cpu=100)
+        cluster_plan = _wrap_cluster(
+            ZoneClusterCapacity(
+                cluster_type="cassandra",
+                count=1,
+                instance=_create_instance(
+                    cpu=150,
+                    ram_gib=200.0,
+                    net_mbps=5000.0,
+                    drive=Drive(name="d", size_gib=1000),
+                ),
+            )
+        )
+        result = compare_plans(
+            cluster_plan,
+            req_plan,
+            strategy=ComparisonStrategy.requirements,
+        )
+        assert not result.is_equivalent
+        assert result.cpu.exceeds_upper_bound
+        assert result.cpu.ratio == pytest.approx(1.5)
+
+    def test_empty_baseline_returns_empty_result(self):
+        """Baseline plan with no clusters → empty PlanComparisonResult."""
+        req_plan = _make_requirement_plan(req_cpu=100)
+        empty_plan = CapacityPlan(
+            requirements=Requirements(),
+            candidate_clusters=Clusters(annual_costs={}, zonal=[], regional=[]),
+        )
+        result = compare_plans(
+            empty_plan,
+            req_plan,
+            strategy=ComparisonStrategy.requirements,
+        )
+        assert result.is_equivalent  # No comparisons = vacuously true
+        assert len(result.comparisons) == 0
+
+    def test_effective_disk_from_cluster_params(self):
+        """Cluster with EFFECTIVE_DISK_PER_NODE_GIB uses that for disk.
+
+        When cluster_params contains effective_disk_per_node_gib, disk
+        should be computed from that value × count, not from the drive.
+        """
+        req_plan = _make_requirement_plan(req_disk=500.0)
+        cluster_plan = _wrap_cluster(
+            ZoneClusterCapacity(
+                cluster_type="cassandra",
+                count=10,
+                instance=_create_instance(
+                    cpu=100,
+                    ram_gib=200.0,
+                    net_mbps=5000.0,
+                    drive=Drive(name="nvme", size_gib=2000),  # 2000 per node
+                ),
+                cluster_params={EFFECTIVE_DISK_PER_NODE_GIB: 50.0},
+            )
+        )
+        result = compare_plans(
+            cluster_plan,
+            req_plan,
+            strategy=ComparisonStrategy.requirements,
+        )
+        # Disk should be 50.0 × 10 = 500, NOT 2000 × 10 = 20000
+        assert result.disk.comparison_value == pytest.approx(500.0)
+        assert result.disk.ratio == pytest.approx(1.0)
+
+    def test_regional_cluster_matching(self):
+        """Regional clusters are found and compared correctly.
+
+        Tests that the chain(zonal, regional) search in the requirements
+        strategy works end-to-end with regional clusters.
+        """
+        req_plan = CapacityPlan(
+            requirements=Requirements(
+                regional=[
+                    CapacityRequirement(
+                        requirement_type="read-only-kv",
+                        cpu_cores=certain_int(100),
+                        mem_gib=certain_float(200.0),
+                        disk_gib=certain_float(1000.0),
+                        network_mbps=certain_float(5000.0),
+                    )
+                ]
+            ),
+            candidate_clusters=Clusters(annual_costs={}, zonal=[], regional=[]),
+        )
+        cluster_plan = CapacityPlan(
+            requirements=Requirements(),
+            candidate_clusters=Clusters(
+                annual_costs={"read-only-kv": Decimal("0")},
+                zonal=[],
+                regional=[
+                    RegionClusterCapacity(
+                        cluster_type="read-only-kv",
+                        count=1,
+                        instance=_create_instance(
+                            cpu=100,
+                            ram_gib=200.0,
+                            net_mbps=5000.0,
+                            drive=Drive(name="d", size_gib=1000),
+                        ),
+                    )
+                ],
+            ),
+        )
+        result = compare_plans(
+            cluster_plan,
+            req_plan,
+            strategy=ComparisonStrategy.requirements,
+        )
+        assert result.is_equivalent
+        assert result.cpu.ratio == pytest.approx(1.0)
+
+    def test_no_matching_requirement_raises(self):
+        """ValueError when no requirement matches the cluster type."""
+        req_plan = _make_requirement_plan(cluster_type="evcache")
+        cluster_plan = _wrap_cluster(
+            ZoneClusterCapacity(
+                cluster_type="cassandra",
+                count=1,
+                instance=_create_instance(),
+            )
+        )
+        with pytest.raises(ValueError, match="No requirement.*cassandra"):
+            compare_plans(
+                cluster_plan,
+                req_plan,
+                strategy=ComparisonStrategy.requirements,
+            )
