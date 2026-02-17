@@ -19,6 +19,7 @@ from service_capacity_modeling.interface import (
     certain_int,
 )
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
+from service_capacity_modeling.models.common import normalize_cores_float
 from service_capacity_modeling.models.plan_comparison import (
     compare_plans,
     ComparisonStrategy,
@@ -32,7 +33,6 @@ from service_capacity_modeling.models.plan_comparison import (
     ResourceType,
     Tolerance,
     tolerance,
-    to_reference_cores,
 )
 
 
@@ -116,12 +116,21 @@ def _create_plan(
 
 
 # -----------------------------------------------------------------------------
-# to_reference_cores tests
+# normalize_cores_float tests
 # -----------------------------------------------------------------------------
 
 
-class TestToReferenceCores:
-    """Tests for to_reference_cores() utility function."""
+def _to_ref_cores(core_count, instance):
+    """Test helper: normalize instance cores to reference-equivalent (float)."""
+    return normalize_cores_float(
+        core_count,
+        target_shape=default_reference_shape,
+        reference_shape=instance,
+    )
+
+
+class TestNormalizeCoresFloat:
+    """Tests for normalize_cores_float() — float precision variant."""
 
     def test_same_as_reference_shape(self):
         """Instance matching reference shape returns cores unchanged.
@@ -130,7 +139,7 @@ class TestToReferenceCores:
         100 cores @ 2.3 GHz, IPC 1.0 → 100 × (2.3×1.0)/(2.3×1.0) = 100
         """
         instance = _create_instance(cpu=100, cpu_ghz=2.3, cpu_ipc_scale=1.0)
-        assert to_reference_cores(100, instance) == 100.0
+        assert _to_ref_cores(100, instance) == 100.0
 
     def test_faster_instance_gives_more_reference_cores(self):
         """Faster instance (higher GHz) yields more reference-equivalent cores.
@@ -138,7 +147,7 @@ class TestToReferenceCores:
         100 cores @ 3.0 GHz, IPC 1.0 → 100 × (3.0×1.0)/(2.3×1.0) = 130.4
         """
         instance = _create_instance(cpu=100, cpu_ghz=3.0, cpu_ipc_scale=1.0)
-        result = to_reference_cores(100, instance)
+        result = _to_ref_cores(100, instance)
         assert 130.0 < result < 131.0  # 130.43
 
     def test_higher_ipc_gives_more_reference_cores(self):
@@ -147,7 +156,7 @@ class TestToReferenceCores:
         100 cores @ 2.3 GHz, IPC 2.0 → 100 × (2.3×2.0)/(2.3×1.0) = 200
         """
         instance = _create_instance(cpu=100, cpu_ghz=2.3, cpu_ipc_scale=2.0)
-        assert to_reference_cores(100, instance) == 200.0
+        assert _to_ref_cores(100, instance) == 200.0
 
     def test_slower_instance_gives_fewer_reference_cores(self):
         """Slower instance (lower GHz or IPC) yields fewer reference-equivalent cores.
@@ -155,17 +164,17 @@ class TestToReferenceCores:
         100 cores @ 2.0 GHz, IPC 0.8 → 100 × (2.0×0.8)/(2.3×1.0) = 69.6
         """
         instance = _create_instance(cpu=100, cpu_ghz=2.0, cpu_ipc_scale=0.8)
-        result = to_reference_cores(100, instance)
+        result = _to_ref_cores(100, instance)
         assert 69.0 < result < 70.0  # 69.57
 
     def test_returns_float_not_int(self):
-        """Returns float for precise ratio calculations (unlike normalize_cores).
+        """normalize_cores_float returns float for precise ratio calculations.
 
         32 cores @ 2.4 GHz, IPC 1.0 → 32 × (2.4×1.0)/(2.3×1.0) = 33.39
         normalize_cores would return ceil(33.39) = 34, but we need 33.39
         """
         instance = _create_instance(cpu=32, cpu_ghz=2.4, cpu_ipc_scale=1.0)
-        result = to_reference_cores(32, instance)
+        result = _to_ref_cores(32, instance)
         assert isinstance(result, float)
         assert 33.3 < result < 33.5  # 33.39, not 34
 

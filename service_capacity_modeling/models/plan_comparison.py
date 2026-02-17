@@ -87,6 +87,7 @@ from service_capacity_modeling.interface import (
 )
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_disk_size_gib
+from service_capacity_modeling.models.common import normalize_cores_float
 
 
 @enum_docstrings
@@ -410,34 +411,16 @@ class PlanComparisonResult(ExcludeUnsetModel):
 
 
 def to_reference_cores(core_count: float, instance: Instance) -> float:
-    """Convert instance cores to reference-equivalent cores.
+    """Convert instance cores to reference-equivalent cores (float precision).
 
-    This is the inverse of normalize_cores() from models.common. While
-    normalize_cores answers "how many target cores to match N reference cores",
-    this answers "how many reference cores is N instance cores equivalent to".
-
-    Mathematically equivalent to:
-        normalize_cores(core_count, target=default_reference_shape, reference=instance)
-
-    but returns float instead of ceiling int. We need float precision for
-    accurate ratio comparisons - ceiling would distort ratios by up to ~3%.
-
-    See normalize_cores() in models/common.py for the original implementation.
-
-    Args:
-        core_count: Number of cores on the instance
-        instance: The instance shape (with cpu_ghz and cpu_ipc_scale)
-
-    Returns:
-        Equivalent cores on default_reference_shape (2.3 GHz, IPC 1.0)
-
-    Example:
-        # 32 cores on a 2.4 GHz instance = 33.4 reference cores
-        to_reference_cores(32, instance_at_2_4_ghz)  # → 33.39
+    Convenience wrapper for normalize_cores_float() with
+    target=default_reference_shape and reference=instance.
     """
-    instance_speed = instance.cpu_ghz * instance.cpu_ipc_scale
-    ref_speed = default_reference_shape.cpu_ghz * default_reference_shape.cpu_ipc_scale
-    return core_count * (instance_speed / ref_speed)
+    return normalize_cores_float(
+        core_count,
+        target_shape=default_reference_shape,
+        reference_shape=instance,
+    )
 
 
 @enum_docstrings
