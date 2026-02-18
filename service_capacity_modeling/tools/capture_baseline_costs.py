@@ -216,6 +216,32 @@ scenarios.extend(
     ]
 )
 
+# Cassandra vertical scaling baseline — large instance with pinned cluster size
+# Used to verify that the bias in PR 2 shifts to smaller instances
+cassandra_vertical_baseline = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=certain_int(350_000),
+        estimated_write_per_second=certain_int(30_000),
+        estimated_mean_read_latency_ms=certain_float(0.8),
+        estimated_mean_write_latency_ms=certain_float(0.5),
+    ),
+    data_shape=DataShape(
+        estimated_state_size_gib=certain_int(500),
+        estimated_compression_ratio=Interval(low=1, mid=1, high=1, confidence=1),
+    ),
+)
+
+scenarios.append(
+    (
+        "org.netflix.cassandra",
+        "us-east-1",
+        cassandra_vertical_baseline,
+        {"require_local_disks": False, "required_cluster_size": 2},
+        "cassandra_vertical_baseline",
+    )
+)
+
 # Kafka scenarios - Kafka uses throughput-based sizing via write_size
 # 100 MiB/s throughput with 2 consumers, 1 producer
 throughput = 100 * 1024 * 1024  # 100 MiB/s
