@@ -461,7 +461,7 @@
       "cassandra.backup.s3-standard": 167.832,
       "cassandra.net.inter.region": 15047.514915466309,
       "cassandra.net.intra.region": 45142.544746398926,
-      "cassandra.zonal-clusters": 44260.020000000004,
+      "cassandra.zonal-clusters": 59016.0,
       "evcache.spread.cost": 0.0,
       "evcache.zonal-clusters": 150306.39,
       "nflx-java-app.regional-clusters": 108432.87
@@ -501,49 +501,49 @@
         "instance": "c6id.2xlarge"
       },
       {
-        "annual_cost": 14753.34,
+        "annual_cost": 19672.0,
         "cluster_params": {
           "cassandra.compaction.min_threshold": 4,
-          "cassandra.heap.gib": 30,
+          "cassandra.heap.gib": 15.0,
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 1676
+          "effective_disk_per_node_gib": 373
         },
         "cluster_type": "cassandra",
-        "count": 2,
+        "count": 8,
         "deployment": "zonal",
-        "instance": "c5d.12xlarge"
+        "instance": "c5d.4xlarge"
       },
       {
-        "annual_cost": 14753.34,
+        "annual_cost": 19672.0,
         "cluster_params": {
           "cassandra.compaction.min_threshold": 4,
-          "cassandra.heap.gib": 30,
+          "cassandra.heap.gib": 15.0,
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 1676
+          "effective_disk_per_node_gib": 373
         },
         "cluster_type": "cassandra",
-        "count": 2,
+        "count": 8,
         "deployment": "zonal",
-        "instance": "c5d.12xlarge"
+        "instance": "c5d.4xlarge"
       },
       {
-        "annual_cost": 14753.34,
+        "annual_cost": 19672.0,
         "cluster_params": {
           "cassandra.compaction.min_threshold": 4,
-          "cassandra.heap.gib": 30,
+          "cassandra.heap.gib": 15.0,
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 1676
+          "effective_disk_per_node_gib": 373
         },
         "cluster_type": "cassandra",
-        "count": 2,
+        "count": 8,
         "deployment": "zonal",
-        "instance": "c5d.12xlarge"
+        "instance": "c5d.4xlarge"
       },
       {
         "annual_cost": 108432.87,
@@ -560,7 +560,7 @@
     "region": "us-east-1",
     "scenario": "kv_with_cache",
     "service_tier": 1,
-    "total_annual_cost": 363357.17
+    "total_annual_cost": 378113.15
   },
   {
     "annual_costs": {
