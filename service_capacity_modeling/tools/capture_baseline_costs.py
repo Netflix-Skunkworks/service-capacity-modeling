@@ -216,8 +216,8 @@ scenarios.extend(
     ]
 )
 
-# Cassandra vertical scaling baseline — large instance with pinned cluster size
-# Used to verify that the bias in PR 2 shifts to smaller instances
+# Cassandra vertical scaling baseline — unconstrained instance sizing
+# Documents which instances the planner prefers for a typical workload
 cassandra_vertical_baseline = CapacityDesires(
     service_tier=1,
     query_pattern=QueryPattern(
@@ -237,7 +237,7 @@ scenarios.append(
         "org.netflix.cassandra",
         "us-east-1",
         cassandra_vertical_baseline,
-        {"require_local_disks": False, "required_cluster_size": 2},
+        {"require_local_disks": False},
         "cassandra_vertical_baseline",
     )
 )

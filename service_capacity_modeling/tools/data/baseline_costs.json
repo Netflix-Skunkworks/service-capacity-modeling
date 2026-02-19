@@ -227,60 +227,60 @@
       "cassandra.backup.s3-standard": 504.0,
       "cassandra.net.inter.region": 9028.508949279785,
       "cassandra.net.intra.region": 27085.526847839355,
-      "cassandra.zonal-clusters": 61660.020000000004
+      "cassandra.zonal-clusters": 61656.0
     },
     "clusters": [
       {
-        "annual_cost": 20553.34,
+        "annual_cost": 20552.0,
         "cluster_params": {
           "cassandra.compaction.min_threshold": 4,
-          "cassandra.heap.gib": 30,
+          "cassandra.heap.gib": 15.0,
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 3539
+          "effective_disk_per_node_gib": 885
         },
         "cluster_type": "cassandra",
-        "count": 2,
+        "count": 8,
         "deployment": "zonal",
-        "instance": "c6id.16xlarge"
+        "instance": "c6id.4xlarge"
       },
       {
-        "annual_cost": 20553.34,
+        "annual_cost": 20552.0,
         "cluster_params": {
           "cassandra.compaction.min_threshold": 4,
-          "cassandra.heap.gib": 30,
+          "cassandra.heap.gib": 15.0,
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 3539
+          "effective_disk_per_node_gib": 885
         },
         "cluster_type": "cassandra",
-        "count": 2,
+        "count": 8,
         "deployment": "zonal",
-        "instance": "c6id.16xlarge"
+        "instance": "c6id.4xlarge"
       },
       {
-        "annual_cost": 20553.34,
+        "annual_cost": 20552.0,
         "cluster_params": {
           "cassandra.compaction.min_threshold": 4,
-          "cassandra.heap.gib": 30,
+          "cassandra.heap.gib": 15.0,
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 3539
+          "effective_disk_per_node_gib": 885
         },
         "cluster_type": "cassandra",
-        "count": 2,
+        "count": 8,
         "deployment": "zonal",
-        "instance": "c6id.16xlarge"
+        "instance": "c6id.4xlarge"
       }
     ],
     "model": "org.netflix.cassandra",
     "region": "us-east-1",
     "scenario": "cassandra_vertical_baseline",
     "service_tier": 1,
-    "total_annual_cost": 98278.06
+    "total_annual_cost": 98274.04
   },
   {
     "annual_costs": {

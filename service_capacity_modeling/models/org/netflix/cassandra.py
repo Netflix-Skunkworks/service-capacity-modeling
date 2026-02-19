@@ -674,6 +674,13 @@ class NflxCassandraArguments(BaseModel):
         "Note that if there are more than 100k writes this will "
         "automatically adjust to 0.2",
     )
+    large_instance_regret: float = Field(
+        default=0.2,
+        description="Graduated cost penalty for instance sizes above 8xlarge. "
+        "Adds penalty * max(0, (normalized_size - 8) / 8) * cost to the "
+        "effective sort cost. Prevents AWS pricing rounding from favoring "
+        "larger instances. Set to 0 to disable.",
+    )
 
     @classmethod
     def from_extra_model_arguments(

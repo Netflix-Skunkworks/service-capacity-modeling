@@ -1,8 +1,13 @@
-"""Baseline tests documenting large-instance selection for Cassandra.
+"""Baseline tests for Cassandra unconstrained instance sizing.
 
-PR 2 will introduce a horizontal-scaling bias that changes these
-recommendations to smaller instances with higher counts. These tests
-capture the current behavior so the shift is verifiable.
+With require_local_disks=False and no required_cluster_size, the planner
+picks the cheapest viable option across all families. For a typical
+350k read / 30k write workload with 500 GiB state, the top plan is a
+≤8xlarge instance (currently c6id.4xlarge).
+
+The large_instance_regret parameter (defined but not yet active) will
+add a within-family penalty for instances above 8xlarge in a subsequent
+change.
 """
 
 from service_capacity_modeling.capacity_planner import planner
@@ -23,14 +28,10 @@ scenario = SCENARIOS["cassandra_vertical_baseline"]
 
 
 class TestCassandraInstanceSizingBaseline:
-    """Baseline tests documenting large-instance selection.
+    """Baseline tests for unconstrained Cassandra instance sizing."""
 
-    PR 2 will introduce a horizontal-scaling bias that changes
-    these recommendations to smaller instances with higher counts.
-    """
-
-    def test_deterministic_selects_16xlarge(self):
-        """plan_certain() picks a 16xlarge × 2 per zone."""
+    def test_deterministic_prefers_small_instance(self):
+        """plan_certain() picks ≤8xlarge when unconstrained."""
         cap_plans = planner.plan_certain(
             model_name=scenario["model"],
             region=scenario["region"],
@@ -42,15 +43,14 @@ class TestCassandraInstanceSizingBaseline:
         cap_plan = cap_plans[0]
         result = cap_plan.candidate_clusters.zonal[0]
 
-        # BASELINE assertions — PR 2 will change these
-        assert result.count == 2
+        # Unconstrained: cheapest family/size wins — currently ≤8xlarge
         instance_size = result.instance.name.split(".")[-1]
-        assert instance_size in ("16xlarge", "24xlarge"), (
-            f"Expected large instance, got {result.instance.name}"
+        assert instance_size in ("2xlarge", "4xlarge", "8xlarge"), (
+            f"Expected ≤8xlarge unconstrained, got {result.instance.name}"
         )
 
-    def test_least_regret_selects_16xlarge(self):
-        """plan() least_regret[0] also picks a large instance under uncertainty."""
+    def test_least_regret_with_pinned_cluster_size(self):
+        """plan() with required_cluster_size=2 picks large (capacity constraint)."""
         uncertain_desires = CapacityDesires(
             service_tier=1,
             query_pattern=QueryPattern(
@@ -84,7 +84,7 @@ class TestCassandraInstanceSizingBaseline:
         lr = result.least_regret[0]
         cluster = lr.candidate_clusters.zonal[0]
 
-        # BASELINE assertions
+        # Pinned at 2 nodes — must pick large instance to fit workload
         assert cluster.count == 2
         instance_size = cluster.instance.name.split(".")[-1]
         assert instance_size in ("16xlarge", "24xlarge"), (
@@ -92,7 +92,7 @@ class TestCassandraInstanceSizingBaseline:
         )
 
     def test_baseline_comparison(self):
-        """compare_plans() shows recommendation matches large-instance baseline."""
+        """compare_plans() round-trip works with unconstrained recommendation."""
         cap_plans = planner.plan_certain(
             model_name=scenario["model"],
             region=scenario["region"],
@@ -121,10 +121,9 @@ class TestCassandraInstanceSizingBaseline:
         )
         comparison = compare_plans(baseline, rec)
 
-        # BASELINE: recommendation matches the large-instance baseline
-        assert rec_cluster.instance.name.split(".")[-1] in (
-            "16xlarge",
-            "24xlarge",
+        # Unconstrained top pick should be ≤8xlarge
+        instance_size = rec_cluster.instance.name.split(".")[-1]
+        assert instance_size in ("2xlarge", "4xlarge", "8xlarge"), (
+            f"Expected ≤8xlarge unconstrained, got {rec_cluster.instance.name}"
         )
-        assert rec_cluster.count == 2
         assert comparison.cpu.ratio > 0
