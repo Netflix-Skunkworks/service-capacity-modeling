@@ -50,11 +50,11 @@ Two comparison strategies are available:
     # "Does my current cluster satisfy the requirements without a
     #  significant change in cost?"
     result = compare_plans(
-        baseline,                                   # provides clusters
+        baseline,                                   # provides clusters (current)
         recommendation,                             # provides requirements
         strategy=ComparisonStrategy.requirements,
         tolerances=ResourceTolerances(
-            default=gte(1.0),               # clusters must meet requirements
+            default=lte(1.0),               # requirement within current
             annual_cost=plus_or_minus(0.10), # cost within ±10%
         ),
     )
@@ -495,7 +495,7 @@ def _aggregate_resources(plan: CapacityPlan) -> dict[ResourceType, float]:
     """Aggregate resource values from a plan's candidate_clusters.
 
     All resources are computed from candidate_clusters (the actual provisioned
-    instances), NOT from requirements (the demand). CPU is normalized to
+    instances), NOT from requirements. CPU is normalized to
     default_reference_shape using IPC and frequency factors for consistent
     comparison across different instance types.
     """
@@ -520,40 +520,40 @@ def _compare_requirements(
 ) -> PlanComparisonResult:
     """Compare baseline's clusters against comparison's requirements.
 
-    Uses demand/supply naming: ratio is supply (cluster) / demand (requirement).
-    Ratios >= 1.0 mean the cluster meets or exceeds the requirement.
+    Ratio is requirement / current cluster. Ratios <= 1.0 mean the
+    cluster meets or exceeds the requirement.
     """
-    supply_clusters = [
+    current_clusters = [
         *baseline.candidate_clusters.zonal,
         *baseline.candidate_clusters.regional,
     ]
-    if not supply_clusters:
+    if not current_clusters:
         return PlanComparisonResult()
-    cluster = supply_clusters[0]
+    cluster = current_clusters[0]
 
-    demand = _find_matching_requirement(cluster.cluster_type, comparison)
-    if demand is None:
+    requirement = _find_matching_requirement(cluster.cluster_type, comparison)
+    if requirement is None:
         raise ValueError(f"No requirement with type '{cluster.cluster_type}' in plan")
 
-    demand_resources = _requirement_resources(demand)
-    supply_resources = _single_cluster_resources(cluster)
+    required_resources = _requirement_resources(requirement)
+    current_resources = _single_cluster_resources(cluster)
 
     comparisons = {
         resource_type: ResourceComparison(
             resource=resource_type,
-            baseline_value=demand_val,
-            comparison_value=supply_resources[resource_type],
+            baseline_value=current_resources[resource_type],
+            comparison_value=req_val,
             tolerance=tolerances.get_tolerance(resource_type),
         )
-        for resource_type, demand_val in demand_resources.items()
+        for resource_type, req_val in required_resources.items()
     }
 
     comp_cluster = _find_matching_cluster(cluster.cluster_type, comparison)
     if comp_cluster:
         comparisons[ResourceType.annual_cost] = ResourceComparison(
             resource=ResourceType.annual_cost,
-            baseline_value=comp_cluster.annual_cost,
-            comparison_value=cluster.annual_cost,
+            baseline_value=cluster.annual_cost,
+            comparison_value=comp_cluster.annual_cost,
             tolerance=tolerances.get_tolerance(ResourceType.annual_cost),
         )
 
@@ -605,9 +605,9 @@ def compare_plans(
       requirements, matched by cluster_type. Answers: "does the baseline's
       deployment satisfy the comparison's requirements?"
 
-      Resource ratios are ``cluster / requirement`` — values ≥ 1.0 mean the
-      cluster meets or exceeds the requirement. Cost ratios are
-      ``baseline_cost / comparison_cost``.
+      Resource ratios are ``requirement / current`` — values ≤ 1.0 mean the
+      current cluster meets or exceeds the requirement. Cost ratios are
+      ``recommended_cost / current_cost``.
 
     Args:
         baseline: The plan providing clusters (e.g., current deployment).

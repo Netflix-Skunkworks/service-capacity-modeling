@@ -41,8 +41,8 @@ from service_capacity_modeling.models.plan_comparison import (
     compare_plans,
     ComparisonStrategy,
     exact_match,
-    gte,
     ignore_resource,
+    lte,
     ResourceTolerances,
 )
 from service_capacity_modeling import tools as scm_tools
@@ -181,12 +181,13 @@ class TestBaselineDrift:
         model = planner.models[scenario["model"]]
         if isinstance(model, CostAwareModel):
             # Clusters should satisfy the model's own requirements
+            # ratio = requirement/current: ≤ 1.0 means current meets requirement
             self_check = compare_plans(
                 cap_plan,
                 cap_plan,
                 strategy=ComparisonStrategy.requirements,
                 tolerances=ResourceTolerances(
-                    default=gte(1.0),
+                    default=lte(1.0),
                     annual_cost=exact_match(),
                 ),
             )
@@ -230,12 +231,13 @@ class TestBaselineDrift:
                 )
 
             # Extracted baseline's clusters should satisfy original requirements
+            # ratio = requirement/current: ≤ 1.0 means current meets requirement
             roundtrip = compare_plans(
                 extracted,
                 cap_plan,
                 strategy=ComparisonStrategy.requirements,
                 tolerances=ResourceTolerances(
-                    default=gte(1.0),
+                    default=lte(1.0),
                     annual_cost=ignore_resource(),
                 ),
             )

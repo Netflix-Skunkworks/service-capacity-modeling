@@ -651,10 +651,10 @@ class TestCompareRequirementsStrategy:
         assert result.memory.ratio == pytest.approx(1.0)
 
     def test_under_provisioned(self):
-        """Cluster with less CPU than requirement → exceeds_lower_bound.
+        """Cluster with less CPU than requirement → exceeds_upper_bound.
 
         Plan requires 100 ref-cores. Cluster has 50 cores at same GHz/IPC.
-        ratio = 50/100 = 0.5, outside default ±10% tolerance.
+        ratio = 100/50 = 2.0, outside default ±10% tolerance.
         """
         req_plan = _make_requirement_plan(req_cpu=100)
         cluster_plan = _wrap_cluster(
@@ -675,8 +675,8 @@ class TestCompareRequirementsStrategy:
             strategy=ComparisonStrategy.requirements,
         )
         assert not result.is_equivalent
-        assert result.cpu.exceeds_lower_bound
-        assert result.cpu.ratio == pytest.approx(0.5)
+        assert result.cpu.exceeds_upper_bound
+        assert result.cpu.ratio == pytest.approx(2.0)
 
     def test_cpu_normalization(self):
         """i3en cluster vs m6id-reference requirement, normalized to default.
@@ -734,9 +734,9 @@ class TestCompareRequirementsStrategy:
             strategy=ComparisonStrategy.requirements,
         )
         assert ResourceType.annual_cost in result.comparisons
-        assert result.annual_cost.baseline_value == 10000.0
-        assert result.annual_cost.comparison_value == 10500.0
-        assert result.annual_cost.ratio == pytest.approx(1.05)
+        assert result.annual_cost.baseline_value == 10500.0
+        assert result.annual_cost.comparison_value == 10000.0
+        assert result.annual_cost.ratio == pytest.approx(10000.0 / 10500.0)
 
     def test_cost_omitted_when_no_matching_cluster(self):
         """No matching cluster in requirement plan → no cost in result."""
@@ -799,8 +799,8 @@ class TestCompareRequirementsStrategy:
             req_plan,
             strategy=ComparisonStrategy.requirements,
         )
-        # CPU baseline should be 100 (cassandra req), not 50 (evcache req)
-        assert result.cpu.baseline_value == 100.0
+        # CPU comparison should be 100 (cassandra req), not 50 (evcache req)
+        assert result.cpu.comparison_value == 100.0
         assert result.cpu.is_equivalent
 
     def test_cassandra_64_node_scenario(self):
@@ -840,16 +840,16 @@ class TestCompareRequirementsStrategy:
             strategy=ComparisonStrategy.requirements,
         )
         assert not result.cpu.is_equivalent
-        assert result.cpu.exceeds_lower_bound
+        assert result.cpu.exceeds_upper_bound
         expected_ref_cores = 64 * 4 * (3.1 / 2.3)
-        assert result.cpu.comparison_value == pytest.approx(expected_ref_cores)
-        assert result.cpu.baseline_value == 500.0
+        assert result.cpu.baseline_value == pytest.approx(expected_ref_cores)
+        assert result.cpu.comparison_value == 500.0
 
     def test_over_provisioned(self):
-        """Cluster with more CPU than requirement → exceeds_upper_bound.
+        """Cluster with more CPU than requirement → exceeds_lower_bound.
 
         Plan requires 100 ref-cores. Cluster has 150 cores at same GHz/IPC.
-        ratio = 150/100 = 1.5, outside default ±10% tolerance.
+        ratio = 100/150 ≈ 0.667, outside default ±10% tolerance.
         """
         req_plan = _make_requirement_plan(req_cpu=100)
         cluster_plan = _wrap_cluster(
@@ -870,8 +870,8 @@ class TestCompareRequirementsStrategy:
             strategy=ComparisonStrategy.requirements,
         )
         assert not result.is_equivalent
-        assert result.cpu.exceeds_upper_bound
-        assert result.cpu.ratio == pytest.approx(1.5)
+        assert result.cpu.exceeds_lower_bound
+        assert result.cpu.ratio == pytest.approx(100.0 / 150.0)
 
     def test_empty_baseline_returns_empty_result(self):
         """Baseline plan with no clusters → empty PlanComparisonResult."""
@@ -914,7 +914,7 @@ class TestCompareRequirementsStrategy:
             strategy=ComparisonStrategy.requirements,
         )
         # Disk should be 50.0 × 10 = 500, NOT 2000 × 10 = 20000
-        assert result.disk.comparison_value == pytest.approx(500.0)
+        assert result.disk.baseline_value == pytest.approx(500.0)
         assert result.disk.ratio == pytest.approx(1.0)
 
     def test_regional_cluster_matching(self):
