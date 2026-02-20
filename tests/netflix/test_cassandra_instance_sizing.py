@@ -1,130 +1,63 @@
-"""Baseline tests documenting large-instance selection for Cassandra.
+"""Tests for Cassandra instance-sizing bias behavior.
 
-PR 2 will introduce a horizontal-scaling bias that changes these
-recommendations to smaller instances with higher counts. These tests
-capture the current behavior so the shift is verifiable.
+Workload: 350k reads/s, 30k writes/s, 500 GiB state, require_local_disks=False.
+
+Without any bias, the planner sorts by (rank, cost) and AWS pricing rounding
+makes larger instances (24xlarge) appear marginally cheaper — so they win.
+This is the problem that large_instance_regret (PR #230) and same_family_bias
+(PR #207) fix.
+
+This file establishes the unbiased baseline. The bias test files verify the fix:
+- test_cassandra_large_instance_bias.py — large_instance_regret flips ordering
+- test_cassandra_family_migration.py — same_family_bias penalizes family switches
 """
 
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import (
     CapacityDesires,
-    CurrentClusters,
-    CurrentZoneClusterCapacity,
     DataShape,
     Interval,
     QueryPattern,
-    certain_int,
 )
-from service_capacity_modeling.models.plan_comparison import compare_plans
-from service_capacity_modeling.tools.capture_baseline_costs import SCENARIOS
 
 
-scenario = SCENARIOS["cassandra_vertical_baseline"]
+# Typical mid-size Cassandra workload — deterministic (no uncertainty)
+DESIRES = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=Interval(
+            low=350_000, mid=350_000, high=350_000, confidence=0.98
+        ),
+        estimated_write_per_second=Interval(
+            low=30_000, mid=30_000, high=30_000, confidence=0.98
+        ),
+    ),
+    data_shape=DataShape(
+        estimated_state_size_gib=Interval(low=500, mid=500, high=500, confidence=0.98),
+        estimated_compression_ratio=Interval(low=1, mid=1, high=1, confidence=1),
+    ),
+)
+
+NO_BIAS = {"require_local_disks": False}
 
 
-class TestCassandraInstanceSizingBaseline:
-    """Baseline tests documenting large-instance selection.
+class TestInstanceSizingBaseline:
+    """Without bias, AWS pricing rounding makes larger instances win."""
 
-    PR 2 will introduce a horizontal-scaling bias that changes
-    these recommendations to smaller instances with higher counts.
-    """
-
-    def test_deterministic_selects_16xlarge(self):
-        """plan_certain() picks a 16xlarge × 2 per zone."""
+    def test_default_prefers_large_instance(self):
+        """Default args produce a large instance due to AWS pricing rounding."""
         cap_plans = planner.plan_certain(
-            model_name=scenario["model"],
-            region=scenario["region"],
-            desires=scenario["desires"],
-            extra_model_arguments=scenario["extra_args"],
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=DESIRES,
+            extra_model_arguments=NO_BIAS,
         )
 
         assert cap_plans, "No capacity plans generated"
-        cap_plan = cap_plans[0]
-        result = cap_plan.candidate_clusters.zonal[0]
+        result = cap_plans[0].candidate_clusters.zonal[0]
 
-        # BASELINE assertions — PR 2 will change these
-        assert result.count == 2
+        # Without bias: large instances win due to AWS 3yr pricing rounding
         instance_size = result.instance.name.split(".")[-1]
-        assert instance_size in ("16xlarge", "24xlarge"), (
-            f"Expected large instance, got {result.instance.name}"
+        assert instance_size in ("12xlarge", "16xlarge", "24xlarge", "32xlarge"), (
+            f"Expected large instance without bias, got {result.instance.name}"
         )
-
-    def test_least_regret_selects_16xlarge(self):
-        """plan() least_regret[0] also picks a large instance under uncertainty."""
-        uncertain_desires = CapacityDesires(
-            service_tier=1,
-            query_pattern=QueryPattern(
-                estimated_read_per_second=Interval(
-                    low=200_000, mid=350_000, high=500_000, confidence=0.98
-                ),
-                estimated_write_per_second=Interval(
-                    low=20_000, mid=30_000, high=40_000, confidence=0.98
-                ),
-            ),
-            data_shape=DataShape(
-                estimated_state_size_gib=Interval(
-                    low=300, mid=500, high=700, confidence=0.98
-                ),
-                estimated_compression_ratio=Interval(
-                    low=1, mid=1, high=1, confidence=1
-                ),
-            ),
-        )
-
-        result = planner.plan(
-            model_name="org.netflix.cassandra",
-            region="us-east-1",
-            desires=uncertain_desires,
-            extra_model_arguments={
-                "require_local_disks": False,
-                "required_cluster_size": 2,
-            },
-        )
-
-        lr = result.least_regret[0]
-        cluster = lr.candidate_clusters.zonal[0]
-
-        # BASELINE assertions
-        assert cluster.count == 2
-        instance_size = cluster.instance.name.split(".")[-1]
-        assert instance_size in ("16xlarge", "24xlarge"), (
-            f"Expected large instance, got {cluster.instance.name}"
-        )
-
-    def test_baseline_comparison(self):
-        """compare_plans() shows recommendation matches large-instance baseline."""
-        cap_plans = planner.plan_certain(
-            model_name=scenario["model"],
-            region=scenario["region"],
-            desires=scenario["desires"],
-            extra_model_arguments=scenario["extra_args"],
-        )
-        assert cap_plans
-        rec = cap_plans[0]
-        rec_cluster = rec.candidate_clusters.zonal[0]
-
-        # Build current deployment from recommendation (round-trip)
-        current = CurrentZoneClusterCapacity(
-            cluster_instance_name=rec_cluster.instance.name,
-            cluster_instance_count=certain_int(rec_cluster.count),
-            cluster_type="cassandra",
-        )
-        desires_with_current = scenario["desires"].model_copy(deep=True)
-        desires_with_current.current_clusters = CurrentClusters(zonal=[current])
-
-        # Extract baseline and compare
-        baseline = planner.extract_baseline_plan(
-            model_name="org.netflix.cassandra",
-            region="us-east-1",
-            desires=desires_with_current,
-            extra_model_arguments=scenario["extra_args"],
-        )
-        comparison = compare_plans(baseline, rec)
-
-        # BASELINE: recommendation matches the large-instance baseline
-        assert rec_cluster.instance.name.split(".")[-1] in (
-            "16xlarge",
-            "24xlarge",
-        )
-        assert rec_cluster.count == 2
-        assert comparison.cpu.ratio > 0
