@@ -178,9 +178,10 @@ class TestStorageScalingConstraints:
     """
 
     # Test scenarios - disk-focused only
-    DISK_HOT_CAPACITY = CLUSTER.get(disk_gib=CLUSTER.disk.hot)
+    # memory_gib=0 so observed working set doesn't activate (these test storage scaling)
+    DISK_HOT_CAPACITY = CLUSTER.get(disk_gib=CLUSTER.disk.hot, memory_gib=0)
 
-    DISK_COLD_CAPACITY = CLUSTER.get(disk_gib=CLUSTER.disk.cold)
+    DISK_COLD_CAPACITY = CLUSTER.get(disk_gib=CLUSTER.disk.cold, memory_gib=0)
 
     # Storage-only buffer configurations
     STORAGE_SCALE_UP = Buffers(
@@ -347,9 +348,10 @@ class TestCPUScalingConstraints:
     CLUSTER_SIZE = 4
 
     # Test scenarios - CPU-focused only
-    CPU_COLD_CAPACITY = CLUSTER.get(cpu=CLUSTER.cpu.cold)
+    # memory_gib=0 so observed working set doesn't activate (these test CPU scaling)
+    CPU_COLD_CAPACITY = CLUSTER.get(cpu=CLUSTER.cpu.cold, memory_gib=0)
 
-    CPU_HOT_CAPACITY = CLUSTER.get(cpu=CLUSTER.cpu.hot)
+    CPU_HOT_CAPACITY = CLUSTER.get(cpu=CLUSTER.cpu.hot, memory_gib=0)
 
     # CPU-only buffer configurations
     CPU_SCALE_UP = Buffers(
@@ -504,9 +506,11 @@ class TestStorageAndCPUIntegration:
     """
 
     # Test scenarios - both storage and CPU are constrained
+    # memory_gib=0: use theoretical working set (test CPU+storage)
     BOTH_CONSTRAINED_CAPACITY = CLUSTER.get(
         cpu=CLUSTER.cpu.hot,  # High CPU - above ideal
         disk_gib=CLUSTER.disk.hot,  # High disk usage - above ideal
+        memory_gib=0,
     )
 
     # Buffer configurations for both storage and CPU constraints
