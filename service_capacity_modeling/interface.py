@@ -1230,7 +1230,7 @@ class Clusters(ExcludeUnsetModel):
 class CapacityPlan(ExcludeUnsetModel):
     requirements: Requirements
     candidate_clusters: Clusters
-    rank: int = 0
+    rank: float = 0
 
 
 # Parameters to cost functions of the form
