@@ -631,3 +631,117 @@ class TestCassandraExtraModelArguments:
             NflxCassandraCapacityModel.get_required_cluster_size(
                 tier, extra_model_arguments
             )
+
+
+class TestCassandraReadLatencySloOverride:
+    """Test read_latency_slo_ms override via extra_model_arguments."""
+
+    def test_relaxed_slo_reduces_working_set(self):
+        """A very relaxed SLO (P50=500ms) should produce near-zero working set,
+        because the drive latency (~1.3ms) is far below the SLO."""
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(10_000),
+                estimated_write_per_second=certain_int(10_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(1_000),
+            ),
+        )
+
+        # Plan with relaxed SLO override
+        relaxed_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "read_latency_slo_ms": {
+                    "low": 100,
+                    "mid": 500,
+                    "high": 1000,
+                    "confidence": 0.98,
+                },
+            },
+        )[0]
+
+        # The working set should be near zero with a 500ms SLO
+        working_set = relaxed_plan.requirements.zonal[0].context["disk_slo_working_set"]
+        assert working_set < 0.05, (
+            f"Expected near-zero working set with relaxed SLO, got {working_set}"
+        )
+
+    def test_relaxed_slo_enables_large_ebs_plan(self):
+        """A 10 TiB dataset with relaxed SLO should produce a valid EBS plan
+        at 16 nodes, which would fail with the default SLO due to high memory
+        requirements from the ~30% working set."""
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(10_000),
+                estimated_write_per_second=certain_int(10_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(10_000),
+            ),
+        )
+
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_attached_disks": True,
+                "require_local_disks": False,
+                "required_cluster_size": 16,
+                "read_latency_slo_ms": {
+                    "low": 100,
+                    "mid": 500,
+                    "high": 1000,
+                    "confidence": 0.98,
+                },
+            },
+        )[0]
+
+        result = cap_plan.candidate_clusters.zonal[0]
+        assert result.count == 16
+        assert result.attached_drives, "Expected attached (EBS) drives"
+        assert result.attached_drives[0].name == "gp3"
+
+        # With relaxed SLO, memory requirement should be modest enough for 16 nodes
+        working_set = cap_plan.requirements.zonal[0].context["disk_slo_working_set"]
+        assert working_set < 0.05
+
+    def test_no_override_preserves_default_behavior(self):
+        """Without the override, the default latency SLO should produce the
+        standard ~30.6% working set for the default Cassandra read SLO
+        when using EBS (gp3) drives."""
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(10_000),
+                estimated_write_per_second=certain_int(10_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(1_000),
+            ),
+        )
+
+        # Force EBS to get consistent gp3 drive latency behavior
+        default_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_attached_disks": True,
+                "require_local_disks": False,
+            },
+        )[0]
+
+        working_set = default_plan.requirements.zonal[0].context["disk_slo_working_set"]
+        # The default latency SLO (P50=2ms) with gp3 drive (P95~1.3ms)
+        # produces approximately 30.6% working set
+        assert 0.20 <= working_set <= 0.45, (
+            f"Expected ~30% working set with default SLO on EBS, got {working_set}"
+        )

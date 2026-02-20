@@ -383,6 +383,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     max_regional_size: int = 192,
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
+    read_latency_slo_override: Optional[FixedInterval] = None,
 ) -> Optional[CapacityPlan]:
     # Netflix Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 2 or instance.ram_gib <= 16:
@@ -421,11 +422,14 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     # working set to keep more or less data in RAM. Faster drives need
     # less fronting RAM.
     ws_drive = instance.drive or drive
+    if read_latency_slo_override is not None:
+        read_slo = read_latency_slo_override
+    else:
+        read_slo = desires.query_pattern.read_latency_slo_ms
+
     working_set = working_set_from_drive_and_slo(
         drive_read_latency_dist=dist_for_interval(ws_drive.read_io_latency_ms),
-        read_slo_latency_dist=dist_for_interval(
-            desires.query_pattern.read_latency_slo_ms
-        ),
+        read_slo_latency_dist=dist_for_interval(read_slo),
         estimated_working_set=desires.data_shape.estimated_working_set_percent,
         # This is about right for a database, a cache probably would want
         # to increase this even more.
@@ -674,6 +678,14 @@ class NflxCassandraArguments(BaseModel):
         "Note that if there are more than 100k writes this will "
         "automatically adjust to 0.2",
     )
+    read_latency_slo_ms: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Override the read latency SLO used for working set computation. "
+        "Format: {low, mid, high, confidence} or "
+        "{minimum_value, low, mid, high, maximum_value, confidence}. "
+        "Example: {'low': 2, 'mid': 8, 'high': 90, 'confidence': 0.98} "
+        "for throughput workloads.",
+    )
 
     @classmethod
     def from_extra_model_arguments(
@@ -819,6 +831,11 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_write_buffer_percent = max(0.5, max_write_buffer_percent)
             max_table_buffer_percent = max(0.2, max_table_buffer_percent)
 
+        # Build read latency SLO override if provided
+        read_latency_slo_override: Optional[FixedInterval] = None
+        if args.read_latency_slo_ms is not None:
+            read_latency_slo_override = FixedInterval(**args.read_latency_slo_ms)
+
         return _estimate_cassandra_cluster_zonal(
             instance=instance,
             drive=drive,
@@ -834,6 +851,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_local_data_per_node_gib=args.max_local_data_per_node_gib,
             max_write_buffer_percent=max_write_buffer_percent,
             max_table_buffer_percent=max_table_buffer_percent,
+            read_latency_slo_override=read_latency_slo_override,
         )
 
     @staticmethod
