@@ -109,6 +109,8 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
+          "cassandra.page_cache.coverage_pct": 100.0,
+          "cassandra.page_cache.cpu_factor": 1.0,
           "effective_disk_per_node_gib": 373
         },
         "cluster_type": "cassandra",
@@ -124,6 +126,8 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
+          "cassandra.page_cache.coverage_pct": 100.0,
+          "cassandra.page_cache.cpu_factor": 1.0,
           "effective_disk_per_node_gib": 373
         },
         "cluster_type": "cassandra",
@@ -139,6 +143,8 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
+          "cassandra.page_cache.coverage_pct": 100.0,
+          "cassandra.page_cache.cpu_factor": 1.0,
           "effective_disk_per_node_gib": 373
         },
         "cluster_type": "cassandra",
@@ -172,6 +178,8 @@
           "cassandra.heap.table.percent": 0.2,
           "cassandra.heap.write.percent": 0.5,
           "cassandra.keyspace.rf": 2,
+          "cassandra.page_cache.coverage_pct": 31.6,
+          "cassandra.page_cache.cpu_factor": 1.012,
           "effective_disk_per_node_gib": 8200
         },
         "cluster_type": "cassandra",
@@ -190,6 +198,8 @@
           "cassandra.heap.table.percent": 0.2,
           "cassandra.heap.write.percent": 0.5,
           "cassandra.keyspace.rf": 2,
+          "cassandra.page_cache.coverage_pct": 31.6,
+          "cassandra.page_cache.cpu_factor": 1.012,
           "effective_disk_per_node_gib": 8200
         },
         "cluster_type": "cassandra",
@@ -208,6 +218,8 @@
           "cassandra.heap.table.percent": 0.2,
           "cassandra.heap.write.percent": 0.5,
           "cassandra.keyspace.rf": 2,
+          "cassandra.page_cache.coverage_pct": 31.6,
+          "cassandra.page_cache.cpu_factor": 1.012,
           "effective_disk_per_node_gib": 8200
         },
         "cluster_type": "cassandra",
@@ -238,6 +250,8 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
+          "cassandra.page_cache.coverage_pct": 100.0,
+          "cassandra.page_cache.cpu_factor": 1.0,
           "effective_disk_per_node_gib": 885
         },
         "cluster_type": "cassandra",
@@ -253,6 +267,8 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
+          "cassandra.page_cache.coverage_pct": 100.0,
+          "cassandra.page_cache.cpu_factor": 1.0,
           "effective_disk_per_node_gib": 885
         },
         "cluster_type": "cassandra",
@@ -268,6 +284,8 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
+          "cassandra.page_cache.coverage_pct": 100.0,
+          "cassandra.page_cache.cpu_factor": 1.0,
           "effective_disk_per_node_gib": 885
         },
         "cluster_type": "cassandra",
@@ -508,6 +526,8 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
+          "cassandra.page_cache.coverage_pct": 100.0,
+          "cassandra.page_cache.cpu_factor": 1.0,
           "effective_disk_per_node_gib": 1676
         },
         "cluster_type": "cassandra",
@@ -523,6 +543,8 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
+          "cassandra.page_cache.coverage_pct": 100.0,
+          "cassandra.page_cache.cpu_factor": 1.0,
           "effective_disk_per_node_gib": 1676
         },
         "cluster_type": "cassandra",
@@ -538,6 +560,8 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
+          "cassandra.page_cache.coverage_pct": 100.0,
+          "cassandra.page_cache.cpu_factor": 1.0,
           "effective_disk_per_node_gib": 1676
         },
         "cluster_type": "cassandra",
