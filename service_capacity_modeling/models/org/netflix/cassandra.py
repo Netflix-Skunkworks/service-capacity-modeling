@@ -59,6 +59,23 @@ from service_capacity_modeling.stats import dist_for_interval
 logger = logging.getLogger(__name__)
 
 BACKGROUND_BUFFER = "background"
+
+
+def _cache_hit_rate(cache_fraction: float, skew_factor: float = 1.0) -> float:
+    """Estimate cache hit rate given the fraction of data in cache and access skew.
+
+    Under uniform access (skew=1.0): hit_rate = cache_fraction
+    Under Zipfian skew: hit_rate = cache_fraction^(1/skew_factor)
+
+    Higher skew_factor means more skewed access — a smaller cache covers more reads.
+    """
+    if cache_fraction >= 1.0:
+        return 1.0
+    if cache_fraction <= 0.0:
+        return 0.0
+    return float(min(1.0, cache_fraction ** (1.0 / skew_factor)))
+
+
 CRITICAL_TIERS: Set[int] = {0, 1}
 # cluster size aka nodes per ASG
 CRITICAL_TIER_MIN_CLUSTER_SIZE = 2
@@ -383,6 +400,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     max_regional_size: int = 192,
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
+    cache_skew_factor: float = 1.0,
 ) -> Optional[CapacityPlan]:
     # Netflix Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 2 or instance.ram_gib <= 16:
@@ -431,6 +449,14 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         # to increase this even more.
         target_percentile=0.95,
     ).mid
+
+    # Adjust working set for access skew.
+    # Under uniform access (skew=1.0), working_set fraction of data must be cached.
+    # Under Zipfian skew, a smaller cache covers more reads:
+    #   adjusted = working_set ^ skew_factor
+    # e.g. working_set=0.306, skew=2.0 -> adjusted=0.094 (9.4% of data covers same reads)
+    if cache_skew_factor > 1.0 and working_set > 0:
+        working_set = working_set**cache_skew_factor
 
     requirement = _estimate_cassandra_requirement(
         instance=instance,
@@ -511,6 +537,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         "cassandra.heap.write.percent": max_write_buffer_percent,
         "cassandra.heap.table.percent": max_table_buffer_percent,
         "cassandra.compaction.min_threshold": requirement.context["min_threshold"],
+        "cassandra.cache_skew_factor": cache_skew_factor,
         EFFECTIVE_DISK_PER_NODE_GIB: disk_per_node_gib,
     }
     upsert_params(cluster, params)
@@ -674,6 +701,14 @@ class NflxCassandraArguments(BaseModel):
         "Note that if there are more than 100k writes this will "
         "automatically adjust to 0.2",
     )
+    cache_skew_factor: float = Field(
+        default=1.0,
+        description="Access skew factor for page cache hit rate estimation. "
+        "1.0 = uniform random access (conservative default). "
+        "2.0 = moderate Zipfian (hit_rate = sqrt(cache_fraction)). "
+        "3.0 = high Zipfian (hit_rate = cache_fraction^(1/3)). "
+        "Higher values mean a smaller cache covers more reads.",
+    )
 
     @classmethod
     def from_extra_model_arguments(
@@ -834,6 +869,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_local_data_per_node_gib=args.max_local_data_per_node_gib,
             max_write_buffer_percent=max_write_buffer_percent,
             max_table_buffer_percent=max_table_buffer_percent,
+            cache_skew_factor=args.cache_skew_factor,
         )
 
     @staticmethod
