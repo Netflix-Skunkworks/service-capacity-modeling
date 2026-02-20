@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """Tests for plan comparison utility."""
 
 import pytest
@@ -27,6 +28,7 @@ from service_capacity_modeling.models.plan_comparison import (
     gte,
     ignore_resource,
     lte,
+    PlanComparisonResult,
     plus_or_minus,
     ResourceComparison,
     ResourceTolerances,
@@ -980,3 +982,172 @@ class TestCompareRequirementsStrategy:
                 req_plan,
                 strategy=ComparisonStrategy.requirements,
             )
+
+
+# -----------------------------------------------------------------------------
+# PlanComparisonResult.explain() and __str__ tests
+# -----------------------------------------------------------------------------
+
+
+class TestExplain:
+    """Tests for PlanComparisonResult.explain() and __str__."""
+
+    def test_provisioned_equivalent(self):
+        """Provisioned strategy, all within tolerance → 'Equivalent' headline."""
+        baseline = _create_plan(cpu_cores=100)
+        comparison = _create_plan(cpu_cores=105)
+        result = compare_plans(baseline, comparison)
+
+        text = result.explain()
+        assert text.startswith("Equivalent: provisioned matches baseline")
+        assert "(ok)" in text
+        # Strategy was recorded
+        assert result.strategy == ComparisonStrategy.provisioned
+
+    def test_provisioned_not_equivalent(self):
+        """Provisioned strategy, CPU out of tolerance → shows bound exceeded."""
+        baseline = _create_plan(cpu_cores=100)
+        comparison = _create_plan(cpu_cores=130)
+        result = compare_plans(baseline, comparison)
+
+        text = result.explain()
+        assert text.startswith("Not equivalent: provisioned differs from baseline.")
+        assert "exceeds upper bound" in text
+        assert "cpu" in text
+
+    def test_requirements_equivalent(self):
+        """Requirements strategy, cluster satisfies requirements."""
+        req_plan = _make_requirement_plan(
+            req_cpu=100,
+            req_mem=200.0,
+            req_disk=1000.0,
+            req_net=5000.0,
+            cluster_annual_cost=15000.0,
+        )
+        cluster_plan = _wrap_cluster(
+            ZoneClusterCapacity(
+                cluster_type="cassandra",
+                count=1,
+                instance=_create_instance(
+                    cpu=100,
+                    ram_gib=200.0,
+                    net_mbps=5000.0,
+                    drive=Drive(name="d", size_gib=1000),
+                ),
+                annual_cost_override=15000.0,
+            )
+        )
+        result = compare_plans(
+            cluster_plan,
+            req_plan,
+            strategy=ComparisonStrategy.requirements,
+        )
+
+        text = result.explain()
+        assert text.startswith("Equivalent: baseline satisfies requirements.")
+        assert result.strategy == ComparisonStrategy.requirements
+
+    def test_requirements_not_equivalent(self):
+        """Requirements strategy, cluster under-provisioned."""
+        req_plan = _make_requirement_plan(req_cpu=100)
+        cluster_plan = _wrap_cluster(
+            ZoneClusterCapacity(
+                cluster_type="cassandra",
+                count=1,
+                instance=_create_instance(
+                    cpu=50,
+                    ram_gib=200.0,
+                    net_mbps=5000.0,
+                    drive=Drive(name="d", size_gib=1000),
+                ),
+            )
+        )
+        result = compare_plans(
+            cluster_plan,
+            req_plan,
+            strategy=ComparisonStrategy.requirements,
+        )
+
+        text = result.explain()
+        assert "Not equivalent: baseline does not satisfy requirements." in text
+        assert "exceeds" in text
+
+    def test_custom_labels(self):
+        """Custom labels override defaults in the headline."""
+        baseline = _create_plan(cpu_cores=100)
+        comparison = _create_plan(cpu_cores=105)
+        result = compare_plans(baseline, comparison)
+
+        text = result.explain(
+            baseline_label="current m6id.8xlarge x 16",
+            comparison_label="recommendation",
+        )
+        assert "current m6id.8xlarge x 16" in text
+        assert "recommendation matches current m6id.8xlarge x 16" in text
+
+    def test_empty_comparisons(self):
+        """Empty result gives just a headline, no resource lines."""
+        result = PlanComparisonResult(strategy=ComparisonStrategy.provisioned)
+        text = result.explain()
+        assert text == "Equivalent: provisioned matches baseline within tolerance."
+
+    def test_resource_names_in_output(self):
+        """Resources use their enum value names in explain output."""
+        baseline = _create_plan(cpu_cores=100)
+        comparison = _create_plan(cpu_cores=100)
+        result = compare_plans(baseline, comparison)
+
+        text = result.explain()
+        assert "cpu" in text
+        assert "mem_gib" in text
+        assert "disk_gib" in text
+        assert "network_mbps" in text
+        assert "annual_cost" in text
+
+    @pytest.mark.parametrize(
+        "tol, comp_value, expected_substr",
+        [
+            (lte(1.10), 130, "<= 1.10x"),
+            (gte(0.90), 50, ">= 0.90x"),
+            (plus_or_minus(0.10), 130, "0.90x to 1.10x"),
+        ],
+        ids=["lte", "gte", "symmetric"],
+    )
+    def test_bounds_formatting(self, tol, comp_value, expected_substr):
+        """Tolerance bounds are formatted correctly in explain output."""
+        result = PlanComparisonResult(
+            strategy=ComparisonStrategy.provisioned,
+            comparisons={
+                ResourceType.cpu: ResourceComparison(
+                    resource=ResourceType.cpu,
+                    baseline_value=100,
+                    comparison_value=comp_value,
+                    tolerance=tol,
+                ),
+            },
+        )
+        assert expected_substr in result.explain()
+
+
+class TestPlanComparisonResultStr:
+    """Tests for PlanComparisonResult.__str__ compact format."""
+
+    def test_equivalent(self):
+        result = compare_plans(_create_plan(), _create_plan())
+        assert str(result) == "Equivalent"
+
+    def test_not_equivalent_single_resource(self):
+        baseline = _create_plan(cpu_cores=100)
+        comparison = _create_plan(cpu_cores=130)
+        result = compare_plans(baseline, comparison)
+        s = str(result)
+        assert s.startswith("Not equivalent:")
+        assert "cpu 1.30x" in s
+
+    def test_not_equivalent_multiple_resources(self):
+        baseline = _create_plan(cpu_cores=100, mem_gib=200)
+        comparison = _create_plan(cpu_cores=130, mem_gib=260)
+        result = compare_plans(baseline, comparison)
+        s = str(result)
+        assert "cpu" in s
+        assert "mem_gib" in s

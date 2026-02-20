@@ -368,11 +368,25 @@ class ResourceComparison(ExcludeUnsetModel):
             )
 
 
+@enum_docstrings
+class ComparisonStrategy(StrEnum):
+    """Strategy for how baseline and comparison values are extracted."""
+
+    requirements = "requirements"
+    """Baseline's clusters vs comparison's requirements (matched by cluster_type)."""
+
+    provisioned = "provisioned"
+    """Aggregate cluster resources from both plans."""
+
+
 class PlanComparisonResult(ExcludeUnsetModel):
     """Result of comparing two capacity plans for equivalence."""
 
     comparisons: dict[ResourceType, ResourceComparison] = {}
     """Resource comparisons keyed by resource type"""
+
+    strategy: ComparisonStrategy
+    """The comparison strategy that produced this result"""
 
     @computed_field(return_type=bool)  # type: ignore
     @property
@@ -409,6 +423,68 @@ class PlanComparisonResult(ExcludeUnsetModel):
         """Get only comparisons that exceed tolerance bounds."""
         return [c for c in self.comparisons.values() if not c.is_equivalent]
 
+    def explain(
+        self,
+        *,
+        baseline_label: str = "baseline",
+        comparison_label: str | None = None,
+    ) -> str:
+        """Human-readable explanation of the comparison result.
+
+        Args:
+            baseline_label: Label for the baseline plan.
+            comparison_label: Label for the comparison plan. Defaults to
+                the strategy name.
+        """
+        if comparison_label is None:
+            comparison_label = self.strategy.value
+
+        lines = [self._headline(baseline_label, comparison_label)]
+        for c in self.comparisons.values():
+            lines.append(self._resource_line(c))
+        return "\n".join(lines)
+
+    def _headline(self, baseline_label: str, comparison_label: str) -> str:
+        if self.strategy == ComparisonStrategy.requirements:
+            if self.is_equivalent:
+                return f"Equivalent: {baseline_label} satisfies {comparison_label}."
+            return (
+                f"Not equivalent: {baseline_label} does not satisfy {comparison_label}."
+            )
+        else:  # provisioned or None
+            if self.is_equivalent:
+                return (
+                    f"Equivalent: {comparison_label} matches "
+                    f"{baseline_label} within tolerance."
+                )
+            return f"Not equivalent: {comparison_label} differs from {baseline_label}."
+
+    @staticmethod
+    def _format_bounds(tol: Tolerance) -> str:
+        if tol.upper == float("inf"):
+            return f">= {tol.lower:.2f}x"
+        elif tol.lower == 0.0:
+            return f"<= {tol.upper:.2f}x"
+        return f"{tol.lower:.2f}x to {tol.upper:.2f}x"
+
+    def _resource_line(self, c: ResourceComparison) -> str:
+        label = c.resource.value
+        if c.is_equivalent:
+            return f"  {label:10s} {c.ratio:.2f}x (ok)"
+        bound = "lower" if c.exceeds_lower_bound else "upper"
+        bounds_str = self._format_bounds(c.tolerance)
+        return (
+            f"  {label:10s} {c.ratio:.2f}x -- exceeds {bound} "
+            f"bound (tolerance: {bounds_str})"
+        )
+
+    def __str__(self) -> str:
+        if self.is_equivalent:
+            return "Equivalent"
+        problems = self.get_out_of_tolerance()
+        parts = [f"{c.resource.value} {c.ratio:.2f}x" for c in problems]
+        return f"Not equivalent: {', '.join(parts)}"
+
 
 def to_reference_cores(core_count: float, instance: Instance) -> float:
     """Convert instance cores to reference-equivalent cores (float precision).
@@ -421,17 +497,6 @@ def to_reference_cores(core_count: float, instance: Instance) -> float:
         target_shape=default_reference_shape,
         reference_shape=instance,
     )
-
-
-@enum_docstrings
-class ComparisonStrategy(StrEnum):
-    """Strategy for how baseline and comparison values are extracted."""
-
-    requirements = "requirements"
-    """Baseline's clusters vs comparison's requirements (matched by cluster_type)."""
-
-    provisioned = "provisioned"
-    """Aggregate cluster resources from both plans."""
 
 
 def _find_matching_requirement(
@@ -528,7 +593,7 @@ def _compare_requirements(
         *baseline.candidate_clusters.regional,
     ]
     if not current_clusters:
-        return PlanComparisonResult()
+        return PlanComparisonResult(strategy=ComparisonStrategy.requirements)
     cluster = current_clusters[0]
 
     requirement = _find_matching_requirement(cluster.cluster_type, comparison)
@@ -557,7 +622,9 @@ def _compare_requirements(
             tolerance=tolerances.get_tolerance(ResourceType.annual_cost),
         )
 
-    return PlanComparisonResult(comparisons=comparisons)
+    return PlanComparisonResult(
+        comparisons=comparisons, strategy=ComparisonStrategy.requirements
+    )
 
 
 def _compare_provisioned(
@@ -585,7 +652,9 @@ def _compare_provisioned(
         tolerance=tolerances.get_tolerance(ResourceType.annual_cost),
     )
 
-    return PlanComparisonResult(comparisons=comparisons)
+    return PlanComparisonResult(
+        comparisons=comparisons, strategy=ComparisonStrategy.provisioned
+    )
 
 
 def compare_plans(
