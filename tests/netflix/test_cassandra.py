@@ -22,6 +22,7 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.org.netflix.cassandra import (
     NflxCassandraCapacityModel,
+    _cache_hit_rate,
 )
 from tests.util import assert_minimum_storage_gib
 from tests.util import assert_similar_compute
@@ -631,3 +632,157 @@ class TestCassandraExtraModelArguments:
             NflxCassandraCapacityModel.get_required_cluster_size(
                 tier, extra_model_arguments
             )
+
+
+class TestCacheSkewFactor:
+    """Test cache_skew_factor parameter for access skew modeling."""
+
+    def test_cache_hit_rate_uniform(self):
+        """With uniform access (skew=1.0), hit rate equals cache fraction."""
+        assert _cache_hit_rate(0.5, 1.0) == 0.5
+        assert _cache_hit_rate(0.306, 1.0) == pytest.approx(0.306)
+        assert _cache_hit_rate(1.0, 1.0) == 1.0
+        assert _cache_hit_rate(0.0, 1.0) == 0.0
+
+    def test_cache_hit_rate_skewed(self):
+        """With skew > 1.0, a smaller cache covers more reads."""
+        # skew=2.0: hit_rate = sqrt(cache_fraction)
+        assert _cache_hit_rate(0.25, 2.0) == pytest.approx(0.5)
+        assert _cache_hit_rate(0.306, 2.0) == pytest.approx(0.306**0.5, rel=1e-6)
+
+        # skew=3.0: hit_rate = cache_fraction^(1/3)
+        assert _cache_hit_rate(0.125, 3.0) == pytest.approx(0.5)
+
+    def test_cache_hit_rate_boundary(self):
+        """Boundary conditions are handled correctly."""
+        assert _cache_hit_rate(0.0, 2.0) == 0.0
+        assert _cache_hit_rate(1.0, 2.0) == 1.0
+        assert _cache_hit_rate(1.5, 2.0) == 1.0
+        assert _cache_hit_rate(-0.1, 2.0) == 0.0
+
+    def test_default_skew_preserves_behavior(self):
+        """Default cache_skew_factor=1.0 produces identical results to no skew."""
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(60_000),
+                estimated_write_per_second=certain_int(10_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(10_000),
+            ),
+        )
+
+        # Plan with default skew (1.0) — should be identical to no skew arg
+        plan_default = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_attached_disks": True,
+                "require_local_disks": False,
+            },
+        )[0]
+
+        plan_explicit = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_attached_disks": True,
+                "require_local_disks": False,
+                "cache_skew_factor": 1.0,
+            },
+        )[0]
+
+        default_result = plan_default.candidate_clusters.zonal[0]
+        explicit_result = plan_explicit.candidate_clusters.zonal[0]
+
+        assert default_result.count == explicit_result.count
+        assert default_result.instance.name == explicit_result.instance.name
+
+    def test_skew_reduces_working_set(self):
+        """skew=2.0 with ~30.6% working set should reduce to ~9.4%."""
+        # A 10 TiB EBS cluster with moderate reads should have a significant
+        # working set. With skew=2.0, the adjusted working set should be
+        # working_set^2, which dramatically reduces memory requirements.
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(60_000),
+                estimated_write_per_second=certain_int(10_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(10_000),
+            ),
+        )
+
+        plan_uniform = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_attached_disks": True,
+                "require_local_disks": False,
+                "cache_skew_factor": 1.0,
+            },
+        )[0]
+
+        plan_skewed = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_attached_disks": True,
+                "require_local_disks": False,
+                "cache_skew_factor": 2.0,
+            },
+        )[0]
+
+        uniform_result = plan_uniform.candidate_clusters.zonal[0]
+        skewed_result = plan_skewed.candidate_clusters.zonal[0]
+
+        # With skew, we should need fewer or smaller nodes (less memory pressure)
+        uniform_cost = plan_uniform.candidate_clusters.total_annual_cost
+        skewed_cost = plan_skewed.candidate_clusters.total_annual_cost
+        assert skewed_cost < uniform_cost, (
+            f"Skewed plan (${skewed_cost:.0f}) should be cheaper than "
+            f"uniform plan (${uniform_cost:.0f})"
+        )
+
+        # The skew factor should be stored in cluster params
+        assert skewed_result.cluster_params["cassandra.cache_skew_factor"] == 2.0
+        assert uniform_result.cluster_params["cassandra.cache_skew_factor"] == 1.0
+
+    def test_skew_enables_smaller_ebs_cluster(self):
+        """skew=2.0 enables a 10 TiB EBS cluster to fit at 16 nodes."""
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(60_000),
+                estimated_write_per_second=certain_int(10_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(10_000),
+            ),
+        )
+
+        # With skew=2.0, should be able to fit in 16 nodes per zone
+        plan_skewed = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_attached_disks": True,
+                "require_local_disks": False,
+                "cache_skew_factor": 2.0,
+                "required_cluster_size": 16,
+            },
+        )
+
+        # The skewed plan should produce a result with exactly 16 nodes
+        assert len(plan_skewed) > 0, (
+            "With cache_skew_factor=2.0, a 10 TiB cluster should fit at 16 nodes"
+        )
+        result = plan_skewed[0].candidate_clusters.zonal[0]
+        assert result.count == 16
