@@ -8,6 +8,7 @@ from typing import List
 from typing import Optional
 from typing import Sequence
 from typing import Set
+from typing import Tuple
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -291,6 +292,9 @@ def _estimate_cassandra_requirement(
             current_capacity.cluster_instance.ram_gib - reserve_memory
         ) * current_capacity.cluster_instance_count.mid
         write_buffer_gib = 0
+        # For preserved memory clusters, the entire needed_memory is the
+        # working set (page cache) requirement
+        working_set_mem_gib = needed_memory
     else:
         # If disk RPS will be smaller than our target because there are no
         # reads, we don't need to hold as much data in memory.
@@ -301,6 +305,9 @@ def _estimate_cassandra_requirement(
         )
         # Now convert to per zone
         needed_memory = max(1, int(needed_memory // zones_per_region))
+        # Track the working set (page cache) memory separately so callers
+        # can treat it as a soft requirement (CPU cost) rather than hard.
+        working_set_mem_gib = needed_memory
 
     logger.debug(
         "Need (cpu, mem, disk, working) = (%s, %s, %s, %f)",
@@ -328,6 +335,7 @@ def _estimate_cassandra_requirement(
             "read_per_second": reads_per_second,
             "write_buffer_gib": write_buffer_gib,
             "min_threshold": min_threshold,
+            "working_set_mem_gib": working_set_mem_gib,
         },
     )
 
@@ -362,6 +370,92 @@ def _get_cluster_size_lambda(
         return lambda x: next_doubling(x, base=current_cluster_size)
     else:  # New provisionings
         return next_power_of_2
+
+
+def _compute_page_cache_cpu_factor(
+    data_per_node_gib: float,
+    available_cache_gib: float,
+    read_fraction: float,
+    drive_read_latency_ms: float,
+    avg_read_latency_ms: float,
+) -> Tuple[float, float, float]:
+    """Compute the CPU overhead factor from page cache misses.
+
+    When the working set cannot fully fit in RAM (page cache), each cache miss
+    goes to EBS instead of RAM. The miss holds a thread ~Nx longer (where N is
+    drive_latency / avg_read_latency), effectively consuming more CPU. This
+    function returns the multiplier to apply to CPU requirements.
+
+    Returns:
+        (cpu_factor, miss_rate, coverage_pct) tuple where:
+        - cpu_factor: multiplier >= 1.0 to apply to CPU cores
+        - miss_rate: fraction of reads that miss page cache [0, 1]
+        - coverage_pct: percent of data covered by page cache [0, 100]
+    """
+    if data_per_node_gib <= 0:
+        return (1.0, 0.0, 100.0)
+
+    coverage = min(1.0, max(0.0, available_cache_gib / data_per_node_gib))
+    miss_rate = 1.0 - coverage
+
+    # Only reads incur cache miss overhead (writes go to commitlog/memtable)
+    # Each miss holds the thread (drive_latency / avg_read_latency) times longer
+    if avg_read_latency_ms > 0:
+        latency_ratio = drive_read_latency_ms / avg_read_latency_ms
+    else:
+        latency_ratio = 1.0
+
+    cpu_overhead = miss_rate * read_fraction * latency_ratio
+    cpu_factor = 1.0 + cpu_overhead
+
+    coverage_pct = round(coverage * 100.0, 1)
+    return (cpu_factor, miss_rate, coverage_pct)
+
+
+# pylint: disable=too-many-positional-arguments
+def _ebs_page_cache_overhead(
+    is_ebs: bool,
+    working_set_mem_gib: float,
+    cluster_count: int,
+    instance: Instance,
+    drive: Drive,
+    base_mem: float,
+    heap_fn: Callable[[float], float],
+    needed_disk_gib: float,
+    rps: float,
+    write_per_sec: float,
+    desires: CapacityDesires,
+) -> Tuple[float, float]:
+    """Compute page cache CPU overhead for EBS clusters.
+
+    Returns (cpu_factor, coverage_pct). For non-EBS or when no working set
+    memory is needed, returns (1.0, 100.0).
+    """
+    if not is_ebs or working_set_mem_gib <= 0 or cluster_count <= 0:
+        return (1.0, 100.0)
+
+    reserve_per_node = base_mem + heap_fn(instance.ram_gib)
+    available_cache_per_node = max(0.0, instance.ram_gib - reserve_per_node)
+    data_per_node_gib = needed_disk_gib / cluster_count
+
+    # Compute read fraction from the zonal reads and writes
+    total_ops = rps + write_per_sec
+    read_fraction = rps / total_ops if total_ops > 0 else 0.0
+
+    # Use the drive's P95 read latency and the mean read latency from
+    # the desires to compute the latency ratio
+    ws_drive = instance.drive or drive
+    drive_read_latency_ms = ws_drive.read_io_latency_ms.high
+    avg_read_latency_ms = desires.query_pattern.estimated_mean_read_latency_ms.mid
+
+    cpu_factor, _, coverage_pct = _compute_page_cache_cpu_factor(
+        data_per_node_gib=data_per_node_gib,
+        available_cache_gib=available_cache_per_node,
+        read_fraction=read_fraction,
+        drive_read_latency_ms=drive_read_latency_ms,
+        avg_read_latency_ms=avg_read_latency_ms,
+    )
+    return (cpu_factor, coverage_pct)
 
 
 # pylint: disable=too-many-locals
@@ -476,12 +570,30 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         buffer_percent=(max_write_buffer_percent * max_table_buffer_percent),
     )
 
+    # For EBS (attached disk) instances, treat the working set (page cache)
+    # memory as a soft requirement. Instead of hard-rejecting when the
+    # instance can't hold the full working set in RAM, we pass only
+    # essential memory (no page cache) to compute_stateful_zone and later
+    # compute the CPU overhead from cache misses.
+    is_ebs = instance.drive is None
+    working_set_mem_gib = requirement.context.get("working_set_mem_gib", 0)
+
+    if is_ebs and working_set_mem_gib > 0:
+        # For EBS: pass 0 for working set memory — the page cache is soft.
+        # compute_stateful_zone will still size for CPU, disk, network, and
+        # write buffer, but won't reject plans due to insufficient RAM for
+        # page cache.
+        essential_memory_gib = 0
+    else:
+        # For local disk instances: keep the original hard memory requirement
+        essential_memory_gib = int(requirement.mem_gib.mid)
+
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
         needed_cores=int(requirement.cpu_cores.mid),
         needed_disk_gib=needed_disk_gib,
-        needed_memory_gib=int(requirement.mem_gib.mid),
+        needed_memory_gib=essential_memory_gib,
         needed_network_mbps=requirement.network_mbps.mid,
         # Take into account the reads per read
         # from the per node dataset using leveled compaction
@@ -502,6 +614,23 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         required_write_buffer_gib=float(requirement.context["write_buffer_gib"]),
     )
 
+    # Compute the page cache CPU factor for EBS instances.
+    # When the working set can't fully fit in RAM, cache misses go to EBS
+    # and each miss holds a Cassandra read thread longer, consuming more CPU.
+    page_cache_cpu_factor, page_cache_coverage_pct = _ebs_page_cache_overhead(
+        is_ebs=is_ebs,
+        working_set_mem_gib=working_set_mem_gib,
+        cluster_count=cluster.count,
+        instance=instance,
+        drive=drive,
+        base_mem=base_mem,
+        heap_fn=heap_fn,
+        needed_disk_gib=needed_disk_gib,
+        rps=rps,
+        write_per_sec=write_per_sec,
+        desires=desires,
+    )
+
     # Communicate to the actual provision that if we want reduced RF
     params = {
         "cassandra.keyspace.rf": copies_per_region,
@@ -512,6 +641,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         "cassandra.heap.table.percent": max_table_buffer_percent,
         "cassandra.compaction.min_threshold": requirement.context["min_threshold"],
         EFFECTIVE_DISK_PER_NODE_GIB: disk_per_node_gib,
+        "cassandra.page_cache.coverage_pct": page_cache_coverage_pct,
+        "cassandra.page_cache.cpu_factor": round(page_cache_cpu_factor, 3),
     }
     upsert_params(cluster, params)
 
