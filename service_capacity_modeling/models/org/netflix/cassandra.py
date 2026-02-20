@@ -369,13 +369,16 @@ def _get_cluster_size_lambda(
 def _compute_plan_penalties(
     instance: Instance,
     large_instance_regret: float,
+    current_family: Optional[str] = None,
+    same_family_bias: float = 0.05,
 ) -> Dict[str, float]:
     """Compute named penalty components for plan ranking.
 
-    Each penalty is a multiplicative factor added to rank:
+    Each penalty is a multiplicative factor applied to rank:
         rank = cost * (1 + sum(penalties.values()))
 
-    Returns only non-zero penalties. Empty dict means no penalty (rank = 0).
+    All plans get a cost-proportional rank, so penalties act as
+    percentage cost adjustments rather than absolute barriers.
     """
     penalties: Dict[str, float] = {}
 
@@ -383,6 +386,10 @@ def _compute_plan_penalties(
     instance_size = float(normalized_aws_size(instance.name))
     if large_instance_regret > 0 and instance_size > 8:
         penalties["large_instance"] = large_instance_regret * (instance_size - 8) / 8
+
+    # Same-family bias: penalize switching to a different instance family
+    if same_family_bias > 0 and current_family and instance.family != current_family:
+        penalties["family_migration"] = same_family_bias
 
     return penalties
 
@@ -407,6 +414,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
     large_instance_regret: float = 0.2,
+    current_family: Optional[str] = None,
+    same_family_bias: float = 0.05,
 ) -> Optional[CapacityPlan]:
     # Netflix Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 2 or instance.ram_gib <= 16:
@@ -543,6 +552,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     penalties = _compute_plan_penalties(
         instance=instance,
         large_instance_regret=large_instance_regret,
+        current_family=current_family,
+        same_family_bias=same_family_bias,
     )
     if penalties:
         upsert_params(cluster, {"rank_penalties": penalties})
@@ -589,9 +600,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     )
 
     total_penalty = sum(penalties.values())
-    plan_rank = (
-        clusters.total_annual_cost * (1 + total_penalty) if total_penalty > 0 else 0.0
-    )
+    plan_rank = clusters.total_annual_cost * (1 + total_penalty)
 
     return CapacityPlan(
         requirements=Requirements(zonal=[requirement] * zones_per_region),
@@ -719,6 +728,14 @@ class NflxCassandraArguments(BaseModel):
         "effective sort cost. Prevents AWS pricing rounding from favoring "
         "larger instances. Set to 0 to disable.",
     )
+    same_family_bias: float = Field(
+        default=0.05,
+        description="Flat cost-proportional penalty when proposed instance family "
+        "differs from the current cluster's family. Adds bias% to the "
+        "effective sort cost, so a 5% bias requires >5% savings to justify "
+        "switching families. Only applies when current_clusters is set. "
+        "Set to 0 to disable.",
+    )
 
     @classmethod
     def from_extra_model_arguments(
@@ -845,6 +862,14 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         # Use durability and consistency to compute RF if not explicitly set
         copies_per_region = _target_rf(desires, args.copies_per_region)
 
+        # Extract current instance family for migration penalty
+        current_capacity = _get_current_capacity(desires)
+        current_family = (
+            current_capacity.cluster_instance_name.rsplit(".", 1)[0]
+            if current_capacity
+            else None
+        )
+
         # Validate required_cluster_size for critical tiers
         required_cluster_size: Optional[int] = (
             NflxCassandraCapacityModel.get_required_cluster_size(
@@ -880,6 +905,8 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_write_buffer_percent=max_write_buffer_percent,
             max_table_buffer_percent=max_table_buffer_percent,
             large_instance_regret=args.large_instance_regret,
+            current_family=current_family,
+            same_family_bias=args.same_family_bias,
         )
 
     @staticmethod
