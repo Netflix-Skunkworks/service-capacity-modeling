@@ -19,6 +19,7 @@ from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
@@ -31,6 +32,7 @@ from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
+from service_capacity_modeling.interface import normalized_aws_size
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
@@ -364,6 +366,27 @@ def _get_cluster_size_lambda(
         return next_power_of_2
 
 
+def _compute_plan_penalties(
+    instance: Instance,
+    large_instance_regret: float,
+) -> Dict[str, float]:
+    """Compute named penalty components for plan ranking.
+
+    Each penalty is a multiplicative factor added to rank:
+        rank = cost * (1 + sum(penalties.values()))
+
+    Returns only non-zero penalties. Empty dict means no penalty (rank = 0).
+    """
+    penalties: Dict[str, float] = {}
+
+    # Prefer horizontal scaling: penalize instance sizes above 8xlarge
+    instance_size = float(normalized_aws_size(instance.name))
+    if large_instance_regret > 0 and instance_size > 8:
+        penalties["large_instance"] = large_instance_regret * (instance_size - 8) / 8
+
+    return penalties
+
+
 # pylint: disable=too-many-locals
 # pylint: disable=too-many-return-statements
 # flake8: noqa: C901
@@ -383,6 +406,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     max_regional_size: int = 192,
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
+    large_instance_regret: float = 0.2,
 ) -> Optional[CapacityPlan]:
     # Netflix Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 2 or instance.ram_gib <= 16:
@@ -515,6 +539,14 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     }
     upsert_params(cluster, params)
 
+    # Compute rank penalties and store in cluster_params for regret()
+    penalties = _compute_plan_penalties(
+        instance=instance,
+        large_instance_regret=large_instance_regret,
+    )
+    if penalties:
+        upsert_params(cluster, {"rank_penalties": penalties})
+
     # Sometimes we don't want modify cluster topology, so only allow
     # topologies that match the desired zone size
     if required_cluster_size is not None and cluster.count != required_cluster_size:
@@ -556,9 +588,15 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         services=cap_services,
     )
 
+    total_penalty = sum(penalties.values())
+    plan_rank = (
+        clusters.total_annual_cost * (1 + total_penalty) if total_penalty > 0 else 0.0
+    )
+
     return CapacityPlan(
         requirements=Requirements(zonal=[requirement] * zones_per_region),
         candidate_clusters=clusters,
+        rank=plan_rank,
     )
 
 
@@ -673,6 +711,13 @@ class NflxCassandraArguments(BaseModel):
         description="How much of heap memory can be used for a single table. "
         "Note that if there are more than 100k writes this will "
         "automatically adjust to 0.2",
+    )
+    large_instance_regret: float = Field(
+        default=0.2,
+        description="Graduated cost penalty for instance sizes above 8xlarge. "
+        "Adds penalty * max(0, (normalized_size - 8) / 8) * cost to the "
+        "effective sort cost. Prevents AWS pricing rounding from favoring "
+        "larger instances. Set to 0 to disable.",
     )
 
     @classmethod
@@ -834,7 +879,23 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_local_data_per_node_gib=args.max_local_data_per_node_gib,
             max_write_buffer_percent=max_write_buffer_percent,
             max_table_buffer_percent=max_table_buffer_percent,
+            large_instance_regret=args.large_instance_regret,
         )
+
+    @staticmethod
+    def regret(
+        regret_params: CapacityRegretParameters,
+        optimal_plan: CapacityPlan,
+        proposed_plan: CapacityPlan,
+    ) -> Dict[str, float]:
+        regrets = CapacityModel.regret(regret_params, optimal_plan, proposed_plan)
+
+        if proposed_plan.candidate_clusters.zonal:
+            params = proposed_plan.candidate_clusters.zonal[0].cluster_params
+            for name, value in params.get("rank_penalties", {}).items():
+                regrets[name] = value
+
+        return regrets
 
     @staticmethod
     def description() -> str:

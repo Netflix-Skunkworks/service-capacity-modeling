@@ -38,14 +38,18 @@ DESIRES = CapacityDesires(
     ),
 )
 
-NO_BIAS = {"require_local_disks": False}
+NO_BIAS = {
+    "require_local_disks": False,
+    "large_instance_regret": 0,
+    "same_family_bias": 0,
+}
 
 
-class TestInstanceSizingBaseline:
+class TestUnbiasedBaseline:
     """Without bias, AWS pricing rounding makes larger instances win."""
 
-    def test_default_prefers_large_instance(self):
-        """Default args produce a large instance due to AWS pricing rounding."""
+    def test_unbiased_prefers_large_instance(self):
+        """With all biases disabled, pricing rounding favors large instances."""
         cap_plans = planner.plan_certain(
             model_name="org.netflix.cassandra",
             region="us-east-1",
