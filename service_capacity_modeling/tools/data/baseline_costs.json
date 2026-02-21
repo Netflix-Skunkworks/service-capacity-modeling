@@ -508,7 +508,10 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 1676
+          "effective_disk_per_node_gib": 1676,
+          "rank_penalties": {
+            "large_instance": 0.1
+          }
         },
         "cluster_type": "cassandra",
         "count": 2,
@@ -523,7 +526,10 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 1676
+          "effective_disk_per_node_gib": 1676,
+          "rank_penalties": {
+            "large_instance": 0.1
+          }
         },
         "cluster_type": "cassandra",
         "count": 2,
@@ -538,7 +544,10 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 1676
+          "effective_disk_per_node_gib": 1676,
+          "rank_penalties": {
+            "large_instance": 0.1
+          }
         },
         "cluster_type": "cassandra",
         "count": 2,
