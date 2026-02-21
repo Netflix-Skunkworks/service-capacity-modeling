@@ -374,13 +374,16 @@ RANK_PENALTIES: str = "rank_penalties"
 def _compute_penalties(
     instance: Instance,
     large_instance_regret: float,
+    current_family: Optional[str] = None,
+    different_family_regret: float = 0.10,
 ) -> Dict[str, float]:
     """Compute named penalties from regret coefficients.
 
     Penalties inflate the plan rank used by plan_certain() sorting:
         rank = cost * (1 + sum(penalties.values()))
 
-    Returns only non-zero penalties.
+    All plans get a cost-proportional rank, so penalties act as
+    percentage cost adjustments rather than absolute barriers.
     """
     penalties: Dict[str, float] = {}
 
@@ -388,6 +391,14 @@ def _compute_penalties(
     instance_size = float(normalized_aws_size(instance.name))
     if large_instance_regret > 0 and instance_size > 8:
         penalties["large_instance"] = large_instance_regret * (instance_size - 8) / 8
+
+    # Penalize switching to a different instance family
+    if (
+        different_family_regret > 0
+        and current_family
+        and instance.family != current_family
+    ):
+        penalties["family_migration"] = different_family_regret
 
     return penalties
 
@@ -412,6 +423,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
     large_instance_regret: float = 0.2,
+    different_family_regret: float = 0.10,
 ) -> Optional[CapacityPlan]:
     # Netflix Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 2 or instance.ram_gib <= 16:
@@ -544,10 +556,20 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     }
     upsert_params(cluster, params)
 
-    # Compute penalties and store in cluster_params for rank sorting
+    # All penalties inflate plan.rank = cost * (1 + sum(penalties)),
+    # which controls plan_certain() sort order. Penalties are also stored
+    # in cluster_params[RANK_PENALTIES] for the regret() override.
+    current_capacity = _get_current_capacity(desires)
+    current_family = (
+        current_capacity.cluster_instance.family
+        if current_capacity and current_capacity.cluster_instance
+        else None
+    )
     penalties = _compute_penalties(
         instance=instance,
         large_instance_regret=large_instance_regret,
+        current_family=current_family,
+        different_family_regret=different_family_regret,
     )
     if penalties:
         upsert_params(cluster, {RANK_PENALTIES: penalties})
@@ -722,6 +744,15 @@ class NflxCassandraArguments(BaseModel):
         "effective sort cost. Prevents AWS pricing rounding from favoring "
         "larger instances. Set to 0 to disable.",
     )
+    different_family_regret: float = Field(
+        default=0.10,
+        description="Minimum annual savings threshold to justify switching "
+        "instance families (e.g. m6id -> c6id). Reservations are "
+        "family-specific, so switching means paying on-demand (~2.8x "
+        "reserved) until new reservations are procured — the savings need "
+        "to pay back that migration cost in O(months). Only applies when "
+        "current_clusters is set. Set to 0 to disable.",
+    )
 
     @classmethod
     def from_extra_model_arguments(
@@ -883,6 +914,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_write_buffer_percent=max_write_buffer_percent,
             max_table_buffer_percent=max_table_buffer_percent,
             large_instance_regret=args.large_instance_regret,
+            different_family_regret=args.different_family_regret,
         )
 
     @staticmethod
@@ -893,9 +925,11 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
     ) -> Dict[str, float]:
         regrets = CapacityModel.regret(regret_params, optimal_plan, proposed_plan)
 
-        # Horizontal scaling under load is harder than vertical — fewer large
-        # nodes means less headroom before hitting a scaling wall. Scale the
-        # penalty by plan cost so it's in the same dollar-space as spend regret.
+        # Large instance size is a pairwise property — choosing 32xlarge over
+        # 8xlarge has operational risk (fewer nodes, harder to scale) that
+        # varies by scenario. Family migration is not pairwise — it's a fixed
+        # switching cost independent of which plan is optimal, so it only
+        # needs the rank penalty to bias selection toward the current family.
         if proposed_plan.candidate_clusters.zonal:
             params = proposed_plan.candidate_clusters.zonal[0].cluster_params
             penalties = params.get(RANK_PENALTIES, {})
