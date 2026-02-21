@@ -209,7 +209,6 @@ def _estimate_cassandra_requirement(
     disk_buffer = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     )
-    memory_preserve = False
     reference_shape = desires.reference_shape
     current_capacity = _get_current_capacity(desires)
 
@@ -229,9 +228,6 @@ def _estimate_cassandra_requirement(
             * current_capacity.cluster_instance_count.mid
             * disk_derived_buffer.scale
         )
-        memory_preserve = DerivedBuffers.for_components(
-            desires.buffers.derived, [BufferComponent.memory]
-        ).preserve
     else:
         # If the cluster is not yet provisioned
         capacity_requirement = _zonal_requirement_for_new_cluster(
@@ -283,26 +279,34 @@ def _estimate_cassandra_requirement(
             flushes_before_compaction=min_threshold,
         )
 
-    if current_capacity and current_capacity.cluster_instance and memory_preserve:
-        # remove base memory and heap from per node ram and then
-        # multiply by number of nodes in a zone to compute the zonal requirement.
-        reserve_memory = _get_base_memory(desires) + _cass_heap(
-            current_capacity.cluster_instance.ram_gib
+    # Compute effective working set
+    memory_utilization_gib = (
+        current_capacity.memory_utilization_gib.mid
+        if current_capacity
+        and current_capacity.cluster_instance
+        and current_capacity.memory_utilization_gib.mid > 0
+        else None
+    )
+
+    if (
+        memory_utilization_gib is not None
+        and current_capacity is not None
+        and current_capacity.cluster_instance
+    ):
+        # Observed: derive working set from actual cluster memory usage
+        page_cache_per_node = max(
+            0, current_capacity.cluster_instance.ram_gib - memory_utilization_gib
         )
-        needed_memory = (
-            current_capacity.cluster_instance.ram_gib - reserve_memory
-        ) * current_capacity.cluster_instance_count.mid
-        write_buffer_gib = 0
+        data_per_node = max(
+            1, disk_used_gib / current_capacity.cluster_instance_count.mid
+        )
+        effective_working_set = min(1.0, page_cache_per_node / data_per_node)
     else:
-        # If disk RPS will be smaller than our target because there are no
-        # reads, we don't need to hold as much data in memory.
-        # For c*, we can skip memory buffer and can just keep using the heap and write buffer calc
-        # Eventually we'll want to phrase those heap, read cache, and write cache as buffers
-        needed_memory = (
-            min(working_set, rps_working_set) * disk_used_gib * zones_per_region
-        )
-        # Now convert to per zone
-        needed_memory = max(1, int(needed_memory // zones_per_region))
+        # Theoretical: from drive latency vs read SLO
+        effective_working_set = min(working_set, rps_working_set)
+
+    needed_memory = effective_working_set * disk_used_gib * zones_per_region
+    needed_memory = max(1, int(needed_memory // zones_per_region))
 
     logger.debug(
         "Need (cpu, mem, disk, working) = (%s, %s, %s, %f)",
@@ -320,7 +324,7 @@ def _estimate_cassandra_requirement(
         disk_gib=certain_float(needed_disk),
         network_mbps=certain_float(needed_network_mbps),
         context={
-            "working_set": min(working_set, rps_working_set),
+            "working_set": effective_working_set,
             "rps_working_set": rps_working_set,
             "disk_slo_working_set": working_set,
             "replication_factor": copies_per_region,
@@ -330,6 +334,7 @@ def _estimate_cassandra_requirement(
             "read_per_second": reads_per_second,
             "write_buffer_gib": write_buffer_gib,
             "min_threshold": min_threshold,
+            "memory_utilization_gib": memory_utilization_gib,
         },
     )
 
