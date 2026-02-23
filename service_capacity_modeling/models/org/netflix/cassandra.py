@@ -372,7 +372,7 @@ def _compute_penalties(
     instance: Instance,
     large_instance_regret: float,
     current_family: Optional[str] = None,
-    different_family_regret: float = 0.10,
+    different_family_regret: float = 0.10,  # Empirical; see NflxCassandraArguments
 ) -> Dict[str, float]:
     """Compute named penalties from regret coefficients.
 
@@ -746,8 +746,10 @@ class NflxCassandraArguments(BaseModel):
         description="Minimum annual savings threshold to justify switching "
         "instance families (e.g. m6id -> c6id). Reservations are "
         "family-specific, so switching means paying on-demand (~2.8x "
-        "reserved) until new reservations are procured — the savings need "
-        "to pay back that migration cost in O(months). Only applies when "
+        "reserved) until new reservations are procured. Empirical: "
+        "10% balances migration friction (on-demand premium for ~1-2 "
+        "months) against locking in suboptimal families. Increase to "
+        "0.15-0.20 for risk-averse clusters. Only applies when "
         "current_clusters is set. Set to 0 to disable.",
     )
 
