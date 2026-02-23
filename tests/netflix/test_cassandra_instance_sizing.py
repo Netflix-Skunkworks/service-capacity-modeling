@@ -4,12 +4,12 @@ Workload: 350k reads/s, 30k writes/s, 500 GiB state, require_local_disks=False.
 
 Without any regret penalties, the planner sorts by (rank, cost) and AWS pricing
 rounding makes larger instances (24xlarge) appear marginally cheaper -- so they win.
-This is the problem that large_instance_regret (PR #230) and same_family_regret
+This is the problem that large_instance_regret (PR #230) and different_family_regret
 (PR #207) fix.
 
 This file establishes the unpenalized baseline. The regret test files verify the fix:
 - test_cassandra_large_instance_regret.py -- large_instance_regret flips ordering
-- test_cassandra_family_migration.py -- same_family_regret penalizes family switches
+- test_cassandra_family_migration.py -- different_family_regret penalizes switches
 """
 
 from service_capacity_modeling.capacity_planner import planner
@@ -41,7 +41,7 @@ DESIRES = CapacityDesires(
 NO_REGRET = {
     "require_local_disks": False,
     "large_instance_regret": 0,
-    "same_family_regret": 0,
+    "different_family_regret": 0,
 }
 
 
