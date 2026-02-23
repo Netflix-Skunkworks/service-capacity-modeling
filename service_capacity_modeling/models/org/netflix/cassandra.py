@@ -342,16 +342,13 @@ def _get_current_cluster_size(desires: CapacityDesires) -> int:
 
 
 def _get_current_capacity(desires: CapacityDesires) -> Optional[CurrentClusterCapacity]:
-    current_capacity = (
-        None
-        if desires.current_clusters is None
-        else (
-            desires.current_clusters.zonal[0]
-            if len(desires.current_clusters.zonal)
-            else desires.current_clusters.regional[0]
-        )
-    )
-    return current_capacity
+    if desires.current_clusters is None:
+        return None
+    if desires.current_clusters.zonal:
+        return desires.current_clusters.zonal[0]
+    if desires.current_clusters.regional:
+        return desires.current_clusters.regional[0]
+    return None
 
 
 def _get_cluster_size_lambda(

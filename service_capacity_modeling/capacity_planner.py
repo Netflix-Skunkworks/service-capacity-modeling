@@ -861,15 +861,12 @@ class CapacityPlanner:
             )
         )
 
-        current_capacity = (
-            None
-            if desires.current_clusters is None
-            else (
-                desires.current_clusters.zonal[0]
-                if len(desires.current_clusters.zonal)
-                else desires.current_clusters.regional[0]
-            )
-        )
+        current_capacity: Optional[CurrentClusterCapacity] = None
+        if desires.current_clusters is not None:
+            if desires.current_clusters.zonal:
+                current_capacity = desires.current_clusters.zonal[0]
+            elif desires.current_clusters.regional:
+                current_capacity = desires.current_clusters.regional[0]
         # Return early if we dont have current_capacity set.
         if current_capacity is None or current_capacity.cluster_instance is None:
             return (per_instance_cores, per_instance_mem)
