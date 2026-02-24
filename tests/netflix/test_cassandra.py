@@ -570,6 +570,113 @@ class TestCassandraCurrentCapacity:
         assert ctx["memory_utilization_gib"] is None
         assert ctx["working_set"] < 0.5
 
+    def test_memory_utilization_exceeds_ram(self):
+        """Bad metric: memory_utilization_gib > instance RAM should not crash."""
+        cluster_capacity = CurrentZoneClusterCapacity(
+            cluster_instance_name="r5d.4xlarge",
+            cluster_instance_count=Interval(low=2, mid=2, high=2, confidence=1),
+            cpu_utilization=certain_float(13.0),
+            memory_utilization_gib=certain_float(200.0),  # exceeds 128 GiB RAM
+            disk_utilization_gib=certain_float(100),
+            network_utilization_mbps=certain_float(128.0),
+        )
+
+        worn_desire = CapacityDesires(
+            service_tier=1,
+            current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(10_000),
+                estimated_write_per_second=certain_int(10_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(300),
+            ),
+        )
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            num_results=3,
+            desires=worn_desire,
+            extra_model_arguments={**EXTRA_MODEL_ARGS, "required_cluster_size": 2},
+        )
+
+        ctx = cap_plan[0].requirements.zonal[0].context
+        # page_cache = max(0, 128 - 200) = 0 → working_set = 0
+        assert ctx["working_set"] == 0
+        assert ctx["memory_utilization_gib"] == 200.0
+
+    def test_small_memory_utilization(self):
+        """Tiny but positive memory_utilization_gib activates observed path."""
+        cluster_capacity = CurrentZoneClusterCapacity(
+            cluster_instance_name="r5d.4xlarge",
+            cluster_instance_count=Interval(low=2, mid=2, high=2, confidence=1),
+            cpu_utilization=certain_float(13.0),
+            memory_utilization_gib=certain_float(0.1),
+            disk_utilization_gib=certain_float(100),
+            network_utilization_mbps=certain_float(128.0),
+        )
+
+        worn_desire = CapacityDesires(
+            service_tier=1,
+            current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(10_000),
+                estimated_write_per_second=certain_int(10_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(300),
+            ),
+        )
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            num_results=3,
+            desires=worn_desire,
+            extra_model_arguments={**EXTRA_MODEL_ARGS, "required_cluster_size": 2},
+        )
+
+        ctx = cap_plan[0].requirements.zonal[0].context
+        # page_cache = 128 - 0.1 = 127.9, data_per_node = 50
+        # working_set = min(1.0, 127.9/50) = 1.0
+        assert ctx["working_set"] == 1.0
+        assert ctx["memory_utilization_gib"] == 0.1
+
+    def test_high_memory_utilization_low_working_set(self):
+        """High memory_utilization (large heap) yields low working set."""
+        cluster_capacity = CurrentZoneClusterCapacity(
+            cluster_instance_name="r5d.4xlarge",
+            cluster_instance_count=Interval(low=2, mid=2, high=2, confidence=1),
+            cpu_utilization=certain_float(13.0),
+            memory_utilization_gib=certain_float(100.0),
+            disk_utilization_gib=certain_float(500),
+            network_utilization_mbps=certain_float(128.0),
+        )
+
+        worn_desire = CapacityDesires(
+            service_tier=1,
+            current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(10_000),
+                estimated_write_per_second=certain_int(10_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(300),
+            ),
+        )
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            num_results=3,
+            desires=worn_desire,
+            extra_model_arguments={**EXTRA_MODEL_ARGS, "required_cluster_size": 2},
+        )
+
+        ctx = cap_plan[0].requirements.zonal[0].context
+        # page_cache = 128 - 100 = 28, data_per_node = 250
+        # working_set = 28/250 = 0.112 → low working set
+        assert ctx["working_set"] < 0.15
+        assert ctx["memory_utilization_gib"] == 100.0
+
     def test_capacity_non_power_of_two(self):
         cluster_capacity = CurrentZoneClusterCapacity(
             cluster_instance_name="r5d.4xlarge",

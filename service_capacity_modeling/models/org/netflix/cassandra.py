@@ -278,6 +278,9 @@ def _estimate_cassandra_requirement(
         )
 
     # Compute effective working set
+    # memory_utilization_gib represents non-page-cache memory per node
+    # (JVM heap + OS buffers + write buffers). Source: antigravity-cass.
+    # page_cache = instance_RAM - memory_utilization_gib
     memory_utilization_gib = (
         current_capacity.memory_utilization_gib.mid
         if current_capacity
