@@ -1,6 +1,6 @@
 # Ralph Status: Review Cass Memory Model
 
-## Current Phase: Phase 3 - Verify write_buffer_gib behavior
+## Current Phase: Phase 4 - Run tests
 ## Status: COMPLETE
 
 ## Phase 3 Findings
@@ -54,9 +54,28 @@
 - `desired_buffer_ratio` intentionally omitted (working set already captures memory need)
 - Fallback path (no current_capacity) correctly skips buffer policy
 
+## Phase 4 Findings
+
+### Test results — ALL 37 PASS
+
+```
+37 passed in 2.40s
+mypy: Success: no issues found in 43 source files
+cassandra.py coverage: 95%
+```
+
+| Check | Expected | Result |
+|---|---|---|
+| `test_preserve_memory` | PASS (RAM==128, write_buffer_gib==0) | PASSED |
+| `test_observed_working_set` | PASS (working_set>0.9, write_buffer_gib>0) | PASSED |
+| `test_theoretical_working_set` | PASS (memory_utilization_gib is None) | PASSED |
+| 3 edge cases (tiny_util, exceeds_ram, high_heap) | PASS | ALL PASSED |
+| 14 scale constraint tests | PASS | ALL PASSED |
+| mypy clean | No errors | `Success: no issues found in 43 source files` |
+
 ## Progress
 - [x] Phase 1: Verify buffer integration correctness
 - [x] Phase 2: Verify working set formula
 - [x] Phase 3: Verify write_buffer_gib behavior
-- [ ] Phase 4: Run tests
+- [x] Phase 4: Run tests
 - [ ] Phase 5: Check for remaining issues
