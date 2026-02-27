@@ -21,6 +21,8 @@ from service_capacity_modeling.interface import (
     certain_int,
     ClusterCapacity,
     Consistency,
+    CurrentClusters,
+    CurrentZoneClusterCapacity,
     DataShape,
     GlobalConsistency,
     Interval,
@@ -239,6 +241,50 @@ scenarios.append(
         cassandra_vertical_baseline,
         {"require_local_disks": False},
         "cassandra_vertical_baseline",
+    )
+)
+
+# Cassandra timeseries — EBS cluster with observed memory metrics
+# Simplified from a production timeseries log-archival cluster.
+# Key: includes memory_utilization_gib which the legacy model ignores.
+cassandra_timeseries_ebs = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=Interval(
+            low=10_000, mid=20_000, high=40_000, confidence=0.98
+        ),
+        estimated_write_per_second=Interval(
+            low=40_000, mid=70_000, high=100_000, confidence=0.98
+        ),
+    ),
+    data_shape=DataShape(
+        estimated_state_size_gib=Interval(
+            low=1_800, mid=2_000, high=2_200, confidence=0.98
+        ),
+        estimated_compression_ratio=certain_float(1.0),
+    ),
+    current_clusters=CurrentClusters(
+        zonal=[
+            CurrentZoneClusterCapacity(
+                cluster_instance_name="r7a.2xlarge",
+                cluster_instance_count=certain_int(8),
+                cpu_utilization=Interval(low=4.5, mid=18.2, high=54.4, confidence=1),
+                memory_utilization_gib=certain_float(20.0),
+                disk_utilization_gib=certain_float(250),
+                network_utilization_mbps=certain_float(30),
+            ),
+        ]
+        * 3
+    ),
+)
+
+scenarios.append(
+    (
+        "org.netflix.cassandra",
+        "us-east-1",
+        cassandra_timeseries_ebs,
+        {"require_local_disks": False, "require_attached_disks": True},
+        "cassandra_timeseries_ebs",
     )
 )
 
