@@ -479,7 +479,11 @@ class TestCassandraCurrentCapacity:
             num_results=3,
             num_regions=4,
             desires=worn_desire,
-            extra_model_arguments={**EXTRA_MODEL_ARGS, "required_cluster_size": 8},
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "required_cluster_size": 8,
+                "experimental_memory_model": True,
+            },
         )
 
         # Observed working set activates (memory_utilization_gib=32 on i4i.8xlarge
@@ -525,7 +529,11 @@ class TestCassandraCurrentCapacity:
             num_results=3,
             num_regions=4,
             desires=worn_desire,
-            extra_model_arguments={**EXTRA_MODEL_ARGS, "required_cluster_size": 2},
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "required_cluster_size": 2,
+                "experimental_memory_model": True,
+            },
         )
 
         lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
@@ -612,7 +620,11 @@ class TestCassandraCurrentCapacity:
             num_results=3,
             num_regions=4,
             desires=worn_desire,
-            extra_model_arguments={**EXTRA_MODEL_ARGS, "required_cluster_size": 2},
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "required_cluster_size": 2,
+                "experimental_memory_model": True,
+            },
         )
 
         lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
@@ -663,7 +675,11 @@ class TestCassandraCurrentCapacity:
             region="us-east-1",
             num_results=3,
             desires=worn_desire,
-            extra_model_arguments={**EXTRA_MODEL_ARGS, "required_cluster_size": 2},
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "required_cluster_size": 2,
+                "experimental_memory_model": True,
+            },
         )
 
         ctx = cap_plan[0].requirements.zonal[0].context
@@ -771,3 +787,72 @@ class TestCassandraExtraModelArguments:
             NflxCassandraCapacityModel.get_required_cluster_size(
                 tier, extra_model_arguments
             )
+
+
+class TestExperimentalMemoryModelFlag:
+    """Test that experimental_memory_model flag gates new memory behavior."""
+
+    _cluster_capacity = CurrentZoneClusterCapacity(
+        cluster_instance_name="r5d.4xlarge",
+        cluster_instance_count=Interval(low=4, mid=4, high=4, confidence=1),
+        cpu_utilization=Interval(low=10, mid=15, high=20, confidence=1),
+        memory_utilization_gib=certain_float(32.0),
+        disk_utilization_gib=certain_float(50),
+        network_utilization_mbps=certain_float(128.0),
+    )
+
+    _desires = CapacityDesires(
+        service_tier=1,
+        current_clusters=CurrentClusters(zonal=[_cluster_capacity]),
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(50_000),
+            estimated_write_per_second=certain_int(10_000),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=certain_int(500),
+        ),
+    )
+
+    def test_flag_off_uses_theoretical_working_set(self):
+        """With flag=False (default), memory_utilization_gib is ignored."""
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=self._desires,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
+        )
+
+        ctx = cap_plan[0].requirements.zonal[0].context
+        assert ctx["memory_utilization_gib"] is None
+        # Theoretical working set should be used
+        assert ctx["working_set"] == ctx["disk_slo_working_set"] or (
+            ctx["working_set"] == ctx["rps_working_set"]
+        )
+
+    def test_flag_on_uses_observed_working_set(self):
+        """With flag=True, observed memory_utilization_gib drives working set."""
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=self._desires,
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "experimental_memory_model": True,
+            },
+        )
+
+        ctx = cap_plan[0].requirements.zonal[0].context
+        assert ctx["memory_utilization_gib"] == 32.0
+        # r5d.4xlarge has 128 GiB RAM, memory_utilization=32 → page_cache=96
+        # disk_used_gib=50*4=200, data_per_node=50
+        # observed working set = min(1.0, 96/50) = 1.0
+        assert ctx["working_set"] > 0.9
+
+    def test_flag_defaults_to_false(self):
+        """Verify the flag defaults to False when not specified."""
+        from service_capacity_modeling.models.org.netflix.cassandra import (
+            NflxCassandraArguments,
+        )
+
+        args = NflxCassandraArguments.from_extra_model_arguments({})
+        assert args.experimental_memory_model is False
