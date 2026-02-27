@@ -53,6 +53,10 @@ from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
 from service_capacity_modeling.models.common import zonal_requirements_from_current
+from service_capacity_modeling.models.org.netflix.cassandra_memory import (
+    estimate_memory_experimental,
+    estimate_memory_legacy,
+)
 from service_capacity_modeling.models.utils import is_power_of_2
 from service_capacity_modeling.models.utils import next_doubling
 from service_capacity_modeling.models.utils import next_power_of_2
@@ -282,73 +286,27 @@ def _estimate_cassandra_requirement(
         )
 
     # Compute effective working set and memory requirement.
-    # The experimental_memory_model flag gates the new behavior:
-    #   True  → observed working set from memory_utilization_gib + DerivedBuffers
-    #   False → legacy theoretical working set + simple memory calculation
     if experimental_memory_model:
-        # memory_utilization_gib represents non-page-cache memory per node
-        # (JVM heap + OS buffers + write buffers). Source: antigravity-cass.
-        # page_cache = instance_RAM - memory_utilization_gib
-        memory_utilization_gib = (
-            current_capacity.memory_utilization_gib.mid
-            if current_capacity
-            and current_capacity.cluster_instance
-            and current_capacity.memory_utilization_gib.mid > 0
-            else None
+        mem = estimate_memory_experimental(
+            current_capacity=current_capacity,
+            working_set=working_set,
+            rps_working_set=rps_working_set,
+            disk_used_gib=disk_used_gib,
+            desires=desires,
+            write_buffer_gib=write_buffer_gib,
         )
-
-        if (
-            memory_utilization_gib is not None
-            and current_capacity is not None
-            and current_capacity.cluster_instance
-        ):
-            # Observed: derive working set from actual cluster memory usage.
-            # Prefer raw disk utilization (not buffer-scaled) so the observed
-            # page cache ratio isn't distorted by buffer policy. Fall back to
-            # estimated disk per node when disk utilization isn't reported.
-            page_cache_per_node = max(
-                0, current_capacity.cluster_instance.ram_gib - memory_utilization_gib
-            )
-            raw_disk_per_node = current_capacity.disk_utilization_gib.mid
-            if raw_disk_per_node <= 0:
-                raw_disk_per_node = (
-                    disk_used_gib / current_capacity.cluster_instance_count.mid
-                )
-            raw_disk_per_node = max(1, raw_disk_per_node)
-            effective_working_set = min(1.0, page_cache_per_node / raw_disk_per_node)
-        else:
-            # Theoretical: from drive latency vs read SLO
-            effective_working_set = min(working_set, rps_working_set)
-
-        # Base memory need from working set (per-zone)
-        base_needed_memory = max(1, int(effective_working_set * disk_used_gib))
-
-        # Apply memory buffer policy via DerivedBuffers (handles preserve,
-        # scale_up, scale_down) — same pattern as CPU and disk.
-        memory_derived = DerivedBuffers.for_components(
-            desires.buffers.derived, [BufferComponent.memory]
-        )
-        if current_capacity and current_capacity.cluster_instance:
-            reserve_memory = _get_base_memory(desires) + _cass_heap(
-                current_capacity.cluster_instance.ram_gib
-            )
-            existing_page_cache = (
-                current_capacity.cluster_instance.ram_gib - reserve_memory
-            ) * current_capacity.cluster_instance_count.mid
-            needed_memory = memory_derived.calculate_requirement(
-                current_usage=base_needed_memory,
-                existing_capacity=existing_page_cache,
-            )
-            if memory_derived.preserve:
-                write_buffer_gib = 0
-        else:
-            needed_memory = base_needed_memory
     else:
-        # Legacy: always use theoretical working set, simple memory calc
-        memory_utilization_gib = None
-        effective_working_set = min(working_set, rps_working_set)
-        needed_memory = effective_working_set * disk_used_gib * zones_per_region
-        needed_memory = max(1, int(needed_memory // zones_per_region))
+        mem = estimate_memory_legacy(
+            working_set=working_set,
+            rps_working_set=rps_working_set,
+            disk_used_gib=disk_used_gib,
+            zones_per_region=zones_per_region,
+            write_buffer_gib=write_buffer_gib,
+        )
+    effective_working_set = mem.effective_working_set
+    needed_memory = mem.needed_memory_gib
+    memory_utilization_gib = mem.memory_utilization_gib
+    write_buffer_gib = mem.write_buffer_gib
 
     logger.debug(
         "Need (cpu, mem, disk, working) = (%s, %s, %s, %f)",
