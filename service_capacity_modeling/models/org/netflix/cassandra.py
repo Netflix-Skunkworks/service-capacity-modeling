@@ -294,20 +294,47 @@ def _estimate_cassandra_requirement(
         and current_capacity is not None
         and current_capacity.cluster_instance
     ):
-        # Observed: derive working set from actual cluster memory usage
+        # Observed: derive working set from actual cluster memory usage.
+        # Prefer raw disk utilization (not buffer-scaled) so the observed
+        # page cache ratio isn't distorted by buffer policy. Fall back to
+        # estimated disk per node when disk utilization isn't reported.
         page_cache_per_node = max(
             0, current_capacity.cluster_instance.ram_gib - memory_utilization_gib
         )
-        data_per_node = max(
-            1, disk_used_gib / current_capacity.cluster_instance_count.mid
-        )
-        effective_working_set = min(1.0, page_cache_per_node / data_per_node)
+        raw_disk_per_node = current_capacity.disk_utilization_gib.mid
+        if raw_disk_per_node <= 0:
+            raw_disk_per_node = (
+                disk_used_gib / current_capacity.cluster_instance_count.mid
+            )
+        raw_disk_per_node = max(1, raw_disk_per_node)
+        effective_working_set = min(1.0, page_cache_per_node / raw_disk_per_node)
     else:
         # Theoretical: from drive latency vs read SLO
         effective_working_set = min(working_set, rps_working_set)
 
-    needed_memory = effective_working_set * disk_used_gib * zones_per_region
-    needed_memory = max(1, int(needed_memory // zones_per_region))
+    # Base memory need from working set (per-zone)
+    base_needed_memory = max(1, int(effective_working_set * disk_used_gib))
+
+    # Apply memory buffer policy via DerivedBuffers (handles preserve,
+    # scale_up, scale_down) — same pattern as CPU and disk.
+    memory_derived = DerivedBuffers.for_components(
+        desires.buffers.derived, [BufferComponent.memory]
+    )
+    if current_capacity and current_capacity.cluster_instance:
+        reserve_memory = _get_base_memory(desires) + _cass_heap(
+            current_capacity.cluster_instance.ram_gib
+        )
+        existing_page_cache = (
+            current_capacity.cluster_instance.ram_gib - reserve_memory
+        ) * current_capacity.cluster_instance_count.mid
+        needed_memory = memory_derived.calculate_requirement(
+            current_usage=base_needed_memory,
+            existing_capacity=existing_page_cache,
+        )
+        if memory_derived.preserve:
+            write_buffer_gib = 0
+    else:
+        needed_memory = base_needed_memory
 
     logger.debug(
         "Need (cpu, mem, disk, working) = (%s, %s, %s, %f)",
