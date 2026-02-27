@@ -1,7 +1,24 @@
 # Ralph Status: Review Cass Memory Model
 
-## Current Phase: Phase 2 - Verify working set formula
+## Current Phase: Phase 3 - Verify write_buffer_gib behavior
 ## Status: COMPLETE
+
+## Phase 3 Findings
+
+### write_buffer_gib verification — ALL CORRECT
+
+| Check | Expected | Actual (cassandra.py) | Status |
+|---|---|---|---|
+| `write_buffer_gib = 0` only when preserve | Conditional on preserve | Line 336-337: `if memory_derived.preserve: write_buffer_gib = 0` | CORRECT |
+| Non-preserve retains computed value | No zeroing | No else branch; value from lines 268-280 preserved | CORRECT |
+| Context dict `write_buffer_gib` | Final value in both paths | Line 365: captures 0 (preserve) or computed (non-preserve) | CORRECT |
+| Context dict `memory_utilization_gib` | None or observed float | Line 367: None for theoretical, float for observed | CORRECT |
+
+### Logic flow
+1. `write_buffer_gib` computed at line 268 via `_write_buffer_gib_zone()`
+2. Reduced in while loop (line 274) if > 12 GiB
+3. Zeroed ONLY when `memory_derived.preserve` is True (line 336)
+4. Context dict at line 365 captures the final value
 
 ## Phase 2 Findings
 
@@ -40,6 +57,6 @@
 ## Progress
 - [x] Phase 1: Verify buffer integration correctness
 - [x] Phase 2: Verify working set formula
-- [ ] Phase 3: Verify write_buffer_gib behavior
+- [x] Phase 3: Verify write_buffer_gib behavior
 - [ ] Phase 4: Run tests
 - [ ] Phase 5: Check for remaining issues
