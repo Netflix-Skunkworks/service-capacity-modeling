@@ -479,16 +479,28 @@ class TestCassandraCurrentCapacity:
             num_results=3,
             num_regions=4,
             desires=worn_desire,
-            extra_model_arguments={**EXTRA_MODEL_ARGS, "required_cluster_size": 8},
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "required_cluster_size": 8,
+                "experimental_memory_model": True,
+            },
         )
 
-        # Use a similar number of CPU cores but allocate less disk
+        # Observed working set activates (memory_utilization_gib=32 on i4i.8xlarge
+        # with 256 GiB RAM → page_cache=224 GiB, high working set → more RAM)
         lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
         assert_similar_compute(
-            shapes.instance("m6id.8xlarge"), lr_clusters.instance, 8, lr_clusters.count
+            shapes.instance("r6id.12xlarge"), lr_clusters.instance, 8, lr_clusters.count
+        )
+        # Verify observed working set was used
+        ws = cap_plan[0].requirements.zonal[0].context["working_set"]
+        assert ws > 0.5, "Expected observed working set > 0.5"
+        assert (
+            cap_plan[0].requirements.zonal[0].context["memory_utilization_gib"] == 32.0
         )
 
-    def test_preserve_memory(self):
+    def test_observed_working_set(self):
+        """Cluster with memory_utilization_gib > 0 uses observed working set."""
         cluster_capacity = CurrentZoneClusterCapacity(
             cluster_instance_name="r5d.4xlarge",
             cluster_instance_count=Interval(low=2, mid=2, high=2, confidence=1),
@@ -498,15 +510,6 @@ class TestCassandraCurrentCapacity:
             memory_utilization_gib=certain_float(32.0),
             disk_utilization_gib=certain_float(100),
             network_utilization_mbps=certain_float(128.0),
-        )
-
-        derived_buffer = Buffers(
-            derived={
-                "memory": Buffer(
-                    intent=BufferIntent.preserve,
-                    components=[BufferComponent.memory],
-                )
-            }
         )
 
         worn_desire = CapacityDesires(
@@ -519,7 +522,52 @@ class TestCassandraCurrentCapacity:
             data_shape=DataShape(
                 estimated_state_size_gib=certain_int(300),
             ),
-            buffers=derived_buffer,
+        )
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            num_results=3,
+            num_regions=4,
+            desires=worn_desire,
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "required_cluster_size": 2,
+                "experimental_memory_model": True,
+            },
+        )
+
+        lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
+        # r5d.4xlarge has 128 GiB RAM, memory_utilization=32 → page_cache=96
+        # raw disk_per_node=100 → observed working set ≈ 0.96 → high RAM
+        assert lr_clusters.instance.ram_gib == 256
+        ctx = cap_plan[0].requirements.zonal[0].context
+        assert ctx["memory_utilization_gib"] == 32.0
+        assert ctx["working_set"] > 0.9
+        # write_buffer_gib is non-zero (no preserve buffer)
+        assert ctx["write_buffer_gib"] > 0
+
+    def test_theoretical_working_set(self):
+        """Cluster without memory_utilization_gib uses theoretical working set."""
+        cluster_capacity = CurrentZoneClusterCapacity(
+            cluster_instance_name="r5d.4xlarge",
+            cluster_instance_count=Interval(low=2, mid=2, high=2, confidence=1),
+            cpu_utilization=Interval(
+                low=10.12, mid=13.2, high=14.194801291058118, confidence=1
+            ),
+            disk_utilization_gib=certain_float(100),
+            network_utilization_mbps=certain_float(128.0),
+        )
+
+        worn_desire = CapacityDesires(
+            service_tier=1,
+            current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(10_000),
+                estimated_write_per_second=certain_int(100_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(300),
+            ),
         )
         cap_plan = planner.plan_certain(
             model_name="org.netflix.cassandra",
@@ -530,8 +578,116 @@ class TestCassandraCurrentCapacity:
             extra_model_arguments={**EXTRA_MODEL_ARGS, "required_cluster_size": 2},
         )
 
+        ctx = cap_plan[0].requirements.zonal[0].context
+        assert ctx["memory_utilization_gib"] is None
+        assert ctx["working_set"] < 0.5
+
+    def test_preserve_memory(self):
+        """Memory preserve buffer keeps current instance's RAM allocation."""
+        cluster_capacity = CurrentZoneClusterCapacity(
+            cluster_instance_name="r5d.4xlarge",
+            cluster_instance_count=Interval(low=2, mid=2, high=2, confidence=1),
+            cpu_utilization=Interval(
+                low=10.12, mid=13.2, high=14.194801291058118, confidence=1
+            ),
+            memory_utilization_gib=certain_float(32.0),
+            disk_utilization_gib=certain_float(100),
+            network_utilization_mbps=certain_float(128.0),
+        )
+
+        worn_desire = CapacityDesires(
+            service_tier=1,
+            current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(10_000),
+                estimated_write_per_second=certain_int(100_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(300),
+            ),
+            buffers=Buffers(
+                derived={
+                    "memory": Buffer(
+                        intent=BufferIntent.preserve,
+                        components=[BufferComponent.memory],
+                    )
+                }
+            ),
+        )
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            num_results=3,
+            num_regions=4,
+            desires=worn_desire,
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "required_cluster_size": 2,
+                "experimental_memory_model": True,
+            },
+        )
+
         lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
+        # Preserve: keeps current instance's RAM (128 GiB)
         assert lr_clusters.instance.ram_gib == 128
+        ctx = cap_plan[0].requirements.zonal[0].context
+        # write_buffer_gib is zeroed when preserving memory
+        assert ctx["write_buffer_gib"] == 0
+
+    @pytest.mark.parametrize(
+        "mem_util, disk_util, expected_ws_range, description",
+        [
+            # Bad metric: memory_utilization > instance RAM
+            (200.0, 100, (0, 0.01), "exceeds RAM → page_cache=0 → ws=0"),
+            # Tiny memory util: nearly all RAM is page cache
+            (0.1, 100, (0.99, 1.01), "tiny util → ws≈1.0"),
+            # High memory util, high disk: large heap, little page cache
+            (100.0, 500, (0, 0.15), "high heap → low page cache → low ws"),
+        ],
+        ids=["exceeds_ram", "tiny_util", "high_heap"],
+    )
+    def test_observed_working_set_edge_cases(
+        self, mem_util, disk_util, expected_ws_range, description
+    ):
+        """Edge cases for observed working set: {description}"""
+        cluster_capacity = CurrentZoneClusterCapacity(
+            cluster_instance_name="r5d.4xlarge",
+            cluster_instance_count=Interval(low=2, mid=2, high=2, confidence=1),
+            cpu_utilization=certain_float(13.0),
+            memory_utilization_gib=certain_float(mem_util),
+            disk_utilization_gib=certain_float(disk_util),
+            network_utilization_mbps=certain_float(128.0),
+        )
+
+        worn_desire = CapacityDesires(
+            service_tier=1,
+            current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(10_000),
+                estimated_write_per_second=certain_int(10_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(300),
+            ),
+        )
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            num_results=3,
+            desires=worn_desire,
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "required_cluster_size": 2,
+                "experimental_memory_model": True,
+            },
+        )
+
+        ctx = cap_plan[0].requirements.zonal[0].context
+        ws = ctx["working_set"]
+        assert expected_ws_range[0] <= ws <= expected_ws_range[1], (
+            f"{description}: working_set={ws}, expected {expected_ws_range}"
+        )
+        assert ctx["memory_utilization_gib"] == mem_util
 
     def test_capacity_non_power_of_two(self):
         cluster_capacity = CurrentZoneClusterCapacity(
@@ -631,3 +787,72 @@ class TestCassandraExtraModelArguments:
             NflxCassandraCapacityModel.get_required_cluster_size(
                 tier, extra_model_arguments
             )
+
+
+class TestExperimentalMemoryModelFlag:
+    """Test that experimental_memory_model flag gates new memory behavior."""
+
+    _cluster_capacity = CurrentZoneClusterCapacity(
+        cluster_instance_name="r5d.4xlarge",
+        cluster_instance_count=Interval(low=4, mid=4, high=4, confidence=1),
+        cpu_utilization=Interval(low=10, mid=15, high=20, confidence=1),
+        memory_utilization_gib=certain_float(32.0),
+        disk_utilization_gib=certain_float(50),
+        network_utilization_mbps=certain_float(128.0),
+    )
+
+    _desires = CapacityDesires(
+        service_tier=1,
+        current_clusters=CurrentClusters(zonal=[_cluster_capacity]),
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(50_000),
+            estimated_write_per_second=certain_int(10_000),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=certain_int(500),
+        ),
+    )
+
+    def test_flag_off_uses_theoretical_working_set(self):
+        """With flag=False (default), memory_utilization_gib is ignored."""
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=self._desires,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
+        )
+
+        ctx = cap_plan[0].requirements.zonal[0].context
+        assert ctx["memory_utilization_gib"] is None
+        # Theoretical working set should be used
+        assert ctx["working_set"] == ctx["disk_slo_working_set"] or (
+            ctx["working_set"] == ctx["rps_working_set"]
+        )
+
+    def test_flag_on_uses_observed_working_set(self):
+        """With flag=True, observed memory_utilization_gib drives working set."""
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=self._desires,
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "experimental_memory_model": True,
+            },
+        )
+
+        ctx = cap_plan[0].requirements.zonal[0].context
+        assert ctx["memory_utilization_gib"] == 32.0
+        # r5d.4xlarge has 128 GiB RAM, memory_utilization=32 → page_cache=96
+        # disk_used_gib=50*4=200, data_per_node=50
+        # observed working set = min(1.0, 96/50) = 1.0
+        assert ctx["working_set"] > 0.9
+
+    def test_flag_defaults_to_false(self):
+        """Verify the flag defaults to False when not specified."""
+        from service_capacity_modeling.models.org.netflix.cassandra import (
+            NflxCassandraArguments,
+        )
+
+        args = NflxCassandraArguments.from_extra_model_arguments({})
+        assert args.experimental_memory_model is False
