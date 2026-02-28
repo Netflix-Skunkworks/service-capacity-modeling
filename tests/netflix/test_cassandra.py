@@ -636,14 +636,13 @@ class TestCassandraExtraModelArguments:
 class TestCassandraDownscale:
     """Test allow_horizontal_downscale flag."""
 
-    # Desire with current_clusters at 16 nodes/zone — the ceiling for downscale
+    # Oversized cluster for a tiny workload — downscale should suggest fewer nodes.
+    # 4 nodes/zone of r5d.xlarge is overkill for 1k reads + 1k writes on 10 GiB.
     _downscale_desire = CapacityDesires(
         service_tier=1,
         query_pattern=QueryPattern(
-            estimated_read_per_second=certain_int(100_000),
-            estimated_write_per_second=certain_int(100_000),
-            estimated_mean_read_latency_ms=certain_float(0.5),
-            estimated_mean_write_latency_ms=certain_float(0.4),
+            estimated_read_per_second=certain_int(1_000),
+            estimated_write_per_second=certain_int(1_000),
         ),
         data_shape=DataShape(
             estimated_state_size_gib=certain_int(10),
@@ -651,17 +650,17 @@ class TestCassandraDownscale:
         current_clusters=CurrentClusters(
             zonal=[
                 CurrentZoneClusterCapacity(
-                    cluster_instance_name="m5d.4xlarge",
-                    cluster_instance_count=certain_int(16),
-                    cpu_utilization=certain_float(20.0),
-                    network_utilization_mbps=certain_float(50),
+                    cluster_instance_name="r5d.xlarge",
+                    cluster_instance_count=certain_int(4),
+                    cpu_utilization=certain_float(5.0),
+                    network_utilization_mbps=certain_float(10),
                 ),
             ]
         ),
     )
 
     def test_allow_horizontal_downscale(self):
-        """With flag=True, model may return fewer nodes than current cluster."""
+        """With flag=True, model returns strictly fewer nodes than current cluster."""
         cap_plan = planner.plan_certain(
             model_name="org.netflix.cassandra",
             region="us-east-1",
@@ -673,7 +672,9 @@ class TestCassandraDownscale:
         )
         assert cap_plan, "Expected at least one plan with downscale enabled"
         result = cap_plan[0].candidate_clusters.zonal[0]
-        assert result.count <= 16
+        assert result.count < 4, (
+            f"Expected fewer than 4 nodes for tiny workload, got {result.count}"
+        )
 
     def test_downscale_disabled_by_default(self):
         """Without flag, required_cluster_size is an exact match."""
