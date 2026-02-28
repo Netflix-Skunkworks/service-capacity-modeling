@@ -286,7 +286,7 @@ scenarios.append(
         cassandra_timeseries_ebs,
         {
             "require_attached_disks": True,
-            "required_cluster_size": 64,
+            "experimental_memory_model": True,
         },
         "cassandra_timeseries_ebs",
     )
