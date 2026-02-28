@@ -421,7 +421,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     max_table_buffer_percent: float = 0.11,
     large_instance_regret: float = 0.2,
     different_family_regret: float = 0.10,
-    allow_horizontal_downscale: bool = False,
 ) -> Optional[CapacityPlan]:
     # Netflix Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 2 or instance.ram_gib <= 16:
@@ -576,12 +575,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     # topologies that match the desired zone size
     if required_cluster_size is not None and cluster.count != required_cluster_size:
         return None
-
-    # When downscaling is allowed, use the current cluster size as a ceiling.
-    # The planner can suggest fewer nodes but not more than today.
-    if allow_horizontal_downscale and current_cluster_size:
-        if cluster.count > current_cluster_size:
-            return None
 
     # Cassandra clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as
@@ -759,11 +752,11 @@ class NflxCassandraArguments(BaseModel):
         "0.15-0.20 for risk-averse clusters. Only applies when "
         "current_clusters is set. Set to 0 to disable.",
     )
-    allow_horizontal_downscale: bool = Field(
+    allow_horizontal_scaling: bool = Field(
         default=False,
-        description="When True and required_cluster_size is set, allow plans "
-        "with fewer nodes. The required size becomes a ceiling "
-        "instead of an exact match.",
+        description="When True, the planner is free to choose any cluster "
+        "size — it can scale up or down from the current topology. "
+        "Mutually exclusive with required_cluster_size.",
     )
 
     @classmethod
@@ -898,11 +891,10 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             )
         )
 
-        if args.allow_horizontal_downscale and required_cluster_size is not None:
+        if args.allow_horizontal_scaling and required_cluster_size is not None:
             raise ValueError(
-                "allow_horizontal_downscale and required_cluster_size are "
-                "mutually exclusive. Use allow_horizontal_downscale to derive "
-                "the ceiling from current_clusters instead."
+                "allow_horizontal_scaling and required_cluster_size are "
+                "mutually exclusive."
             )
 
         # Apply caps to buffer percentages
@@ -935,7 +927,6 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_table_buffer_percent=max_table_buffer_percent,
             large_instance_regret=args.large_instance_regret,
             different_family_regret=args.different_family_regret,
-            allow_horizontal_downscale=args.allow_horizontal_downscale,
         )
 
     @staticmethod

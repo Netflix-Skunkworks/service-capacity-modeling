@@ -633,12 +633,12 @@ class TestCassandraExtraModelArguments:
             )
 
 
-class TestCassandraDownscale:
-    """Test allow_horizontal_downscale flag."""
+class TestCassandraHorizontalScaling:
+    """Test allow_horizontal_scaling flag."""
 
-    # Oversized cluster for a tiny workload — downscale should suggest fewer nodes.
+    # Oversized cluster for a tiny workload — the planner should freely resize.
     # 4 nodes/zone of r5d.xlarge is overkill for 1k reads + 1k writes on 10 GiB.
-    _downscale_desire = CapacityDesires(
+    _scaling_desire = CapacityDesires(
         service_tier=1,
         query_pattern=QueryPattern(
             estimated_read_per_second=certain_int(1_000),
@@ -659,25 +659,26 @@ class TestCassandraDownscale:
         ),
     )
 
-    def test_allow_horizontal_downscale(self):
-        """With flag=True, model returns strictly fewer nodes than current cluster."""
+    def test_allow_horizontal_scaling(self):
+        """With flag=True, planner freely picks cluster size (not pinned to current)."""
         cap_plan = planner.plan_certain(
             model_name="org.netflix.cassandra",
             region="us-east-1",
-            desires=self._downscale_desire,
+            desires=self._scaling_desire,
             extra_model_arguments={
                 **EXTRA_MODEL_ARGS,
-                "allow_horizontal_downscale": True,
+                "allow_horizontal_scaling": True,
             },
         )
-        assert cap_plan, "Expected at least one plan with downscale enabled"
+        assert cap_plan, "Expected at least one plan with horizontal scaling"
         result = cap_plan[0].candidate_clusters.zonal[0]
+        # Tiny workload on 4 oversized nodes → planner should pick fewer
         assert result.count < 4, (
             f"Expected fewer than 4 nodes for tiny workload, got {result.count}"
         )
 
-    def test_downscale_disabled_by_default(self):
-        """Without flag, required_cluster_size is an exact match."""
+    def test_required_cluster_size_is_exact(self):
+        """Without flag, required_cluster_size pins to exact count."""
         cap_plan = planner.plan_certain(
             model_name="org.netflix.cassandra",
             region="us-east-1",
@@ -692,15 +693,15 @@ class TestCassandraDownscale:
         assert result.count == 64
 
     def test_mutual_exclusivity(self):
-        """Cannot set both allow_horizontal_downscale and required_cluster_size."""
+        """Cannot set both allow_horizontal_scaling and required_cluster_size."""
         with pytest.raises(ValueError, match="mutually exclusive"):
             planner.plan_certain(
                 model_name="org.netflix.cassandra",
                 region="us-east-1",
-                desires=self._downscale_desire,
+                desires=self._scaling_desire,
                 extra_model_arguments={
                     **EXTRA_MODEL_ARGS,
                     "required_cluster_size": 64,
-                    "allow_horizontal_downscale": True,
+                    "allow_horizontal_scaling": True,
                 },
             )
