@@ -736,3 +736,71 @@ class TestCassandraExtraModelArguments:
 
         args = NflxCassandraArguments.from_extra_model_arguments({})
         assert args.experimental_memory_model is False
+
+
+class TestCassandraConservativeFallback:
+    """Test conservative memory fallback (no memory_utilization_gib)."""
+
+    def test_conservative_fallback_no_memory_metric(self):
+        """Current cluster without memory metrics uses conservative estimate."""
+        desire = _make_memory_test_desire(
+            memory_utilization_gib=0,
+            disk_utilization_gib=500,
+            state_size_gib=300,
+            reads=10_000,
+            writes=50_000,
+        )
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desire,
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "required_cluster_size": 2,
+                "experimental_memory_model": True,
+            },
+        )
+
+        # Conservative: page_cache = RAM - heap - base (no memory_utilization)
+        # r5d.4xlarge has 128 GiB RAM → page_cache ≈ 96 GiB, disk=500 → ws≈0.19
+        ctx = cap_plan[0].requirements.zonal[0].context
+        assert ctx["memory_utilization_gib"] is None
+        assert 0.1 < ctx["working_set"] < 0.3
+
+    def test_conservative_fallback_large_state(self):
+        """Large-state cluster uses conservative estimate for reasonable sizing."""
+        cluster = CurrentZoneClusterCapacity(
+            cluster_instance_name="r6a.4xlarge",
+            cluster_instance_count=certain_int(16),
+            cpu_utilization=certain_float(15.0),
+            disk_utilization_gib=certain_float(3000),
+            network_utilization_mbps=certain_float(50),
+        )
+        desire = CapacityDesires(
+            service_tier=1,
+            current_clusters=CurrentClusters(zonal=[cluster] * 3),
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(60_000),
+                estimated_write_per_second=certain_int(170_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(10_000),
+                estimated_compression_ratio=certain_float(1.0),
+            ),
+        )
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desire,
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "experimental_memory_model": True,
+            },
+        )
+
+        assert cap_plan, "Conservative fallback should produce a plan"
+        ctx = cap_plan[0].requirements.zonal[0].context
+        # r6a.4xlarge: 122 GiB RAM, heap=30, base≈2 → page_cache≈90
+        # disk_per_node=3000 → ws ≈ 90/3000 ≈ 0.03
+        assert ctx["memory_utilization_gib"] is None
+        assert ctx["working_set"] < 0.1

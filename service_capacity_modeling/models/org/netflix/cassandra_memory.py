@@ -98,6 +98,22 @@ def estimate_memory_experimental(  # pylint: disable=too-many-positional-argumen
             )
         raw_disk_per_node = max(1, raw_disk_per_node)
         effective_ws = min(1.0, page_cache_per_node / raw_disk_per_node)
+    elif current_capacity and current_capacity.cluster_instance:
+        # Conservative: no memory metrics, but we know the instance type.
+        # Estimate page cache as RAM minus heap and base memory reserves.
+        reserve = _get_base_memory(desires) + _cass_heap(
+            current_capacity.cluster_instance.ram_gib
+        )
+        page_cache_per_node = max(
+            0, current_capacity.cluster_instance.ram_gib - reserve
+        )
+        raw_disk_per_node = current_capacity.disk_utilization_gib.mid
+        if raw_disk_per_node <= 0:
+            raw_disk_per_node = (
+                disk_used_gib / current_capacity.cluster_instance_count.mid
+            )
+        raw_disk_per_node = max(1, raw_disk_per_node)
+        effective_ws = min(1.0, page_cache_per_node / raw_disk_per_node)
     else:
         # Theoretical: from drive latency vs read SLO
         effective_ws = min(working_set, rps_working_set)
