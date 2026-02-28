@@ -631,3 +631,38 @@ class TestCassandraExtraModelArguments:
             NflxCassandraCapacityModel.get_required_cluster_size(
                 tier, extra_model_arguments
             )
+
+
+class TestCassandraDownscale:
+    """Test allow_horizontal_downscale flag."""
+
+    def test_allow_horizontal_downscale(self):
+        """With flag=True, model may return fewer nodes than required_cluster_size."""
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=small_but_high_qps,
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "required_cluster_size": 64,
+                "allow_horizontal_downscale": True,
+            },
+        )
+        assert cap_plan, "Expected at least one plan with downscale enabled"
+        result = cap_plan[0].candidate_clusters.zonal[0]
+        assert result.count <= 64
+
+    def test_downscale_disabled_by_default(self):
+        """Without flag, required_cluster_size is an exact match."""
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=small_but_high_qps,
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "required_cluster_size": 64,
+            },
+        )
+        assert cap_plan, "Expected a plan with required_cluster_size=64"
+        result = cap_plan[0].candidate_clusters.zonal[0]
+        assert result.count == 64
