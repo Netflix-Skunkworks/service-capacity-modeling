@@ -244,7 +244,7 @@ scenarios.append(
     )
 )
 
-# Cassandra timeseries — large EBS log-archival cluster.
+# Cassandra timeseries — large write-heavy EBS cluster.
 # Anonymized from a production cluster with ~200 TiB state, 64 nodes/zone.
 # Key: NO memory_utilization_gib — the legacy model must infer working set
 # from drive latency and read SLO alone, which overestimates memory needs
