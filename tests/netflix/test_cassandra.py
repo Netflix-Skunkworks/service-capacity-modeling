@@ -636,21 +636,44 @@ class TestCassandraExtraModelArguments:
 class TestCassandraDownscale:
     """Test allow_horizontal_downscale flag."""
 
+    # Desire with current_clusters at 16 nodes/zone — the ceiling for downscale
+    _downscale_desire = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(100_000),
+            estimated_write_per_second=certain_int(100_000),
+            estimated_mean_read_latency_ms=certain_float(0.5),
+            estimated_mean_write_latency_ms=certain_float(0.4),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=certain_int(10),
+        ),
+        current_clusters=CurrentClusters(
+            zonal=[
+                CurrentZoneClusterCapacity(
+                    cluster_instance_name="m5d.4xlarge",
+                    cluster_instance_count=certain_int(16),
+                    cpu_utilization=certain_float(20.0),
+                    network_utilization_mbps=certain_float(50),
+                ),
+            ]
+        ),
+    )
+
     def test_allow_horizontal_downscale(self):
-        """With flag=True, model may return fewer nodes than required_cluster_size."""
+        """With flag=True, model may return fewer nodes than current cluster."""
         cap_plan = planner.plan_certain(
             model_name="org.netflix.cassandra",
             region="us-east-1",
-            desires=small_but_high_qps,
+            desires=self._downscale_desire,
             extra_model_arguments={
                 **EXTRA_MODEL_ARGS,
-                "required_cluster_size": 64,
                 "allow_horizontal_downscale": True,
             },
         )
         assert cap_plan, "Expected at least one plan with downscale enabled"
         result = cap_plan[0].candidate_clusters.zonal[0]
-        assert result.count <= 64
+        assert result.count <= 16
 
     def test_downscale_disabled_by_default(self):
         """Without flag, required_cluster_size is an exact match."""
@@ -666,3 +689,17 @@ class TestCassandraDownscale:
         assert cap_plan, "Expected a plan with required_cluster_size=64"
         result = cap_plan[0].candidate_clusters.zonal[0]
         assert result.count == 64
+
+    def test_mutual_exclusivity(self):
+        """Cannot set both allow_horizontal_downscale and required_cluster_size."""
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            planner.plan_certain(
+                model_name="org.netflix.cassandra",
+                region="us-east-1",
+                desires=self._downscale_desire,
+                extra_model_arguments={
+                    **EXTRA_MODEL_ARGS,
+                    "required_cluster_size": 64,
+                    "allow_horizontal_downscale": True,
+                },
+            )

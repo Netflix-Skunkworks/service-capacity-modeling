@@ -120,13 +120,12 @@ def _get_disk_from_desires(desires: CapacityDesires, copies_per_region: int) -> 
     )
 
 
-def _get_min_count(  # pylint: disable=too-many-positional-arguments
+def _get_min_count(
     tier: int,
     required_cluster_size: Optional[int],
     needed_disk_gib: float,
     disk_per_node_gib: float,
     cluster_size_lambda: Callable[[int], int],
-    allow_horizontal_downscale: bool = False,
 ) -> int:
     """
     Compute the minimum number of nodes required for a zone.
@@ -159,12 +158,9 @@ def _get_min_count(  # pylint: disable=too-many-positional-arguments
     #     For example, if we need 4TiB of disk, and the max data per node is 1TiB,
     #     and the upstream requires >= 8 nodes, we can allocate 8 nodes because
     #     each node would only have 500GB of data.
-    effective_required = (
-        0 if allow_horizontal_downscale else (required_cluster_size or 0)
-    )
     min_count = max(
         min_nodes_for_tier,
-        effective_required,
+        required_cluster_size or 0,
         min_nodes_for_disk,
     )
     # Ensure that the min count is an increment of the cluster size constraint (doubling)
@@ -508,7 +504,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         needed_disk_gib=needed_disk_gib,
         disk_per_node_gib=disk_per_node_gib,
         cluster_size_lambda=cluster_size_lambda,
-        allow_horizontal_downscale=allow_horizontal_downscale,
     )
 
     base_mem = _get_base_memory(desires)
@@ -579,13 +574,14 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
 
     # Sometimes we don't want modify cluster topology, so only allow
     # topologies that match the desired zone size
-    if required_cluster_size is not None:
-        if allow_horizontal_downscale:
-            if cluster.count > required_cluster_size:
-                return None
-        else:
-            if cluster.count != required_cluster_size:
-                return None
+    if required_cluster_size is not None and cluster.count != required_cluster_size:
+        return None
+
+    # When downscaling is allowed, use the current cluster size as a ceiling.
+    # The planner can suggest fewer nodes but not more than today.
+    if allow_horizontal_downscale and current_cluster_size:
+        if cluster.count > current_cluster_size:
+            return None
 
     # Cassandra clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as
@@ -901,6 +897,13 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
                 desires.service_tier, extra_model_arguments
             )
         )
+
+        if args.allow_horizontal_downscale and required_cluster_size is not None:
+            raise ValueError(
+                "allow_horizontal_downscale and required_cluster_size are "
+                "mutually exclusive. Use allow_horizontal_downscale to derive "
+                "the ceiling from current_clusters instead."
+            )
 
         # Apply caps to buffer percentages
         max_write_buffer_percent = min(0.5, args.max_write_buffer_percent)
