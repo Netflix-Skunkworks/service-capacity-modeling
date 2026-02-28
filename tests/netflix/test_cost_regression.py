@@ -62,9 +62,7 @@ def load_baseline() -> dict[str, dict[str, Any]]:
         )
         content = baseline_file.read_text(encoding="utf-8")
         baselines = json.loads(content)
-        return {
-            b["scenario"]: b for b in baselines if "scenario" in b and "error" not in b
-        }
+        return {b["scenario"]: b for b in baselines if "scenario" in b}
     except FileNotFoundError:
         return {}
 
@@ -143,8 +141,6 @@ class TestBaselineDrift:
             )
 
         baseline = baseline_costs[scenario_name]
-        baseline_total = baseline["total_annual_cost"]
-        baseline_keys = set(baseline["annual_costs"].keys())
 
         # Inline plan_certain call for cleaner test
         cap_plans = planner.plan_certain(
@@ -154,6 +150,18 @@ class TestBaselineDrift:
             num_results=1,
             extra_model_arguments=scenario["extra_args"] or {},
         )
+
+        # Baseline records that intentionally produce no results (e.g. the
+        # legacy model cannot size very large archival clusters).
+        if "error" in baseline:
+            assert not cap_plans, (
+                f"Scenario '{scenario_name}' should produce no results per "
+                f"baseline, but got {len(cap_plans)} plan(s)."
+            )
+            return
+
+        baseline_total = baseline["total_annual_cost"]
+        baseline_keys = set(baseline["annual_costs"].keys())
 
         assert cap_plans, f"No capacity plans generated for {scenario_name}"
         cap_plan = cap_plans[0]
