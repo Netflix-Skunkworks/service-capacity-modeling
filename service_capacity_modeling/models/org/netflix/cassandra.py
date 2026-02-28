@@ -910,6 +910,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_rps_to_disk=args.max_rps_to_disk,
             max_regional_size=args.max_regional_size,
             max_local_data_per_node_gib=args.max_local_data_per_node_gib,
+            max_attached_data_per_node_gib=args.max_attached_data_per_node_gib,
             max_write_buffer_percent=max_write_buffer_percent,
             max_table_buffer_percent=max_table_buffer_percent,
             large_instance_regret=args.large_instance_regret,

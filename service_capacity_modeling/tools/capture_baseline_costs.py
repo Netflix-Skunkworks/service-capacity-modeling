@@ -21,6 +21,8 @@ from service_capacity_modeling.interface import (
     certain_int,
     ClusterCapacity,
     Consistency,
+    CurrentClusters,
+    CurrentZoneClusterCapacity,
     DataShape,
     GlobalConsistency,
     Interval,
@@ -239,6 +241,54 @@ scenarios.append(
         cassandra_vertical_baseline,
         {"require_local_disks": False},
         "cassandra_vertical_baseline",
+    )
+)
+
+# Cassandra timeseries — large write-heavy EBS cluster.
+# Anonymized from a production cluster with ~200 TiB state, 64 nodes/zone.
+# Key: NO memory_utilization_gib — the legacy model must infer working set
+# from drive latency and read SLO alone, which overestimates memory needs
+# and produces zero results for large archival clusters.
+cassandra_timeseries_ebs = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=Interval(
+            low=120_000, mid=240_000, high=480_000, confidence=0.98
+        ),
+        estimated_write_per_second=Interval(
+            low=340_000, mid=680_000, high=1_000_000, confidence=0.98
+        ),
+    ),
+    data_shape=DataShape(
+        estimated_state_size_gib=Interval(
+            low=180_000, mid=200_000, high=220_000, confidence=0.98
+        ),
+        estimated_compression_ratio=certain_float(1.0),
+    ),
+    current_clusters=CurrentClusters(
+        zonal=[
+            CurrentZoneClusterCapacity(
+                cluster_instance_name="r6a.4xlarge",
+                cluster_instance_count=certain_int(64),
+                cpu_utilization=Interval(low=5, mid=15, high=45, confidence=1),
+                disk_utilization_gib=certain_float(3000),
+                network_utilization_mbps=certain_float(50),
+            ),
+        ]
+        * 3
+    ),
+)
+
+scenarios.append(
+    (
+        "org.netflix.cassandra",
+        "us-east-1",
+        cassandra_timeseries_ebs,
+        {
+            "require_attached_disks": True,
+            "required_cluster_size": 64,
+        },
+        "cassandra_timeseries_ebs",
     )
 )
 

@@ -283,6 +283,10 @@
     "total_annual_cost": 98274.04
   },
   {
+    "error": "No capacity plans generated",
+    "scenario": "cassandra_timeseries_ebs"
+  },
+  {
     "annual_costs": {
       "kafka.zonal-clusters": 13494.059999999998
     },
