@@ -53,12 +53,6 @@ from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
 from service_capacity_modeling.models.common import zonal_requirements_from_current
-from service_capacity_modeling.models.org.netflix.cassandra_memory import (
-    _get_base_memory,
-    _cass_heap,
-    estimate_memory_experimental,
-    estimate_memory_legacy,
-)
 from service_capacity_modeling.models.utils import is_power_of_2
 from service_capacity_modeling.models.utils import next_doubling
 from service_capacity_modeling.models.utils import next_power_of_2
@@ -202,7 +196,6 @@ def _zonal_requirement_for_new_cluster(
 
 # pylint: disable=too-many-locals
 # pylint: disable=too-many-positional-arguments
-# pylint: disable=too-many-statements
 def _estimate_cassandra_requirement(
     instance: Instance,
     desires: CapacityDesires,
@@ -211,12 +204,12 @@ def _estimate_cassandra_requirement(
     max_rps_to_disk: int,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
-    experimental_memory_model: bool = False,
 ) -> CapacityRequirement:
     # Input: regional desires → Output: zonal requirement
     disk_buffer = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     )
+    memory_preserve = False
     reference_shape = desires.reference_shape
     current_capacity = _get_current_capacity(desires)
 
@@ -236,6 +229,9 @@ def _estimate_cassandra_requirement(
             * current_capacity.cluster_instance_count.mid
             * disk_derived_buffer.scale
         )
+        memory_preserve = DerivedBuffers.for_components(
+            desires.buffers.derived, [BufferComponent.memory]
+        ).preserve
     else:
         # If the cluster is not yet provisioned
         capacity_requirement = _zonal_requirement_for_new_cluster(
@@ -287,28 +283,26 @@ def _estimate_cassandra_requirement(
             flushes_before_compaction=min_threshold,
         )
 
-    # Compute effective working set and memory requirement.
-    if experimental_memory_model:
-        mem = estimate_memory_experimental(
-            current_capacity=current_capacity,
-            working_set=working_set,
-            rps_working_set=rps_working_set,
-            disk_used_gib=disk_used_gib,
-            desires=desires,
-            write_buffer_gib=write_buffer_gib,
+    if current_capacity and current_capacity.cluster_instance and memory_preserve:
+        # remove base memory and heap from per node ram and then
+        # multiply by number of nodes in a zone to compute the zonal requirement.
+        reserve_memory = _get_base_memory(desires) + _cass_heap(
+            current_capacity.cluster_instance.ram_gib
         )
+        needed_memory = (
+            current_capacity.cluster_instance.ram_gib - reserve_memory
+        ) * current_capacity.cluster_instance_count.mid
+        write_buffer_gib = 0
     else:
-        mem = estimate_memory_legacy(
-            working_set=working_set,
-            rps_working_set=rps_working_set,
-            disk_used_gib=disk_used_gib,
-            zones_per_region=zones_per_region,
-            write_buffer_gib=write_buffer_gib,
+        # If disk RPS will be smaller than our target because there are no
+        # reads, we don't need to hold as much data in memory.
+        # For c*, we can skip memory buffer and can just keep using the heap and write buffer calc
+        # Eventually we'll want to phrase those heap, read cache, and write cache as buffers
+        needed_memory = (
+            min(working_set, rps_working_set) * disk_used_gib * zones_per_region
         )
-    effective_working_set = mem.effective_working_set
-    needed_memory = mem.needed_memory_gib
-    memory_utilization_gib = mem.memory_utilization_gib
-    write_buffer_gib = mem.write_buffer_gib
+        # Now convert to per zone
+        needed_memory = max(1, int(needed_memory // zones_per_region))
 
     logger.debug(
         "Need (cpu, mem, disk, working) = (%s, %s, %s, %f)",
@@ -326,7 +320,7 @@ def _estimate_cassandra_requirement(
         disk_gib=certain_float(needed_disk),
         network_mbps=certain_float(needed_network_mbps),
         context={
-            "working_set": effective_working_set,
+            "working_set": min(working_set, rps_working_set),
             "rps_working_set": rps_working_set,
             "disk_slo_working_set": working_set,
             "replication_factor": copies_per_region,
@@ -336,7 +330,6 @@ def _estimate_cassandra_requirement(
             "read_per_second": reads_per_second,
             "write_buffer_gib": write_buffer_gib,
             "min_threshold": min_threshold,
-            "memory_utilization_gib": memory_utilization_gib,
         },
     )
 
@@ -428,7 +421,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     max_table_buffer_percent: float = 0.11,
     large_instance_regret: float = 0.2,
     different_family_regret: float = 0.10,
-    experimental_memory_model: bool = False,
 ) -> Optional[CapacityPlan]:
     # Netflix Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 2 or instance.ram_gib <= 16:
@@ -486,7 +478,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         max_rps_to_disk=max_rps_to_disk,
         zones_per_region=zones_per_region,
         copies_per_region=copies_per_region,
-        experimental_memory_model=experimental_memory_model,
     )
 
     # Adjust the min count to adjust to prevent too much data on a single
@@ -642,6 +633,13 @@ def _cass_io_per_read(node_size_gib: float, sstable_size_mb: int = 160) -> int:
     return 2 * levels
 
 
+def _get_base_memory(desires: CapacityDesires) -> float:
+    return (
+        desires.data_shape.reserved_instance_app_mem_gib
+        + desires.data_shape.reserved_instance_system_mem_gib
+    )
+
+
 def _cass_heap_for_write_buffer(
     instance: Instance,
     write_buffer_gib: float,
@@ -656,6 +654,15 @@ def _cass_heap_for_write_buffer(
         return lambda x: _cass_heap(x, max_heap_gib=30)
     else:
         return _cass_heap
+
+
+# C* follows the following formula for calculating heap
+def _cass_heap(node_memory_gib: float, max_heap_gib: float = 30) -> float:
+    # OSS Cassandra does this
+    # max(min(node_memory_gib // 2, 4), min(node_memory_gib // 4, max_heap_gib))
+
+    # Netflix Cassandra does this
+    return min(max(4, node_memory_gib // 2), max_heap_gib)
 
 
 def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
@@ -744,12 +751,6 @@ class NflxCassandraArguments(BaseModel):
         "months) against locking in suboptimal families. Increase to "
         "0.15-0.20 for risk-averse clusters. Only applies when "
         "current_clusters is set. Set to 0 to disable.",
-    )
-    experimental_memory_model: bool = Field(
-        default=False,
-        description="Enable experimental memory model. When True, derives working "
-        "set from observed memory utilization instead of theoretical disk/SLO estimate. "
-        "When False (default), uses the legacy memory sizing approach.",
     )
 
     @classmethod
@@ -914,7 +915,6 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_table_buffer_percent=max_table_buffer_percent,
             large_instance_regret=args.large_instance_regret,
             different_family_regret=args.different_family_regret,
-            experimental_memory_model=args.experimental_memory_model,
         )
 
     @staticmethod
