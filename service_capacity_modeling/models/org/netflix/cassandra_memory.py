@@ -79,34 +79,22 @@ def estimate_memory_experimental(  # pylint: disable=too-many-positional-argumen
         else None
     )
 
-    if (
-        memory_utilization_gib is not None
-        and current_capacity is not None
-        and current_capacity.cluster_instance
-    ):
-        # Observed: derive working set from actual cluster memory usage.
-        # Prefer raw disk utilization (not buffer-scaled) so the observed
-        # page cache ratio isn't distorted by buffer policy. Fall back to
-        # estimated disk per node when disk utilization isn't reported.
-        page_cache_per_node = max(
-            0, current_capacity.cluster_instance.ram_gib - memory_utilization_gib
-        )
-        raw_disk_per_node = current_capacity.disk_utilization_gib.mid
-        if raw_disk_per_node <= 0:
-            raw_disk_per_node = (
-                disk_used_gib / current_capacity.cluster_instance_count.mid
+    if current_capacity and current_capacity.cluster_instance:
+        if memory_utilization_gib is not None:
+            # Observed: page cache = RAM minus non-cache usage
+            page_cache_per_node = max(
+                0,
+                current_capacity.cluster_instance.ram_gib - memory_utilization_gib,
             )
-        raw_disk_per_node = max(1, raw_disk_per_node)
-        effective_ws = min(1.0, page_cache_per_node / raw_disk_per_node)
-    elif current_capacity and current_capacity.cluster_instance:
-        # Conservative: no memory metrics, but we know the instance type.
-        # Estimate page cache as RAM minus heap and base memory reserves.
-        reserve = _get_base_memory(desires) + _cass_heap(
-            current_capacity.cluster_instance.ram_gib
-        )
-        page_cache_per_node = max(
-            0, current_capacity.cluster_instance.ram_gib - reserve
-        )
+        else:
+            # Conservative: page cache = RAM minus heap and base reserves
+            reserve = _get_base_memory(desires) + _cass_heap(
+                current_capacity.cluster_instance.ram_gib
+            )
+            page_cache_per_node = max(
+                0, current_capacity.cluster_instance.ram_gib - reserve
+            )
+        # Derive working set from page cache / disk ratio
         raw_disk_per_node = current_capacity.disk_utilization_gib.mid
         if raw_disk_per_node <= 0:
             raw_disk_per_node = (

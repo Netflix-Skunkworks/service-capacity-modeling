@@ -54,6 +54,8 @@ from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
 from service_capacity_modeling.models.common import zonal_requirements_from_current
 from service_capacity_modeling.models.org.netflix.cassandra_memory import (
+    _get_base_memory,
+    _cass_heap,
     estimate_memory_experimental,
     estimate_memory_legacy,
 )
@@ -640,13 +642,6 @@ def _cass_io_per_read(node_size_gib: float, sstable_size_mb: int = 160) -> int:
     return 2 * levels
 
 
-def _get_base_memory(desires: CapacityDesires) -> float:
-    return (
-        desires.data_shape.reserved_instance_app_mem_gib
-        + desires.data_shape.reserved_instance_system_mem_gib
-    )
-
-
 def _cass_heap_for_write_buffer(
     instance: Instance,
     write_buffer_gib: float,
@@ -661,15 +656,6 @@ def _cass_heap_for_write_buffer(
         return lambda x: _cass_heap(x, max_heap_gib=30)
     else:
         return _cass_heap
-
-
-# C* follows the following formula for calculating heap
-def _cass_heap(node_memory_gib: float, max_heap_gib: float = 30) -> float:
-    # OSS Cassandra does this
-    # max(min(node_memory_gib // 2, 4), min(node_memory_gib // 4, max_heap_gib))
-
-    # Netflix Cassandra does this
-    return min(max(4, node_memory_gib // 2), max_heap_gib)
 
 
 def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
@@ -761,10 +747,8 @@ class NflxCassandraArguments(BaseModel):
     )
     experimental_memory_model: bool = Field(
         default=False,
-        description="Enable experimental memory model. When True: "
-        "(1) derives working set from observed memory utilization, "
-        "(2) treats EBS page cache as soft CPU cost instead of hard memory gate, "
-        "(3) applies cache_skew_factor for non-uniform access patterns. "
+        description="Enable experimental memory model. When True, derives working "
+        "set from observed memory utilization instead of theoretical disk/SLO estimate. "
         "When False (default), uses the legacy memory sizing approach.",
     )
 
