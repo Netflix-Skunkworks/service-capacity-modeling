@@ -244,24 +244,23 @@ scenarios.append(
     )
 )
 
-# Cassandra timeseries — large write-heavy EBS cluster.
-# Anonymized from a production cluster with ~200 TiB state, 64 nodes/zone.
-# Key: NO memory_utilization_gib — the legacy model must infer working set
-# from drive latency and read SLO alone, which overestimates memory needs
-# and produces zero results for large archival clusters.
+# Cassandra timeseries — write-heavy EBS cluster.
+# Anonymized from a production cluster. The experimental memory model's
+# page cache cap estimates working set from min(page_cache, 32 GiB) / disk,
+# producing a ~1% working set instead of the legacy ~30%.
 cassandra_timeseries_ebs = CapacityDesires(
     service_tier=1,
     query_pattern=QueryPattern(
         estimated_read_per_second=Interval(
-            low=120_000, mid=240_000, high=480_000, confidence=0.98
+            low=30_000, mid=60_000, high=120_000, confidence=0.98
         ),
         estimated_write_per_second=Interval(
-            low=340_000, mid=680_000, high=1_000_000, confidence=0.98
+            low=85_000, mid=170_000, high=250_000, confidence=0.98
         ),
     ),
     data_shape=DataShape(
         estimated_state_size_gib=Interval(
-            low=180_000, mid=200_000, high=220_000, confidence=0.98
+            low=50_000, mid=55_000, high=60_000, confidence=0.98
         ),
         estimated_compression_ratio=certain_float(1.0),
     ),
@@ -269,7 +268,7 @@ cassandra_timeseries_ebs = CapacityDesires(
         zonal=[
             CurrentZoneClusterCapacity(
                 cluster_instance_name="r6a.4xlarge",
-                cluster_instance_count=certain_int(64),
+                cluster_instance_count=certain_int(16),
                 cpu_utilization=Interval(low=5, mid=15, high=45, confidence=1),
                 disk_utilization_gib=certain_float(3000),
                 network_utilization_mbps=certain_float(50),
@@ -285,8 +284,10 @@ scenarios.append(
         "us-east-1",
         cassandra_timeseries_ebs,
         {
+            "require_local_disks": False,
             "require_attached_disks": True,
-            "required_cluster_size": 64,
+            "experimental_memory_model": True,
+            "max_attached_data_per_node_gib": 4096,
         },
         "cassandra_timeseries_ebs",
     )
