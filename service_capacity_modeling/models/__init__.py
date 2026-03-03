@@ -24,6 +24,11 @@ from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import ServiceCapacity
 
+# Shared constant for rank penalty metadata in cluster_params.
+# Models store penalties as {"penalty_name": coefficient} dicts under this key.
+# Used by both capacity_plan() (to inflate rank) and regret() (to add named regret).
+RANK_PENALTIES: str = "rank_penalties"
+
 __all__ = [
     "AccessConsistency",
     "AccessPattern",
@@ -42,6 +47,7 @@ __all__ = [
     "RegionContext",
     "CapacityModel",
     "CostAwareModel",
+    "RANK_PENALTIES",
 ]
 
 __common_regrets__ = frozenset(("spend", "disk", "mem"))
@@ -121,15 +127,26 @@ class CostAwareModel:
             f"service_costs() must be implemented by {service_type} model"
         )
 
-    @staticmethod
+    @classmethod
     def cluster_costs(
+        cls,
         service_type: str,
         zonal_clusters: Sequence["ClusterCapacity"] = (),
         regional_clusters: Sequence["ClusterCapacity"] = (),
     ) -> Dict[str, float]:
-        """Calculate cluster infrastructure costs (instances, drives)."""
-        raise NotImplementedError(
-            f"cluster_costs() must be implemented by {service_type} model"
+        """Calculate cluster infrastructure costs (instances, drives).
+
+        Default implementation delegates to cluster_infra_cost() filtered
+        by cls.cluster_type.  Models with custom cost logic (e.g. different
+        service_type, extra cost components) should override this.
+        """
+        from service_capacity_modeling.models.common import cluster_infra_cost
+
+        return cluster_infra_cost(
+            service_type,
+            zonal_clusters,
+            regional_clusters,
+            cluster_type=cls.cluster_type,
         )
 
 

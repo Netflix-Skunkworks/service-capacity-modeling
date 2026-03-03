@@ -6,7 +6,6 @@ from typing import Callable
 from typing import Dict
 from typing import List
 from typing import Optional
-from typing import Sequence
 from typing import Set
 
 from pydantic import BaseModel
@@ -23,7 +22,6 @@ from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
-from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import CurrentClusterCapacity
@@ -40,8 +38,8 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
+from service_capacity_modeling.models import RANK_PENALTIES
 from service_capacity_modeling.models.common import buffer_for_components
-from service_capacity_modeling.models.common import cluster_infra_cost
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import DerivedBuffers
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
@@ -361,11 +359,6 @@ def _get_cluster_size_lambda(
         return lambda x: next_doubling(x, base=current_cluster_size)
     else:  # New provisionings
         return next_power_of_2
-
-
-# TODO: If more models adopt rank_penalties, consider promoting this to a
-# typed field on ZoneClusterCapacity instead of using cluster_params.
-RANK_PENALTIES: str = "rank_penalties"
 
 
 def _compute_penalties(
@@ -850,19 +843,6 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
                 )
 
         return services
-
-    @staticmethod
-    def cluster_costs(
-        service_type: str,
-        zonal_clusters: Sequence[ClusterCapacity] = (),
-        regional_clusters: Sequence[ClusterCapacity] = (),
-    ) -> Dict[str, float]:
-        return cluster_infra_cost(
-            service_type,
-            zonal_clusters,
-            regional_clusters,
-            cluster_type=NflxCassandraCapacityModel.cluster_type,
-        )
 
     @staticmethod
     def capacity_plan(
