@@ -3,6 +3,10 @@
 import pytest
 
 from service_capacity_modeling.interface import (
+    Buffer,
+    BufferComponent,
+    BufferIntent,
+    Buffers,
     CapacityDesires,
     CurrentZoneClusterCapacity,
     DataShape,
@@ -11,10 +15,9 @@ from service_capacity_modeling.interface import (
     certain_float,
     certain_int,
 )
-from service_capacity_modeling.models.org.netflix.cassandra import (
-    NflxCassandraArguments,
-)
 from service_capacity_modeling.models.org.netflix.cassandra_memory import (
+    _cass_heap,
+    _get_base_memory,
     estimate_memory_experimental,
 )
 
@@ -56,7 +59,6 @@ def _make_current_capacity(
     ram_gib: float = 128.0,
     instance_count: int = 12,
     disk_util_gib: float = 200.0,
-    memory_util_gib: float = 0.0,
     cpu: int = 32,
 ) -> CurrentZoneClusterCapacity:
     return CurrentZoneClusterCapacity(
@@ -69,87 +71,97 @@ def _make_current_capacity(
         cluster_instance_count=certain_float(instance_count),
         cpu_utilization=certain_float(0.3),
         disk_utilization_gib=certain_float(disk_util_gib),
-        memory_utilization_gib=certain_float(memory_util_gib),
     )
 
 
-class TestCurrentCapacityMemoryUtil:
-    """When current_capacity has memory_utilization_gib, use it directly."""
+# 128 GiB: heap=30, base=3, raw_page_cache=95
+# 32 GiB: heap=16, base=3, raw_page_cache=13
+@pytest.mark.parametrize(
+    "ram_gib, disk_util, cap, expected_ws",
+    [
+        (128.0, 200.0, 32.0, 32.0 / 200.0),  # capped: 95 → 32
+        (32.0, 100.0, 32.0, 13.0 / 100.0),  # below cap: stays 13
+        (128.0, 200.0, 64.0, 64.0 / 200.0),  # custom cap: 95 → 64
+        (128.0, 200.0, 0, 95.0 / 200.0),  # cap=0 disables: full 95
+    ],
+    ids=["capped", "below_cap", "custom_cap", "cap_disabled"],
+)
+def test_page_cache_cap(ram_gib, disk_util, cap, expected_ws):
+    desires = _make_desires()
+    current = _make_current_capacity(ram_gib=ram_gib, disk_util_gib=disk_util)
 
-    def test_no_args_uses_current_capacity(self):
-        """args=None → fallback to current_capacity."""
-        desires = _make_desires()
-        current = _make_current_capacity(memory_util_gib=20.0)
+    result = estimate_memory_experimental(
+        current_capacity=current,
+        working_set=0.5,
+        rps_working_set=0.4,
+        disk_used_gib=1000.0,
+        desires=desires,
+        write_buffer_gib=2.0,
+        max_page_cache_gib=cap,
+    )
 
-        result = estimate_memory_experimental(
-            current_capacity=current,
-            working_set=0.5,
-            rps_working_set=0.4,
-            disk_used_gib=1000.0,
-            desires=desires,
-            write_buffer_gib=2.0,
-            args=None,
-        )
-
-        assert result.memory_utilization_gib == pytest.approx(20.0)
-
-    def test_args_present_uses_current_capacity(self):
-        """Args present → still uses current_capacity.memory_utilization_gib."""
-        args = NflxCassandraArguments(experimental_memory_model=True)
-        desires = _make_desires()
-        current = _make_current_capacity(memory_util_gib=22.0)
-
-        result = estimate_memory_experimental(
-            current_capacity=current,
-            working_set=0.5,
-            rps_working_set=0.4,
-            disk_used_gib=1000.0,
-            desires=desires,
-            write_buffer_gib=2.0,
-            args=args,
-        )
-
-        assert result.memory_utilization_gib == pytest.approx(22.0)
+    assert result.effective_working_set == pytest.approx(expected_ws)
 
 
-class TestTheoreticalFallback:
-    """When current_capacity memory_util is unavailable → theoretical working set."""
+def test_no_current_capacity_uses_theoretical():
+    desires = _make_desires()
 
-    def test_no_current_capacity(self):
-        """No cluster data → theoretical working set."""
-        args = NflxCassandraArguments(experimental_memory_model=True)
-        desires = _make_desires()
+    result = estimate_memory_experimental(
+        current_capacity=None,
+        working_set=0.5,
+        rps_working_set=0.4,
+        disk_used_gib=500.0,
+        desires=desires,
+        write_buffer_gib=1.0,
+    )
 
-        result = estimate_memory_experimental(
-            current_capacity=None,
-            working_set=0.5,
-            rps_working_set=0.4,
-            disk_used_gib=500.0,
-            desires=desires,
-            write_buffer_gib=1.0,
-            args=args,
-        )
+    assert result.effective_working_set == pytest.approx(0.4)
+    assert result.needed_memory_gib == 200
 
-        # memory_utilization_gib is None (no data to derive it)
-        assert result.memory_utilization_gib is None
-        # effective_working_set = min(0.5, 0.4) = 0.4
-        assert result.effective_working_set == pytest.approx(0.4)
 
-    def test_current_capacity_zero_memory_util(self):
-        """Current capacity exists but memory_util=0 → conservative."""
-        args = NflxCassandraArguments(experimental_memory_model=True)
-        desires = _make_desires()
-        current = _make_current_capacity(memory_util_gib=0.0)
+def test_write_buffer_passthrough():
+    desires = _make_desires()
+    current = _make_current_capacity()
 
-        result = estimate_memory_experimental(
-            current_capacity=current,
-            working_set=0.5,
-            rps_working_set=0.4,
-            disk_used_gib=1000.0,
-            desires=desires,
-            write_buffer_gib=2.0,
-            args=args,
-        )
+    result = estimate_memory_experimental(
+        current_capacity=current,
+        working_set=0.5,
+        rps_working_set=0.4,
+        disk_used_gib=1000.0,
+        desires=desires,
+        write_buffer_gib=5.0,
+    )
 
-        # memory_utilization_gib is None (was 0, treated as unavailable)
-        assert result.memory_utilization_gib is None
+    assert result.write_buffer_gib == 5.0
+
+
+def test_preserve_buffer_keeps_existing_memory():
+    """Memory preserve buffer returns current cluster's total page cache."""
+    desires = _make_desires(
+        buffers=Buffers(
+            derived={
+                "memory": Buffer(
+                    intent=BufferIntent.preserve,
+                    components=[BufferComponent.memory],
+                )
+            }
+        ),
+    )
+    # 128 GiB RAM, heap=30, base=3 → page_cache_per_node=95
+    # 12 instances → total page cache = 95 * 12 = 1140
+    current = _make_current_capacity()
+
+    result = estimate_memory_experimental(
+        current_capacity=current,
+        working_set=0.5,
+        rps_working_set=0.4,
+        disk_used_gib=1000.0,
+        desires=desires,
+        write_buffer_gib=5.0,
+    )
+
+    base = _get_base_memory(desires)
+    heap = _cass_heap(128.0)
+    expected = (128.0 - heap - base) * 12
+    assert result.needed_memory_gib == pytest.approx(expected)
+    assert result.write_buffer_gib == 0

@@ -2,12 +2,12 @@
 
 Provides two strategies for estimating memory requirements:
 - Legacy: theoretical working set from drive latency and read SLO
-- Experimental: observed working set from memory_utilization_gib metrics
+- Experimental: page-cache-capped working set with configurable max
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -17,11 +17,6 @@ from service_capacity_modeling.interface import (
     CurrentClusterCapacity,
 )
 from service_capacity_modeling.models.common import DerivedBuffers
-
-if TYPE_CHECKING:
-    from service_capacity_modeling.models.org.netflix.cassandra import (
-        NflxCassandraArguments,
-    )
 
 
 def _get_base_memory(desires: CapacityDesires) -> float:
@@ -41,7 +36,6 @@ class MemoryEstimate(BaseModel):
 
     effective_working_set: float
     needed_memory_gib: float
-    memory_utilization_gib: Optional[float] = None
     write_buffer_gib: float
 
 
@@ -59,12 +53,10 @@ def estimate_memory_legacy(
     return MemoryEstimate(
         effective_working_set=effective_ws,
         needed_memory_gib=needed,
-        memory_utilization_gib=None,
         write_buffer_gib=write_buffer_gib,
     )
 
 
-# pylint: disable-next=too-many-branches
 def estimate_memory_experimental(  # pylint: disable=too-many-positional-arguments
     current_capacity: Optional[CurrentClusterCapacity],
     working_set: float,
@@ -72,41 +64,33 @@ def estimate_memory_experimental(  # pylint: disable=too-many-positional-argumen
     disk_used_gib: float,
     desires: CapacityDesires,
     write_buffer_gib: float,
-    args: NflxCassandraArguments | None = None,
+    max_page_cache_gib: float = 32.0,
 ) -> MemoryEstimate:
-    """Experimental: observed working set + DerivedBuffers for memory.
+    """Experimental: page-cache-capped working set.
 
-    memory_utilization_gib represents non-page-cache memory per node
-    (JVM heap + OS buffers + write buffers). Source: antigravity-cass.
-    page_cache = instance_RAM - memory_utilization_gib
+    Computes page cache per node as RAM - heap - base_reserves, then caps it
+    at max_page_cache_gib (0 or negative disables the cap).  The cap prevents
+    large-RAM instances from inflating the working-set estimate for workloads
+    that don't benefit from extra cache (e.g. write-heavy timeseries).
 
-    Use memory_utilization_gib from current_capacity when available.
-    Flat _cass_heap() is used for the conservative path (no memory metric).
+    Honors memory preserve buffers: when set, keeps the current cluster's
+    total page cache as the memory requirement and zeros write_buffer_gib.
+
+    When no current capacity is available, falls back to the theoretical
+    working set (same as legacy).
     """
-    memory_utilization_gib: Optional[float] = (
-        current_capacity.memory_utilization_gib.mid
-        if current_capacity
-        and current_capacity.cluster_instance
-        and current_capacity.memory_utilization_gib.mid > 0
-        else None
-    )
-
     if current_capacity and current_capacity.cluster_instance:
-        if memory_utilization_gib is not None:
-            # Observed: page cache = RAM minus non-cache usage
-            page_cache_per_node = max(
-                0,
-                current_capacity.cluster_instance.ram_gib - memory_utilization_gib,
-            )
-        else:
-            # Conservative: page cache = RAM minus heap and base reserves
-            reserve = _get_base_memory(desires) + _cass_heap(
-                current_capacity.cluster_instance.ram_gib
-            )
-            page_cache_per_node = max(
-                0, current_capacity.cluster_instance.ram_gib - reserve
-            )
-        # Derive working set from page cache / disk ratio
+        reserve = _get_base_memory(desires) + _cass_heap(
+            current_capacity.cluster_instance.ram_gib
+        )
+        page_cache_per_node = max(
+            0, current_capacity.cluster_instance.ram_gib - reserve
+        )
+        # Apply the cap (0 or negative disables it)
+        if max_page_cache_gib > 0:
+            page_cache_per_node = min(page_cache_per_node, max_page_cache_gib)
+
+        # Derive working set from capped page cache / disk ratio
         raw_disk_per_node = current_capacity.disk_utilization_gib.mid
         if raw_disk_per_node <= 0:
             raw_disk_per_node = (
@@ -118,33 +102,27 @@ def estimate_memory_experimental(  # pylint: disable=too-many-positional-argumen
         # Theoretical: from drive latency vs read SLO
         effective_ws = min(working_set, rps_working_set)
 
-    # Base memory need from working set (per-zone)
-    base_needed_memory = max(1, int(effective_ws * disk_used_gib))
+    needed_memory: float = max(1, int(effective_ws * disk_used_gib))
 
-    # Apply memory buffer policy via DerivedBuffers (handles preserve,
-    # scale_up, scale_down) — same pattern as CPU and disk.
+    # Honor memory preserve buffer: keep current cluster's total page cache
     memory_derived = DerivedBuffers.for_components(
         desires.buffers.derived, [BufferComponent.memory]
     )
-    if current_capacity and current_capacity.cluster_instance:
+    if (
+        memory_derived.preserve
+        and current_capacity
+        and current_capacity.cluster_instance
+    ):
         reserve_memory = _get_base_memory(desires) + _cass_heap(
             current_capacity.cluster_instance.ram_gib
         )
-        existing_page_cache = (
+        needed_memory = (
             current_capacity.cluster_instance.ram_gib - reserve_memory
         ) * current_capacity.cluster_instance_count.mid
-        needed_memory = memory_derived.calculate_requirement(
-            current_usage=base_needed_memory,
-            existing_capacity=existing_page_cache,
-        )
-        if memory_derived.preserve:
-            write_buffer_gib = 0
-    else:
-        needed_memory = base_needed_memory
+        write_buffer_gib = 0
 
     return MemoryEstimate(
         effective_working_set=effective_ws,
         needed_memory_gib=needed_memory,
-        memory_utilization_gib=memory_utilization_gib,
         write_buffer_gib=write_buffer_gib,
     )

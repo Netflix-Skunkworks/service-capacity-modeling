@@ -210,7 +210,7 @@ def _estimate_cassandra_requirement(
     zones_per_region: int = 3,
     copies_per_region: int = 3,
     experimental_memory_model: bool = False,
-    args: Optional["NflxCassandraArguments"] = None,
+    max_page_cache_gib: float = 32.0,
 ) -> CapacityRequirement:
     # Input: regional desires → Output: zonal requirement
     disk_buffer = buffer_for_components(
@@ -295,7 +295,7 @@ def _estimate_cassandra_requirement(
             disk_used_gib=disk_used_gib,
             desires=desires,
             write_buffer_gib=write_buffer_gib,
-            args=args,
+            max_page_cache_gib=max_page_cache_gib,
         )
     else:
         mem = estimate_memory_legacy(
@@ -307,7 +307,6 @@ def _estimate_cassandra_requirement(
         )
     effective_working_set = mem.effective_working_set
     needed_memory = mem.needed_memory_gib
-    memory_utilization_gib = mem.memory_utilization_gib
     write_buffer_gib = mem.write_buffer_gib
 
     logger.debug(
@@ -336,7 +335,6 @@ def _estimate_cassandra_requirement(
             "read_per_second": reads_per_second,
             "write_buffer_gib": write_buffer_gib,
             "min_threshold": min_threshold,
-            "memory_utilization_gib": memory_utilization_gib,
         },
     )
 
@@ -424,7 +422,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     large_instance_regret: float = 0.2,
     different_family_regret: float = 0.10,
     experimental_memory_model: bool = False,
-    args: Optional["NflxCassandraArguments"] = None,
+    max_page_cache_gib: float = 32.0,
 ) -> Optional[CapacityPlan]:
     # Netflix Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 2 or instance.ram_gib <= 16:
@@ -483,7 +481,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         zones_per_region=zones_per_region,
         copies_per_region=copies_per_region,
         experimental_memory_model=experimental_memory_model,
-        args=args,
+        max_page_cache_gib=max_page_cache_gib,
     )
 
     # Adjust the min count to adjust to prevent too much data on a single
@@ -745,8 +743,15 @@ class NflxCassandraArguments(BaseModel):
     experimental_memory_model: bool = Field(
         default=False,
         description="Enable experimental memory model. When True, derives working "
-        "set from observed memory utilization instead of theoretical disk/SLO estimate. "
-        "When False (default), uses the legacy memory sizing approach.",
+        "set from page cache capped at max_page_cache_gib instead of theoretical "
+        "disk/SLO estimate. When False (default), uses the legacy memory sizing.",
+    )
+    max_page_cache_gib: float = Field(
+        default=32.0,
+        description="Maximum page cache (GiB) to assume per node when computing "
+        "working set in the experimental memory model. Caps the effective page "
+        "cache at this value regardless of instance RAM. Set to 0 to disable "
+        "the cap. Only applies when experimental_memory_model is True.",
     )
 
     @classmethod
@@ -899,7 +904,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             large_instance_regret=args.large_instance_regret,
             different_family_regret=args.different_family_regret,
             experimental_memory_model=args.experimental_memory_model,
-            args=args,
+            max_page_cache_gib=args.max_page_cache_gib,
         )
 
     @staticmethod
