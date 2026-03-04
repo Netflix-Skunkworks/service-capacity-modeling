@@ -130,7 +130,7 @@ class I4i4xlarge:
     def get(
         self,
         cpu: Optional[float] = None,
-        memory_gib: Optional[float] = 0,
+        memory_gib: Optional[float] = None,
         disk_gib: Optional[float] = None,
         network: Optional[float] = None,
     ) -> CurrentZoneClusterCapacity:
@@ -140,7 +140,7 @@ class I4i4xlarge:
             cluster_instance_count=certain_int(self.cluster_size),
             cpu_utilization=certain_float(cpu if cpu is not None else self.cpu.cold),
             memory_utilization_gib=certain_float(
-                memory_gib if memory_gib is not None else 0
+                memory_gib if memory_gib is not None else self.memory.cold
             ),
             disk_utilization_gib=certain_float(
                 disk_gib if disk_gib is not None else self.disk.cold
