@@ -23,10 +23,12 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import ServiceCapacity
+from service_capacity_modeling.models.common import cluster_infra_cost
 
 # Shared constant for rank penalty metadata in cluster_params.
-# Models store penalties as {"penalty_name": coefficient} dicts under this key.
-# Used by both capacity_plan() (to inflate rank) and regret() (to add named regret).
+# Models store penalty values (coefficients or dollar amounts) under this key.
+# Used by both capacity_plan() (to inflate rank) and regret() (named regret).
+# See each model's regret() for how it interprets the stored values.
 RANK_PENALTIES: str = "rank_penalties"
 
 __all__ = [
@@ -140,8 +142,6 @@ class CostAwareModel:
         by cls.cluster_type.  Models with custom cost logic (e.g. different
         service_type, extra cost components) should override this.
         """
-        from service_capacity_modeling.models.common import cluster_infra_cost
-
         return cluster_infra_cost(
             service_type,
             zonal_clusters,
