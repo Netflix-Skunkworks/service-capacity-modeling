@@ -283,10 +283,6 @@
     "total_annual_cost": 98274.04
   },
   {
-    "error": "No capacity plans generated",
-    "scenario": "cassandra_timeseries_ebs"
-  },
-  {
     "annual_costs": {
       "cassandra.backup.s3-standard": 55440.0,
       "cassandra.net.inter.region": 51161.55071258545,
