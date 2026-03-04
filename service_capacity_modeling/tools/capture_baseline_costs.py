@@ -293,6 +293,51 @@ scenarios.append(
     )
 )
 
+# Cassandra read-heavy EBS — exercises EBS soft memory (page cache treated as soft)
+cassandra_read_heavy_ebs = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=certain_int(200_000),
+        estimated_write_per_second=certain_int(10_000),
+        estimated_mean_read_latency_ms=certain_float(1.0),
+        estimated_mean_write_latency_ms=certain_float(0.5),
+    ),
+    data_shape=DataShape(
+        estimated_state_size_gib=certain_int(2_000),
+        estimated_compression_ratio=certain_float(1.0),
+    ),
+)
+
+scenarios.append(
+    (
+        "org.netflix.cassandra",
+        "us-east-1",
+        cassandra_read_heavy_ebs,
+        {
+            "require_local_disks": False,
+            "require_attached_disks": True,
+            "experimental_memory_model": True,
+        },
+        "cassandra_read_heavy_ebs_soft_memory",
+    )
+)
+
+# Same read-heavy EBS scenario with cache skew — Zipfian access reduces working set
+scenarios.append(
+    (
+        "org.netflix.cassandra",
+        "us-east-1",
+        cassandra_read_heavy_ebs,
+        {
+            "require_local_disks": False,
+            "require_attached_disks": True,
+            "experimental_memory_model": True,
+            "cache_skew_factor": 2.0,
+        },
+        "cassandra_read_heavy_ebs_with_skew",
+    )
+)
+
 # Kafka scenarios - Kafka uses throughput-based sizing via write_size
 # 100 MiB/s throughput with 2 consumers, 1 producer
 throughput = 100 * 1024 * 1024  # 100 MiB/s
