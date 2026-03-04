@@ -429,7 +429,6 @@ class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
             params = proposed_plan.candidate_clusters.zonal[0].cluster_params
             penalties = params.get(RANK_PENALTIES, {})
             if "under_spread" in penalties:
-                # Value is already in dollars (same formula as old spread cost)
                 regrets["under_spread"] = penalties["under_spread"]
 
         return regrets
