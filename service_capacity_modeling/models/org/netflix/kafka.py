@@ -4,7 +4,6 @@ from typing import Any
 from typing import Dict
 from typing import List
 from typing import Optional
-from typing import Sequence
 from typing import Tuple
 
 from pydantic import BaseModel
@@ -19,7 +18,6 @@ from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
-from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
@@ -40,7 +38,6 @@ from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import buffer_for_components
-from service_capacity_modeling.models.common import cluster_infra_cost
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
@@ -544,19 +541,6 @@ class NflxKafkaCapacityModel(CapacityModel, CostAwareModel):
             min_instance_memory_gib=min_instance_memory_gib,
             hot_retention_seconds=hot_retention_seconds,
             require_same_instance_family=require_same_instance_family,
-        )
-
-    @staticmethod
-    def cluster_costs(
-        service_type: str,
-        zonal_clusters: Sequence[ClusterCapacity] = (),
-        regional_clusters: Sequence[ClusterCapacity] = (),
-    ) -> Dict[str, float]:
-        return cluster_infra_cost(
-            service_type,
-            zonal_clusters,
-            regional_clusters,
-            cluster_type=NflxKafkaCapacityModel.cluster_type,
         )
 
     @staticmethod

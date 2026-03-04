@@ -333,7 +333,6 @@
   },
   {
     "annual_costs": {
-      "evcache.spread.cost": 93333.33333333333,
       "evcache.zonal-clusters": 2490.0
     },
     "clusters": [
@@ -341,7 +340,10 @@
         "annual_cost": 830.0,
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
-          "evcache.copies": 3
+          "evcache.copies": 3,
+          "rank_penalties": {
+            "under_spread": 93333.33333333333
+          }
         },
         "cluster_type": "evcache",
         "count": 2,
@@ -352,7 +354,10 @@
         "annual_cost": 830.0,
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
-          "evcache.copies": 3
+          "evcache.copies": 3,
+          "rank_penalties": {
+            "under_spread": 93333.33333333333
+          }
         },
         "cluster_type": "evcache",
         "count": 2,
@@ -363,7 +368,10 @@
         "annual_cost": 830.0,
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
-          "evcache.copies": 3
+          "evcache.copies": 3,
+          "rank_penalties": {
+            "under_spread": 93333.33333333333
+          }
         },
         "cluster_type": "evcache",
         "count": 2,
@@ -375,11 +383,10 @@
     "region": "us-east-1",
     "scenario": "evcache_tiny_with_spread",
     "service_tier": 1,
-    "total_annual_cost": 95823.33
+    "total_annual_cost": 2490.0
   },
   {
     "annual_costs": {
-      "evcache.spread.cost": 0.0,
       "evcache.zonal-clusters": 31265.129999999997
     },
     "clusters": [
@@ -427,7 +434,6 @@
     "annual_costs": {
       "evcache.net.inter.region": 30095.029830932617,
       "evcache.net.intra.region": 45142.544746398926,
-      "evcache.spread.cost": 0.0,
       "evcache.zonal-clusters": 100204.26000000001
     },
     "clusters": [
@@ -466,7 +472,6 @@
       "cassandra.net.inter.region": 15047.514915466309,
       "cassandra.net.intra.region": 45142.544746398926,
       "cassandra.zonal-clusters": 44260.020000000004,
-      "evcache.spread.cost": 0.0,
       "evcache.zonal-clusters": 150306.39,
       "nflx-java-app.regional-clusters": 108432.87
     },

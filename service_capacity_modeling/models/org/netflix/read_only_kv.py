@@ -18,7 +18,6 @@ from typing import Any
 from typing import Dict
 from typing import List
 from typing import Optional
-from typing import Sequence
 from typing import Tuple
 
 from pydantic import BaseModel
@@ -26,7 +25,6 @@ from pydantic import Field
 
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
-from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
@@ -49,7 +47,6 @@ from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import buffer_for_components
-from service_capacity_modeling.models.common import cluster_infra_cost
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import upsert_params
@@ -336,19 +333,6 @@ class NflxReadOnlyKVCapacityModel(CapacityModel, CostAwareModel):
     ) -> List[ServiceCapacity]:
         # No additional service costs (read-only: no network replication, no backup)
         return []
-
-    @staticmethod
-    def cluster_costs(
-        service_type: str,
-        zonal_clusters: Sequence[ClusterCapacity] = (),
-        regional_clusters: Sequence[ClusterCapacity] = (),
-    ) -> Dict[str, float]:
-        return cluster_infra_cost(
-            service_type,
-            zonal_clusters,
-            regional_clusters,
-            cluster_type=NflxReadOnlyKVCapacityModel.cluster_type,
-        )
 
     @staticmethod
     def capacity_plan(

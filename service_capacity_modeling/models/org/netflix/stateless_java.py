@@ -3,7 +3,6 @@ from typing import Any
 from typing import Dict
 from typing import List
 from typing import Optional
-from typing import Sequence
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -16,7 +15,6 @@ from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
-from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
@@ -32,7 +30,6 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
-from service_capacity_modeling.models.common import cluster_infra_cost
 from service_capacity_modeling.models.common import compute_stateless_region
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
@@ -165,19 +162,6 @@ class NflxJavaAppArguments(BaseModel):
 class NflxJavaAppCapacityModel(CapacityModel, CostAwareModel):
     service_name = "nflx-java-app"
     cluster_type = "nflx-java-app"
-
-    @staticmethod
-    def cluster_costs(
-        service_type: str,
-        zonal_clusters: Sequence[ClusterCapacity] = (),
-        regional_clusters: Sequence[ClusterCapacity] = (),
-    ) -> Dict[str, float]:
-        return cluster_infra_cost(
-            service_type,
-            zonal_clusters,
-            regional_clusters,
-            cluster_type=NflxJavaAppCapacityModel.cluster_type,
-        )
 
     @staticmethod
     def service_costs(

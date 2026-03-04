@@ -3,7 +3,6 @@ import math
 from typing import Any
 from typing import Dict
 from typing import List
-from typing import Sequence
 from typing import Optional
 from typing import Tuple
 
@@ -18,6 +17,7 @@ from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
@@ -30,14 +30,13 @@ from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
-from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
+from service_capacity_modeling.models import RANK_PENALTIES
 from service_capacity_modeling.models.common import buffer_for_components
-from service_capacity_modeling.models.common import cluster_infra_cost
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
@@ -80,6 +79,13 @@ def calculate_read_cpu_time_evcache_ms(read_size_bytes: float) -> float:
 def calculate_spread_cost(
     cluster_size: int, max_cost: float = 100000, min_cost: float = 0.0
 ) -> float:
+    """Dollar penalty for under-spread clusters.
+
+    Returns an additive cost penalty (in dollars) that increases as clusters
+    get smaller. This was originally injected into annual_costs as fake
+    dollars; now it's applied to plan.rank instead, keeping total_annual_cost
+    honest while preserving the same selection behavior in plan_certain().
+    """
     if cluster_size > 10:
         return min_cost
     if cluster_size < 2:
@@ -323,6 +329,14 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     }
     upsert_params(cluster, params)
 
+    # Penalize under-spread clusters via rank (deterministic sort) and
+    # regret (stochastic robustness). Uses the same additive dollar formula
+    # as before, but applied to plan.rank instead of annual_costs — keeping
+    # total_annual_cost honest while preserving identical selection order.
+    spread_cost = calculate_spread_cost(cluster.count)
+    if spread_cost > 0:
+        upsert_params(cluster, {RANK_PENALTIES: {"under_spread": spread_cost}})
+
     # evcache clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as
     #   * Security group limits. Since you must have < 500 rules if you're
@@ -361,11 +375,14 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         services=services,
     )
 
+    plan_rank = clusters.total_annual_cost + spread_cost
+
     return CapacityPlan(
         requirements=Requirements(
             zonal=[requirement] * copies_per_region, regrets=regrets
         ),
         candidate_clusters=clusters,
+        rank=plan_rank,
     )
 
 
@@ -401,31 +418,20 @@ class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
     cluster_type = "evcache"
 
     @staticmethod
-    def cluster_costs(
-        service_type: str,
-        zonal_clusters: Sequence[ClusterCapacity] = (),
-        regional_clusters: Sequence[ClusterCapacity] = (),
+    def regret(
+        regret_params: CapacityRegretParameters,
+        optimal_plan: CapacityPlan,
+        proposed_plan: CapacityPlan,
     ) -> Dict[str, float]:
-        # Adds "{service_type}.spread.cost" penalty for small clusters
-        filtered_zonal = [
-            c
-            for c in zonal_clusters
-            if c.cluster_type == NflxEVCacheCapacityModel.cluster_type
-        ]
+        regrets = CapacityModel.regret(regret_params, optimal_plan, proposed_plan)
 
-        costs = cluster_infra_cost(
-            service_type,
-            filtered_zonal,
-            regional_clusters,
-            cluster_type=NflxEVCacheCapacityModel.cluster_type,
-        )
+        if proposed_plan.candidate_clusters.zonal:
+            params = proposed_plan.candidate_clusters.zonal[0].cluster_params
+            penalties = params.get(RANK_PENALTIES, {})
+            if "under_spread" in penalties:
+                regrets["under_spread"] = penalties["under_spread"]
 
-        # Add spread cost penalty for small clusters
-        if filtered_zonal:
-            cluster_count = filtered_zonal[0].count
-            costs[f"{service_type}.spread.cost"] = calculate_spread_cost(cluster_count)
-
-        return costs
+        return regrets
 
     @staticmethod
     def service_costs(
