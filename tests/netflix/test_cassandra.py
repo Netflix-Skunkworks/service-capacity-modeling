@@ -787,3 +787,100 @@ class TestCassandraPageCacheCap:
         # r6a.4xlarge: 122 GiB RAM → raw page_cache≈90, capped to 32
         # disk_per_node=3000 → ws ≈ 32/3000 ≈ 0.01
         assert ctx["working_set"] < 0.02
+
+
+class TestEbsSoftMemory:
+    """Test EBS soft memory: page cache treated as soft for EBS instances."""
+
+    def _plan_ebs_experimental(self, extra_args=None):
+        """Helper: plan an EBS cluster with experimental memory model."""
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(200_000),
+                estimated_write_per_second=certain_int(10_000),
+                estimated_mean_read_latency_ms=certain_float(1.0),
+                estimated_mean_write_latency_ms=certain_float(0.5),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(2_000),
+                estimated_compression_ratio=certain_float(1.0),
+            ),
+        )
+        args = {
+            "require_local_disks": False,
+            "require_attached_disks": True,
+            "experimental_memory_model": True,
+        }
+        if extra_args:
+            args.update(extra_args)
+        return planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments=args,
+        )
+
+    def test_ebs_soft_memory_produces_page_cache_params(self):
+        """EBS + experimental model -> page_cache params in cluster_params."""
+        plans = self._plan_ebs_experimental()
+        assert plans, "Should produce at least one plan"
+        result = plans[0].candidate_clusters.zonal[0]
+        assert "cassandra.page_cache.coverage_pct" in result.cluster_params
+        assert "cassandra.page_cache.cpu_factor" in result.cluster_params
+        assert result.cluster_params["cassandra.page_cache.cpu_factor"] >= 1.0
+
+    def test_local_disk_no_soft_memory(self):
+        """Local disk instances should NOT get page_cache params."""
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(100_000),
+                estimated_write_per_second=certain_int(100_000),
+                estimated_mean_read_latency_ms=certain_float(0.5),
+                estimated_mean_write_latency_ms=certain_float(0.4),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(10),
+            ),
+        )
+        plans = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_local_disks": True,
+                "experimental_memory_model": True,
+            },
+        )
+        assert plans
+        result = plans[0].candidate_clusters.zonal[0]
+        assert "cassandra.page_cache.coverage_pct" not in result.cluster_params
+
+    def test_no_experimental_flag_no_soft_memory(self):
+        """Without experimental_memory_model, no page_cache params."""
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(200_000),
+                estimated_write_per_second=certain_int(10_000),
+                estimated_mean_read_latency_ms=certain_float(1.0),
+                estimated_mean_write_latency_ms=certain_float(0.5),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(2_000),
+                estimated_compression_ratio=certain_float(1.0),
+            ),
+        )
+        plans = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_local_disks": False,
+                "require_attached_disks": True,
+            },
+        )
+        assert plans
+        result = plans[0].candidate_clusters.zonal[0]
+        assert "cassandra.page_cache.coverage_pct" not in result.cluster_params

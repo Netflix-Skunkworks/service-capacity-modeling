@@ -70,6 +70,39 @@ CRITICAL_TIERS: Set[int] = {0, 1}
 CRITICAL_TIER_MIN_CLUSTER_SIZE = 2
 
 
+def _compute_page_cache_cpu_factor(
+    data_per_node_gib: float,
+    available_cache_gib: float,
+    read_fraction: float,
+    drive_read_latency_ms: float,
+    avg_read_latency_ms: float,
+) -> tuple[float, float, float]:
+    """CPU overhead from EBS cache misses.
+
+    When page cache is treated as soft (EBS clusters), reads that miss cache
+    hit disk with higher latency. This computes a CPU inflation factor to
+    account for threads blocked on I/O.
+
+    Returns (cpu_factor, miss_rate, coverage_pct) where:
+    - cpu_factor: multiplier >= 1.0 to inflate CPU requirement
+    - miss_rate: fraction of reads that miss page cache (0..1)
+    - coverage_pct: percentage of data covered by cache (0..100)
+    """
+    if data_per_node_gib <= 0 or available_cache_gib <= 0:
+        return (1.0, 1.0 if data_per_node_gib > 0 else 0.0, 0.0)
+
+    coverage = min(1.0, available_cache_gib / data_per_node_gib)
+    miss_rate = 1.0 - coverage
+    coverage_pct = round(coverage * 100, 1)
+
+    if avg_read_latency_ms <= 0:
+        return (1.0, miss_rate, coverage_pct)
+
+    latency_ratio = drive_read_latency_ms / avg_read_latency_ms
+    cpu_factor = 1.0 + miss_rate * read_fraction * latency_ratio
+    return (cpu_factor, miss_rate, coverage_pct)
+
+
 def _write_buffer_gib_zone(
     desires: CapacityDesires, zones_per_region: int, flushes_before_compaction: int = 4
 ) -> float:
@@ -518,12 +551,19 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         buffer_percent=(max_write_buffer_percent * max_table_buffer_percent),
     )
 
+    # EBS soft memory: page cache is "nice to have" on EBS instances.
+    # Instead of requiring RAM for the full working set, we let the planner
+    # pick smaller instances and account for cache-miss CPU overhead below.
+    is_ebs = instance.drive is None
+    soft_memory = experimental_memory_model and is_ebs
+    needed_memory_for_zone = 0 if soft_memory else int(requirement.mem_gib.mid)
+
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
         needed_cores=int(requirement.cpu_cores.mid),
         needed_disk_gib=needed_disk_gib,
-        needed_memory_gib=int(requirement.mem_gib.mid),
+        needed_memory_gib=needed_memory_for_zone,
         needed_network_mbps=requirement.network_mbps.mid,
         # Take into account the reads per read
         # from the per node dataset using leveled compaction
@@ -544,6 +584,25 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         required_write_buffer_gib=float(requirement.context["write_buffer_gib"]),
     )
 
+    # EBS soft memory: compute CPU overhead from page cache misses
+    coverage_pct = 0.0
+    cpu_factor = 1.0
+    if soft_memory:
+        data_per_node = needed_disk_gib / max(1, cluster.count)
+        available_cache = max(
+            0, instance.ram_gib - base_mem - heap_fn(instance.ram_gib)
+        )
+        total_rps = rps + write_per_sec
+        read_fraction = rps / total_rps if total_rps > 0 else 0.5
+        ws_drive = instance.drive or drive
+        cpu_factor, _, coverage_pct = _compute_page_cache_cpu_factor(
+            data_per_node_gib=data_per_node,
+            available_cache_gib=available_cache,
+            read_fraction=read_fraction,
+            drive_read_latency_ms=ws_drive.read_io_latency_ms.high,
+            avg_read_latency_ms=desires.query_pattern.estimated_mean_read_latency_ms.mid,
+        )
+
     # Communicate to the actual provision that if we want reduced RF
     params = {
         "cassandra.keyspace.rf": copies_per_region,
@@ -555,6 +614,9 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         "cassandra.compaction.min_threshold": requirement.context["min_threshold"],
         EFFECTIVE_DISK_PER_NODE_GIB: disk_per_node_gib,
     }
+    if soft_memory:
+        params["cassandra.page_cache.coverage_pct"] = coverage_pct
+        params["cassandra.page_cache.cpu_factor"] = round(cpu_factor, 3)
     upsert_params(cluster, params)
 
     # All penalties inflate plan.rank = cost * (1 + sum(penalties)),
