@@ -456,6 +456,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     different_family_regret: float = 0.10,
     experimental_memory_model: bool = False,
     max_page_cache_gib: float = 32.0,
+    cache_skew_factor: float = 1.0,
 ) -> Optional[CapacityPlan]:
     # Netflix Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 2 or instance.ram_gib <= 16:
@@ -504,6 +505,11 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         # to increase this even more.
         target_percentile=0.95,
     ).mid
+
+    # Cache skew: Zipfian access patterns concentrate reads on a subset of data,
+    # reducing the effective working set. ws^skew shrinks the fraction since ws<1.
+    if experimental_memory_model and cache_skew_factor > 1.0 and working_set > 0:
+        working_set = working_set**cache_skew_factor
 
     requirement = _estimate_cassandra_requirement(
         instance=instance,
@@ -617,6 +623,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     if soft_memory:
         params["cassandra.page_cache.coverage_pct"] = coverage_pct
         params["cassandra.page_cache.cpu_factor"] = round(cpu_factor, 3)
+    if experimental_memory_model and cache_skew_factor > 1.0:
+        params["cassandra.cache_skew_factor"] = cache_skew_factor
     upsert_params(cluster, params)
 
     # All penalties inflate plan.rank = cost * (1 + sum(penalties)),
@@ -815,6 +823,13 @@ class NflxCassandraArguments(BaseModel):
         "cache at this value regardless of instance RAM. Set to 0 to disable "
         "the cap. Only applies when experimental_memory_model is True.",
     )
+    cache_skew_factor: float = Field(
+        default=1.0,
+        ge=1.0,
+        description="Exponent for Zipfian access pattern. 1.0=uniform, 2.0=moderate skew. "
+        "Reduces effective working set via working_set^(1/skew_factor), modeling "
+        "hot-key locality. Only applies when experimental_memory_model is True.",
+    )
 
     @classmethod
     def from_extra_model_arguments(
@@ -967,6 +982,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             different_family_regret=args.different_family_regret,
             experimental_memory_model=args.experimental_memory_model,
             max_page_cache_gib=args.max_page_cache_gib,
+            cache_skew_factor=args.cache_skew_factor,
         )
 
     @staticmethod
