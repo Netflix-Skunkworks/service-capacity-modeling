@@ -333,6 +333,51 @@
   },
   {
     "annual_costs": {
+      "kafka.zonal-clusters": 98036.72999999998
+    },
+    "clusters": [
+      {
+        "annual_cost": 32678.909999999996,
+        "cluster_params": {
+          "effective_disk_per_node_gib": 873,
+          "kafka.copies": 2
+        },
+        "cluster_type": "kafka",
+        "count": 27,
+        "deployment": "zonal",
+        "instance": "i4i.xlarge"
+      },
+      {
+        "annual_cost": 32678.909999999996,
+        "cluster_params": {
+          "effective_disk_per_node_gib": 873,
+          "kafka.copies": 2
+        },
+        "cluster_type": "kafka",
+        "count": 27,
+        "deployment": "zonal",
+        "instance": "i4i.xlarge"
+      },
+      {
+        "annual_cost": 32678.909999999996,
+        "cluster_params": {
+          "effective_disk_per_node_gib": 873,
+          "kafka.copies": 2
+        },
+        "cluster_type": "kafka",
+        "count": 27,
+        "deployment": "zonal",
+        "instance": "i4i.xlarge"
+      }
+    ],
+    "model": "org.netflix.kafka",
+    "region": "us-east-1",
+    "scenario": "kafka_500mib_throughput",
+    "service_tier": 1,
+    "total_annual_cost": 98036.73
+  },
+  {
+    "annual_costs": {
       "evcache.zonal-clusters": 2490.0
     },
     "clusters": [

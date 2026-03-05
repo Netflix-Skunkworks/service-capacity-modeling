@@ -306,6 +306,23 @@ kafka_throughput = CapacityDesires(
     ),
 )
 
+# 500 MiB/s high-throughput Kafka — exercises EBS volume sizing in
+# compute_stateful_zone to guard against regressions in max_node_disk_gib.
+high_throughput = 500 * 1024 * 1024  # 500 MiB/s
+kafka_high_throughput = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=Interval(low=2, mid=4, high=6, confidence=0.98),
+        estimated_write_per_second=Interval(low=1, mid=1, high=1, confidence=0.98),
+        estimated_mean_write_size_bytes=Interval(
+            low=high_throughput,
+            mid=high_throughput,
+            high=high_throughput * 2,
+            confidence=0.98,
+        ),
+    ),
+)
+
 scenarios.extend(
     [
         (
@@ -314,6 +331,13 @@ scenarios.extend(
             kafka_throughput,
             {"require_local_disks": False},
             "kafka_100mib_throughput",
+        ),
+        (
+            "org.netflix.kafka",
+            "us-east-1",
+            kafka_high_throughput,
+            {"require_local_disks": False},
+            "kafka_500mib_throughput",
         ),
     ]
 )

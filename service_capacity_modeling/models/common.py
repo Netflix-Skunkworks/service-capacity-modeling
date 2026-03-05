@@ -535,6 +535,9 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     min_count: int = 0,
     adjusted_disk_io_needed: float = 0.0,
     read_write_ratio: float = 0.0,
+    # Maximum EBS volume size per node. Default caps at 1/3 max to leave
+    # growth headroom. Models can override for clusters with known disk needs.
+    max_node_disk_gib: Callable[[Drive], int] = lambda d: math.ceil(d.max_size_gib / 3),
 ) -> ZoneClusterCapacity:
     # How many instances do we need for the CPU
     count = math.ceil(needed_cores / instance.cpu)
@@ -610,10 +613,7 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
         # Provision EBS in increments of 100 GiB
         ebs_gib = utils.next_n(max(1, io_gib, space_gib), n=100)
 
-        # When initially provisioniong we don't want to attach more than
-        # 1/3 the maximum volume size in one node (preferring more nodes
-        # with smaller volumes)
-        max_size = math.ceil(drive.max_size_gib / 3)
+        max_size = max_node_disk_gib(drive)
         if ebs_gib > max_size > 0:
             ratio = ebs_gib / max_size
             count = max(cluster_size(math.ceil(count * ratio)), min_count)
