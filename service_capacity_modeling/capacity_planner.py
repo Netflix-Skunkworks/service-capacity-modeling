@@ -412,6 +412,23 @@ def _in_allowed(inp: str, allowed: Sequence[str]) -> bool:
         return inp in allowed
 
 
+def _resolve_cluster_instances(desires: CapacityDesires) -> None:
+    """Resolve cluster_instance from cluster_instance_name on current clusters.
+
+    Mutates the desires in-place so downstream code can rely on
+    cluster_instance being set whenever cluster_instance_name is valid.
+    """
+    if desires.current_clusters is None:
+        return
+    for cluster_list in (
+        desires.current_clusters.zonal,
+        desires.current_clusters.regional,
+    ):
+        for cap in cluster_list:
+            if cap.cluster_instance is None and cap.cluster_instance_name:
+                cap.cluster_instance = shapes.instance(cap.cluster_instance_name)
+
+
 class CapacityPlanner:
     def __init__(
         self,
@@ -501,6 +518,7 @@ class CapacityPlanner:
                 f"Try {sorted(list(self._models.keys()))}"
             )
 
+        _resolve_cluster_instances(desires)
         extra_model_arguments = extra_model_arguments or {}
         lifecycles = lifecycles or self._default_lifecycles
 
@@ -640,6 +658,7 @@ class CapacityPlanner:
                 f"Try {sorted(list(self._models.keys()))}"
             )
 
+        _resolve_cluster_instances(desires)
         extra_model_arguments = extra_model_arguments or {}
         lifecycles = lifecycles or self._default_lifecycles
 
