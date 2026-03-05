@@ -15,6 +15,9 @@ from service_capacity_modeling.interface import (
     certain_float,
     certain_int,
 )
+from service_capacity_modeling.models.org.netflix.cassandra import (
+    _compute_page_cache_cpu_factor,
+)
 from service_capacity_modeling.models.org.netflix.cassandra_memory import (
     _cass_heap,
     _get_base_memory,
@@ -165,3 +168,60 @@ def test_preserve_buffer_keeps_existing_memory():
     expected = (128.0 - heap - base) * 12
     assert result.needed_memory_gib == pytest.approx(expected)
     assert result.write_buffer_gib == 0
+
+
+class TestPageCacheCpuFactor:
+    """Unit tests for _compute_page_cache_cpu_factor."""
+
+    def test_full_coverage_no_overhead(self):
+        """Cache larger than data -> no misses, factor=1.0."""
+        factor, miss_rate, cov = _compute_page_cache_cpu_factor(
+            data_per_node_gib=100,
+            available_cache_gib=200,
+            read_fraction=0.8,
+            drive_read_latency_ms=1.0,
+            avg_read_latency_ms=0.5,
+        )
+        assert factor == 1.0
+        assert miss_rate == 0.0
+        assert cov == 100.0
+
+    def test_no_cache_full_overhead(self):
+        """Cache=0 -> all reads miss, early return."""
+        factor, miss_rate, cov = _compute_page_cache_cpu_factor(
+            data_per_node_gib=100,
+            available_cache_gib=0,
+            read_fraction=0.8,
+            drive_read_latency_ms=1.0,
+            avg_read_latency_ms=0.5,
+        )
+        assert miss_rate == 1.0
+        assert cov == 0.0
+        assert factor == 1.0
+
+    def test_half_coverage(self):
+        """50% coverage -> exact math check."""
+        factor, miss_rate, cov = _compute_page_cache_cpu_factor(
+            data_per_node_gib=200,
+            available_cache_gib=100,
+            read_fraction=0.5,
+            drive_read_latency_ms=2.0,
+            avg_read_latency_ms=1.0,
+        )
+        assert miss_rate == pytest.approx(0.5)
+        assert cov == pytest.approx(50.0)
+        # factor = 1.0 + 0.5 * 0.5 * (2.0/1.0) = 1.0 + 0.5 = 1.5
+        assert factor == pytest.approx(1.5)
+
+    def test_zero_data(self):
+        """Edge case: no data -> no overhead."""
+        factor, miss_rate, cov = _compute_page_cache_cpu_factor(
+            data_per_node_gib=0,
+            available_cache_gib=100,
+            read_fraction=0.8,
+            drive_read_latency_ms=1.0,
+            avg_read_latency_ms=0.5,
+        )
+        assert factor == 1.0
+        assert miss_rate == 0.0
+        assert cov == 0.0
