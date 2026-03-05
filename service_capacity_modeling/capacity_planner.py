@@ -518,6 +518,7 @@ class CapacityPlanner:
                 f"Try {sorted(list(self._models.keys()))}"
             )
 
+        desires = desires.model_copy(deep=True)
         _resolve_cluster_instances(desires)
         extra_model_arguments = extra_model_arguments or {}
         lifecycles = lifecycles or self._default_lifecycles
@@ -658,6 +659,7 @@ class CapacityPlanner:
                 f"Try {sorted(list(self._models.keys()))}"
             )
 
+        desires = desires.model_copy(deep=True)
         _resolve_cluster_instances(desires)
         extra_model_arguments = extra_model_arguments or {}
         lifecycles = lifecycles or self._default_lifecycles
