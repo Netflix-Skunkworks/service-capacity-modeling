@@ -312,6 +312,131 @@ scenarios.append(
     )
 )
 
+# Cassandra KV dense — read-heavy lookup workload on small EBS instances.
+# 50 TiB state served from a hot subset, 32 r6a.2xlarge nodes/zone.
+# Exercises the page cache cap on small instances where memory easily becomes
+# the bottleneck: the cap requires ~1024 GiB total page cache but disk/CPU
+# only need ~9 nodes. Soft memory should reduce from ~24 → ~9 nodes.
+cassandra_kv_dense_ebs = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=Interval(
+            low=100_000, mid=200_000, high=400_000, confidence=0.98
+        ),
+        estimated_write_per_second=Interval(
+            low=10_000, mid=20_000, high=40_000, confidence=0.98
+        ),
+    ),
+    data_shape=DataShape(
+        estimated_state_size_gib=Interval(
+            low=40_000, mid=50_000, high=60_000, confidence=0.98
+        ),
+        estimated_compression_ratio=certain_float(1.0),
+    ),
+    current_clusters=CurrentClusters(
+        zonal=[
+            CurrentZoneClusterCapacity(
+                cluster_instance_name="r6a.2xlarge",
+                cluster_drive=Drive(
+                    name="gp3",
+                    drive_type="attached-ssd",
+                    size_gib=2400,
+                ),
+                cluster_instance_count=certain_int(32),
+                cpu_utilization=Interval(low=8, mid=20, high=50, confidence=1),
+                disk_utilization_gib=certain_float(1500),
+                network_utilization_mbps=certain_float(30),
+            ),
+        ]
+        * 3
+    ),
+    buffers=Buffers(
+        derived={
+            "storage": Buffer(
+                ratio=1.0,
+                intent=BufferIntent.scale_down,
+                components=[BufferComponent.storage],
+            ),
+        },
+    ),
+)
+
+scenarios.append(
+    (
+        "org.netflix.cassandra",
+        "us-east-1",
+        cassandra_kv_dense_ebs,
+        {
+            "require_local_disks": False,
+            "require_attached_disks": True,
+            "experimental_memory_model": True,
+        },
+        "cassandra_kv_dense_ebs",
+    )
+)
+
+# Cassandra KV compact — small lookup workload on 2xlarge EBS instances.
+# 20 TiB state, 16 r6a.2xlarge nodes/zone, light read traffic.
+# Most extreme memory-bound case: page cache cap requires ~512 GiB total
+# but disk/CPU only need ~4 nodes. Soft memory should reduce from ~12 → ~4.
+cassandra_kv_compact_ebs = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=Interval(
+            low=50_000, mid=100_000, high=200_000, confidence=0.98
+        ),
+        estimated_write_per_second=Interval(
+            low=2_500, mid=5_000, high=10_000, confidence=0.98
+        ),
+    ),
+    data_shape=DataShape(
+        estimated_state_size_gib=Interval(
+            low=16_000, mid=20_000, high=24_000, confidence=0.98
+        ),
+        estimated_compression_ratio=certain_float(1.0),
+    ),
+    current_clusters=CurrentClusters(
+        zonal=[
+            CurrentZoneClusterCapacity(
+                cluster_instance_name="r6a.2xlarge",
+                cluster_drive=Drive(
+                    name="gp3",
+                    drive_type="attached-ssd",
+                    size_gib=1800,
+                ),
+                cluster_instance_count=certain_int(16),
+                cpu_utilization=Interval(low=5, mid=12, high=35, confidence=1),
+                disk_utilization_gib=certain_float(1200),
+                network_utilization_mbps=certain_float(15),
+            ),
+        ]
+        * 3
+    ),
+    buffers=Buffers(
+        derived={
+            "storage": Buffer(
+                ratio=1.0,
+                intent=BufferIntent.scale_down,
+                components=[BufferComponent.storage],
+            ),
+        },
+    ),
+)
+
+scenarios.append(
+    (
+        "org.netflix.cassandra",
+        "us-east-1",
+        cassandra_kv_compact_ebs,
+        {
+            "require_local_disks": False,
+            "require_attached_disks": True,
+            "experimental_memory_model": True,
+        },
+        "cassandra_kv_compact_ebs",
+    )
+)
+
 # Kafka scenarios - Kafka uses throughput-based sizing via write_size
 # 100 MiB/s throughput with 2 consumers, 1 producer
 throughput = 100 * 1024 * 1024  # 100 MiB/s
