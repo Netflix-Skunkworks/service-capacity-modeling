@@ -489,6 +489,27 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     disk_buffer_ratio = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     ).ratio
+
+    # For existing EBS clusters, raise disk caps to at least the observed
+    # values so _get_min_count and compute_stateful_zone don't reject the
+    # current topology or inflate node count.
+    current_capacity = _get_current_capacity(desires)
+    is_ebs = instance.drive is None
+    is_existing = (
+        current_capacity is not None
+        and current_capacity.disk_utilization_gib is not None
+        and current_capacity.disk_utilization_gib.mid > 0
+    )
+    ebs_disk_floor = 0
+    if experimental_memory_model and is_ebs and is_existing:
+        assert current_capacity is not None
+        assert current_capacity.disk_utilization_gib is not None
+        observed_disk_per_node = int(current_capacity.disk_utilization_gib.mid)
+        max_attached_data_per_node_gib = max(
+            max_attached_data_per_node_gib, observed_disk_per_node
+        )
+        ebs_disk_floor = int(observed_disk_per_node * disk_buffer_ratio)
+
     disk_per_node_gib = get_effective_disk_per_node_gib(
         instance,
         drive,
@@ -518,6 +539,9 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         buffer_percent=(max_write_buffer_percent * max_table_buffer_percent),
     )
 
+    def max_node_disk(d: Drive) -> int:
+        return max(math.ceil(d.max_size_gib / 3), ebs_disk_floor)
+
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
@@ -542,6 +566,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         # is 0.11 * 25 * heap
         write_buffer=lambda x: heap_fn(x) * max_write_buffer_percent * 0.25,
         required_write_buffer_gib=float(requirement.context["write_buffer_gib"]),
+        max_node_disk_gib=max_node_disk,
     )
 
     # Communicate to the actual provision that if we want reduced RF
