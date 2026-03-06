@@ -430,6 +430,32 @@ class TestCassandraDurability:
         )
 
 
+def _make_memory_test_desire(
+    disk_utilization_gib: float = 100,
+    state_size_gib: int = 300,
+    reads: int = 10_000,
+    writes: int = 100_000,
+) -> CapacityDesires:
+    """Build a CapacityDesires for memory model tests with common defaults."""
+    cluster = CurrentZoneClusterCapacity(
+        cluster_instance_name="r5d.4xlarge",
+        cluster_instance=shapes.instance("r5d.4xlarge"),
+        cluster_instance_count=certain_int(2),
+        cpu_utilization=certain_float(13.0),
+        disk_utilization_gib=certain_float(disk_utilization_gib),
+        network_utilization_mbps=certain_float(128.0),
+    )
+    return CapacityDesires(
+        service_tier=1,
+        current_clusters=CurrentClusters(zonal=[cluster]),
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(reads),
+            estimated_write_per_second=certain_int(writes),
+        ),
+        data_shape=DataShape(estimated_state_size_gib=certain_int(state_size_gib)),
+    )
+
+
 class TestCassandraCurrentCapacity:
     """Test scenarios with current capacity information."""
 
@@ -479,59 +505,115 @@ class TestCassandraCurrentCapacity:
             num_results=3,
             num_regions=4,
             desires=worn_desire,
-            extra_model_arguments={**EXTRA_MODEL_ARGS, "required_cluster_size": 8},
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "required_cluster_size": 8,
+                "experimental_memory_model": True,
+            },
         )
 
-        # Use a similar number of CPU cores but allocate less disk
+        # Page cache cap (32 GiB default) limits working set on i4i.8xlarge
+        # (256 GiB RAM → raw page_cache≈224, capped to 32).  This prevents
+        # the planner from picking 256+ GiB RAM instances to satisfy inflated
+        # memory requirements.
         lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
-        assert_similar_compute(
-            shapes.instance("m6id.8xlarge"), lr_clusters.instance, 8, lr_clusters.count
+        assert lr_clusters.instance.ram_gib < 256, (
+            f"Cap should prevent 256 GiB RAM instances, got {lr_clusters.instance.name}"
         )
+
+    def test_page_cache_cap_limits_working_set(self):
+        """Page cache cap (default 32 GiB) limits effective working set."""
+        # r5d.4xlarge: 128 GiB RAM, heap=30, base≈2 → raw page_cache≈96
+        # capped to 32, disk_per_node=100 → ws=0.32
+        desire = _make_memory_test_desire()
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desire,
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "required_cluster_size": 2,
+                "experimental_memory_model": True,
+            },
+        )
+
+        ctx = cap_plan[0].requirements.zonal[0].context
+        assert ctx["working_set"] < 0.35
+        assert ctx["write_buffer_gib"] > 0
+
+    def test_custom_page_cache_cap(self):
+        """Custom max_page_cache_gib overrides default cap."""
+        desire = _make_memory_test_desire()
+        # With cap=64, ws = min(1.0, 64/100) = 0.64 → more RAM needed
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desire,
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "required_cluster_size": 2,
+                "experimental_memory_model": True,
+                "max_page_cache_gib": 64.0,
+            },
+        )
+
+        ctx = cap_plan[0].requirements.zonal[0].context
+        assert ctx["working_set"] > 0.5
+
+    def test_legacy_path_ignores_cap(self):
+        """Without experimental_memory_model, legacy theoretical path is used."""
+        desire = _make_memory_test_desire()
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desire,
+            extra_model_arguments={**EXTRA_MODEL_ARGS, "required_cluster_size": 2},
+        )
+
+        ctx = cap_plan[0].requirements.zonal[0].context
+        assert ctx["working_set"] < 0.5
 
     def test_preserve_memory(self):
-        cluster_capacity = CurrentZoneClusterCapacity(
+        """Memory preserve buffer keeps current cluster's page cache."""
+        cluster = CurrentZoneClusterCapacity(
             cluster_instance_name="r5d.4xlarge",
-            cluster_instance_count=Interval(low=2, mid=2, high=2, confidence=1),
-            cpu_utilization=Interval(
-                low=10.12, mid=13.2, high=14.194801291058118, confidence=1
-            ),
-            memory_utilization_gib=certain_float(32.0),
+            cluster_instance=shapes.instance("r5d.4xlarge"),
+            cluster_instance_count=certain_int(2),
+            cpu_utilization=certain_float(13.0),
             disk_utilization_gib=certain_float(100),
             network_utilization_mbps=certain_float(128.0),
         )
-
-        derived_buffer = Buffers(
-            derived={
-                "memory": Buffer(
-                    intent=BufferIntent.preserve,
-                    components=[BufferComponent.memory],
-                )
-            }
-        )
-
-        worn_desire = CapacityDesires(
+        desire = CapacityDesires(
             service_tier=1,
-            current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+            current_clusters=CurrentClusters(zonal=[cluster]),
             query_pattern=QueryPattern(
                 estimated_read_per_second=certain_int(10_000),
                 estimated_write_per_second=certain_int(100_000),
             ),
-            data_shape=DataShape(
-                estimated_state_size_gib=certain_int(300),
+            data_shape=DataShape(estimated_state_size_gib=certain_int(300)),
+            buffers=Buffers(
+                derived={
+                    "memory": Buffer(
+                        intent=BufferIntent.preserve,
+                        components=[BufferComponent.memory],
+                    )
+                }
             ),
-            buffers=derived_buffer,
         )
         cap_plan = planner.plan_certain(
             model_name="org.netflix.cassandra",
             region="us-east-1",
-            num_results=3,
-            num_regions=4,
-            desires=worn_desire,
-            extra_model_arguments={**EXTRA_MODEL_ARGS, "required_cluster_size": 2},
+            desires=desire,
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "required_cluster_size": 2,
+                "experimental_memory_model": True,
+            },
         )
 
-        lr_clusters = cap_plan[0].candidate_clusters.zonal[0]
-        assert lr_clusters.instance.ram_gib == 128
+        # Preserve → write_buffer zeroed, RAM preserved at current level
+        ctx = cap_plan[0].requirements.zonal[0].context
+        assert ctx["write_buffer_gib"] == 0
 
     def test_capacity_non_power_of_two(self):
         cluster_capacity = CurrentZoneClusterCapacity(
@@ -631,3 +713,77 @@ class TestCassandraExtraModelArguments:
             NflxCassandraCapacityModel.get_required_cluster_size(
                 tier, extra_model_arguments
             )
+
+    def test_experimental_memory_model_defaults_to_false(self):
+        """Verify experimental_memory_model defaults to False."""
+        from service_capacity_modeling.models.org.netflix.cassandra import (
+            NflxCassandraArguments,
+        )
+
+        args = NflxCassandraArguments.from_extra_model_arguments({})
+        assert args.experimental_memory_model is False
+
+
+class TestCassandraPageCacheCap:
+    """Test page cache cap in the experimental memory model."""
+
+    def test_cap_with_high_disk_per_node(self):
+        """High disk per node with cap → low working set."""
+        desire = _make_memory_test_desire(
+            disk_utilization_gib=500,
+            state_size_gib=300,
+            reads=10_000,
+            writes=50_000,
+        )
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desire,
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "required_cluster_size": 2,
+                "experimental_memory_model": True,
+            },
+        )
+
+        # r5d.4xlarge: 128 GiB RAM, page_cache capped to 32, disk=500
+        # ws = 32/500 = 0.064
+        ctx = cap_plan[0].requirements.zonal[0].context
+        assert ctx["working_set"] < 0.1
+
+    def test_large_state_cluster(self):
+        """Large-state cluster benefits from page cache cap."""
+        cluster = CurrentZoneClusterCapacity(
+            cluster_instance_name="r6a.4xlarge",
+            cluster_instance_count=certain_int(16),
+            cpu_utilization=certain_float(15.0),
+            disk_utilization_gib=certain_float(3000),
+            network_utilization_mbps=certain_float(50),
+        )
+        desire = CapacityDesires(
+            service_tier=1,
+            current_clusters=CurrentClusters(zonal=[cluster] * 3),
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(60_000),
+                estimated_write_per_second=certain_int(170_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(10_000),
+                estimated_compression_ratio=certain_float(1.0),
+            ),
+        )
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desire,
+            extra_model_arguments={
+                **EXTRA_MODEL_ARGS,
+                "experimental_memory_model": True,
+            },
+        )
+
+        assert cap_plan, "Page cache cap should produce a plan"
+        ctx = cap_plan[0].requirements.zonal[0].context
+        # r6a.4xlarge: 122 GiB RAM → raw page_cache≈90, capped to 32
+        # disk_per_node=3000 → ws ≈ 32/3000 ≈ 0.01
+        assert ctx["working_set"] < 0.02

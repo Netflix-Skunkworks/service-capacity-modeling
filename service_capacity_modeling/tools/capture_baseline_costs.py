@@ -16,8 +16,13 @@ from typing import Any
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import (
     AccessConsistency,
+    Buffer,
+    BufferComponent,
+    BufferIntent,
+    Buffers,
     CapacityDesires,
     certain_float,
+    Drive,
     certain_int,
     ClusterCapacity,
     Consistency,
@@ -269,6 +274,11 @@ cassandra_timeseries_ebs = CapacityDesires(
         zonal=[
             CurrentZoneClusterCapacity(
                 cluster_instance_name="r6a.4xlarge",
+                cluster_drive=Drive(
+                    name="gp3",
+                    drive_type="attached-ssd",
+                    size_gib=5600,
+                ),
                 cluster_instance_count=certain_int(64),
                 cpu_utilization=Interval(low=5, mid=15, high=45, confidence=1),
                 disk_utilization_gib=certain_float(3000),
@@ -276,6 +286,16 @@ cassandra_timeseries_ebs = CapacityDesires(
             ),
         ]
         * 3
+    ),
+    # Existing cluster: don't inflate observed disk by the model's storage buffer.
+    buffers=Buffers(
+        derived={
+            "storage": Buffer(
+                ratio=1.0,
+                intent=BufferIntent.scale_down,
+                components=[BufferComponent.storage],
+            ),
+        },
     ),
 )
 
@@ -285,8 +305,8 @@ scenarios.append(
         "us-east-1",
         cassandra_timeseries_ebs,
         {
-            "require_attached_disks": True,
-            "required_cluster_size": 64,
+            "require_local_disks": False,
+            "experimental_memory_model": True,
         },
         "cassandra_timeseries_ebs",
     )
