@@ -704,21 +704,30 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     zonal_clusters = [cluster] * zones_per_region
 
     # Account for the clusters, backup, and network costs
-    cassandra_costs = NflxCassandraCapacityModel.cluster_costs(
+    cluster_costs = NflxCassandraCapacityModel.cluster_costs(
         service_type=NflxCassandraCapacityModel.service_name,
         zonal_clusters=zonal_clusters,
     )
-    cassandra_costs.update({s.service_type: s.annual_cost for s in cap_services})
+    # annual_costs combines cluster infra + services for the Clusters object
+    annual_costs = {**cluster_costs}
+    annual_costs.update({s.service_type: s.annual_cost for s in cap_services})
 
     clusters = Clusters(
-        annual_costs=cassandra_costs,
+        annual_costs=annual_costs,
         zonal=zonal_clusters,
         regional=[],
         services=cap_services,
     )
 
+    # Apply penalties only to compute (cluster infrastructure) costs, not
+    # service costs (network, backup). Service costs are fixed regardless of
+    # instance choice, so penalizing them inflates the effective threshold —
+    # e.g. a 10% penalty on $700K total when services are $600K acts as a
+    # 47% penalty on the $100K compute component.
     total_penalty = sum(penalties.values())
-    plan_rank = clusters.total_annual_cost * (1 + total_penalty)
+    compute_cost = float(sum(cluster_costs.values()))
+    service_cost = float(sum(s.annual_cost for s in cap_services))
+    plan_rank = compute_cost * (1 + total_penalty) + service_cost
 
     return CapacityPlan(
         requirements=Requirements(zonal=[requirement] * zones_per_region),
@@ -1074,8 +1083,11 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             params = proposed_plan.candidate_clusters.zonal[0].cluster_params
             penalties = params.get(RANK_PENALTIES, {})
             if "large_instance" in penalties:
-                plan_cost = float(proposed_plan.candidate_clusters.total_annual_cost)
-                regrets["large_instance"] = penalties["large_instance"] * plan_cost
+                # Apply regret only to compute costs (same rationale as rank)
+                compute_cost = float(
+                    sum(c.annual_cost for c in proposed_plan.candidate_clusters.zonal)
+                )
+                regrets["large_instance"] = penalties["large_instance"] * compute_cost
 
         return regrets
 
