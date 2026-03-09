@@ -3,8 +3,9 @@
 When a cluster runs on m6id, migrating to c6id requires paying on-demand
 prices (reservations are family-specific). The different_family_regret
 (default 10%) penalises cross-family plans so savings must exceed the
-threshold to justify switching. c6id is ~13% cheaper than m6id for this
-workload, so the default 10% allows the switch while 15% blocks it.
+threshold to justify switching. c6id is ~6% cheaper than m6id for this
+workload (compute savings diluted by network/backup costs), so the default
+10% blocks the switch while disabling regret (0%) allows it.
 """
 
 import pytest
@@ -78,7 +79,7 @@ def _first_family(desires, extra_model_arguments, families=None):
             "m6id",
             id="high_regret_keeps_m6id",
         ),
-        pytest.param("m6id.8xlarge", {}, "c6id", id="default_allows_savings"),
+        pytest.param("m6id.8xlarge", {}, "m6id", id="default_blocks_switch"),
         pytest.param(
             "m6id.8xlarge",
             {"different_family_regret": 0},

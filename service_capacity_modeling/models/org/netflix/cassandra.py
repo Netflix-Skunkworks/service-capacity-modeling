@@ -69,6 +69,78 @@ CRITICAL_TIERS: Set[int] = {0, 1}
 # cluster size aka nodes per ASG
 CRITICAL_TIER_MIN_CLUSTER_SIZE = 2
 
+# --- CRR network and backup cost helpers ---
+#
+# Empirically derived from billing validation against 10 production clusters.
+# Two clusters with known app-level write sizes were used to fit a linear model:
+#   - cluster A: app=240B, billing=1,241B
+#   - cluster B: app=6,700B (20KB / 3:1 compression), billing=10,415B
+#
+# Linear regression: wire_bytes = intercept + slope * app_bytes
+#   slope = (10415 - 1241) / (6700 - 240) = 1.42
+#   intercept = 1241 - 1.42 * 240 = 900
+#
+# Physical interpretation:
+#   - 900B fixed: internode MessageOut framing, partition key, clustering column
+#     metadata, per-mutation timestamps, CRC checksums
+#   - 1.42x proportional: per-cell serialization overhead (column name, flags,
+#     timestamp, TTL per cell ~ 42% of raw value bytes)
+#
+# Validated against 5 additional clusters using default write sizes (256B):
+#   wire = 900 + 1.42*256 = 1,264B vs billing median 1,136-1,467B (within 15%)
+_CASSANDRA_MUTATION_FIXED_OVERHEAD_BYTES = 900
+_CASSANDRA_SERIALIZATION_AMPLIFICATION = 1.42
+
+# Empirically derived from 8 production clusters (Feb 2026).
+# For each cluster: effective_retention = (actual_backup_gib - state_gib) / daily_write_gib
+# Across 6 LCS clusters (excluding TTL-heavy outliers): median = 14.4 days
+#
+# This reflects the SSTable lifecycle under LCS:
+#   1. SSTable created on memtable flush -> backed up to S3
+#   2. Compacted into new SSTable -> new SSTable backed up
+#   3. Old SSTable deleted from live cluster
+#   4. Retained in backup for ~7 additional days post-deletion
+#
+# Configurable via backup_retention_days in extra_model_arguments for clusters
+# with different compaction strategies (TWCS) or aggressive TTLs.
+_DEFAULT_BACKUP_RETENTION_DAYS = 14.0
+
+# Known Cassandra write size defaults (from default_desires() and interface.py).
+# Used to detect whether estimated_mean_write_size_bytes was user-supplied or
+# model-defaulted. Interval has frozen=True (hashable), so set membership works.
+_KNOWN_WRITE_SIZE_DEFAULTS = {
+    Interval(low=64, mid=256, high=1024, confidence=0.95),  # latency pattern
+    Interval(low=128, mid=1024, high=65536, confidence=0.95),  # throughput pattern
+    Interval(low=512, mid=512, high=512, confidence=1.0),  # interface fallback
+}
+
+
+def _cassandra_wire_write_size(app_write_size_bytes: float) -> int:
+    """Convert application-level write size to on-wire bytes for network cost.
+
+    Cassandra mutations carry fixed protocol overhead (internode framing,
+    partition metadata) plus proportional serialization overhead (per-cell
+    metadata). See module-level constants for derivation.
+    """
+    return int(
+        _CASSANDRA_MUTATION_FIXED_OVERHEAD_BYTES
+        + _CASSANDRA_SERIALIZATION_AMPLIFICATION * app_write_size_bytes
+    )
+
+
+def _is_write_size_defaulted(desires: CapacityDesires) -> bool:
+    """Detect whether estimated_mean_write_size_bytes was user-supplied or defaulted.
+
+    After merge_with(), user-supplied values override model defaults via
+    ExcludeUnsetModel.model_dump(exclude_unset=True). We detect defaults by
+    exact equality against the known default Intervals (all 4 params: low, mid,
+    high, confidence).
+    """
+    return (
+        desires.query_pattern.estimated_mean_write_size_bytes
+        in _KNOWN_WRITE_SIZE_DEFAULTS
+    )
+
 
 def _write_buffer_gib_zone(
     desires: CapacityDesires, zones_per_region: int, flushes_before_compaction: int = 4
@@ -423,6 +495,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     different_family_regret: float = 0.10,
     experimental_memory_model: bool = False,
     max_page_cache_gib: float = 32.0,
+    backup_retention_days: Optional[float] = None,
 ) -> Optional[CapacityPlan]:
     # Netflix Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 2 or instance.ram_gib <= 16:
@@ -621,7 +694,10 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         service_type=NflxCassandraCapacityModel.service_name,
         context=context,
         desires=desires,
-        extra_model_arguments={"copies_per_region": copies_per_region},
+        extra_model_arguments={
+            "copies_per_region": copies_per_region,
+            "backup_retention_days": backup_retention_days,
+        },
     )
 
     cluster.cluster_type = NflxCassandraCapacityModel.cluster_type
@@ -778,6 +854,12 @@ class NflxCassandraArguments(BaseModel):
         "cache at this value regardless of instance RAM. Set to 0 to disable "
         "the cap. Only applies when experimental_memory_model is True.",
     )
+    backup_retention_days: Optional[float] = Field(
+        default=None,
+        description="Effective backup retention in days for write-throughput backup cost. "
+        "Default 14.0 (derived from LCS production clusters). Lower for TWCS or "
+        "aggressive TTL workloads where SSTables expire before retention matters.",
+    )
 
     @classmethod
     def from_extra_model_arguments(
@@ -844,33 +926,75 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         extra_model_arguments: Dict[str, Any],
     ) -> List[ServiceCapacity]:
         # C* service costs: network + backup
+        args = NflxCassandraArguments.from_extra_model_arguments(extra_model_arguments)
         copies_per_region: int = _target_rf(
             desires, extra_model_arguments.get("copies_per_region")
         )
 
-        services: List[ServiceCapacity] = []
-        services.extend(
-            network_services(service_type, context, desires, copies_per_region)
+        # Compute overhead-adjusted wire write size for CRR network cost.
+        # Cassandra mutations carry ~900B fixed overhead plus 1.42x proportional
+        # overhead vs raw app payload. See module-level constants for derivation.
+        current_write_size = desires.query_pattern.estimated_mean_write_size_bytes.mid
+        wire_write_size = _cassandra_wire_write_size(current_write_size)
+        write_size_defaulted = _is_write_size_defaulted(desires)
+
+        # Adjust desires to use wire write size for network cost calculation.
+        # We copy desires rather than modifying the shared function in common.py,
+        # since the overhead is Cassandra-specific (other models use
+        # network_services() with their own wire formats).
+        adjusted_desires = desires.model_copy(deep=True)
+        adjusted_desires.query_pattern.estimated_mean_write_size_bytes = certain_int(
+            wire_write_size
         )
+
+        services: List[ServiceCapacity] = []
+
+        # TODO(homatthew): Move cost confidence/warning signals to a top-level
+        # field on CapacityPlan (e.g., cost_warnings or cost_metadata). This is
+        # part of a larger explainability feature for the capacity planner —
+        # surfacing which costs are estimated vs measured, which inputs were
+        # defaulted, and how confident the model is in each cost component.
+        # For now, service_params carries the flag per-service.
+        net_services = network_services(
+            service_type, context, adjusted_desires, copies_per_region
+        )
+        for svc in net_services:
+            svc.service_params["write_size_defaulted"] = write_size_defaulted
+        services.extend(net_services)
 
         if desires.data_shape.durability_slo_order.mid >= 1000:
             blob = context.services.get("blob.standard", None)
             if blob:
-                # Calculate backup disk from desires (same as capacity_plan)
-                # This ensures consistent backup costs regardless of how requirement was built
+                # Snapshot component: data-at-rest per zone
                 backup_disk_gib = max(
                     1,
                     _get_disk_from_desires(desires, copies_per_region)
                     // context.zones_in_region,
                 )
+
+                # Write-throughput component: backup storage is dominated by
+                # continuous SSTable uploads, not just the data-at-rest snapshot.
+                # Uses overhead-adjusted wire size because SSTables include
+                # full serialized mutations (cell metadata, timestamps, bloom
+                # filter contributions), not just raw app payload.
+                wps = desires.query_pattern.estimated_write_per_second.mid
+                daily_write_gib = (wps * wire_write_size * 86400) / (1024**3)
+                retention_days = (
+                    args.backup_retention_days or _DEFAULT_BACKUP_RETENTION_DAYS
+                )
+
+                # Total = state snapshot + retained write volume
+                backup_total_gib = backup_disk_gib + daily_write_gib * retention_days
+
                 services.append(
                     ServiceCapacity(
                         service_type=f"{service_type}.backup.{blob.name}",
-                        annual_cost=blob.annual_cost_gib(backup_disk_gib),
+                        annual_cost=blob.annual_cost_gib(backup_total_gib),
                         service_params={
-                            "nines_required": (
-                                1 - 1.0 / desires.data_shape.durability_slo_order.mid
-                            )
+                            "snapshot_gib": backup_disk_gib,
+                            "daily_write_gib": round(daily_write_gib, 1),
+                            "retention_days": retention_days,
+                            "write_size_defaulted": write_size_defaulted,
                         },
                     )
                 )
@@ -930,6 +1054,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             different_family_regret=args.different_family_regret,
             experimental_memory_model=args.experimental_memory_model,
             max_page_cache_gib=args.max_page_cache_gib,
+            backup_retention_days=args.backup_retention_days,
         )
 
     @staticmethod
