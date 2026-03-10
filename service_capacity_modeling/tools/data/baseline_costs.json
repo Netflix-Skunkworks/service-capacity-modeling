@@ -353,9 +353,9 @@
   },
   {
     "annual_costs": {
-      "cassandra.backup.s3-standard": 50400.0,
-      "cassandra.net.inter.region": 6019.005966186523,
-      "cassandra.net.intra.region": 18057.01789855957,
+      "cassandra.backup.s3-standard": 57570.93515396118,
+      "cassandra.net.inter.region": 29695.330215990543,
+      "cassandra.net.intra.region": 89085.99064797163,
       "cassandra.zonal-clusters": 627456.0
     },
     "clusters": [
@@ -427,13 +427,13 @@
     "region": "us-east-1",
     "scenario": "cassandra_kv_dense_ebs",
     "service_tier": 1,
-    "total_annual_cost": 701932.02
+    "total_annual_cost": 803808.26
   },
   {
     "annual_costs": {
-      "cassandra.backup.s3-standard": 20160.0,
-      "cassandra.net.inter.region": 1504.7514915466309,
-      "cassandra.net.intra.region": 4514.254474639893,
+      "cassandra.backup.s3-standard": 21952.733788490295,
+      "cassandra.net.inter.region": 7423.832553997636,
+      "cassandra.net.intra.region": 22271.497661992908,
       "cassandra.zonal-clusters": 270399.36
     },
     "clusters": [
@@ -496,7 +496,7 @@
     "region": "us-east-1",
     "scenario": "cassandra_kv_compact_ebs",
     "service_tier": 1,
-    "total_annual_cost": 296578.37
+    "total_annual_cost": 322047.42
   },
   {
     "annual_costs": {
