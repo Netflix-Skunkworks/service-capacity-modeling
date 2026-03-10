@@ -2,9 +2,13 @@
 
 When a cluster runs on m6id, migrating to c6id requires paying on-demand
 prices (reservations are family-specific). The different_family_regret
-(default 10%) penalises cross-family plans so savings must exceed the
-threshold to justify switching. c6id is ~13% cheaper than m6id for this
-workload, so the default 10% allows the switch while 15% blocks it.
+(default 10%) penalises cross-family plans so compute savings must exceed
+the threshold to justify switching. Penalties apply only to compute costs,
+not service costs (network, backup), since service costs are identical
+regardless of instance choice.
+
+c6id is ~18% cheaper per-CPU than m6id, so the default 10% allows the
+switch while 25% blocks it.
 """
 
 import pytest
@@ -74,7 +78,7 @@ def _first_family(desires, extra_model_arguments, families=None):
     [
         pytest.param(
             "m6id.8xlarge",
-            {"different_family_regret": 0.15},
+            {"different_family_regret": 0.25},
             "m6id",
             id="high_regret_keeps_m6id",
         ),
@@ -88,7 +92,7 @@ def _first_family(desires, extra_model_arguments, families=None):
         pytest.param(None, {}, "c6id", id="new_provisioning"),
         pytest.param(
             "c6id.8xlarge",
-            {"different_family_regret": 0.15},
+            {"different_family_regret": 0.25},
             "c6id",
             id="reverse_keeps_c6id",
         ),
@@ -107,7 +111,7 @@ def test_combined_family_and_large_instance_penalties():
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=desires,
-        extra_model_arguments={"different_family_regret": 0.15},
+        extra_model_arguments={"different_family_regret": 0.25},
         instance_families=["m6id", "c6id"],
     )
     for p in plans:
