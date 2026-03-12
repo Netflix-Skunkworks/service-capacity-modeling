@@ -19,6 +19,7 @@ from .key_value import nflx_key_value_capacity_model
 from .read_only_kv import nflx_read_only_kv_capacity_model
 from .postgres import nflx_postgres_capacity_model
 from .rds import nflx_rds_capacity_model
+from .search import nflx_search_capacity_model
 from .stateless_java import nflx_java_app_capacity_model
 from .time_series import nflx_time_series_capacity_model
 from .wal import nflx_wal_capacity_model
@@ -49,4 +50,5 @@ def models() -> Dict[str, Any]:
         "org.netflix.wal": nflx_wal_capacity_model,
         "org.netflix.graphkv": nflx_graphkv_capacity_model,
         "org.netflix.read-only-kv": nflx_read_only_kv_capacity_model,
+        "org.netflix.search": nflx_search_capacity_model,
     }
