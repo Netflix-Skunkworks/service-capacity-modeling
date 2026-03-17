@@ -653,6 +653,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         "cassandra.heap.table.percent": max_table_buffer_percent,
         "cassandra.compaction.min_threshold": requirement.context["min_threshold"],
         EFFECTIVE_DISK_PER_NODE_GIB: disk_per_node_gib,
+        "cassandra.storage_buffer_ratio": round(disk_buffer_ratio, 2),
     }
     upsert_params(cluster, params)
 
