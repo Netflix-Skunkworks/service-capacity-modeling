@@ -780,6 +780,26 @@ def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
     return 3
 
 
+def _adaptive_storage_buffer_ratio(
+    zonal_data_gib: float,
+    max_ratio: float = 4.0,
+    min_ratio: float = 2.0,
+    midpoint_gib: float = 10_000,
+    steepness: float = 0.8,
+) -> float:
+    """Logistic decay from max_ratio to min_ratio as data size grows.
+
+    Large clusters have enormous absolute headroom even at lower ratios,
+    so a fixed 4x buffer over-provisions them and rejects cheaper instance
+    types that physically fit the data.
+    """
+    if zonal_data_gib <= 0:
+        return max_ratio
+    x = math.log(zonal_data_gib / midpoint_gib) * steepness
+    t = 1.0 / (1.0 + math.exp(-x))
+    return max_ratio - t * (max_ratio - min_ratio)
+
+
 class NflxCassandraArguments(BaseModel):
     """Configuration arguments for the Netflix Cassandra capacity model.
 
@@ -868,6 +888,20 @@ class NflxCassandraArguments(BaseModel):
         description="Effective backup retention in days for write-throughput backup cost. "
         "Default 14.0 (derived from LCS production clusters). Lower for TWCS or "
         "aggressive TTL workloads where SSTables expire before retention matters.",
+    )
+    adaptive_storage_buffer: bool = Field(
+        default=True,
+        description="Use a data-size-adaptive storage buffer instead of the fixed 4x. "
+        "Large clusters get a lower ratio (down to min_storage_buffer_ratio) "
+        "because they already have enormous absolute headroom in GiB.",
+    )
+    max_storage_buffer_ratio: float = Field(
+        default=4.0,
+        description="Storage buffer ratio for tiny clusters (adaptive upper bound).",
+    )
+    min_storage_buffer_ratio: float = Field(
+        default=2.0,
+        description="Storage buffer ratio for very large clusters (adaptive lower bound).",
     )
 
     @classmethod
@@ -1100,12 +1134,14 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         return NflxCassandraArguments.model_json_schema()
 
     @staticmethod
-    def default_buffers() -> Buffers:
+    def default_buffers(storage_ratio: float = 4.0) -> Buffers:
         return Buffers(
             default=Buffer(ratio=1.5),
             desired={
                 "compute": Buffer(ratio=1.5, components=[BufferComponent.compute]),
-                "storage": Buffer(ratio=4.0, components=[BufferComponent.storage]),
+                "storage": Buffer(
+                    ratio=storage_ratio, components=[BufferComponent.storage]
+                ),
                 # Cassandra reserves headroom in both cpu and network for background
                 # work and tasks
                 "background": Buffer(
@@ -1146,9 +1182,41 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         else:
             rf_write_latency = Interval(low=0.4, mid=1, high=2, confidence=0.98)
 
+        # Compute adaptive storage buffer ratio based on data size
+        args = NflxCassandraArguments.from_extra_model_arguments(extra_model_arguments)
+        storage_ratio = args.max_storage_buffer_ratio
+        if args.adaptive_storage_buffer:
+            # Estimate zonal data to scale the buffer
+            zonal_data_gib = 0.0
+            if (
+                user_desires.current_clusters is not None
+                and user_desires.current_clusters.zonal
+            ):
+                cc = user_desires.current_clusters.zonal[0]
+                if (
+                    cc.disk_utilization_gib is not None
+                    and cc.cluster_instance_count is not None
+                ):
+                    zonal_data_gib = (
+                        cc.disk_utilization_gib.mid * cc.cluster_instance_count.mid
+                    )
+            if zonal_data_gib <= 0 and user_desires.data_shape is not None:
+                state = getattr(
+                    user_desires.data_shape, "estimated_state_size_gib", None
+                )
+                if state is not None:
+                    zonal_data_gib = state.mid * rf / 3
+            storage_ratio = _adaptive_storage_buffer_ratio(
+                zonal_data_gib,
+                max_ratio=args.max_storage_buffer_ratio,
+                min_ratio=args.min_storage_buffer_ratio,
+            )
+
         # By supplying these buffers we can deconstruct observed utilization into
         # load versus buffer.
-        buffers = NflxCassandraCapacityModel.default_buffers()
+        buffers = NflxCassandraCapacityModel.default_buffers(
+            storage_ratio=storage_ratio
+        )
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
                 query_pattern=QueryPattern(

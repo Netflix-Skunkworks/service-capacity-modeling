@@ -334,7 +334,8 @@ class TestCassandraThroughput:
         )
         assert high_writes_result.attached_drives[0].size_gib >= 400
         total_storage = get_total_storage_gib(high_writes_result)
-        assert 100_000 <= total_storage < 300_000
+        # Adaptive buffer (~2.3x for 100 TiB) provisions less than fixed 4x
+        assert 60_000 <= total_storage < 300_000
 
         cluster_cost = cap_plan.candidate_clusters.annual_costs[
             "cassandra.zonal-clusters"

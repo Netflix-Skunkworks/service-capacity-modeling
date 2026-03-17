@@ -84,10 +84,10 @@ def test_cassandra_merge():
         ).ratio
         == 1.5 * 2.0
     )
-    # Disk should just come from the default storage
-    assert (
-        buffer_for_components(
-            buffers=merged.buffers, components=[BufferComponent.disk]
-        ).ratio
-        == 4.0
-    )
+    # Disk should come from the default storage (adaptive buffer for
+    # tiny clusters is near 4.0)
+    import pytest
+
+    assert buffer_for_components(
+        buffers=merged.buffers, components=[BufferComponent.disk]
+    ).ratio == pytest.approx(4.0, abs=0.1)

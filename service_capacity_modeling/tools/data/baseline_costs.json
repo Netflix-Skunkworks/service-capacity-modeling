@@ -155,7 +155,7 @@
   },
   {
     "annual_costs": {
-      "cassandra.backup.s3-standard": 179340.41084902955,
+      "cassandra.backup.s3-standard": 179339.15084902954,
       "cassandra.net.inter.region": 742383.2553997636,
       "cassandra.net.intra.region": 1113574.8830996454,
       "cassandra.zonal-clusters": 69031.92
@@ -172,7 +172,7 @@
           "cassandra.heap.table.percent": 0.2,
           "cassandra.heap.write.percent": 0.5,
           "cassandra.keyspace.rf": 2,
-          "effective_disk_per_node_gib": 8200
+          "effective_disk_per_node_gib": 8100
         },
         "cluster_type": "cassandra",
         "count": 8,
@@ -190,7 +190,7 @@
           "cassandra.heap.table.percent": 0.2,
           "cassandra.heap.write.percent": 0.5,
           "cassandra.keyspace.rf": 2,
-          "effective_disk_per_node_gib": 8200
+          "effective_disk_per_node_gib": 8100
         },
         "cluster_type": "cassandra",
         "count": 8,
@@ -208,7 +208,7 @@
           "cassandra.heap.table.percent": 0.2,
           "cassandra.heap.write.percent": 0.5,
           "cassandra.keyspace.rf": 2,
-          "effective_disk_per_node_gib": 8200
+          "effective_disk_per_node_gib": 8100
         },
         "cluster_type": "cassandra",
         "count": 8,
@@ -220,11 +220,11 @@
     "region": "us-east-1",
     "scenario": "cassandra_high_writes_ebs",
     "service_tier": 1,
-    "total_annual_cost": 2104330.47
+    "total_annual_cost": 2104329.21
   },
   {
     "annual_costs": {
-      "cassandra.backup.s3-standard": 11260.402730941772,
+      "cassandra.backup.s3-standard": 11239.234730941773,
       "cassandra.net.inter.region": 44542.995323985815,
       "cassandra.net.intra.region": 133628.98597195745,
       "cassandra.zonal-clusters": 61656.0
@@ -280,11 +280,11 @@
     "region": "us-east-1",
     "scenario": "cassandra_vertical_baseline",
     "service_tier": 1,
-    "total_annual_cost": 251088.38
+    "total_annual_cost": 251067.22
   },
   {
     "annual_costs": {
-      "cassandra.backup.s3-standard": 445411.7952346802,
+      "cassandra.backup.s3-standard": 353277.0672346802,
       "cassandra.net.inter.region": 1009641.2273436785,
       "cassandra.net.intra.region": 3028923.6820310354,
       "cassandra.zonal-clusters": 1772864.6400000001
@@ -301,7 +301,7 @@
           "cassandra.heap.table.percent": 0.2,
           "cassandra.heap.write.percent": 0.5,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 12000
+          "effective_disk_per_node_gib": 6600
         },
         "cluster_type": "cassandra",
         "count": 64,
@@ -319,7 +319,7 @@
           "cassandra.heap.table.percent": 0.2,
           "cassandra.heap.write.percent": 0.5,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 12000
+          "effective_disk_per_node_gib": 6600
         },
         "cluster_type": "cassandra",
         "count": 64,
@@ -337,7 +337,7 @@
           "cassandra.heap.table.percent": 0.2,
           "cassandra.heap.write.percent": 0.5,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 12000
+          "effective_disk_per_node_gib": 6600
         },
         "cluster_type": "cassandra",
         "count": 64,
@@ -349,11 +349,11 @@
     "region": "us-east-1",
     "scenario": "cassandra_timeseries_ebs",
     "service_tier": 1,
-    "total_annual_cost": 6256841.34
+    "total_annual_cost": 6164706.62
   },
   {
     "annual_costs": {
-      "cassandra.backup.s3-standard": 57570.93515396118,
+      "cassandra.backup.s3-standard": 37961.555153961184,
       "cassandra.net.inter.region": 29695.330215990543,
       "cassandra.net.intra.region": 89085.99064797163,
       "cassandra.zonal-clusters": 627456.0
@@ -370,7 +370,7 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 8200,
+          "effective_disk_per_node_gib": 5100,
           "rank_penalties": {
             "family_migration": 0.1
           }
@@ -391,7 +391,7 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 8200,
+          "effective_disk_per_node_gib": 5100,
           "rank_penalties": {
             "family_migration": 0.1
           }
@@ -412,7 +412,7 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 8200,
+          "effective_disk_per_node_gib": 5100,
           "rank_penalties": {
             "family_migration": 0.1
           }
@@ -427,11 +427,11 @@
     "region": "us-east-1",
     "scenario": "cassandra_kv_dense_ebs",
     "service_tier": 1,
-    "total_annual_cost": 803808.26
+    "total_annual_cost": 784198.88
   },
   {
     "annual_costs": {
-      "cassandra.backup.s3-standard": 21952.733788490295,
+      "cassandra.backup.s3-standard": 15626.777788490295,
       "cassandra.net.inter.region": 7423.832553997636,
       "cassandra.net.intra.region": 22271.497661992908,
       "cassandra.zonal-clusters": 270399.36
@@ -448,7 +448,7 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 8200
+          "effective_disk_per_node_gib": 5700
         },
         "cluster_type": "cassandra",
         "count": 64,
@@ -466,7 +466,7 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 8200
+          "effective_disk_per_node_gib": 5700
         },
         "cluster_type": "cassandra",
         "count": 64,
@@ -484,7 +484,7 @@
           "cassandra.heap.table.percent": 0.11,
           "cassandra.heap.write.percent": 0.25,
           "cassandra.keyspace.rf": 3,
-          "effective_disk_per_node_gib": 8200
+          "effective_disk_per_node_gib": 5700
         },
         "cluster_type": "cassandra",
         "count": 64,
@@ -496,7 +496,7 @@
     "region": "us-east-1",
     "scenario": "cassandra_kv_compact_ebs",
     "service_tier": 1,
-    "total_annual_cost": 322047.42
+    "total_annual_cost": 315721.47
   },
   {
     "annual_costs": {
@@ -725,7 +725,7 @@
   },
   {
     "annual_costs": {
-      "cassandra.backup.s3-standard": 18095.169884902953,
+      "cassandra.backup.s3-standard": 18088.365884902953,
       "cassandra.net.inter.region": 74238.32553997636,
       "cassandra.net.intra.region": 222714.97661992908,
       "cassandra.zonal-clusters": 44260.020000000004,
@@ -835,7 +835,7 @@
     "region": "us-east-1",
     "scenario": "kv_with_cache",
     "service_tier": 1,
-    "total_annual_cost": 618047.75
+    "total_annual_cost": 618040.95
   },
   {
     "annual_costs": {
