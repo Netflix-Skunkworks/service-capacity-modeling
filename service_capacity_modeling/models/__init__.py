@@ -170,7 +170,7 @@ class ExplainableModel:
     """
 
     @staticmethod
-    def family_graph(hardware: Hardware) -> FamilyGraph:  # noqa: W0613
+    def family_graph(hardware: Hardware) -> FamilyGraph:
         """Return the family relationship graph for this model.
 
         The hardware parameter provides instance shapes for deriving
