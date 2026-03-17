@@ -1097,7 +1097,7 @@ class CapacityPlanner:
             str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]
         ] = {}
         desires_by_model: Dict[str, CapacityDesires] = {}
-        excuses_by_model: Dict[str, List[Excuse]] = {}
+        excuses_by_model: Dict[str, List[Excuse]] = {} if explain else {}
         for sub_model, sub_desires in self._sub_models(
             model_name=model_name,
             desires=desires,
@@ -1105,7 +1105,7 @@ class CapacityPlanner:
         ):
             desires_by_model[sub_model] = sub_desires
             model_plans: List[Tuple[CapacityDesires, Sequence[CapacityPlan]]] = []
-            model_excuses: List[Excuse] = []
+            model_excuses: List[Excuse] = [] if explain else []
             for sim_desires in model_desires(sub_desires, simulations):
                 sim_result = self._plan_certain(
                     model_name=sub_model,
@@ -1120,8 +1120,10 @@ class CapacityPlanner:
                     max_results_per_family=max_results_per_family,
                 )
                 model_plans.append((sim_desires, sim_result.plans))
-                model_excuses.extend(sim_result.excuses)
-            excuses_by_model[sub_model] = model_excuses
+                if explain:
+                    model_excuses.extend(sim_result.excuses)
+            if explain:
+                excuses_by_model[sub_model] = model_excuses
             regret_clusters_by_model[sub_model] = _regret(
                 capacity_plans=[
                     (sim_desires, plan[0]) for sim_desires, plan in model_plans if plan

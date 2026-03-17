@@ -1,5 +1,7 @@
 """Tests for the Explainability mixin: Excuses, FamilyGraph, and ExplainedPlans."""
 
+import pytest
+
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import (
     CapacityDesires,
@@ -37,6 +39,17 @@ small_workload = CapacityDesires(
         estimated_state_size_gib=certain_int(100),
     ),
 )
+
+
+@pytest.fixture(scope="module")
+def explained_plans():
+    """Shared fixture for plan_certain_explained() with small_workload."""
+    return planner.plan_certain_explained(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=small_workload,
+        extra_model_arguments=EXTRA_MODEL_ARGS,
+    )
 
 
 class TestExcuseModel:
@@ -157,29 +170,18 @@ class TestFamilyGraph:
         assert not graph.edges
 
 
-class TestComputeExcuseTags:
-    """Test the _compute_excuse_tags function."""
-
-    def test_same_instance(self):
-        assert _compute_excuse_tags("r6a.2xlarge", "r6a.2xlarge") == ["current_shape"]
-
-    def test_same_family_size_up(self):
-        tags = _compute_excuse_tags("r6a.4xlarge", "r6a.2xlarge")
-        assert "same_family" in tags
-        assert "size_up" in tags
-
-    def test_same_family_size_down(self):
-        tags = _compute_excuse_tags("r6a.xlarge", "r6a.2xlarge")
-        assert "same_family" in tags
-        assert "size_down" in tags
-
-    def test_different_family(self):
-        assert _compute_excuse_tags("i4i.2xlarge", "r6a.2xlarge") == [
-            "different_family"
-        ]
-
-    def test_no_current_instance(self):
-        assert not _compute_excuse_tags("r6a.2xlarge", None)
+@pytest.mark.parametrize(
+    "excuse_inst, current_inst, expected_tags",
+    [
+        ("r6a.2xlarge", "r6a.2xlarge", ["current_shape"]),
+        ("r6a.4xlarge", "r6a.2xlarge", ["same_family", "size_up"]),
+        ("r6a.xlarge", "r6a.2xlarge", ["same_family", "size_down"]),
+        ("i4i.2xlarge", "r6a.2xlarge", ["different_family"]),
+        ("r6a.2xlarge", None, []),
+    ],
+)
+def test_compute_excuse_tags(excuse_inst, current_inst, expected_tags):
+    assert _compute_excuse_tags(excuse_inst, current_inst) == expected_tags
 
 
 class TestCassandraFamilyGraph:
@@ -216,50 +218,26 @@ class TestCassandraFamilyGraph:
 class TestPlanCertainExplained:
     """Test plan_certain_explained() returns excuses and plans."""
 
-    def test_returns_explained_plans(self):
-        result = planner.plan_certain_explained(
-            model_name="org.netflix.cassandra",
-            region="us-east-1",
-            desires=small_workload,
-            extra_model_arguments=EXTRA_MODEL_ARGS,
-        )
-        assert isinstance(result, ExplainedPlans)
-        # Should have some viable plans
-        assert len(result.plans) > 0
-        # Should have some excuses (small instances rejected, etc)
-        assert len(result.excuses) > 0
+    def test_returns_explained_plans(self, explained_plans):
+        assert isinstance(explained_plans, ExplainedPlans)
+        assert len(explained_plans.plans) > 0
+        assert len(explained_plans.excuses) > 0
 
-    def test_excuses_have_structured_fields(self):
-        result = planner.plan_certain_explained(
-            model_name="org.netflix.cassandra",
-            region="us-east-1",
-            desires=small_workload,
-            extra_model_arguments=EXTRA_MODEL_ARGS,
-        )
-        for excuse in result.excuses:
+    def test_excuses_have_structured_fields(self, explained_plans):
+        for excuse in explained_plans.excuses:
             assert excuse.instance, "Excuse must have an instance"
             assert excuse.drive, "Excuse must have a drive"
             assert excuse.reason, "Excuse must have a reason"
 
-    def test_excuses_include_drive_type_rejections(self):
-        result = planner.plan_certain_explained(
-            model_name="org.netflix.cassandra",
-            region="us-east-1",
-            desires=small_workload,
-            extra_model_arguments=EXTRA_MODEL_ARGS,
-        )
-        drive_type_excuses = [e for e in result.excuses if e.bottleneck == "drive_type"]
+    def test_excuses_include_drive_type_rejections(self, explained_plans):
+        drive_type_excuses = [
+            e for e in explained_plans.excuses if e.bottleneck == "drive_type"
+        ]
         assert len(drive_type_excuses) > 0
 
-    def test_family_graph_is_populated(self):
-        result = planner.plan_certain_explained(
-            model_name="org.netflix.cassandra",
-            region="us-east-1",
-            desires=small_workload,
-            extra_model_arguments=EXTRA_MODEL_ARGS,
-        )
-        assert len(result.family_graph.families) > 0
-        assert len(result.family_graph.edges) > 0
+    def test_family_graph_is_populated(self, explained_plans):
+        assert len(explained_plans.family_graph.families) > 0
+        assert len(explained_plans.family_graph.edges) > 0
 
 
 class TestExplainedPlansRender:
@@ -313,17 +291,10 @@ class TestExplainedPlansRender:
         assert "r6a.2xlarge" in md
         assert "Bottleneck: disk" in md
 
-    def test_render_with_live_data(self):
+    def test_render_with_live_data(self, explained_plans):
         """Render from actual planner output."""
-        result = planner.plan_certain_explained(
-            model_name="org.netflix.cassandra",
-            region="us-east-1",
-            desires=small_workload,
-            extra_model_arguments=EXTRA_MODEL_ARGS,
-        )
-        md = result.render()
-        # Should produce non-empty markdown if there are excuses
-        if result.excuses:
+        md = explained_plans.render()
+        if explained_plans.excuses:
             assert "## Why shapes were rejected" in md
 
 
@@ -339,10 +310,20 @@ class TestPlanExplainFlag:
             explain=True,
             extra_model_arguments=EXTRA_MODEL_ARGS,
         )
-        # excuses_by_model should be populated when explain=True
         assert hasattr(result.explanation, "excuses_by_model")
         if result.explanation.excuses_by_model:
             for model_name, excuses in result.explanation.excuses_by_model.items():
                 assert isinstance(model_name, str)
                 for excuse in excuses:
                     assert isinstance(excuse, Excuse)
+
+    def test_plan_explain_false_has_no_excuses(self):
+        result = planner.plan(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=small_workload,
+            simulations=2,
+            explain=False,
+            extra_model_arguments=EXTRA_MODEL_ARGS,
+        )
+        assert not result.explanation.excuses_by_model

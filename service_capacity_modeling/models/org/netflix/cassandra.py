@@ -747,8 +747,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     if penalties:
         upsert_params(cluster, {RANK_PENALTIES: penalties})
 
-    drive_name = drive.name
-
     # Sometimes we don't want modify cluster topology, so only allow
     # topologies that match the desired zone size
     if required_cluster_size is not None and cluster.count != required_cluster_size:
@@ -787,7 +785,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 "needed_disk_gib": needed_disk_gib,
                 "disk_per_node_gib": disk_per_node_gib,
             },
-            bottleneck="disk",
+            bottleneck="disk_capacity",
         )
 
     # Calculate service costs (network + backup)
