@@ -7,6 +7,7 @@ from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Set
+from typing import Tuple
 from typing import Union
 
 from pydantic import BaseModel
@@ -576,15 +577,15 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             bottleneck=Bottleneck.drive_type,
         )
 
-    # Cassandra only deploys on gp2 and gp3 drives right now
-    if drive.name not in ("gp2", "gp3"):
+    # Cassandra deploys on gp3 only (gp2 is legacy)
+    if drive.name != "gp3":
         return Excuse(
             instance=instance.name,
             drive=drive_name,
             reason=f"Unsupported drive type: {drive_name}",
             context={
                 "drive_name": drive_name,
-                "supported_drives": ["gp2", "gp3"],
+                "supported_drives": ["gp3"],
             },
             bottleneck=Bottleneck.drive_type,
         )
@@ -1096,6 +1097,10 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel, ExplainableModel
             ),
         ],
     }
+
+    @staticmethod
+    def allowed_cloud_drives() -> Tuple[str, ...]:
+        return ("gp3",)
 
     @staticmethod
     def family_graph(hardware: Hardware) -> FamilyGraph:

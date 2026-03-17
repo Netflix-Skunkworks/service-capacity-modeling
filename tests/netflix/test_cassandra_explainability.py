@@ -286,11 +286,11 @@ class TestPlanCertainExplained:
         for excuse in typed_excuses:
             assert isinstance(excuse.bottleneck, Bottleneck)
 
-    def test_excuses_include_drive_type_rejections(self, explained_plans):
-        drive_type_excuses = [
-            e for e in explained_plans.excuses if e.bottleneck == Bottleneck.drive_type
-        ]
-        assert len(drive_type_excuses) > 0
+    def test_no_unsupported_drive_excuses(self, explained_plans):
+        """With allowed_cloud_drives=('gp3',), no aurora/io2/gp2 excuses."""
+        bad_drives = {"aurora", "io2", "gp2"}
+        for excuse in explained_plans.excuses:
+            assert excuse.drive not in bad_drives
 
     def test_family_graph_is_populated(self, explained_plans):
         assert len(explained_plans.family_graph.traits) > 0
