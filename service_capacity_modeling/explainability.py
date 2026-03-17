@@ -1,11 +1,39 @@
 """Explainability types for the capacity planner.
 
+**Experimental** — this API may change as more models adopt ExplainableModel.
+
 This module contains the family graph (FamilyTrait, FamilyEdge, FamilyGraph)
 and ExplainedPlans — types used to explain *why* the planner rejected
 certain instance/drive combinations and what alternatives exist.
 
 Core contract types (Bottleneck, Excuse) live in interface.py because they
 are part of the CapacityModel.capacity_plan() return type.
+
+Consumer usage::
+
+    from service_capacity_modeling.capacity_planner import planner
+    from service_capacity_modeling.models.plan_comparison import compare_plans
+
+    # Rejection explanations + family graph
+    explained = planner.plan_certain_explained(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=desires,
+        extra_model_arguments=extra,
+    )
+
+    # Current-vs-recommended comparison (separate concern)
+    baseline = planner.extract_baseline_plan(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=desires,
+        extra_model_arguments=extra,
+    )
+    comparison = compare_plans(baseline, explained.plans[0])
+
+    # Serialize both for downstream consumers
+    explained.model_dump_json()
+    comparison.model_dump_json()
 """
 
 from __future__ import annotations
