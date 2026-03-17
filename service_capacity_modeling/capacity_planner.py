@@ -10,6 +10,7 @@ from typing import cast
 from typing import Dict
 from typing import Generator
 from typing import List
+from typing import NamedTuple
 from typing import Optional
 from typing import Sequence
 from typing import Set
@@ -29,6 +30,9 @@ from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Excuse
+from service_capacity_modeling.interface import ExplainedPlans
+from service_capacity_modeling.interface import FamilyGraph
 from service_capacity_modeling.interface import Hardware
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
@@ -45,6 +49,7 @@ from service_capacity_modeling.interface import UncertainCapacityPlan
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
+from service_capacity_modeling.models import ExplainableModel
 from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.org import netflix
@@ -53,6 +58,23 @@ from service_capacity_modeling.stats import dist_for_interval
 from service_capacity_modeling.stats import interval_percentile
 
 logger = logging.getLogger(__name__)
+
+
+class _CertainResult(NamedTuple):
+    plans: Sequence[CapacityPlan]
+    excuses: Sequence[Excuse]
+
+
+def _deduplicate_excuses(excuses: Sequence[Excuse]) -> Sequence[Excuse]:
+    """Deduplicate excuses by (instance, drive, reason) across simulations."""
+    seen: Set[Tuple[str, str, str]] = set()
+    result: List[Excuse] = []
+    for exc in excuses:
+        key = (exc.instance, exc.drive, exc.reason)
+        if key not in seen:
+            seen.add(key)
+            result.append(exc)
+    return result
 
 
 def simulate_interval(
@@ -585,7 +607,7 @@ class CapacityPlanner:
             for percentile_sub_model, percentile_sub_desire in model_percentile_desires[
                 index
             ].items():
-                percentile_sub_plan = self._plan_certain(
+                percentile_sub_result = self._plan_certain(
                     model_name=percentile_sub_model,
                     region=region,
                     desires=percentile_sub_desire,
@@ -596,8 +618,8 @@ class CapacityPlanner:
                     instance_families=instance_families,
                     drives=drives,
                 )
-                if percentile_sub_plan:
-                    percentile_plan.append(percentile_sub_plan)
+                if percentile_sub_result.plans:
+                    percentile_plan.append(percentile_sub_result.plans)
 
             percentile_plans[percentile] = cast(
                 Sequence[CapacityPlan],
@@ -621,7 +643,7 @@ class CapacityPlanner:
     ) -> Sequence[CapacityPlan]:
         mean_plans = []
         for mean_sub_model, mean_sub_desire in model_mean_desires.items():
-            mean_sub_plan = self._plan_certain(
+            mean_sub_result = self._plan_certain(
                 model_name=mean_sub_model,
                 region=region,
                 desires=mean_sub_desire,
@@ -632,8 +654,8 @@ class CapacityPlanner:
                 instance_families=instance_families,
                 drives=drives,
             )
-            if mean_sub_plan:
-                mean_plans.append(mean_sub_plan)
+            if mean_sub_result.plans:
+                mean_plans.append(mean_sub_result.plans)
         mean_plan = cast(
             Sequence[CapacityPlan],
             [functools.reduce(merge_plan, composed) for composed in zip(*mean_plans)],
@@ -671,7 +693,7 @@ class CapacityPlanner:
             desires=desires,
             extra_model_arguments=extra_model_arguments,
         ):
-            sub_plan = self._plan_certain(
+            sub_result = self._plan_certain(
                 model_name=sub_model,
                 region=region,
                 desires=sub_desires,
@@ -683,10 +705,79 @@ class CapacityPlanner:
                 drives=drives,
                 max_results_per_family=max_results_per_family,
             )
-            if sub_plan:
-                results.append(sub_plan)
+            if sub_result.plans:
+                results.append(sub_result.plans)
 
         return [functools.reduce(merge_plan, composed) for composed in zip(*results)]
+
+    def plan_certain_explained(  # pylint: disable=too-many-positional-arguments
+        self,
+        model_name: str,
+        region: str,
+        desires: CapacityDesires,
+        lifecycles: Optional[Sequence[Lifecycle]] = None,
+        instance_families: Optional[Sequence[str]] = None,
+        drives: Optional[Sequence[str]] = None,
+        num_results: Optional[int] = None,
+        num_regions: int = 3,
+        extra_model_arguments: Optional[Dict[str, Any]] = None,
+        max_results_per_family: int = 1,
+    ) -> ExplainedPlans:
+        """Like plan_certain() but returns excuses and family graph too."""
+        if model_name not in self._models:
+            raise ValueError(
+                f"model_name={model_name} does not exist. "
+                f"Try {sorted(list(self._models.keys()))}"
+            )
+
+        desires = desires.model_copy(deep=True)
+        _resolve_cluster_instances(desires)
+        extra_model_arguments = extra_model_arguments or {}
+        lifecycles = lifecycles or self._default_lifecycles
+
+        all_plans: List[Sequence[CapacityPlan]] = []
+        all_excuses: List[Excuse] = []
+
+        for sub_model, sub_desires in self._sub_models(
+            model_name=model_name,
+            desires=desires,
+            extra_model_arguments=extra_model_arguments,
+        ):
+            sub_result = self._plan_certain(
+                model_name=sub_model,
+                region=region,
+                desires=sub_desires,
+                num_results=num_results,
+                num_regions=num_regions,
+                extra_model_arguments=extra_model_arguments,
+                lifecycles=lifecycles,
+                instance_families=instance_families,
+                drives=drives,
+                max_results_per_family=max_results_per_family,
+            )
+            if sub_result.plans:
+                all_plans.append(sub_result.plans)
+            all_excuses.extend(sub_result.excuses)
+
+        plans = (
+            [functools.reduce(merge_plan, composed) for composed in zip(*all_plans)]
+            if all_plans
+            else []
+        )
+
+        # Get family graph from model if it implements ExplainableModel
+        model = self._models[model_name]
+        graph = (
+            model.family_graph()
+            if isinstance(model, ExplainableModel)
+            else FamilyGraph()
+        )
+
+        return ExplainedPlans(
+            plans=plans,
+            excuses=_deduplicate_excuses(all_excuses),
+            family_graph=graph,
+        )
 
     def _plan_certain(  # pylint: disable=too-many-positional-arguments
         self,
@@ -700,31 +791,39 @@ class CapacityPlanner:
         drives: Optional[Sequence[str]] = None,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
         max_results_per_family: int = 1,
-    ) -> Sequence[CapacityPlan]:
+    ) -> _CertainResult:
         extra_model_arguments = extra_model_arguments or {}
         model = self._models[model_name]
 
-        plans = []
+        plans: List[CapacityPlan] = []
+        excuses: List[Excuse] = []
         for instance, drive, context in self.generate_scenarios(
             model, region, desires, num_regions, lifecycles, instance_families, drives
         ):
-            plan = model.capacity_plan(
+            match model.capacity_plan(
                 instance=instance,
                 drive=drive,
                 context=context,
                 desires=desires,
                 extra_model_arguments=extra_model_arguments,
-            )
-            if plan is not None:
-                plans.append(plan)
+            ):
+                case CapacityPlan() as plan:
+                    plans.append(plan)
+                case Excuse() as excuse:
+                    excuses.append(excuse)
+                case None:
+                    pass
 
         # lowest cost first
         plans.sort(key=lambda p: (p.rank, p.candidate_clusters.total_annual_cost))
 
         num_results = num_results or self._default_num_results
-        return reduce_by_family(plans, max_results_per_family=max_results_per_family)[
-            :num_results
-        ]
+        return _CertainResult(
+            plans=reduce_by_family(
+                plans, max_results_per_family=max_results_per_family
+            )[:num_results],
+            excuses=excuses,
+        )
 
     def _get_model_costs(
         self,
@@ -998,6 +1097,7 @@ class CapacityPlanner:
             str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]
         ] = {}
         desires_by_model: Dict[str, CapacityDesires] = {}
+        excuses_by_model: Dict[str, List[Excuse]] = {}
         for sub_model, sub_desires in self._sub_models(
             model_name=model_name,
             desires=desires,
@@ -1005,24 +1105,23 @@ class CapacityPlanner:
         ):
             desires_by_model[sub_model] = sub_desires
             model_plans: List[Tuple[CapacityDesires, Sequence[CapacityPlan]]] = []
+            model_excuses: List[Excuse] = []
             for sim_desires in model_desires(sub_desires, simulations):
-                model_plans.append(
-                    (
-                        sim_desires,
-                        self._plan_certain(
-                            model_name=sub_model,
-                            region=region,
-                            desires=sim_desires,
-                            num_results=1,
-                            num_regions=num_regions,
-                            extra_model_arguments=extra_model_arguments,
-                            lifecycles=lifecycles,
-                            instance_families=instance_families,
-                            drives=drives,
-                            max_results_per_family=max_results_per_family,
-                        ),
-                    )
+                sim_result = self._plan_certain(
+                    model_name=sub_model,
+                    region=region,
+                    desires=sim_desires,
+                    num_results=1,
+                    num_regions=num_regions,
+                    extra_model_arguments=extra_model_arguments,
+                    lifecycles=lifecycles,
+                    instance_families=instance_families,
+                    drives=drives,
+                    max_results_per_family=max_results_per_family,
                 )
+                model_plans.append((sim_desires, sim_result.plans))
+                model_excuses.extend(sim_result.excuses)
+            excuses_by_model[sub_model] = model_excuses
             regret_clusters_by_model[sub_model] = _regret(
                 capacity_plans=[
                     (sim_desires, plan[0]) for sim_desires, plan in model_plans if plan
@@ -1100,6 +1199,11 @@ class CapacityPlanner:
         )
         if explain:
             result.explanation.regret_clusters_by_model = regret_clusters_by_model
+            result.explanation.excuses_by_model = {
+                model: _deduplicate_excuses(excuses)
+                for model, excuses in excuses_by_model.items()
+                if excuses
+            }
             result.explanation.context["regret"] = least_regret
 
         return result

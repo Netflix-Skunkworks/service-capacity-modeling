@@ -1263,13 +1263,140 @@ class CapacityRegretParameters(ExcludeUnsetModel):
     extra: Dict[str, Regret] = {}
 
 
+###############################################################################
+#                     Explainability: Excuses & Family Graph                  #
+###############################################################################
+
+
+class Excuse(ExcludeUnsetModel):
+    """Structured explanation for why an instance/drive combo was rejected."""
+
+    instance: str
+    drive: str
+    reason: str
+    context: Dict[str, Any] = {}
+    tags: List[str] = []
+    bottleneck: Optional[str] = None
+
+
+class FamilyTrait(ExcludeUnsetModel):
+    """What an instance family is good/bad at for this model."""
+
+    family: str
+    storage_type: str
+    strengths: List[str] = []
+    weaknesses: List[str] = []
+    typical_disk_gib_per_node: Optional[int] = None
+    typical_memory_per_vcpu: Optional[float] = None
+    compute_balance: str = "balanced"
+
+
+class FamilyEdge(ExcludeUnsetModel):
+    """Trade-off relationship between two families."""
+
+    from_family: str
+    to_family: str
+    trade_off: str
+    improves: List[str] = []
+    degrades: List[str] = []
+
+
+class FamilyGraph(ExcludeUnsetModel):
+    """Soft DAG of instance family relationships."""
+
+    families: Dict[str, FamilyTrait] = {}
+    edges: List[FamilyEdge] = []
+
+    def suggest_alternatives(self, excuse: Excuse) -> List[FamilyEdge]:
+        """Return edges to families that improve the excuse's bottleneck."""
+        if not excuse.bottleneck:
+            return []
+        excuse_family = excuse.instance.rsplit(".", 1)[0]
+        return [
+            e
+            for e in self.edges
+            if e.from_family == excuse_family and excuse.bottleneck in e.improves
+        ]
+
+
 class PlanExplanation(ExcludeUnsetModel):
     regret_params: CapacityRegretParameters
     regret_clusters_by_model: Dict[
         str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]
     ] = {}
     desires_by_model: Dict[str, CapacityDesires] = {}
+    excuses_by_model: Dict[str, Sequence[Excuse]] = {}
     context: Dict[str, Any] = {}
+
+
+class ExplainedPlans(ExcludeUnsetModel):
+    """Plans + excuses + family context. Both structured and renderable."""
+
+    plans: Sequence[CapacityPlan]
+    excuses: Sequence[Excuse] = []
+    family_graph: FamilyGraph = FamilyGraph()
+
+    def render(self) -> str:
+        """Render a markdown report for human/AI consumption."""
+        if not self.excuses:
+            return ""
+
+        lines: List[str] = ["## Why shapes were rejected", ""]
+
+        # Group excuses by tag category
+        current = [e for e in self.excuses if "current_shape" in e.tags]
+        same_fam = [
+            e
+            for e in self.excuses
+            if any(t in e.tags for t in ("same_family",))
+            and "current_shape" not in e.tags
+        ]
+        diff_fam = [e for e in self.excuses if "different_family" in e.tags]
+        untagged = [
+            e
+            for e in self.excuses
+            if not e.tags
+            or not any(
+                t in e.tags
+                for t in ("current_shape", "same_family", "different_family")
+            )
+        ]
+
+        for section_title, section_excuses in [
+            ("Current shape", current),
+            ("Same family", same_fam),
+            ("Different families", diff_fam),
+            ("Other", untagged),
+        ]:
+            if not section_excuses:
+                continue
+            lines.append(f"### {section_title}")
+            for exc in section_excuses:
+                line = f"- **{exc.instance}** ({exc.drive}): {exc.reason}"
+                if exc.bottleneck:
+                    alts = self.family_graph.suggest_alternatives(exc)
+                    alt_str = (
+                        ", ".join(f"{a.to_family} ({a.trade_off})" for a in alts)
+                        if alts
+                        else "none"
+                    )
+                    line += (
+                        f"\n  Bottleneck: {exc.bottleneck} | Alternatives: {alt_str}"
+                    )
+                lines.append(line)
+            lines.append("")
+
+        # Family trade-off map
+        if self.family_graph.edges:
+            lines.append("### Family trade-off map")
+            for edge in self.family_graph.edges:
+                lines.append(
+                    f"- {edge.from_family} --[{', '.join(edge.improves)}]--> "
+                    f"{edge.to_family} ({edge.trade_off})"
+                )
+            lines.append("")
+
+        return "\n".join(lines)
 
 
 class UncertainCapacityPlan(ExcludeUnsetModel):

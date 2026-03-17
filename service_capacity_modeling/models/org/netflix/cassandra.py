@@ -7,6 +7,7 @@ from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Set
+from typing import Union
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -27,6 +28,10 @@ from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Excuse
+from service_capacity_modeling.interface import FamilyEdge
+from service_capacity_modeling.interface import FamilyGraph
+from service_capacity_modeling.interface import FamilyTrait
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
@@ -38,6 +43,7 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
+from service_capacity_modeling.models import ExplainableModel
 from service_capacity_modeling.models import RANK_PENALTIES
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
@@ -472,6 +478,31 @@ def _compute_penalties(
     return penalties
 
 
+def _compute_excuse_tags(
+    excuse_instance: str,
+    current_instance: Optional[str],
+) -> List[str]:
+    """Tag an excuse relative to the current cluster's instance type.
+
+    Tags:
+    - ["current_shape"] — same instance type
+    - ["same_family", "size_up"] or ["same_family", "size_down"]
+    - ["different_family"]
+    """
+    if current_instance is None:
+        return []
+    if excuse_instance == current_instance:
+        return ["current_shape"]
+    excuse_family = excuse_instance.rsplit(".", 1)[0]
+    current_family = current_instance.rsplit(".", 1)[0]
+    if excuse_family == current_family:
+        excuse_size = normalized_aws_size(excuse_instance)
+        current_size = normalized_aws_size(current_instance)
+        direction = "size_up" if excuse_size > current_size else "size_down"
+        return ["same_family", direction]
+    return ["different_family"]
+
+
 # pylint: disable=too-many-locals
 # pylint: disable=too-many-return-statements
 # flake8: noqa: C901
@@ -496,22 +527,65 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     experimental_memory_model: bool = False,
     max_page_cache_gib: float = 32.0,
     backup_retention_days: Optional[float] = None,
-) -> Optional[CapacityPlan]:
+) -> Union[CapacityPlan, Excuse, None]:
+    drive_name = drive.name
+
     # Netflix Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 2 or instance.ram_gib <= 16:
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive_name,
+            reason=(
+                f"Instance too small: {instance.cpu} vCPUs "
+                f"(min 2), {instance.ram_gib:.0f} GiB RAM (min 16)"
+            ),
+            context={
+                "cpu": instance.cpu,
+                "ram_gib": instance.ram_gib,
+                "min_cpu": 2,
+                "min_ram_gib": 16,
+            },
+            bottleneck="cpu" if instance.cpu < 2 else "memory",
+        )
 
     # if we're not allowed to use gp2, skip EBS only types
     if instance.drive is None and require_local_disks:
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive_name,
+            reason=f"Requires local disks but {instance.name} is EBS-only",
+            context={
+                "has_local_drive": False,
+                "require_local_disks": True,
+            },
+            bottleneck="drive_type",
+        )
 
     # if we're not allowed to use local disks, skip ephems
     if instance.drive is not None and require_attached_disks:
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive_name,
+            reason=f"Requires attached disks but {instance.name} has local drives",
+            context={
+                "instance_drive": str(instance.drive),
+                "require_attached_disks": True,
+            },
+            bottleneck="drive_type",
+        )
 
     # Cassandra only deploys on gp2 and gp3 drives right now
     if drive.name not in ("gp2", "gp3"):
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive_name,
+            reason=f"Unsupported drive type: {drive_name}",
+            context={
+                "drive_name": drive_name,
+                "supported_drives": ["gp2", "gp3"],
+            },
+            bottleneck="drive_type",
+        )
 
     rps = desires.query_pattern.estimated_read_per_second.mid // zones_per_region
     write_per_sec = (
@@ -673,10 +747,23 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     if penalties:
         upsert_params(cluster, {RANK_PENALTIES: penalties})
 
+    drive_name = drive.name
+
     # Sometimes we don't want modify cluster topology, so only allow
     # topologies that match the desired zone size
     if required_cluster_size is not None and cluster.count != required_cluster_size:
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive_name,
+            reason=(
+                f"Cluster size {cluster.count} != required {required_cluster_size}"
+            ),
+            context={
+                "computed_count": cluster.count,
+                "required_cluster_size": required_cluster_size,
+            },
+            bottleneck="cluster_size",
+        )
 
     # Cassandra clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as
@@ -686,8 +773,22 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     #       smaller clusters so your restarts don't take months.
     #   * Schema propagation. Since C* must gossip out changes to schema the
     #       duration of this can increase a lot with > 500 node clusters.
-    if cluster.count > (max_regional_size // zones_per_region):
-        return None
+    max_zonal = max_regional_size // zones_per_region
+    if cluster.count > max_zonal:
+        return Excuse(
+            instance=instance.name,
+            drive=drive_name,
+            reason=(
+                f"Cluster too large: {cluster.count} nodes > max {max_zonal} per zone"
+            ),
+            context={
+                "zonal_count": cluster.count,
+                "max_zonal": max_zonal,
+                "needed_disk_gib": needed_disk_gib,
+                "disk_per_node_gib": disk_per_node_gib,
+            },
+            bottleneck="disk",
+        )
 
     # Calculate service costs (network + backup)
     cap_services = NflxCassandraCapacityModel.service_costs(
@@ -891,12 +992,151 @@ class NflxCassandraArguments(BaseModel):
         return cls.model_validate(args)
 
 
-class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
+class NflxCassandraCapacityModel(CapacityModel, CostAwareModel, ExplainableModel):
     service_name = "cassandra"
     cluster_type = "cassandra"
 
     def __init__(self) -> None:
         pass
+
+    @staticmethod
+    def family_graph() -> FamilyGraph:
+        return FamilyGraph(
+            families={
+                "i4i": FamilyTrait(
+                    family="i4i",
+                    storage_type="local_nvme",
+                    strengths=["iops", "local_disk_speed"],
+                    weaknesses=["disk_capacity_per_node", "cost_per_gib"],
+                    typical_disk_gib_per_node=3750,
+                    typical_memory_per_vcpu=8.0,
+                    compute_balance="balanced",
+                ),
+                "m6id": FamilyTrait(
+                    family="m6id",
+                    storage_type="local_nvme",
+                    strengths=["cost_efficiency", "balanced"],
+                    weaknesses=["disk_capacity_per_node"],
+                    typical_disk_gib_per_node=950,
+                    typical_memory_per_vcpu=4.0,
+                    compute_balance="balanced",
+                ),
+                "i3en": FamilyTrait(
+                    family="i3en",
+                    storage_type="local_nvme",
+                    strengths=["disk_capacity", "throughput"],
+                    weaknesses=["cost", "iops_per_gib"],
+                    typical_disk_gib_per_node=15000,
+                    typical_memory_per_vcpu=8.0,
+                    compute_balance="storage_heavy",
+                ),
+                "r5d": FamilyTrait(
+                    family="r5d",
+                    storage_type="local_nvme",
+                    strengths=["memory", "cost_per_gib_ram"],
+                    weaknesses=["disk_capacity", "generation"],
+                    typical_disk_gib_per_node=600,
+                    typical_memory_per_vcpu=8.0,
+                    compute_balance="memory_heavy",
+                ),
+                "r6a": FamilyTrait(
+                    family="r6a",
+                    storage_type="ebs",
+                    strengths=["memory", "cost_efficiency", "ebs_scalable_disk"],
+                    weaknesses=["iops_latency"],
+                    typical_memory_per_vcpu=8.0,
+                    compute_balance="memory_heavy",
+                ),
+                "m7a": FamilyTrait(
+                    family="m7a",
+                    storage_type="ebs",
+                    strengths=["flexibility", "newer_generation", "ebs_scalable_disk"],
+                    weaknesses=["iops_latency"],
+                    typical_memory_per_vcpu=4.0,
+                    compute_balance="balanced",
+                ),
+                "r7a": FamilyTrait(
+                    family="r7a",
+                    storage_type="ebs",
+                    strengths=["memory", "ebs_scalable_disk", "newer_generation"],
+                    weaknesses=["iops_latency"],
+                    typical_memory_per_vcpu=8.0,
+                    compute_balance="memory_heavy",
+                ),
+            },
+            edges=[
+                FamilyEdge(
+                    from_family="i4i",
+                    to_family="i3en",
+                    trade_off="4x disk/node, denser storage",
+                    improves=["disk_capacity"],
+                    degrades=["iops_per_gib"],
+                ),
+                FamilyEdge(
+                    from_family="i4i",
+                    to_family="r7a",
+                    trade_off="EBS-attached, unlimited disk, more memory",
+                    improves=["disk_capacity", "memory"],
+                    degrades=["iops_latency"],
+                ),
+                FamilyEdge(
+                    from_family="i4i",
+                    to_family="m6id",
+                    trade_off="Better cost efficiency, less disk/node",
+                    improves=["cost"],
+                    degrades=["disk_capacity"],
+                ),
+                FamilyEdge(
+                    from_family="i4i",
+                    to_family="r6a",
+                    trade_off="EBS, cheaper memory-optimized, no local",
+                    improves=["disk_capacity", "memory", "cost"],
+                    degrades=["iops_latency"],
+                ),
+                FamilyEdge(
+                    from_family="m6id",
+                    to_family="m7a",
+                    trade_off="EBS counterpart, newer gen, flexible disk",
+                    improves=["disk_capacity", "generation"],
+                    degrades=["iops_latency"],
+                ),
+                FamilyEdge(
+                    from_family="m6id",
+                    to_family="r5d",
+                    trade_off="More memory per vCPU, similar storage",
+                    improves=["memory"],
+                    degrades=["generation"],
+                ),
+                FamilyEdge(
+                    from_family="r5d",
+                    to_family="r6a",
+                    trade_off="EBS counterpart, cheaper, flexible disk",
+                    improves=["disk_capacity", "cost"],
+                    degrades=["iops_latency"],
+                ),
+                FamilyEdge(
+                    from_family="r5d",
+                    to_family="r7a",
+                    trade_off="Newer gen, EBS-attached, flexible disk",
+                    improves=["generation", "disk_capacity"],
+                    degrades=["iops_latency"],
+                ),
+                FamilyEdge(
+                    from_family="r6a",
+                    to_family="r7a",
+                    trade_off="Newer gen, slightly more expensive",
+                    improves=["generation"],
+                    degrades=["cost"],
+                ),
+                FamilyEdge(
+                    from_family="i3en",
+                    to_family="r7a",
+                    trade_off="EBS, more memory, less local throughput",
+                    improves=["memory", "flexibility"],
+                    degrades=["throughput"],
+                ),
+            ],
+        )
 
     @staticmethod
     def get_required_cluster_size(
@@ -1017,7 +1257,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         context: RegionContext,
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
-    ) -> Optional[CapacityPlan]:
+    ) -> Union[CapacityPlan, Excuse, None]:
         # Parse extra_model_arguments into a validated model with centralized defaults
         args = NflxCassandraArguments.from_extra_model_arguments(extra_model_arguments)
 
@@ -1043,7 +1283,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_write_buffer_percent = max(0.5, max_write_buffer_percent)
             max_table_buffer_percent = max(0.2, max_table_buffer_percent)
 
-        return _estimate_cassandra_cluster_zonal(
+        result = _estimate_cassandra_cluster_zonal(
             instance=instance,
             drive=drive,
             context=context,
@@ -1065,6 +1305,18 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_page_cache_gib=args.max_page_cache_gib,
             backup_retention_days=args.backup_retention_days,
         )
+
+        # Tag excuses relative to current cluster instance
+        if isinstance(result, Excuse):
+            current_capacity = _get_current_capacity(desires)
+            current_instance_name = (
+                current_capacity.cluster_instance.name
+                if current_capacity and current_capacity.cluster_instance
+                else None
+            )
+            result.tags = _compute_excuse_tags(result.instance, current_instance_name)
+
+        return result
 
     @staticmethod
     def regret(

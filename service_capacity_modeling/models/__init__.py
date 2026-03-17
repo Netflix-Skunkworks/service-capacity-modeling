@@ -5,6 +5,7 @@ from typing import List
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
+from typing import Union
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
@@ -15,6 +16,8 @@ from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Excuse
+from service_capacity_modeling.interface import FamilyGraph
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
@@ -49,6 +52,7 @@ __all__ = [
     "RegionContext",
     "CapacityModel",
     "CostAwareModel",
+    "ExplainableModel",
     "RANK_PENALTIES",
 ]
 
@@ -150,6 +154,28 @@ class CostAwareModel:
         )
 
 
+class ExplainableModel:
+    """Mixin for models that provide structured rejection explanations.
+
+    Models using this mixin:
+    1. Return Excuse objects instead of None from capacity_plan()
+    2. Define a family_graph() describing instance family trade-offs
+
+    Example:
+        class MyModel(CapacityModel, ExplainableModel):
+            @staticmethod
+            def family_graph() -> FamilyGraph:
+                return FamilyGraph(families={...}, edges=[...])
+    """
+
+    @staticmethod
+    def family_graph() -> FamilyGraph:
+        """Return the family relationship graph for this model.
+        Default: empty graph. Models override with their specific families.
+        """
+        return FamilyGraph()
+
+
 class CapacityModel:
     """Stateless interface for defining a capacity model
 
@@ -177,13 +203,14 @@ class CapacityModel:
         context: RegionContext,
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
-    ) -> Optional[CapacityPlan]:
+    ) -> Union[CapacityPlan, Excuse, None]:
         """Given a concrete hardware shape and desires, return a candidate
 
         This is the only required method on this interface. Your model
         must either:
             * Return None to indicate there is no viable use of the
               instance/drive which meets the user's desires
+            * Return an Excuse explaining why the instance/drive was rejected
             * Return a CapapacityPlan containing the model's calculation
               of how much CPU/RAM/disk etc ... that is required and
         """
