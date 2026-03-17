@@ -28,10 +28,12 @@ from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import Excuse
-from service_capacity_modeling.interface import FamilyEdge
-from service_capacity_modeling.interface import FamilyGraph
-from service_capacity_modeling.interface import FamilyTrait
+from service_capacity_modeling.interface import Hardware
+from service_capacity_modeling.explainability import FamilyEdge
+from service_capacity_modeling.explainability import FamilyGraph
+from service_capacity_modeling.explainability import FamilyTrait
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
@@ -545,7 +547,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 "min_cpu": 2,
                 "min_ram_gib": 16,
             },
-            bottleneck="cpu" if instance.cpu < 2 else "memory",
+            bottleneck=Bottleneck.cpu if instance.cpu < 2 else Bottleneck.memory,
         )
 
     # if we're not allowed to use gp2, skip EBS only types
@@ -558,7 +560,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 "has_local_drive": False,
                 "require_local_disks": True,
             },
-            bottleneck="drive_type",
+            bottleneck=Bottleneck.drive_type,
         )
 
     # if we're not allowed to use local disks, skip ephems
@@ -571,7 +573,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 "instance_drive": str(instance.drive),
                 "require_attached_disks": True,
             },
-            bottleneck="drive_type",
+            bottleneck=Bottleneck.drive_type,
         )
 
     # Cassandra only deploys on gp2 and gp3 drives right now
@@ -584,7 +586,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 "drive_name": drive_name,
                 "supported_drives": ["gp2", "gp3"],
             },
-            bottleneck="drive_type",
+            bottleneck=Bottleneck.drive_type,
         )
 
     rps = desires.query_pattern.estimated_read_per_second.mid // zones_per_region
@@ -760,7 +762,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 "computed_count": cluster.count,
                 "required_cluster_size": required_cluster_size,
             },
-            bottleneck="cluster_size",
+            bottleneck=Bottleneck.cluster_size,
         )
 
     # Cassandra clusters generally should try to stay under some total number
@@ -785,7 +787,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 "needed_disk_gib": needed_disk_gib,
                 "disk_per_node_gib": disk_per_node_gib,
             },
-            bottleneck="disk_capacity",
+            bottleneck=Bottleneck.disk_capacity,
         )
 
     # Calculate service costs (network + backup)
@@ -997,144 +999,114 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel, ExplainableModel
     def __init__(self) -> None:
         pass
 
+    # Families the Cassandra model considers for capacity planning.
+    # FamilyTrait values are derived from hardware shapes at runtime.
+    _FAMILIES = ("i4i", "m6id", "i3en", "r5d", "r6a", "m7a", "r7a")
+
+    # Trade-off edges grouped by source family.
+    # Each edge is domain knowledge: "from this family, switching to that
+    # family improves X but degrades Y". Not derivable from hardware data.
+    _B = Bottleneck  # alias for readability
+    _EDGES_BY_FAMILY: Dict[str, List[FamilyEdge]] = {
+        "i4i": [
+            FamilyEdge(
+                from_family="i4i",
+                to_family="i3en",
+                trade_off="4x disk/node, denser storage",
+                improves=[_B.disk_capacity],
+                degrades=[_B.disk_iops],
+            ),
+            FamilyEdge(
+                from_family="i4i",
+                to_family="r7a",
+                trade_off="EBS, unlimited disk, more memory",
+                improves=[_B.disk_capacity, _B.memory],
+                degrades=[_B.disk_iops],
+            ),
+            FamilyEdge(
+                from_family="i4i",
+                to_family="m6id",
+                trade_off="Better cost efficiency, less disk/node",
+                improves=[_B.cost],
+                degrades=[_B.disk_capacity],
+            ),
+            FamilyEdge(
+                from_family="i4i",
+                to_family="r6a",
+                trade_off="EBS, cheaper memory-optimized",
+                improves=[_B.disk_capacity, _B.memory, _B.cost],
+                degrades=[_B.disk_iops],
+            ),
+        ],
+        "m6id": [
+            FamilyEdge(
+                from_family="m6id",
+                to_family="m7a",
+                trade_off="EBS counterpart, newer gen",
+                improves=[_B.disk_capacity, _B.generation],
+                degrades=[_B.disk_iops],
+            ),
+            FamilyEdge(
+                from_family="m6id",
+                to_family="r5d",
+                trade_off="More memory/vCPU, similar storage",
+                improves=[_B.memory],
+                degrades=[_B.generation],
+            ),
+        ],
+        "r5d": [
+            FamilyEdge(
+                from_family="r5d",
+                to_family="r6a",
+                trade_off="EBS counterpart, cheaper, flexible disk",
+                improves=[_B.disk_capacity, _B.cost],
+                degrades=[_B.disk_iops],
+            ),
+            FamilyEdge(
+                from_family="r5d",
+                to_family="r7a",
+                trade_off="Newer gen, EBS, flexible disk",
+                improves=[_B.generation, _B.disk_capacity],
+                degrades=[_B.disk_iops],
+            ),
+        ],
+        "r6a": [
+            FamilyEdge(
+                from_family="r6a",
+                to_family="r7a",
+                trade_off="Newer gen, slightly more expensive",
+                improves=[_B.generation],
+                degrades=[_B.cost],
+            ),
+        ],
+        "i3en": [
+            FamilyEdge(
+                from_family="i3en",
+                to_family="r7a",
+                trade_off="EBS, more memory, less local throughput",
+                improves=[_B.memory, _B.disk_capacity],
+                degrades=[_B.disk_iops],
+            ),
+        ],
+    }
+
     @staticmethod
-    def family_graph() -> FamilyGraph:
-        return FamilyGraph(
-            families={
-                "i4i": FamilyTrait(
-                    family="i4i",
-                    storage_type="local_nvme",
-                    strengths=["iops", "local_disk_speed"],
-                    weaknesses=["disk_capacity_per_node", "cost_per_gib"],
-                    typical_disk_gib_per_node=3750,
-                    typical_memory_per_vcpu=8.0,
-                    compute_balance="balanced",
-                ),
-                "m6id": FamilyTrait(
-                    family="m6id",
-                    storage_type="local_nvme",
-                    strengths=["cost_efficiency", "balanced"],
-                    weaknesses=["disk_capacity_per_node"],
-                    typical_disk_gib_per_node=950,
-                    typical_memory_per_vcpu=4.0,
-                    compute_balance="balanced",
-                ),
-                "i3en": FamilyTrait(
-                    family="i3en",
-                    storage_type="local_nvme",
-                    strengths=["disk_capacity", "throughput"],
-                    weaknesses=["cost", "iops_per_gib"],
-                    typical_disk_gib_per_node=15000,
-                    typical_memory_per_vcpu=8.0,
-                    compute_balance="storage_heavy",
-                ),
-                "r5d": FamilyTrait(
-                    family="r5d",
-                    storage_type="local_nvme",
-                    strengths=["memory", "cost_per_gib_ram"],
-                    weaknesses=["disk_capacity", "generation"],
-                    typical_disk_gib_per_node=600,
-                    typical_memory_per_vcpu=8.0,
-                    compute_balance="memory_heavy",
-                ),
-                "r6a": FamilyTrait(
-                    family="r6a",
-                    storage_type="ebs",
-                    strengths=["memory", "cost_efficiency", "ebs_scalable_disk"],
-                    weaknesses=["iops_latency"],
-                    typical_memory_per_vcpu=8.0,
-                    compute_balance="memory_heavy",
-                ),
-                "m7a": FamilyTrait(
-                    family="m7a",
-                    storage_type="ebs",
-                    strengths=["flexibility", "newer_generation", "ebs_scalable_disk"],
-                    weaknesses=["iops_latency"],
-                    typical_memory_per_vcpu=4.0,
-                    compute_balance="balanced",
-                ),
-                "r7a": FamilyTrait(
-                    family="r7a",
-                    storage_type="ebs",
-                    strengths=["memory", "ebs_scalable_disk", "newer_generation"],
-                    weaknesses=["iops_latency"],
-                    typical_memory_per_vcpu=8.0,
-                    compute_balance="memory_heavy",
-                ),
-            },
-            edges=[
-                FamilyEdge(
-                    from_family="i4i",
-                    to_family="i3en",
-                    trade_off="4x disk/node, denser storage",
-                    improves=["disk_capacity"],
-                    degrades=["iops_per_gib"],
-                ),
-                FamilyEdge(
-                    from_family="i4i",
-                    to_family="r7a",
-                    trade_off="EBS-attached, unlimited disk, more memory",
-                    improves=["disk_capacity", "memory"],
-                    degrades=["iops_latency"],
-                ),
-                FamilyEdge(
-                    from_family="i4i",
-                    to_family="m6id",
-                    trade_off="Better cost efficiency, less disk/node",
-                    improves=["cost"],
-                    degrades=["disk_capacity"],
-                ),
-                FamilyEdge(
-                    from_family="i4i",
-                    to_family="r6a",
-                    trade_off="EBS, cheaper memory-optimized, no local",
-                    improves=["disk_capacity", "memory", "cost"],
-                    degrades=["iops_latency"],
-                ),
-                FamilyEdge(
-                    from_family="m6id",
-                    to_family="m7a",
-                    trade_off="EBS counterpart, newer gen, flexible disk",
-                    improves=["disk_capacity", "generation"],
-                    degrades=["iops_latency"],
-                ),
-                FamilyEdge(
-                    from_family="m6id",
-                    to_family="r5d",
-                    trade_off="More memory per vCPU, similar storage",
-                    improves=["memory"],
-                    degrades=["generation"],
-                ),
-                FamilyEdge(
-                    from_family="r5d",
-                    to_family="r6a",
-                    trade_off="EBS counterpart, cheaper, flexible disk",
-                    improves=["disk_capacity", "cost"],
-                    degrades=["iops_latency"],
-                ),
-                FamilyEdge(
-                    from_family="r5d",
-                    to_family="r7a",
-                    trade_off="Newer gen, EBS-attached, flexible disk",
-                    improves=["generation", "disk_capacity"],
-                    degrades=["iops_latency"],
-                ),
-                FamilyEdge(
-                    from_family="r6a",
-                    to_family="r7a",
-                    trade_off="Newer gen, slightly more expensive",
-                    improves=["generation"],
-                    degrades=["cost"],
-                ),
-                FamilyEdge(
-                    from_family="i3en",
-                    to_family="r7a",
-                    trade_off="EBS, more memory, less local throughput",
-                    improves=["memory", "flexibility"],
-                    degrades=["throughput"],
-                ),
-            ],
-        )
+    def family_graph(hardware: Hardware) -> FamilyGraph:
+        # Derive traits from actual hardware shapes
+        traits: Dict[str, FamilyTrait] = {}
+        for fam in NflxCassandraCapacityModel._FAMILIES:
+            for inst in hardware.instances.values():
+                if inst.family == fam:
+                    traits[fam] = FamilyTrait.from_instance(inst)
+                    break
+
+        # Flatten grouped edges
+        edges = [
+            edge
+            for family_edges in (NflxCassandraCapacityModel._EDGES_BY_FAMILY.values())
+            for edge in family_edges
+        ]
+        return FamilyGraph(traits=traits, edges=edges)
 
     @staticmethod
     def get_required_cluster_size(

@@ -31,8 +31,8 @@ from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Excuse
-from service_capacity_modeling.interface import ExplainedPlans
-from service_capacity_modeling.interface import FamilyGraph
+from service_capacity_modeling.explainability import ExplainedPlans
+from service_capacity_modeling.explainability import FamilyGraph
 from service_capacity_modeling.interface import Hardware
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
@@ -767,8 +767,9 @@ class CapacityPlanner:
 
         # Get family graph from model if it implements ExplainableModel
         model = self._models[model_name]
+        hardware, _ = self._prepare_context(region, num_regions)
         graph = (
-            model.family_graph()
+            model.family_graph(hardware)
             if isinstance(model, ExplainableModel)
             else FamilyGraph()
         )

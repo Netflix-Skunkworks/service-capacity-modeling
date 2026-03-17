@@ -3,14 +3,18 @@
 import pytest
 
 from service_capacity_modeling.capacity_planner import planner
-from service_capacity_modeling.interface import (
-    CapacityDesires,
-    DataShape,
-    Excuse,
+from service_capacity_modeling.hardware import shapes
+from service_capacity_modeling.explainability import (
     ExplainedPlans,
     FamilyEdge,
     FamilyGraph,
     FamilyTrait,
+)
+from service_capacity_modeling.interface import (
+    Bottleneck,
+    CapacityDesires,
+    DataShape,
+    Excuse,
     QueryPattern,
     certain_float,
     certain_int,
@@ -24,9 +28,6 @@ from service_capacity_modeling.models.org.netflix.cassandra import (
 EXTRA_MODEL_ARGS = {"require_local_disks": False}
 
 
-# A workload that produces excuses: tiny data + low QPS means small instances
-# are rejected for being too small, and large clusters are rejected for other
-# families.
 small_workload = CapacityDesires(
     service_tier=1,
     query_pattern=QueryPattern(
@@ -60,11 +61,11 @@ class TestExcuseModel:
             instance="r6a.2xlarge",
             drive="gp3",
             reason="Cluster too large: 128 nodes > max 64",
-            bottleneck="disk",
+            bottleneck=Bottleneck.disk_capacity,
         )
         assert excuse.instance == "r6a.2xlarge"
         assert excuse.drive == "gp3"
-        assert excuse.bottleneck == "disk"
+        assert excuse.bottleneck == Bottleneck.disk_capacity
         assert not excuse.tags
         assert not excuse.context
 
@@ -74,7 +75,7 @@ class TestExcuseModel:
             drive="gp3",
             reason="Requires attached disks but i4i has local drives",
             context={"instance_drive": "local_nvme", "require_attached_disks": True},
-            bottleneck="drive_type",
+            bottleneck=Bottleneck.drive_type,
             tags=["different_family"],
         )
         assert excuse.context["require_attached_disks"] is True
@@ -87,10 +88,49 @@ class TestExcuseModel:
             reason="Instance too small",
         )
         data = excuse.model_dump()
-        # bottleneck was not set, should not appear
         assert "bottleneck" not in data
-        # Required fields should be present
         assert data["instance"] == "r6a.xlarge"
+
+
+class TestFamilyTrait:
+    """Test FamilyTrait.from_instance() derivation."""
+
+    def test_from_instance_local_disk(self):
+        hardware = shapes.region("us-east-1")
+        inst = hardware.instances["i4i.8xlarge"]
+        trait = FamilyTrait.from_instance(inst)
+        assert trait.family == "i4i"
+        assert trait.has_local_disk is True
+        assert trait.memory_gib_per_vcpu == pytest.approx(7.63, abs=0.1)
+        assert trait.local_disk_gib_per_vcpu is not None
+        assert trait.local_disk_gib_per_vcpu > 200
+
+    def test_from_instance_ebs(self):
+        hardware = shapes.region("us-east-1")
+        # r6a is EBS-only (no local drive)
+        r6a_inst = None
+        for inst in hardware.instances.values():
+            if inst.family == "r6a":
+                r6a_inst = inst
+                break
+        assert r6a_inst is not None
+        trait = FamilyTrait.from_instance(r6a_inst)
+        assert trait.family == "r6a"
+        assert trait.has_local_disk is False
+        assert trait.local_disk_gib_per_vcpu is None
+        assert trait.drive_type is None
+        assert trait.memory_gib_per_vcpu > 7.0
+
+    def test_ratios_constant_across_sizes(self):
+        hardware = shapes.region("us-east-1")
+        i4i_traits = [
+            FamilyTrait.from_instance(inst)
+            for inst in hardware.instances.values()
+            if inst.family == "i4i" and inst.cpu >= 4
+        ]
+        assert len(i4i_traits) >= 2
+        ratios = {t.memory_gib_per_vcpu for t in i4i_traits}
+        assert len(ratios) == 1
 
 
 class TestFamilyGraph:
@@ -98,25 +138,20 @@ class TestFamilyGraph:
 
     def test_suggest_alternatives_finds_edges(self):
         graph = FamilyGraph(
-            families={
-                "i4i": FamilyTrait(family="i4i", storage_type="local_nvme"),
-                "i3en": FamilyTrait(family="i3en", storage_type="local_nvme"),
-                "r7a": FamilyTrait(family="r7a", storage_type="ebs"),
-            },
             edges=[
                 FamilyEdge(
                     from_family="i4i",
                     to_family="i3en",
                     trade_off="4x disk/node",
-                    improves=["disk_capacity"],
-                    degrades=["iops_per_gib"],
+                    improves=[Bottleneck.disk_capacity],
+                    degrades=[Bottleneck.disk_iops],
                 ),
                 FamilyEdge(
                     from_family="i4i",
                     to_family="r7a",
                     trade_off="EBS, unlimited disk",
-                    improves=["disk_capacity", "memory"],
-                    degrades=["iops_latency"],
+                    improves=[Bottleneck.disk_capacity, Bottleneck.memory],
+                    degrades=[Bottleneck.disk_iops],
                 ),
             ],
         )
@@ -124,7 +159,7 @@ class TestFamilyGraph:
             instance="i4i.2xlarge",
             drive="gp3",
             reason="Cluster too large",
-            bottleneck="disk_capacity",
+            bottleneck=Bottleneck.disk_capacity,
         )
         alts = graph.suggest_alternatives(excuse)
         assert len(alts) == 2
@@ -137,7 +172,7 @@ class TestFamilyGraph:
                     from_family="i4i",
                     to_family="i3en",
                     trade_off="x",
-                    improves=["disk"],
+                    improves=[Bottleneck.disk_capacity],
                 ),
             ],
         )
@@ -151,7 +186,7 @@ class TestFamilyGraph:
                     from_family="m6id",
                     to_family="m7a",
                     trade_off="x",
-                    improves=["disk_capacity"],
+                    improves=[Bottleneck.disk_capacity],
                 ),
             ],
         )
@@ -159,14 +194,13 @@ class TestFamilyGraph:
             instance="i4i.2xlarge",
             drive="gp3",
             reason="test",
-            bottleneck="disk_capacity",
+            bottleneck=Bottleneck.disk_capacity,
         )
-        # No edges from i4i
         assert graph.suggest_alternatives(excuse) == []
 
     def test_empty_graph(self):
         graph = FamilyGraph()
-        assert not graph.families
+        assert not graph.traits
         assert not graph.edges
 
 
@@ -185,29 +219,46 @@ def test_compute_excuse_tags(excuse_inst, current_inst, expected_tags):
 
 
 class TestCassandraFamilyGraph:
-    """Test the Cassandra model's family graph."""
+    """Test the Cassandra model's family graph with derived traits."""
 
-    def test_family_graph_has_expected_families(self):
-        graph = NflxCassandraCapacityModel.family_graph()
+    @pytest.fixture(scope="class")
+    def graph(self):
+        hardware = shapes.region("us-east-1")
+        return NflxCassandraCapacityModel.family_graph(hardware)
+
+    def test_family_graph_has_expected_families(self, graph):
         expected = {"i4i", "m6id", "i3en", "r5d", "r6a", "m7a", "r7a"}
-        assert set(graph.families.keys()) == expected
+        assert set(graph.traits.keys()) == expected
 
-    def test_family_graph_has_edges(self):
-        graph = NflxCassandraCapacityModel.family_graph()
+    def test_traits_are_derived(self, graph):
+        i4i = graph.traits["i4i"]
+        assert i4i.has_local_disk is True
+        assert i4i.memory_gib_per_vcpu > 0
+        assert i4i.local_disk_gib_per_vcpu is not None
+        r6a = graph.traits["r6a"]
+        assert r6a.has_local_disk is False
+        assert r6a.local_disk_gib_per_vcpu is None
+
+    def test_family_graph_has_edges(self, graph):
         assert len(graph.edges) > 0
-        # All edges reference known families
-        known = set(graph.families.keys())
+        known = set(graph.traits.keys())
         for edge in graph.edges:
-            assert edge.from_family in known, f"Unknown from_family: {edge.from_family}"
-            assert edge.to_family in known, f"Unknown to_family: {edge.to_family}"
+            assert edge.from_family in known
+            assert edge.to_family in known
 
-    def test_i4i_disk_bottleneck_suggests_alternatives(self):
-        graph = NflxCassandraCapacityModel.family_graph()
+    def test_edges_use_bottleneck_enum(self, graph):
+        for edge in graph.edges:
+            for b in edge.improves:
+                assert isinstance(b, Bottleneck)
+            for b in edge.degrades:
+                assert isinstance(b, Bottleneck)
+
+    def test_i4i_disk_bottleneck_suggests_alternatives(self, graph):
         excuse = Excuse(
             instance="i4i.4xlarge",
             drive="gp3",
             reason="Cluster too large",
-            bottleneck="disk_capacity",
+            bottleneck=Bottleneck.disk_capacity,
         )
         alts = graph.suggest_alternatives(excuse)
         to_families = {a.to_family for a in alts}
@@ -225,18 +276,24 @@ class TestPlanCertainExplained:
 
     def test_excuses_have_structured_fields(self, explained_plans):
         for excuse in explained_plans.excuses:
-            assert excuse.instance, "Excuse must have an instance"
-            assert excuse.drive, "Excuse must have a drive"
-            assert excuse.reason, "Excuse must have a reason"
+            assert excuse.instance
+            assert excuse.drive
+            assert excuse.reason
+
+    def test_excuses_use_bottleneck_enum(self, explained_plans):
+        typed_excuses = [e for e in explained_plans.excuses if e.bottleneck is not None]
+        assert len(typed_excuses) > 0
+        for excuse in typed_excuses:
+            assert isinstance(excuse.bottleneck, Bottleneck)
 
     def test_excuses_include_drive_type_rejections(self, explained_plans):
         drive_type_excuses = [
-            e for e in explained_plans.excuses if e.bottleneck == "drive_type"
+            e for e in explained_plans.excuses if e.bottleneck == Bottleneck.drive_type
         ]
         assert len(drive_type_excuses) > 0
 
     def test_family_graph_is_populated(self, explained_plans):
-        assert len(explained_plans.family_graph.families) > 0
+        assert len(explained_plans.family_graph.traits) > 0
         assert len(explained_plans.family_graph.edges) > 0
 
 
@@ -254,7 +311,7 @@ class TestExplainedPlansRender:
                 drive="gp3",
                 reason="Cluster too large",
                 tags=["current_shape"],
-                bottleneck="disk",
+                bottleneck=Bottleneck.disk_capacity,
             ),
             Excuse(
                 instance="r6a.4xlarge",
@@ -267,7 +324,7 @@ class TestExplainedPlansRender:
                 drive="gp3",
                 reason="Has local drives",
                 tags=["different_family"],
-                bottleneck="drive_type",
+                bottleneck=Bottleneck.drive_type,
             ),
         ]
         graph = FamilyGraph(
@@ -276,7 +333,7 @@ class TestExplainedPlansRender:
                     from_family="r6a",
                     to_family="r7a",
                     trade_off="Newer gen",
-                    improves=["disk", "generation"],
+                    improves=[Bottleneck.disk_capacity, Bottleneck.generation],
                 ),
             ],
         )
@@ -289,7 +346,7 @@ class TestExplainedPlansRender:
         assert "### Different families" in md
         assert "### Family trade-off map" in md
         assert "r6a.2xlarge" in md
-        assert "Bottleneck: disk" in md
+        assert "Bottleneck: disk_capacity" in md
 
     def test_render_with_live_data(self, explained_plans):
         """Render from actual planner output."""

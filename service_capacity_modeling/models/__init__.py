@@ -17,7 +17,8 @@ from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Excuse
-from service_capacity_modeling.interface import FamilyGraph
+from service_capacity_modeling.explainability import FamilyGraph
+from service_capacity_modeling.interface import Hardware
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
@@ -164,15 +165,19 @@ class ExplainableModel:
     Example:
         class MyModel(CapacityModel, ExplainableModel):
             @staticmethod
-            def family_graph() -> FamilyGraph:
-                return FamilyGraph(families={...}, edges=[...])
+            def family_graph(hardware: Hardware) -> FamilyGraph:
+                return FamilyGraph(traits={...}, edges=[...])
     """
 
     @staticmethod
-    def family_graph() -> FamilyGraph:
+    def family_graph(hardware: Hardware) -> FamilyGraph:  # noqa: W0613
         """Return the family relationship graph for this model.
-        Default: empty graph. Models override with their specific families.
+
+        The hardware parameter provides instance shapes for deriving
+        FamilyTrait values. Default: empty graph.
         """
+        # quiet pylint
+        _ = hardware
         return FamilyGraph()
 
 
