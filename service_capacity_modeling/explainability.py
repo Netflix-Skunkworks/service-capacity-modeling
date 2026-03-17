@@ -96,75 +96,12 @@ class FamilyGraph(ExcludeUnsetModel):
 
 
 class ExplainedPlans(ExcludeUnsetModel):
-    """Plans + excuses + family context. Both structured and renderable."""
+    """Plans + excuses + family context.
+
+    Structured data for programmatic consumers. Serialize with
+    .model_dump() / .model_dump_json().
+    """
 
     plans: Sequence[CapacityPlan]
     excuses: Sequence[Excuse] = []
     family_graph: FamilyGraph = FamilyGraph()
-
-    def render(self) -> str:
-        """Render a markdown report for human/AI consumption."""
-        if not self.excuses:
-            return ""
-
-        lines: List[str] = ["## Why shapes were rejected", ""]
-
-        # Group excuses by tag category
-        current = [e for e in self.excuses if "current_shape" in e.tags]
-        same_fam = [
-            e
-            for e in self.excuses
-            if any(t in e.tags for t in ("same_family",))
-            and "current_shape" not in e.tags
-        ]
-        diff_fam = [e for e in self.excuses if "different_family" in e.tags]
-        untagged = [
-            e
-            for e in self.excuses
-            if not e.tags
-            or not any(
-                t in e.tags
-                for t in (
-                    "current_shape",
-                    "same_family",
-                    "different_family",
-                )
-            )
-        ]
-
-        for section_title, section_excuses in [
-            ("Current shape", current),
-            ("Same family", same_fam),
-            ("Different families", diff_fam),
-            ("Other", untagged),
-        ]:
-            if not section_excuses:
-                continue
-            lines.append(f"### {section_title}")
-            for exc in section_excuses:
-                line = f"- **{exc.instance}** ({exc.drive}): {exc.reason}"
-                if exc.bottleneck:
-                    alts = self.family_graph.suggest_alternatives(exc)
-                    alt_str = (
-                        ", ".join(f"{a.to_family} ({a.trade_off})" for a in alts)
-                        if alts
-                        else "none"
-                    )
-                    line += (
-                        f"\n  Bottleneck: {exc.bottleneck} | Alternatives: {alt_str}"
-                    )
-                lines.append(line)
-            lines.append("")
-
-        # Family trade-off map
-        if self.family_graph.edges:
-            lines.append("### Family trade-off map")
-            for edge in self.family_graph.edges:
-                lines.append(
-                    f"- {edge.from_family}"
-                    f" --[{', '.join(edge.improves)}]--> "
-                    f"{edge.to_family} ({edge.trade_off})"
-                )
-            lines.append("")
-
-        return "\n".join(lines)

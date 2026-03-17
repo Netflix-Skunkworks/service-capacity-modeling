@@ -297,64 +297,6 @@ class TestPlanCertainExplained:
         assert len(explained_plans.family_graph.edges) > 0
 
 
-class TestExplainedPlansRender:
-    """Test the markdown render method."""
-
-    def test_render_empty_excuses(self):
-        ep = ExplainedPlans(plans=[])
-        assert ep.render() == ""
-
-    def test_render_groups_by_tag(self):
-        excuses = [
-            Excuse(
-                instance="r6a.2xlarge",
-                drive="gp3",
-                reason="Cluster too large",
-                tags=["current_shape"],
-                bottleneck=Bottleneck.disk_capacity,
-            ),
-            Excuse(
-                instance="r6a.4xlarge",
-                drive="gp3",
-                reason="Still too large",
-                tags=["same_family", "size_up"],
-            ),
-            Excuse(
-                instance="i4i.2xlarge",
-                drive="gp3",
-                reason="Has local drives",
-                tags=["different_family"],
-                bottleneck=Bottleneck.drive_type,
-            ),
-        ]
-        graph = FamilyGraph(
-            edges=[
-                FamilyEdge(
-                    from_family="r6a",
-                    to_family="r7a",
-                    trade_off="Newer gen",
-                    improves=[Bottleneck.disk_capacity, Bottleneck.generation],
-                ),
-            ],
-        )
-        ep = ExplainedPlans(plans=[], excuses=excuses, family_graph=graph)
-        md = ep.render()
-
-        assert "## Why shapes were rejected" in md
-        assert "### Current shape" in md
-        assert "### Same family" in md
-        assert "### Different families" in md
-        assert "### Family trade-off map" in md
-        assert "r6a.2xlarge" in md
-        assert "Bottleneck: disk_capacity" in md
-
-    def test_render_with_live_data(self, explained_plans):
-        """Render from actual planner output."""
-        md = explained_plans.render()
-        if explained_plans.excuses:
-            assert "## Why shapes were rejected" in md
-
-
 class TestPlanExplainFlag:
     """Test that plan(explain=True) populates excuses_by_model."""
 
