@@ -1,3 +1,5 @@
+import pytest
+
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
@@ -86,8 +88,6 @@ def test_cassandra_merge():
     )
     # Disk should come from the default storage (adaptive buffer for
     # tiny clusters is near 4.0)
-    import pytest
-
     assert buffer_for_components(
         buffers=merged.buffers, components=[BufferComponent.disk]
     ).ratio == pytest.approx(4.0, abs=0.1)

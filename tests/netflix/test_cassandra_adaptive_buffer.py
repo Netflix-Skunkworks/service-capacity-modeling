@@ -6,12 +6,17 @@ decay from max_ratio (4.0) to min_ratio (2.0) as zonal data grows, allowing
 cheaper instance types that physically fit the data.
 """
 
+import pytest
+
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import (
     CapacityDesires,
     DataShape,
     Interval,
     QueryPattern,
+)
+from service_capacity_modeling.models.org.netflix.cassandra import (
+    NflxCassandraArguments,
 )
 from service_capacity_modeling.models.org.netflix.cassandra import (
     _adaptive_storage_buffer_ratio,
@@ -62,6 +67,14 @@ class TestAdaptiveBufferFormula:
         for size in [1, 10, 100, 1_000, 10_000, 100_000, 1_000_000]:
             ratio = _adaptive_storage_buffer_ratio(size)
             assert 2.0 <= ratio <= 4.0
+
+    def test_rejects_inverted_bounds(self):
+        """min > max should raise ValueError."""
+        with pytest.raises(ValueError, match="min_storage_buffer_ratio"):
+            NflxCassandraArguments(
+                min_storage_buffer_ratio=5.0,
+                max_storage_buffer_ratio=4.0,
+            )
 
 
 # Large cluster: 35 TiB state, high read/write traffic (the problem scenario)
@@ -154,11 +167,21 @@ class TestOptOut:
             extra_model_arguments={"adaptive_storage_buffer": False},
             families=["m6id"],
         )
-        # With fixed 4x buffer, fewer instance types should be valid
+        # Fixed 4x buffer should accept same or fewer instance types
         assert len(names_fixed) <= len(names_adaptive), (
             f"Fixed buffer should accept same or fewer instance types. "
             f"Adaptive: {names_adaptive}, Fixed: {names_fixed}"
         )
+        # Verify the buffer actually changed — adaptive should rank cheaper
+        # instances higher (8xlarge before 16xlarge)
+        if any("8xlarge" in n for n in names_adaptive) and any(
+            "16xlarge" in n for n in names_adaptive
+        ):
+            idx_8_a = next(i for i, n in enumerate(names_adaptive) if "8xlarge" in n)
+            idx_16_a = next(i for i, n in enumerate(names_adaptive) if "16xlarge" in n)
+            assert idx_8_a < idx_16_a, (
+                f"Adaptive should rank 8xlarge above 16xlarge, got: {names_adaptive}"
+            )
 
 
 class TestSmallClusterUnchanged:

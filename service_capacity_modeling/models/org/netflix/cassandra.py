@@ -10,6 +10,7 @@ from typing import Set
 
 from pydantic import BaseModel
 from pydantic import Field
+from pydantic import model_validator
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
@@ -904,6 +905,15 @@ class NflxCassandraArguments(BaseModel):
         description="Storage buffer ratio for very large clusters (adaptive lower bound).",
     )
 
+    @model_validator(mode="after")
+    def _check_storage_buffer_bounds(self) -> "NflxCassandraArguments":
+        if self.min_storage_buffer_ratio > self.max_storage_buffer_ratio:
+            raise ValueError(
+                f"min_storage_buffer_ratio ({self.min_storage_buffer_ratio}) "
+                f"must be <= max_storage_buffer_ratio ({self.max_storage_buffer_ratio})"
+            )
+        return self
+
     @classmethod
     def from_extra_model_arguments(
         cls, extra_model_arguments: Dict[str, Any]
@@ -1205,7 +1215,15 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
                     user_desires.data_shape, "estimated_state_size_gib", None
                 )
                 if state is not None:
-                    zonal_data_gib = state.mid * rf / 3
+                    # Divide by compression to match the current_clusters path
+                    # (which reports compressed on-disk bytes)
+                    compression = getattr(
+                        user_desires.data_shape,
+                        "estimated_compression_ratio",
+                        None,
+                    )
+                    cr = compression.mid if compression is not None else 3.0
+                    zonal_data_gib = state.mid / cr * rf / 3
             storage_ratio = _adaptive_storage_buffer_ratio(
                 zonal_data_gib,
                 max_ratio=args.max_storage_buffer_ratio,
