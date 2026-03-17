@@ -1006,6 +1006,13 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel, ExplainableModel
     # Trade-off edges grouped by source family.
     # Each edge is domain knowledge: "from this family, switching to that
     # family improves X but degrades Y". Not derivable from hardware data.
+    #
+    # NOTE: These edges are not Cassandra-specific — the hardware trade-offs
+    # apply to any model on the same instance families. They live here
+    # (not in explainability.py) because library-level common code is
+    # semi-permanent. Once a second model implements ExplainableModel,
+    # extract shared edges into a common registry in explainability.py
+    # and have each model select the families it uses.
     _B = Bottleneck  # alias for readability
     _EDGES_BY_FAMILY: Dict[str, List[FamilyEdge]] = {
         "i4i": [
