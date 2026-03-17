@@ -774,9 +774,16 @@ class CapacityPlanner:
             else FamilyGraph()
         )
 
+        # Filter excuses to families the model actually considers.
+        # graph.traits.keys() is the source of truth for relevant families.
+        excuses = _deduplicate_excuses(all_excuses)
+        if graph.traits:
+            relevant = set(graph.traits.keys())
+            excuses = [e for e in excuses if e.instance.rsplit(".", 1)[0] in relevant]
+
         return ExplainedPlans(
             plans=plans,
-            excuses=_deduplicate_excuses(all_excuses),
+            excuses=excuses,
             family_graph=graph,
         )
 

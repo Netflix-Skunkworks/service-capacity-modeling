@@ -296,6 +296,20 @@ class TestPlanCertainExplained:
         assert len(explained_plans.family_graph.traits) > 0
         assert len(explained_plans.family_graph.edges) > 0
 
+    def test_excuses_filtered_to_relevant_families(self, explained_plans):
+        """All excuses should be from families in the model's family graph."""
+        relevant = set(explained_plans.family_graph.traits.keys())
+        for excuse in explained_plans.excuses:
+            family = excuse.instance.rsplit(".", 1)[0]
+            assert family in relevant, (
+                f"Excuse for {excuse.instance} is from family {family} "
+                f"which is not in relevant families {relevant}"
+            )
+
+    def test_excuse_count_is_reasonable(self, explained_plans):
+        """With gp3-only + family filtering, should be <50 excuses."""
+        assert len(explained_plans.excuses) < 50
+
 
 class TestPlanExplainFlag:
     """Test that plan(explain=True) populates excuses_by_model."""
