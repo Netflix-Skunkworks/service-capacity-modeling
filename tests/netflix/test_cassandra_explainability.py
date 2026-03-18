@@ -5,11 +5,11 @@ import pytest
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.explainability import (
-    AWS_FAMILY_EDGES,
     ExplainedPlans,
     FamilyEdge,
     FamilyGraph,
     FamilyTrait,
+    KNOWN_DATASTORE_FAMILIES,
 )
 from service_capacity_modeling.interface import (
     Bottleneck,
@@ -220,12 +220,23 @@ def test_compute_excuse_tags(excuse_inst, current_inst, expected_tags):
 
 
 class TestAWSFamilyGraph:
-    """Test that plan_certain_explained() auto-builds the family graph."""
+    """Test that plan_certain_explained() auto-builds the M×N family graph."""
 
-    def test_known_families_are_included(self, explained_plans):
-        # Only families in AWS_FAMILY_EDGES (plus current shape) get traits
+    def test_preferred_families_are_graph_nodes(self, explained_plans):
+        # With no current_cluster in desires, all nodes come from
+        # CASSANDRA_PREFERRED_FAMILIES (current_shape_families is empty)
+        from service_capacity_modeling.models.org.netflix.cassandra import (
+            CASSANDRA_PREFERRED_FAMILIES,
+        )
+
         for fam in explained_plans.family_graph.traits:
-            assert fam in AWS_FAMILY_EDGES
+            assert fam in CASSANDRA_PREFERRED_FAMILIES
+
+    def test_known_datastore_families_are_library_default(self):
+        # Sanity-check the library-level constant exists and is non-empty
+        assert len(KNOWN_DATASTORE_FAMILIES) > 0
+        assert "i4i" in KNOWN_DATASTORE_FAMILIES
+        assert "r6a" in KNOWN_DATASTORE_FAMILIES
 
     def test_traits_are_derived(self, explained_plans):
         traits = explained_plans.family_graph.traits
@@ -237,8 +248,13 @@ class TestAWSFamilyGraph:
 
     def test_edges_use_bottleneck_enum(self, explained_plans):
         for edge in explained_plans.family_graph.edges:
-            for b in edge.improves:
+            for b in edge.improves + edge.degrades:
                 assert isinstance(b, Bottleneck)
+
+    def test_graph_is_m_times_n(self, explained_plans):
+        graph = explained_plans.family_graph
+        n = len(graph.traits)
+        assert len(graph.edges) == n * (n - 1)
 
     def test_i4i_disk_bottleneck_suggests_alternatives(self, explained_plans):
         excuse = Excuse(

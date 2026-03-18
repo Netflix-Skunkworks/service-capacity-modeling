@@ -1,6 +1,7 @@
 from typing import Any
 from typing import Callable
 from typing import Dict
+from typing import FrozenSet
 from typing import List
 from typing import Optional
 from typing import Sequence
@@ -192,6 +193,18 @@ class CapacityModel:
         """
         # quiet pylint
         (_, _, _, _, _) = (instance, drive, context, desires, extra_model_arguments)
+        return None
+
+    @staticmethod
+    def preferred_families() -> Optional[FrozenSet[str]]:
+        """Instance families this model prefers for capacity planning.
+
+        Returns None to use the planner's default (KNOWN_DATASTORE_FAMILIES).
+        Override to bias the family graph toward model-specific families.
+
+        A small rank penalty will be applied to plans using families outside
+        the returned set (follow-up).
+        """
         return None
 
     @staticmethod

@@ -4,6 +4,7 @@ import math
 from typing import Any
 from typing import Callable
 from typing import Dict
+from typing import FrozenSet
 from typing import List
 from typing import Optional
 from typing import Set
@@ -984,12 +985,44 @@ class NflxCassandraArguments(BaseModel):
         return cls.model_validate(args)
 
 
+# Instance families Cassandra considers as preferred alternatives.
+# Covers the full decision space: compute/general/memory × local-NVMe/EBS,
+# one representative per meaningful {memory-class × storage-class × generation}.
+# "n"-suffix (enhanced-network) families are intentionally excluded — C* is
+# disk/memory bound and rarely needs the network premium.
+CASSANDRA_PREFERRED_FAMILIES: FrozenSet[str] = frozenset(
+    {
+        # Compute-optimized EBS (~1.9 GiB/vCPU) — CPU-bound workloads
+        "c6a",
+        "c7a",
+        # General-purpose EBS (~3.8 GiB/vCPU)
+        "m6a",
+        "m7a",
+        # General-purpose local NVMe (~3.8 GiB/vCPU)
+        "m6id",
+        # Memory-optimized EBS (~7.6 GiB/vCPU)
+        "r6a",
+        "r7a",
+        # Memory-optimized local NVMe (~7.6–8.0 GiB/vCPU)
+        "r5d",
+        "r6id",
+        # Storage-optimized local NVMe — disk-dense workloads
+        "i4i",
+        "i3en",
+    }
+)
+
+
 class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
     service_name = "cassandra"
     cluster_type = "cassandra"
 
     def __init__(self) -> None:
         pass
+
+    @staticmethod
+    def preferred_families() -> Optional[FrozenSet[str]]:
+        return CASSANDRA_PREFERRED_FAMILIES
 
     @staticmethod
     def get_required_cluster_size(

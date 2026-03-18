@@ -39,6 +39,7 @@ Consumer usage::
 from __future__ import annotations
 
 from typing import Dict
+from typing import FrozenSet
 from typing import List
 from typing import Optional
 from typing import Sequence
@@ -55,8 +56,8 @@ class FamilyTrait(ExcludeUnsetModel):
     """Intrinsic hardware properties of an instance family.
 
     All numeric values are derived from hardware shapes data via
-    from_instance(). Within an AWS family, ratios (ram/vcpu,
-    disk/vcpu) are constant across instance sizes.
+    from_instance(). Within an AWS family, ratios (ram/vcpu, disk/vcpu,
+    cost/vcpu) are constant across instance sizes due to linear pricing.
     """
 
     family: str
@@ -64,12 +65,15 @@ class FamilyTrait(ExcludeUnsetModel):
     has_local_disk: bool
     local_disk_gib_per_vcpu: Optional[float] = None
     drive_type: Optional[DriveType] = None
+    cost_per_vcpu_annual: Optional[float] = None
+    """Annual cost per vCPU derived from loaded pricing (may be internal)."""
 
     @classmethod
     def from_instance(cls, instance: Instance) -> FamilyTrait:
         """Derive family traits from any instance in the family.
 
         Since ratios are constant within a family, any size works.
+        Cost uses whatever pricing is loaded (public or internal).
         """
         drive = instance.drive
         has_local = drive is not None
@@ -83,20 +87,29 @@ class FamilyTrait(ExcludeUnsetModel):
                 else None
             ),
             drive_type=drive.drive_type if drive is not None else None,
+            cost_per_vcpu_annual=(
+                round(instance.annual_cost / instance.cpu, 2)
+                if instance.annual_cost and instance.cpu
+                else None
+            ),
         )
 
 
 class FamilyEdge(ExcludeUnsetModel):
     """A directed trade-off edge between two instance families.
 
-    Edges encode domain knowledge: what improves and what degrades
-    when switching from one family to another. These are human-authored
-    and cannot be derived from hardware data.
+    Edges encode hardware topology: what improves and what degrades
+    when switching from one family to another. Human-authored for
+    non-derivable facts (disk type, generation, IOPS).
+
+    Cost is intentionally excluded — it is derived at runtime from
+    loaded pricing (which may be internal) and annotated onto edges
+    by _build_family_graph() in capacity_planner.py.
     """
 
     from_family: str
     to_family: str
-    trade_off: str
+    trade_off: str = ""
     improves: List[Bottleneck] = []
     degrades: List[Bottleneck] = []
 
@@ -123,165 +136,24 @@ class FamilyGraph(ExcludeUnsetModel):
         ]
 
 
-_B = Bottleneck  # alias for readability
-
-# AWS instance family trade-off edges — shared across all models.
-#
-# These describe hardware facts: "switching from family A to family B
-# improves X but degrades Y." They are not model-specific — any model
-# running on these families can benefit from this graph.
-#
-# The planner auto-builds a FamilyGraph for each plan_certain_explained()
-# call using these edges (filtered to families that appear in the excuses)
-# plus FamilyTrait values derived from hardware shapes at runtime.
-#
-# Add entries here when new instance families are introduced.
-AWS_FAMILY_EDGES: Dict[str, List[FamilyEdge]] = {
-    "i4i": [
-        FamilyEdge(
-            from_family="i4i",
-            to_family="i3en",
-            trade_off="4x disk/node, denser storage",
-            improves=[_B.disk_capacity],
-            degrades=[_B.disk_iops],
-        ),
-        FamilyEdge(
-            from_family="i4i",
-            to_family="r7a",
-            trade_off="EBS, unlimited disk, more memory",
-            improves=[_B.disk_capacity, _B.memory],
-            degrades=[_B.disk_iops],
-        ),
-        FamilyEdge(
-            from_family="i4i",
-            to_family="m6id",
-            trade_off="Better cost efficiency, less disk/node",
-            improves=[_B.cost],
-            degrades=[_B.disk_capacity],
-        ),
-        FamilyEdge(
-            from_family="i4i",
-            to_family="r6a",
-            trade_off="EBS, cheaper memory-optimized",
-            improves=[_B.disk_capacity, _B.memory, _B.cost],
-            degrades=[_B.disk_iops],
-        ),
-    ],
-    "m6id": [
-        FamilyEdge(
-            from_family="m6id",
-            to_family="m7a",
-            trade_off="EBS counterpart, newer gen",
-            improves=[_B.disk_capacity, _B.generation],
-            degrades=[_B.disk_iops],
-        ),
-        FamilyEdge(
-            from_family="m6id",
-            to_family="r5d",
-            trade_off="More memory/vCPU, similar storage",
-            improves=[_B.memory],
-            degrades=[_B.generation],
-        ),
-    ],
-    "r5d": [
-        FamilyEdge(
-            from_family="r5d",
-            to_family="r6a",
-            trade_off="EBS counterpart, cheaper, flexible disk",
-            improves=[_B.disk_capacity, _B.cost],
-            degrades=[_B.disk_iops],
-        ),
-        FamilyEdge(
-            from_family="r5d",
-            to_family="r7a",
-            trade_off="Newer gen, EBS, flexible disk",
-            improves=[_B.generation, _B.disk_capacity],
-            degrades=[_B.disk_iops],
-        ),
-    ],
-    "r6a": [
-        FamilyEdge(
-            from_family="r6a",
-            to_family="r7a",
-            trade_off="Newer gen, slightly more expensive",
-            improves=[_B.generation],
-            degrades=[_B.cost],
-        ),
-    ],
-    "i3en": [
-        FamilyEdge(
-            from_family="i3en",
-            to_family="r7a",
-            trade_off="EBS, more memory, less local throughput",
-            improves=[_B.memory, _B.disk_capacity],
-            degrades=[_B.disk_iops],
-        ),
-    ],
-    "m5d": [
-        FamilyEdge(
-            from_family="m5d",
-            to_family="m6id",
-            trade_off="Newer gen, more disk/vCPU",
-            improves=[_B.generation, _B.disk_capacity],
-            degrades=[],
-        ),
-    ],
-    "r5": [
-        FamilyEdge(
-            from_family="r5",
-            to_family="r6a",
-            trade_off="EBS, newer gen, flexible disk",
-            improves=[_B.generation, _B.disk_capacity],
-            degrades=[_B.disk_iops],
-        ),
-        FamilyEdge(
-            from_family="r5",
-            to_family="r7a",
-            trade_off="Newer gen EBS, more memory",
-            improves=[_B.generation, _B.memory],
-            degrades=[_B.disk_iops],
-        ),
-        FamilyEdge(
-            from_family="r5",
-            to_family="r5d",
-            trade_off="Add local NVMe, same generation",
-            improves=[_B.disk_iops],
-            degrades=[_B.cost],
-        ),
-    ],
-    "r7a": [
-        FamilyEdge(
-            from_family="r7a",
-            to_family="i4i",
-            trade_off="Local NVMe, higher IOPS, less disk capacity",
-            improves=[_B.disk_iops],
-            degrades=[_B.disk_capacity],
-        ),
-        FamilyEdge(
-            from_family="r7a",
-            to_family="r6a",
-            trade_off="Older gen, slightly cheaper",
-            improves=[_B.cost],
-            degrades=[_B.generation],
-        ),
-    ],
-    "m7a": [
-        FamilyEdge(
-            from_family="m7a",
-            to_family="m6id",
-            trade_off="Local NVMe counterpart, better IOPS",
-            improves=[_B.disk_iops],
-            degrades=[_B.disk_capacity],
-        ),
-        FamilyEdge(
-            from_family="m7a",
-            to_family="r7a",
-            trade_off="More memory per vCPU, same generation",
-            improves=[_B.memory],
-            degrades=[_B.cost],
-        ),
-    ],
-}
+# Library-level default family set.  Models override via preferred_families().
+# One representative per {memory-class × storage-class × generation-tier};
+# "n"-suffix (enhanced-network) families are intentionally excluded.
+KNOWN_DATASTORE_FAMILIES: FrozenSet[str] = frozenset(
+    {
+        "c6a",
+        "c7a",  # compute-optimized EBS (~1.9 GiB/vCPU)
+        "m6a",
+        "m7a",  # general-purpose EBS (~3.8 GiB/vCPU)
+        "m6id",  # general-purpose local NVMe (~3.8 GiB/vCPU)
+        "r6a",
+        "r7a",  # memory-optimized EBS (~7.6 GiB/vCPU)
+        "r5d",
+        "r6id",  # memory-optimized local NVMe (~7.6–8.0 GiB/vCPU)
+        "i4i",
+        "i3en",  # storage-optimized local NVMe
+    }
+)
 
 
 class ExplainedPlans(ExcludeUnsetModel):
