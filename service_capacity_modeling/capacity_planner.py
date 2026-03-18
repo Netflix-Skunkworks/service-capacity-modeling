@@ -65,11 +65,6 @@ from service_capacity_modeling.stats import interval_percentile
 
 logger = logging.getLogger(__name__)
 
-# Rank inflation applied to plans whose instance family is not in
-# model.preferred_families(). Acts as a soft bias: non-preferred families
-# need a ~15% cost advantage to rank above a preferred alternative.
-_PREFERRED_FAMILY_RANK_PENALTY = 0.15
-
 
 class _CertainResult(ExcludeUnsetModel):
     """Internal result from _plan_certain: viable plans + rejection excuses."""
@@ -909,7 +904,6 @@ class CapacityPlanner:
 
         plans: List[CapacityPlan] = []
         excuses: List[Excuse] = []
-        preferred = model.preferred_families()
         for instance, drive, context in self.generate_scenarios(
             model, region, desires, num_regions, lifecycles, instance_families, drives
         ):
@@ -921,14 +915,6 @@ class CapacityPlanner:
                 extra_model_arguments=extra_model_arguments,
             ):
                 case CapacityPlan() as plan:
-                    if preferred and instance.family not in preferred:
-                        plan = plan.model_copy(
-                            update={
-                                "rank": plan.rank
-                                + plan.candidate_clusters.total_annual_cost
-                                * _PREFERRED_FAMILY_RANK_PENALTY
-                            }
-                        )
                     plans.append(plan)
                 case Excuse() as excuse:
                     excuses.append(excuse)

@@ -458,7 +458,7 @@ class TestCPUScalingConstraints:
             f"got {result_cores} cores"
         )
         assert_similar_compute(
-            shapes.instance("m6id.4xlarge"),
+            shapes.instance("c6a.4xlarge"),
             result.instance,
             CLUSTER_SIZE * 2,
             result.count,

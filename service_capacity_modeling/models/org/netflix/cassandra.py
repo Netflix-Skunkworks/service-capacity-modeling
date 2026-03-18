@@ -450,11 +450,12 @@ def _compute_penalties(
     large_instance_regret: float,
     current_family: Optional[str] = None,
     different_family_regret: float = 0.10,  # Empirical; see NflxCassandraArguments
+    non_preferred_family_regret: float = 0.15,  # Empirical; see NflxCassandraArguments
 ) -> Dict[str, float]:
     """Compute named penalties from regret coefficients.
 
     Penalties inflate the plan rank used by plan_certain() sorting:
-        rank = cost * (1 + sum(penalties.values()))
+        rank = compute_cost * (1 + sum(penalties.values())) + service_cost
 
     All plans get a cost-proportional rank, so penalties act as
     percentage cost adjustments rather than absolute barriers.
@@ -473,6 +474,13 @@ def _compute_penalties(
         and instance.family != current_family
     ):
         penalties["family_migration"] = different_family_regret
+
+    # Bias toward well-tested preferred families
+    if (
+        non_preferred_family_regret > 0
+        and instance.family not in CASSANDRA_PREFERRED_FAMILIES
+    ):
+        penalties["non_preferred_family"] = non_preferred_family_regret
 
     return penalties
 
@@ -519,6 +527,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     max_table_buffer_percent: float = 0.11,
     large_instance_regret: float = 0.2,
     different_family_regret: float = 0.10,
+    non_preferred_family_regret: float = 0.15,
     experimental_memory_model: bool = False,
     max_page_cache_gib: float = 32.0,
     backup_retention_days: Optional[float] = None,
@@ -738,6 +747,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         large_instance_regret=large_instance_regret,
         current_family=current_family,
         different_family_regret=different_family_regret,
+        non_preferred_family_regret=non_preferred_family_regret,
     )
     if penalties:
         upsert_params(cluster, {RANK_PENALTIES: penalties})
@@ -943,6 +953,15 @@ class NflxCassandraArguments(BaseModel):
         "months) against locking in suboptimal families. Increase to "
         "0.15-0.20 for risk-averse clusters. Only applies when "
         "current_clusters is set. Set to 0 to disable.",
+    )
+    non_preferred_family_regret: float = Field(
+        default=0.15,
+        description="Cost penalty applied to instance families outside "
+        "CASSANDRA_PREFERRED_FAMILIES. Acts as a soft bias: a non-preferred "
+        "family must be at least this fraction cheaper (on compute cost) to "
+        "rank above a preferred alternative. Applied only to compute costs, "
+        "not service costs (network, backup), consistent with other rank "
+        "penalties. Set to 0 to disable and evaluate all families equally.",
     )
     experimental_memory_model: bool = Field(
         default=False,
@@ -1187,6 +1206,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_table_buffer_percent=max_table_buffer_percent,
             large_instance_regret=args.large_instance_regret,
             different_family_regret=args.different_family_regret,
+            non_preferred_family_regret=args.non_preferred_family_regret,
             experimental_memory_model=args.experimental_memory_model,
             max_page_cache_gib=args.max_page_cache_gib,
             backup_retention_days=args.backup_retention_days,

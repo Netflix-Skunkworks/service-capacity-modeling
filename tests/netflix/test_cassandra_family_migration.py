@@ -1,14 +1,17 @@
-"""Tests for different_family_regret: prefer current instance family.
+"""Tests for family selection penalties.
 
-When a cluster runs on m6id, migrating to c6id requires paying on-demand
-prices (reservations are family-specific). The different_family_regret
-(default 10%) penalises cross-family plans so compute savings must exceed
-the threshold to justify switching. Penalties apply only to compute costs,
-not service costs (network, backup), since service costs are identical
-regardless of instance choice.
+Two penalties interact:
+1. Cassandra-level different_family_regret (default 10%) — penalises
+   cross-family plans relative to the *current* cluster's family.
+2. Planner-level preferred_family penalty (15%) — applied to any plan
+   whose instance family is not in preferred_families().
 
-c6id is ~18% cheaper per-CPU than m6id, so the default 10% allows the
-switch while 25% blocks it.
+c6id is not in CASSANDRA_PREFERRED_FAMILIES, so it always carries the 15%
+planner penalty. c6id is ~18% cheaper per-CPU than m6id. Combined:
+  - default (10% model + 15% planner = 25% total): m6id wins
+  - disabled model penalty (0% + 15% planner = 15% total): c6id still wins
+    (18% savings > 15% penalty)
+  - high model penalty (25% + 15% = 40%): m6id wins decisively
 """
 
 import pytest
@@ -82,7 +85,7 @@ def _first_family(desires, extra_model_arguments, families=None):
             "m6id",
             id="high_regret_keeps_m6id",
         ),
-        pytest.param("m6id.8xlarge", {}, "c6id", id="default_allows_savings"),
+        pytest.param("m6id.8xlarge", {}, "m6id", id="preferred_penalty_keeps_m6id"),
         pytest.param(
             "m6id.8xlarge",
             {"different_family_regret": 0},
