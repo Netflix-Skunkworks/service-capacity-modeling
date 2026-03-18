@@ -10,7 +10,6 @@ from typing import cast
 from typing import Dict
 from typing import Generator
 from typing import List
-from typing import NamedTuple
 from typing import Optional
 from typing import Sequence
 from typing import Set
@@ -30,9 +29,14 @@ from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import ExcludeUnsetModel
 from service_capacity_modeling.interface import Excuse
+from service_capacity_modeling.interface import ExcuseTag
+from service_capacity_modeling.explainability import AWS_FAMILY_EDGES
 from service_capacity_modeling.explainability import ExplainedPlans
+from service_capacity_modeling.explainability import FamilyEdge
 from service_capacity_modeling.explainability import FamilyGraph
+from service_capacity_modeling.explainability import FamilyTrait
 from service_capacity_modeling.interface import Hardware
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
@@ -49,7 +53,6 @@ from service_capacity_modeling.interface import UncertainCapacityPlan
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
-from service_capacity_modeling.models import ExplainableModel
 from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.org import netflix
@@ -60,9 +63,11 @@ from service_capacity_modeling.stats import interval_percentile
 logger = logging.getLogger(__name__)
 
 
-class _CertainResult(NamedTuple):
+class _CertainResult(ExcludeUnsetModel):
+    """Internal result from _plan_certain: viable plans + rejection excuses."""
+
     plans: Sequence[CapacityPlan]
-    excuses: Sequence[Excuse]
+    excuses: Sequence[Excuse] = []
 
 
 def _deduplicate_excuses(excuses: Sequence[Excuse]) -> Sequence[Excuse]:
@@ -75,6 +80,55 @@ def _deduplicate_excuses(excuses: Sequence[Excuse]) -> Sequence[Excuse]:
             seen.add(key)
             result.append(exc)
     return result
+
+
+def _build_family_graph(
+    excuses: Sequence[Excuse],
+    hardware: Hardware,
+) -> FamilyGraph:
+    """Build a FamilyGraph from excuse families + hardware shapes + AWS_FAMILY_EDGES.
+
+    AWS_FAMILY_EDGES serves as both the trade-off data and the inclusion list:
+    families with no entry are unknown/noise and are filtered out. The current
+    cluster shape is always included regardless, so users always see why their
+    current instance was rejected.
+    """
+    if not excuses:
+        return FamilyGraph()
+
+    known = set(AWS_FAMILY_EDGES.keys())
+    current_shape_families: Set[str] = {
+        e.instance.rsplit(".", 1)[0]
+        for e in excuses
+        if ExcuseTag.current_shape in e.tags
+    }
+    # Keep excuses from known families + current shape (always)
+    relevant = known | current_shape_families
+    excuse_families: Set[str] = {
+        e.instance.rsplit(".", 1)[0]
+        for e in excuses
+        if e.instance.rsplit(".", 1)[0] in relevant
+    }
+
+    if not excuse_families:
+        return FamilyGraph()
+
+    # Index instances by family — O(M) single pass
+    family_first: Dict[str, Any] = {}
+    for inst in hardware.instances.values():
+        fam = inst.family
+        if fam in excuse_families and fam not in family_first:
+            family_first[fam] = inst
+
+    traits = {
+        fam: FamilyTrait.from_instance(family_first[fam])
+        for fam in excuse_families
+        if fam in family_first
+    }
+    edges: List[FamilyEdge] = [
+        edge for fam in excuse_families for edge in AWS_FAMILY_EDGES.get(fam, [])
+    ]
+    return FamilyGraph(traits=traits, edges=edges)
 
 
 def simulate_interval(
@@ -675,40 +729,18 @@ class CapacityPlanner:
         extra_model_arguments: Optional[Dict[str, Any]] = None,
         max_results_per_family: int = 1,
     ) -> Sequence[CapacityPlan]:
-        if model_name not in self._models:
-            raise ValueError(
-                f"model_name={model_name} does not exist. "
-                f"Try {sorted(list(self._models.keys()))}"
-            )
-
-        desires = desires.model_copy(deep=True)
-        _resolve_cluster_instances(desires)
-        extra_model_arguments = extra_model_arguments or {}
-        lifecycles = lifecycles or self._default_lifecycles
-
-        results = []
-
-        for sub_model, sub_desires in self._sub_models(
+        return self.plan_certain_explained(
             model_name=model_name,
+            region=region,
             desires=desires,
+            lifecycles=lifecycles,
+            instance_families=instance_families,
+            drives=drives,
+            num_results=num_results,
+            num_regions=num_regions,
             extra_model_arguments=extra_model_arguments,
-        ):
-            sub_result = self._plan_certain(
-                model_name=sub_model,
-                region=region,
-                desires=sub_desires,
-                num_results=num_results,
-                num_regions=num_regions,
-                extra_model_arguments=extra_model_arguments,
-                lifecycles=lifecycles,
-                instance_families=instance_families,
-                drives=drives,
-                max_results_per_family=max_results_per_family,
-            )
-            if sub_result.plans:
-                results.append(sub_result.plans)
-
-        return [functools.reduce(merge_plan, composed) for composed in zip(*results)]
+            max_results_per_family=max_results_per_family,
+        ).plans
 
     def plan_certain_explained(  # pylint: disable=too-many-positional-arguments
         self,
@@ -765,18 +797,18 @@ class CapacityPlanner:
             else []
         )
 
-        # Get family graph from model if it implements ExplainableModel
-        model = self._models[model_name]
+        excuses = _deduplicate_excuses(all_excuses)
+
+        # Auto-build FamilyGraph from hardware shapes + AWS_FAMILY_EDGES,
+        # filtered to the families that actually appear in this run's excuses.
+        # No per-model family_graph() needed — any model that returns Excuses
+        # gets trade-off context automatically.
         hardware, _ = self._prepare_context(region, num_regions)
-        graph = (
-            model.family_graph(hardware)
-            if isinstance(model, ExplainableModel)
-            else FamilyGraph()
-        )
+        graph = _build_family_graph(excuses, hardware)
 
         return ExplainedPlans(
             plans=plans,
-            excuses=_deduplicate_excuses(all_excuses),
+            excuses=excuses,
             family_graph=graph,
         )
 
@@ -1098,7 +1130,7 @@ class CapacityPlanner:
             str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]
         ] = {}
         desires_by_model: Dict[str, CapacityDesires] = {}
-        excuses_by_model: Dict[str, List[Excuse]] = {} if explain else {}
+        excuses_by_model: Dict[str, List[Excuse]] = {}
         for sub_model, sub_desires in self._sub_models(
             model_name=model_name,
             desires=desires,
@@ -1106,7 +1138,7 @@ class CapacityPlanner:
         ):
             desires_by_model[sub_model] = sub_desires
             model_plans: List[Tuple[CapacityDesires, Sequence[CapacityPlan]]] = []
-            model_excuses: List[Excuse] = [] if explain else []
+            model_excuses: List[Excuse] = []
             for sim_desires in model_desires(sub_desires, simulations):
                 sim_result = self._plan_certain(
                     model_name=sub_model,

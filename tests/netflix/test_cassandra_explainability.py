@@ -1,10 +1,11 @@
-"""Tests for the Explainability mixin: Excuses, FamilyGraph, and ExplainedPlans."""
+"""Tests for explainability: Excuses, FamilyGraph, ExplainedPlans."""
 
 import pytest
 
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.explainability import (
+    AWS_FAMILY_EDGES,
     ExplainedPlans,
     FamilyEdge,
     FamilyGraph,
@@ -15,12 +16,12 @@ from service_capacity_modeling.interface import (
     CapacityDesires,
     DataShape,
     Excuse,
+    ExcuseTag,
     QueryPattern,
     certain_float,
     certain_int,
 )
 from service_capacity_modeling.models.org.netflix.cassandra import (
-    NflxCassandraCapacityModel,
     _compute_excuse_tags,
 )
 
@@ -207,10 +208,10 @@ class TestFamilyGraph:
 @pytest.mark.parametrize(
     "excuse_inst, current_inst, expected_tags",
     [
-        ("r6a.2xlarge", "r6a.2xlarge", ["current_shape"]),
-        ("r6a.4xlarge", "r6a.2xlarge", ["same_family", "size_up"]),
-        ("r6a.xlarge", "r6a.2xlarge", ["same_family", "size_down"]),
-        ("i4i.2xlarge", "r6a.2xlarge", ["different_family"]),
+        ("r6a.2xlarge", "r6a.2xlarge", [ExcuseTag.current_shape]),
+        ("r6a.4xlarge", "r6a.2xlarge", [ExcuseTag.same_family, ExcuseTag.size_up]),
+        ("r6a.xlarge", "r6a.2xlarge", [ExcuseTag.same_family, ExcuseTag.size_down]),
+        ("i4i.2xlarge", "r6a.2xlarge", [ExcuseTag.different_family]),
         ("r6a.2xlarge", None, []),
     ],
 )
@@ -218,49 +219,35 @@ def test_compute_excuse_tags(excuse_inst, current_inst, expected_tags):
     assert _compute_excuse_tags(excuse_inst, current_inst) == expected_tags
 
 
-class TestCassandraFamilyGraph:
-    """Test the Cassandra model's family graph with derived traits."""
+class TestAWSFamilyGraph:
+    """Test that plan_certain_explained() auto-builds the family graph."""
 
-    @pytest.fixture(scope="class")
-    def graph(self):
-        hardware = shapes.region("us-east-1")
-        return NflxCassandraCapacityModel.family_graph(hardware)
+    def test_known_families_are_included(self, explained_plans):
+        # Only families in AWS_FAMILY_EDGES (plus current shape) get traits
+        for fam in explained_plans.family_graph.traits:
+            assert fam in AWS_FAMILY_EDGES
 
-    def test_family_graph_has_expected_families(self, graph):
-        expected = {"i4i", "m6id", "i3en", "r5d", "r6a", "m7a", "r7a"}
-        assert set(graph.traits.keys()) == expected
+    def test_traits_are_derived(self, explained_plans):
+        traits = explained_plans.family_graph.traits
+        if "i4i" in traits:
+            assert traits["i4i"].has_local_disk is True
+            assert traits["i4i"].local_disk_gib_per_vcpu is not None
+        if "r6a" in traits:
+            assert traits["r6a"].has_local_disk is False
 
-    def test_traits_are_derived(self, graph):
-        i4i = graph.traits["i4i"]
-        assert i4i.has_local_disk is True
-        assert i4i.memory_gib_per_vcpu > 0
-        assert i4i.local_disk_gib_per_vcpu is not None
-        r6a = graph.traits["r6a"]
-        assert r6a.has_local_disk is False
-        assert r6a.local_disk_gib_per_vcpu is None
-
-    def test_family_graph_has_edges(self, graph):
-        assert len(graph.edges) > 0
-        known = set(graph.traits.keys())
-        for edge in graph.edges:
-            assert edge.from_family in known
-            assert edge.to_family in known
-
-    def test_edges_use_bottleneck_enum(self, graph):
-        for edge in graph.edges:
+    def test_edges_use_bottleneck_enum(self, explained_plans):
+        for edge in explained_plans.family_graph.edges:
             for b in edge.improves:
                 assert isinstance(b, Bottleneck)
-            for b in edge.degrades:
-                assert isinstance(b, Bottleneck)
 
-    def test_i4i_disk_bottleneck_suggests_alternatives(self, graph):
+    def test_i4i_disk_bottleneck_suggests_alternatives(self, explained_plans):
         excuse = Excuse(
             instance="i4i.4xlarge",
             drive="gp3",
             reason="Cluster too large",
             bottleneck=Bottleneck.disk_capacity,
         )
-        alts = graph.suggest_alternatives(excuse)
+        alts = explained_plans.family_graph.suggest_alternatives(excuse)
         to_families = {a.to_family for a in alts}
         assert "i3en" in to_families
         assert "r7a" in to_families

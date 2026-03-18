@@ -1301,6 +1301,26 @@ class Bottleneck(StrEnum):
     """Hardware generation — newer gens improve price/performance"""
 
 
+@enum_docstrings
+class ExcuseTag(StrEnum):
+    """Tags that classify an Excuse relative to the current cluster shape."""
+
+    current_shape = "current_shape"
+    """This is the exact instance type the cluster currently runs on."""
+
+    same_family = "same_family"
+    """Same instance family as the current shape (e.g., both m6id)."""
+
+    size_up = "size_up"
+    """Larger size within the same family than the current shape."""
+
+    size_down = "size_down"
+    """Smaller size within the same family than the current shape."""
+
+    different_family = "different_family"
+    """A different instance family from the current shape."""
+
+
 class Excuse(ExcludeUnsetModel):
     """Structured explanation for why an instance/drive combo was rejected."""
 
@@ -1308,7 +1328,7 @@ class Excuse(ExcludeUnsetModel):
     drive: str
     reason: str
     context: Dict[str, Any] = {}
-    tags: List[str] = []
+    tags: List[ExcuseTag] = []
     bottleneck: Optional[Bottleneck] = None
 
 

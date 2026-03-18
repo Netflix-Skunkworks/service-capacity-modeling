@@ -30,10 +30,7 @@ from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import Excuse
-from service_capacity_modeling.interface import Hardware
-from service_capacity_modeling.explainability import FamilyEdge
-from service_capacity_modeling.explainability import FamilyGraph
-from service_capacity_modeling.explainability import FamilyTrait
+from service_capacity_modeling.interface import ExcuseTag
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
@@ -45,7 +42,6 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
-from service_capacity_modeling.models import ExplainableModel
 from service_capacity_modeling.models import RANK_PENALTIES
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
@@ -483,26 +479,22 @@ def _compute_penalties(
 def _compute_excuse_tags(
     excuse_instance: str,
     current_instance: Optional[str],
-) -> List[str]:
-    """Tag an excuse relative to the current cluster's instance type.
-
-    Tags:
-    - ["current_shape"] — same instance type
-    - ["same_family", "size_up"] or ["same_family", "size_down"]
-    - ["different_family"]
-    """
+) -> List[ExcuseTag]:
+    """Tag an excuse relative to the current cluster's instance type."""
     if current_instance is None:
         return []
     if excuse_instance == current_instance:
-        return ["current_shape"]
+        return [ExcuseTag.current_shape]
     excuse_family = excuse_instance.rsplit(".", 1)[0]
     current_family = current_instance.rsplit(".", 1)[0]
     if excuse_family == current_family:
         excuse_size = normalized_aws_size(excuse_instance)
         current_size = normalized_aws_size(current_instance)
-        direction = "size_up" if excuse_size > current_size else "size_down"
-        return ["same_family", direction]
-    return ["different_family"]
+        direction = (
+            ExcuseTag.size_up if excuse_size > current_size else ExcuseTag.size_down
+        )
+        return [ExcuseTag.same_family, direction]
+    return [ExcuseTag.different_family]
 
 
 # pylint: disable=too-many-locals
@@ -992,128 +984,12 @@ class NflxCassandraArguments(BaseModel):
         return cls.model_validate(args)
 
 
-class NflxCassandraCapacityModel(CapacityModel, CostAwareModel, ExplainableModel):
+class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
     service_name = "cassandra"
     cluster_type = "cassandra"
 
     def __init__(self) -> None:
         pass
-
-    # Families the Cassandra model considers for capacity planning.
-    # FamilyTrait values are derived from hardware shapes at runtime.
-    _FAMILIES = ("i4i", "m6id", "i3en", "r5d", "r6a", "m7a", "r7a")
-
-    # Trade-off edges grouped by source family.
-    # Each edge is domain knowledge: "from this family, switching to that
-    # family improves X but degrades Y". Not derivable from hardware data.
-    #
-    # NOTE: These edges are not Cassandra-specific — the hardware trade-offs
-    # apply to any model on the same instance families. They live here
-    # (not in explainability.py) because library-level common code is
-    # semi-permanent. Once a second model implements ExplainableModel,
-    # extract shared edges into a common registry in explainability.py
-    # and have each model select the families it uses.
-    _B = Bottleneck  # alias for readability
-    _EDGES_BY_FAMILY: Dict[str, List[FamilyEdge]] = {
-        "i4i": [
-            FamilyEdge(
-                from_family="i4i",
-                to_family="i3en",
-                trade_off="4x disk/node, denser storage",
-                improves=[_B.disk_capacity],
-                degrades=[_B.disk_iops],
-            ),
-            FamilyEdge(
-                from_family="i4i",
-                to_family="r7a",
-                trade_off="EBS, unlimited disk, more memory",
-                improves=[_B.disk_capacity, _B.memory],
-                degrades=[_B.disk_iops],
-            ),
-            FamilyEdge(
-                from_family="i4i",
-                to_family="m6id",
-                trade_off="Better cost efficiency, less disk/node",
-                improves=[_B.cost],
-                degrades=[_B.disk_capacity],
-            ),
-            FamilyEdge(
-                from_family="i4i",
-                to_family="r6a",
-                trade_off="EBS, cheaper memory-optimized",
-                improves=[_B.disk_capacity, _B.memory, _B.cost],
-                degrades=[_B.disk_iops],
-            ),
-        ],
-        "m6id": [
-            FamilyEdge(
-                from_family="m6id",
-                to_family="m7a",
-                trade_off="EBS counterpart, newer gen",
-                improves=[_B.disk_capacity, _B.generation],
-                degrades=[_B.disk_iops],
-            ),
-            FamilyEdge(
-                from_family="m6id",
-                to_family="r5d",
-                trade_off="More memory/vCPU, similar storage",
-                improves=[_B.memory],
-                degrades=[_B.generation],
-            ),
-        ],
-        "r5d": [
-            FamilyEdge(
-                from_family="r5d",
-                to_family="r6a",
-                trade_off="EBS counterpart, cheaper, flexible disk",
-                improves=[_B.disk_capacity, _B.cost],
-                degrades=[_B.disk_iops],
-            ),
-            FamilyEdge(
-                from_family="r5d",
-                to_family="r7a",
-                trade_off="Newer gen, EBS, flexible disk",
-                improves=[_B.generation, _B.disk_capacity],
-                degrades=[_B.disk_iops],
-            ),
-        ],
-        "r6a": [
-            FamilyEdge(
-                from_family="r6a",
-                to_family="r7a",
-                trade_off="Newer gen, slightly more expensive",
-                improves=[_B.generation],
-                degrades=[_B.cost],
-            ),
-        ],
-        "i3en": [
-            FamilyEdge(
-                from_family="i3en",
-                to_family="r7a",
-                trade_off="EBS, more memory, less local throughput",
-                improves=[_B.memory, _B.disk_capacity],
-                degrades=[_B.disk_iops],
-            ),
-        ],
-    }
-
-    @staticmethod
-    def family_graph(hardware: Hardware) -> FamilyGraph:
-        # Derive traits from actual hardware shapes
-        traits: Dict[str, FamilyTrait] = {}
-        for fam in NflxCassandraCapacityModel._FAMILIES:
-            for inst in hardware.instances.values():
-                if inst.family == fam:
-                    traits[fam] = FamilyTrait.from_instance(inst)
-                    break
-
-        # Flatten grouped edges
-        edges = [
-            edge
-            for family_edges in (NflxCassandraCapacityModel._EDGES_BY_FAMILY.values())
-            for edge in family_edges
-        ]
-        return FamilyGraph(traits=traits, edges=edges)
 
     @staticmethod
     def get_required_cluster_size(
@@ -1284,16 +1160,23 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel, ExplainableModel
         )
 
         # Tag excuses relative to current cluster instance
-        if isinstance(result, Excuse):
-            current_capacity = _get_current_capacity(desires)
-            current_instance_name = (
-                current_capacity.cluster_instance.name
-                if current_capacity and current_capacity.cluster_instance
-                else None
-            )
-            result.tags = _compute_excuse_tags(result.instance, current_instance_name)
-
-        return result
+        match result:
+            case Excuse():
+                current_capacity = _get_current_capacity(desires)
+                current_instance_name = (
+                    current_capacity.cluster_instance.name
+                    if current_capacity and current_capacity.cluster_instance
+                    else None
+                )
+                return result.model_copy(
+                    update={
+                        "tags": _compute_excuse_tags(
+                            result.instance, current_instance_name
+                        )
+                    }
+                )
+            case _:
+                return result
 
     @staticmethod
     def regret(

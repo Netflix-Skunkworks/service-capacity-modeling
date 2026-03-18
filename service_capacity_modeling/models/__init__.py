@@ -17,8 +17,6 @@ from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Excuse
-from service_capacity_modeling.explainability import FamilyGraph
-from service_capacity_modeling.interface import Hardware
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
@@ -53,7 +51,6 @@ __all__ = [
     "RegionContext",
     "CapacityModel",
     "CostAwareModel",
-    "ExplainableModel",
     "RANK_PENALTIES",
 ]
 
@@ -153,32 +150,6 @@ class CostAwareModel:
             regional_clusters,
             cluster_type=cls.cluster_type,
         )
-
-
-class ExplainableModel:
-    """Mixin for models that provide structured rejection explanations.
-
-    Models using this mixin:
-    1. Return Excuse objects instead of None from capacity_plan()
-    2. Define a family_graph() describing instance family trade-offs
-
-    Example:
-        class MyModel(CapacityModel, ExplainableModel):
-            @staticmethod
-            def family_graph(hardware: Hardware) -> FamilyGraph:
-                return FamilyGraph(traits={...}, edges=[...])
-    """
-
-    @staticmethod
-    def family_graph(hardware: Hardware) -> FamilyGraph:
-        """Return the family relationship graph for this model.
-
-        The hardware parameter provides instance shapes for deriving
-        FamilyTrait values. Default: empty graph.
-        """
-        # quiet pylint
-        _ = hardware
-        return FamilyGraph()
 
 
 class CapacityModel:

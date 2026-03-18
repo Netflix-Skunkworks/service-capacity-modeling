@@ -1,6 +1,6 @@
 """Explainability types for the capacity planner.
 
-**Experimental** — this API may change as more models adopt ExplainableModel.
+**Experimental** — this API may change.
 
 This module contains the family graph (FamilyTrait, FamilyEdge, FamilyGraph)
 and ExplainedPlans — types used to explain *why* the planner rejected
@@ -121,6 +121,167 @@ class FamilyGraph(ExcludeUnsetModel):
             for e in self.edges
             if e.from_family == excuse_family and excuse.bottleneck in e.improves
         ]
+
+
+_B = Bottleneck  # alias for readability
+
+# AWS instance family trade-off edges — shared across all models.
+#
+# These describe hardware facts: "switching from family A to family B
+# improves X but degrades Y." They are not model-specific — any model
+# running on these families can benefit from this graph.
+#
+# The planner auto-builds a FamilyGraph for each plan_certain_explained()
+# call using these edges (filtered to families that appear in the excuses)
+# plus FamilyTrait values derived from hardware shapes at runtime.
+#
+# Add entries here when new instance families are introduced.
+AWS_FAMILY_EDGES: Dict[str, List[FamilyEdge]] = {
+    "i4i": [
+        FamilyEdge(
+            from_family="i4i",
+            to_family="i3en",
+            trade_off="4x disk/node, denser storage",
+            improves=[_B.disk_capacity],
+            degrades=[_B.disk_iops],
+        ),
+        FamilyEdge(
+            from_family="i4i",
+            to_family="r7a",
+            trade_off="EBS, unlimited disk, more memory",
+            improves=[_B.disk_capacity, _B.memory],
+            degrades=[_B.disk_iops],
+        ),
+        FamilyEdge(
+            from_family="i4i",
+            to_family="m6id",
+            trade_off="Better cost efficiency, less disk/node",
+            improves=[_B.cost],
+            degrades=[_B.disk_capacity],
+        ),
+        FamilyEdge(
+            from_family="i4i",
+            to_family="r6a",
+            trade_off="EBS, cheaper memory-optimized",
+            improves=[_B.disk_capacity, _B.memory, _B.cost],
+            degrades=[_B.disk_iops],
+        ),
+    ],
+    "m6id": [
+        FamilyEdge(
+            from_family="m6id",
+            to_family="m7a",
+            trade_off="EBS counterpart, newer gen",
+            improves=[_B.disk_capacity, _B.generation],
+            degrades=[_B.disk_iops],
+        ),
+        FamilyEdge(
+            from_family="m6id",
+            to_family="r5d",
+            trade_off="More memory/vCPU, similar storage",
+            improves=[_B.memory],
+            degrades=[_B.generation],
+        ),
+    ],
+    "r5d": [
+        FamilyEdge(
+            from_family="r5d",
+            to_family="r6a",
+            trade_off="EBS counterpart, cheaper, flexible disk",
+            improves=[_B.disk_capacity, _B.cost],
+            degrades=[_B.disk_iops],
+        ),
+        FamilyEdge(
+            from_family="r5d",
+            to_family="r7a",
+            trade_off="Newer gen, EBS, flexible disk",
+            improves=[_B.generation, _B.disk_capacity],
+            degrades=[_B.disk_iops],
+        ),
+    ],
+    "r6a": [
+        FamilyEdge(
+            from_family="r6a",
+            to_family="r7a",
+            trade_off="Newer gen, slightly more expensive",
+            improves=[_B.generation],
+            degrades=[_B.cost],
+        ),
+    ],
+    "i3en": [
+        FamilyEdge(
+            from_family="i3en",
+            to_family="r7a",
+            trade_off="EBS, more memory, less local throughput",
+            improves=[_B.memory, _B.disk_capacity],
+            degrades=[_B.disk_iops],
+        ),
+    ],
+    "m5d": [
+        FamilyEdge(
+            from_family="m5d",
+            to_family="m6id",
+            trade_off="Newer gen, more disk/vCPU",
+            improves=[_B.generation, _B.disk_capacity],
+            degrades=[],
+        ),
+    ],
+    "r5": [
+        FamilyEdge(
+            from_family="r5",
+            to_family="r6a",
+            trade_off="EBS, newer gen, flexible disk",
+            improves=[_B.generation, _B.disk_capacity],
+            degrades=[_B.disk_iops],
+        ),
+        FamilyEdge(
+            from_family="r5",
+            to_family="r7a",
+            trade_off="Newer gen EBS, more memory",
+            improves=[_B.generation, _B.memory],
+            degrades=[_B.disk_iops],
+        ),
+        FamilyEdge(
+            from_family="r5",
+            to_family="r5d",
+            trade_off="Add local NVMe, same generation",
+            improves=[_B.disk_iops],
+            degrades=[_B.cost],
+        ),
+    ],
+    "r7a": [
+        FamilyEdge(
+            from_family="r7a",
+            to_family="i4i",
+            trade_off="Local NVMe, higher IOPS, less disk capacity",
+            improves=[_B.disk_iops],
+            degrades=[_B.disk_capacity],
+        ),
+        FamilyEdge(
+            from_family="r7a",
+            to_family="r6a",
+            trade_off="Older gen, slightly cheaper",
+            improves=[_B.cost],
+            degrades=[_B.generation],
+        ),
+    ],
+    "m7a": [
+        FamilyEdge(
+            from_family="m7a",
+            to_family="m6id",
+            trade_off="Local NVMe counterpart, better IOPS",
+            improves=[_B.disk_iops],
+            degrades=[_B.disk_capacity],
+        ),
+        FamilyEdge(
+            from_family="m7a",
+            to_family="r7a",
+            trade_off="More memory per vCPU, same generation",
+            improves=[_B.memory],
+            degrades=[_B.cost],
+        ),
+    ],
+}
 
 
 class ExplainedPlans(ExcludeUnsetModel):
