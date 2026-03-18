@@ -819,6 +819,7 @@ def _estimate_zonal_data_gib(user_desires: CapacityDesires, rf: int) -> float:
         cc = user_desires.current_clusters.zonal[0]
         if (
             cc.disk_utilization_gib is not None
+            and cc.disk_utilization_gib.mid > 0
             and cc.cluster_instance_count is not None
         ):
             return cc.disk_utilization_gib.mid * cc.cluster_instance_count.mid
@@ -826,14 +827,12 @@ def _estimate_zonal_data_gib(user_desires: CapacityDesires, rf: int) -> float:
     if user_desires.data_shape is not None:
         state = user_desires.data_shape.estimated_state_size_gib
         if state.mid > 0:
-            # Divide by compression to match the current_clusters path
-            # (which reports compressed on-disk bytes). Fall back to
-            # typical Cassandra LZ4 3:1 if the user left it at the
-            # DataShape default of 1.0 (i.e., unset).
+            # Use state size as-is with the user's compression ratio.
+            # estimated_compression_ratio defaults to 1.0 (no compression)
+            # when unset, so this path naturally operates in logical GiB.
+            # The adaptive buffer midpoint is calibrated for this.
             cr = user_desires.data_shape.estimated_compression_ratio.mid
-            if cr <= 1.0:
-                cr = 3.0
-            return state.mid / cr * rf / 3
+            return state.mid / max(cr, 1.0) * rf / 3
 
     return 0.0
 
