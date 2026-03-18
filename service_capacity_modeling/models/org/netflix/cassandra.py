@@ -6,6 +6,7 @@ from typing import Callable
 from typing import Dict
 from typing import List
 from typing import Optional
+from typing import Tuple
 from typing import Set
 
 from pydantic import BaseModel
@@ -897,6 +898,10 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
 
     def __init__(self) -> None:
         pass
+
+    @staticmethod
+    def allowed_cloud_drives() -> Tuple[Optional[str], ...]:
+        return ("gp3",)
 
     @staticmethod
     def get_required_cluster_size(
