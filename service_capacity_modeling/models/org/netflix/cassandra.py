@@ -654,6 +654,10 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         "cassandra.compaction.min_threshold": requirement.context["min_threshold"],
         EFFECTIVE_DISK_PER_NODE_GIB: disk_per_node_gib,
         "cassandra.storage_buffer_ratio": round(disk_buffer_ratio, 2),
+        "cassandra.compute_buffer_ratio": round(
+            getattr(desires.buffers.desired.get("compute"), "ratio", 1.5),
+            2,
+        ),
     }
     upsert_params(cluster, params)
 
@@ -802,6 +806,59 @@ def _adaptive_storage_buffer_ratio(
     return max_ratio - t * (max_ratio - min_ratio)
 
 
+def _estimate_zonal_data_gib(user_desires: CapacityDesires, rf: int) -> float:
+    """Estimate compressed on-disk bytes for one zone.
+
+    Prefers actual current_clusters data; falls back to estimated_state_size_gib
+    divided by compression ratio (matching the on-disk units of the first path).
+    """
+    if (
+        user_desires.current_clusters is not None
+        and user_desires.current_clusters.zonal
+    ):
+        cc = user_desires.current_clusters.zonal[0]
+        if (
+            cc.disk_utilization_gib is not None
+            and cc.cluster_instance_count is not None
+        ):
+            return cc.disk_utilization_gib.mid * cc.cluster_instance_count.mid
+
+    if user_desires.data_shape is not None:
+        state = user_desires.data_shape.estimated_state_size_gib
+        if state.mid > 0:
+            # Divide by compression to match the current_clusters path
+            # (which reports compressed on-disk bytes). Fall back to
+            # typical Cassandra LZ4 3:1 if the user left it at the
+            # DataShape default of 1.0 (i.e., unset).
+            cr = user_desires.data_shape.estimated_compression_ratio.mid
+            if cr <= 1.0:
+                cr = 3.0
+            return state.mid / cr * rf / 3
+
+    return 0.0
+
+
+def _adaptive_compute_buffer_ratio(
+    write_weighted_throughput_mbps: float,
+    max_ratio: float = 1.5,
+    min_ratio: float = 1.3,
+    midpoint_mbps: float = 100.0,
+    steepness: float = 0.8,
+) -> float:
+    """Logistic decay from max_ratio to min_ratio as write-weighted throughput grows.
+
+    At high throughput, sqrt staffing provides natural statistical multiplexing
+    headroom. Uses write-weighted throughput (read MB/s + 3x write MB/s) to
+    account for both operation size and write CPU overhead (memtable flushes,
+    compaction pressure scale with write size, not just write count).
+    """
+    if write_weighted_throughput_mbps <= 0:
+        return max_ratio
+    x = math.log(write_weighted_throughput_mbps / midpoint_mbps) * steepness
+    t = 1.0 / (1.0 + math.exp(-x))
+    return max_ratio - t * (max_ratio - min_ratio)
+
+
 class NflxCassandraArguments(BaseModel):
     """Configuration arguments for the Netflix Cassandra capacity model.
 
@@ -906,12 +963,36 @@ class NflxCassandraArguments(BaseModel):
         description="Storage buffer ratio for very large clusters (adaptive lower bound).",
     )
 
+    adaptive_compute_buffer: bool = Field(
+        default=True,
+        description="Use a traffic-adaptive compute buffer instead of fixed 1.5x. "
+        "Large clusters get a lower ratio (down to min_compute_buffer_ratio) "
+        "because sqrt staffing provides natural headroom at scale.",
+    )
+    max_compute_buffer_ratio: float = Field(
+        default=1.5,
+        description="Compute success buffer for tiny clusters (adaptive upper bound).",
+    )
+    min_compute_buffer_ratio: float = Field(
+        default=1.3,
+        description="Compute success buffer for very large clusters (adaptive lower bound).",
+    )
+
     @model_validator(mode="after")
     def _check_storage_buffer_bounds(self) -> "NflxCassandraArguments":
         if self.min_storage_buffer_ratio > self.max_storage_buffer_ratio:
             raise ValueError(
                 f"min_storage_buffer_ratio ({self.min_storage_buffer_ratio}) "
                 f"must be <= max_storage_buffer_ratio ({self.max_storage_buffer_ratio})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_compute_buffer_bounds(self) -> "NflxCassandraArguments":
+        if self.min_compute_buffer_ratio > self.max_compute_buffer_ratio:
+            raise ValueError(
+                f"min_compute_buffer_ratio ({self.min_compute_buffer_ratio}) "
+                f"must be <= max_compute_buffer_ratio ({self.max_compute_buffer_ratio})"
             )
         return self
 
@@ -1145,11 +1226,15 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         return NflxCassandraArguments.model_json_schema()
 
     @staticmethod
-    def default_buffers(storage_ratio: float = 4.0) -> Buffers:
+    def default_buffers(
+        storage_ratio: float = 4.0, compute_ratio: float = 1.5
+    ) -> Buffers:
         return Buffers(
             default=Buffer(ratio=1.5),
             desired={
-                "compute": Buffer(ratio=1.5, components=[BufferComponent.compute]),
+                "compute": Buffer(
+                    ratio=compute_ratio, components=[BufferComponent.compute]
+                ),
                 "storage": Buffer(
                     ratio=storage_ratio, components=[BufferComponent.storage]
                 ),
@@ -1197,44 +1282,36 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         args = NflxCassandraArguments.from_extra_model_arguments(extra_model_arguments)
         storage_ratio = args.max_storage_buffer_ratio
         if args.adaptive_storage_buffer:
-            # Estimate zonal data to scale the buffer
-            zonal_data_gib = 0.0
-            if (
-                user_desires.current_clusters is not None
-                and user_desires.current_clusters.zonal
-            ):
-                cc = user_desires.current_clusters.zonal[0]
-                if (
-                    cc.disk_utilization_gib is not None
-                    and cc.cluster_instance_count is not None
-                ):
-                    zonal_data_gib = (
-                        cc.disk_utilization_gib.mid * cc.cluster_instance_count.mid
-                    )
-            if zonal_data_gib <= 0 and user_desires.data_shape is not None:
-                state = getattr(
-                    user_desires.data_shape, "estimated_state_size_gib", None
-                )
-                if state is not None:
-                    # Divide by compression to match the current_clusters path
-                    # (which reports compressed on-disk bytes)
-                    compression = getattr(
-                        user_desires.data_shape,
-                        "estimated_compression_ratio",
-                        None,
-                    )
-                    cr = compression.mid if compression is not None else 3.0
-                    zonal_data_gib = state.mid / cr * rf / 3
             storage_ratio = _adaptive_storage_buffer_ratio(
-                zonal_data_gib,
+                _estimate_zonal_data_gib(user_desires, rf),
                 max_ratio=args.max_storage_buffer_ratio,
                 min_ratio=args.min_storage_buffer_ratio,
+            )
+
+        # Compute adaptive compute buffer ratio based on total RPS
+        compute_ratio = args.max_compute_buffer_ratio
+        if args.adaptive_compute_buffer:
+            # Write-weighted throughput as a proxy for CPU load. Writes are
+            # ~3x more expensive per byte than reads (memtable flushes and
+            # compaction pressure scale with write size, not just write count).
+            qp = user_desires.query_pattern
+            write_weighted_throughput_mbps = (
+                qp.estimated_read_per_second.mid * qp.estimated_mean_read_size_bytes.mid
+                + 3.0
+                * qp.estimated_write_per_second.mid
+                * qp.estimated_mean_write_size_bytes.mid
+            ) / (1024 * 1024)
+            compute_ratio = _adaptive_compute_buffer_ratio(
+                write_weighted_throughput_mbps,
+                max_ratio=args.max_compute_buffer_ratio,
+                min_ratio=args.min_compute_buffer_ratio,
             )
 
         # By supplying these buffers we can deconstruct observed utilization into
         # load versus buffer.
         buffers = NflxCassandraCapacityModel.default_buffers(
-            storage_ratio=storage_ratio
+            storage_ratio=storage_ratio,
+            compute_ratio=compute_ratio,
         )
         if user_desires.query_pattern.access_pattern == AccessPattern.latency:
             return CapacityDesires(
