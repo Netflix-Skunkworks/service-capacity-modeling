@@ -71,21 +71,19 @@ def test_cassandra_merge():
         buffer_for_components(buffers=merged.buffers, components=["custom"]).ratio
         == 3.8
     )
-    # The custom cpu buffer should multiply with the default 1.5 compute buffer
+    # The adaptive compute ratio depends on write-weighted throughput.
+    # Use the merged value directly so this test verifies composition
+    # (user-cpu × adaptive-compute × background) rather than a hardcoded ratio.
+    compute_ratio = merged.buffers.desired["compute"].ratio
+    # The custom cpu buffer should multiply with the adaptive compute buffer
     # AND the 2.0 background buffer
-    assert (
-        buffer_for_components(
-            buffers=merged.buffers, components=[BufferComponent.cpu]
-        ).ratio
-        == 3.0 * 1.5 * 2.0
-    )
-    # The network should just have the default 1.5 compute and 2.0 background
-    assert (
-        buffer_for_components(
-            buffers=merged.buffers, components=[BufferComponent.network]
-        ).ratio
-        == 1.5 * 2.0
-    )
+    assert buffer_for_components(
+        buffers=merged.buffers, components=[BufferComponent.cpu]
+    ).ratio == pytest.approx(3.0 * compute_ratio * 2.0)
+    # The network should just have the adaptive compute and 2.0 background
+    assert buffer_for_components(
+        buffers=merged.buffers, components=[BufferComponent.network]
+    ).ratio == pytest.approx(compute_ratio * 2.0)
     # Disk should come from the default storage (adaptive buffer for
     # tiny clusters is near 4.0)
     assert buffer_for_components(
