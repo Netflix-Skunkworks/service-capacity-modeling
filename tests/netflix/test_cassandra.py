@@ -884,3 +884,37 @@ class TestEbsSoftMemory:
         assert plans
         result = plans[0].candidate_clusters.zonal[0]
         assert "cassandra.page_cache.coverage_pct" not in result.cluster_params
+
+
+class TestCacheSkew:
+    """Test cache skew factor for Zipfian access patterns."""
+
+    def test_cache_skew_in_cluster_params(self):
+        """cache_skew_factor > 1.0 -> recorded in cluster_params."""
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(200_000),
+                estimated_write_per_second=certain_int(10_000),
+                estimated_mean_read_latency_ms=certain_float(1.0),
+                estimated_mean_write_latency_ms=certain_float(0.5),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(2_000),
+                estimated_compression_ratio=certain_float(1.0),
+            ),
+        )
+        plans = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_local_disks": False,
+                "require_attached_disks": True,
+                "experimental_memory_model": True,
+                "cache_skew_factor": 2.0,
+            },
+        )
+        assert plans
+        result = plans[0].candidate_clusters.zonal[0]
+        assert result.cluster_params.get("cassandra.cache_skew_factor") == 2.0
