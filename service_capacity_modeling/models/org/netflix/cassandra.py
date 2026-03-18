@@ -6,6 +6,7 @@ from typing import Callable
 from typing import Dict
 from typing import List
 from typing import Optional
+from typing import Tuple
 from typing import Set
 
 from pydantic import BaseModel
@@ -509,8 +510,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     if instance.drive is not None and require_attached_disks:
         return None
 
-    # Cassandra only deploys on gp2 and gp3 drives right now
-    if drive.name not in ("gp2", "gp3"):
+    # Cassandra deploys on gp3 only (gp2 is legacy)
+    if drive.name != "gp3":
         return None
 
     rps = desires.query_pattern.estimated_read_per_second.mid // zones_per_region
@@ -897,6 +898,10 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
 
     def __init__(self) -> None:
         pass
+
+    @staticmethod
+    def allowed_cloud_drives() -> Tuple[Optional[str], ...]:
+        return ("gp3",)
 
     @staticmethod
     def get_required_cluster_size(
