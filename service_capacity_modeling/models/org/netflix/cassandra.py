@@ -460,11 +460,6 @@ def _compute_penalties(
 
     All plans get a cost-proportional rank, so penalties act as
     percentage cost adjustments rather than absolute barriers.
-
-    Note: the preferred-family penalty (non_preferred_family_regret) has been
-    moved to the planner level. The planner reads model.preferred_families()
-    and applies _PREFERRED_FAMILY_RANK_PENALTY uniformly, so models get this
-    bias for free without re-implementing it per-model.
     """
     penalties: Dict[str, float] = {}
 

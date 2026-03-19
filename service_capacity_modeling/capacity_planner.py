@@ -66,9 +66,7 @@ from service_capacity_modeling.stats import interval_percentile
 
 logger = logging.getLogger(__name__)
 
-# Rank inflation applied by the planner to plans using instance families outside
-# model.preferred_families(). Models declare their preferred set; the planner
-# enforces the bias uniformly so models don't each re-implement it.
+# Rank inflation applied to plans using families outside model.preferred_families().
 # 0.15 means a non-preferred family needs ~15% lower compute cost to rank above
 # a preferred alternative. Applied to compute cost only (not service costs).
 _PREFERRED_FAMILY_RANK_PENALTY = 0.15
