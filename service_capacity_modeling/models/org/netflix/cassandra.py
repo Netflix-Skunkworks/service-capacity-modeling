@@ -4,10 +4,12 @@ import math
 from typing import Any
 from typing import Callable
 from typing import Dict
+from typing import FrozenSet
 from typing import List
 from typing import Optional
 from typing import Tuple
 from typing import Set
+from typing import Union
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -29,6 +31,9 @@ from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Bottleneck
+from service_capacity_modeling.interface import Excuse
+from service_capacity_modeling.interface import ExcuseTag
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
@@ -451,10 +456,15 @@ def _compute_penalties(
     """Compute named penalties from regret coefficients.
 
     Penalties inflate the plan rank used by plan_certain() sorting:
-        rank = cost * (1 + sum(penalties.values()))
+        rank = compute_cost * (1 + sum(penalties.values())) + service_cost
 
     All plans get a cost-proportional rank, so penalties act as
     percentage cost adjustments rather than absolute barriers.
+
+    Note: the preferred-family penalty (non_preferred_family_regret) has been
+    moved to the planner level. The planner reads model.preferred_families()
+    and applies _PREFERRED_FAMILY_RANK_PENALTY uniformly, so models get this
+    bias for free without re-implementing it per-model.
     """
     penalties: Dict[str, float] = {}
 
@@ -472,6 +482,27 @@ def _compute_penalties(
         penalties["family_migration"] = different_family_regret
 
     return penalties
+
+
+def _compute_excuse_tags(
+    excuse_instance: str,
+    current_instance: Optional[str],
+) -> List[ExcuseTag]:
+    """Tag an excuse relative to the current cluster's instance type."""
+    if current_instance is None:
+        return []
+    if excuse_instance == current_instance:
+        return [ExcuseTag.current_shape]
+    excuse_family = excuse_instance.rsplit(".", 1)[0]
+    current_family = current_instance.rsplit(".", 1)[0]
+    if excuse_family == current_family:
+        excuse_size = normalized_aws_size(excuse_instance)
+        current_size = normalized_aws_size(current_instance)
+        direction = (
+            ExcuseTag.size_up if excuse_size > current_size else ExcuseTag.size_down
+        )
+        return [ExcuseTag.same_family, direction]
+    return [ExcuseTag.different_family]
 
 
 # pylint: disable=too-many-locals
@@ -498,22 +529,65 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     experimental_memory_model: bool = False,
     max_page_cache_gib: float = 32.0,
     backup_retention_days: Optional[float] = None,
-) -> Optional[CapacityPlan]:
+) -> Union[CapacityPlan, Excuse, None]:
+    drive_name = drive.name
+
     # Netflix Cassandra doesn't like to deploy on really small instances
     if instance.cpu < 2 or instance.ram_gib <= 16:
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive_name,
+            reason=(
+                f"Instance too small: {instance.cpu} vCPUs "
+                f"(min 2), {instance.ram_gib:.0f} GiB RAM (min 16)"
+            ),
+            context={
+                "cpu": instance.cpu,
+                "ram_gib": instance.ram_gib,
+                "min_cpu": 2,
+                "min_ram_gib": 16,
+            },
+            bottleneck=Bottleneck.cpu if instance.cpu < 2 else Bottleneck.memory,
+        )
 
     # if we're not allowed to use gp2, skip EBS only types
     if instance.drive is None and require_local_disks:
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive_name,
+            reason=f"Requires local disks but {instance.name} is EBS-only",
+            context={
+                "has_local_drive": False,
+                "require_local_disks": True,
+            },
+            bottleneck=Bottleneck.drive_type,
+        )
 
     # if we're not allowed to use local disks, skip ephems
     if instance.drive is not None and require_attached_disks:
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive_name,
+            reason=f"Requires attached disks but {instance.name} has local drives",
+            context={
+                "instance_drive": str(instance.drive),
+                "require_attached_disks": True,
+            },
+            bottleneck=Bottleneck.drive_type,
+        )
 
     # Cassandra deploys on gp3 only (gp2 is legacy)
     if drive.name != "gp3":
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive_name,
+            reason=f"Unsupported drive type: {drive_name}",
+            context={
+                "drive_name": drive_name,
+                "supported_drives": ["gp3"],
+            },
+            bottleneck=Bottleneck.drive_type,
+        )
 
     rps = desires.query_pattern.estimated_read_per_second.mid // zones_per_region
     write_per_sec = (
@@ -683,7 +757,18 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     # Sometimes we don't want modify cluster topology, so only allow
     # topologies that match the desired zone size
     if required_cluster_size is not None and cluster.count != required_cluster_size:
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive_name,
+            reason=(
+                f"Cluster size {cluster.count} != required {required_cluster_size}"
+            ),
+            context={
+                "computed_count": cluster.count,
+                "required_cluster_size": required_cluster_size,
+            },
+            bottleneck=Bottleneck.cluster_size,
+        )
 
     # Cassandra clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as
@@ -693,8 +778,22 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     #       smaller clusters so your restarts don't take months.
     #   * Schema propagation. Since C* must gossip out changes to schema the
     #       duration of this can increase a lot with > 500 node clusters.
-    if cluster.count > (max_regional_size // zones_per_region):
-        return None
+    max_zonal = max_regional_size // zones_per_region
+    if cluster.count > max_zonal:
+        return Excuse(
+            instance=instance.name,
+            drive=drive_name,
+            reason=(
+                f"Cluster too large: {cluster.count} nodes > max {max_zonal} per zone"
+            ),
+            context={
+                "zonal_count": cluster.count,
+                "max_zonal": max_zonal,
+                "needed_disk_gib": needed_disk_gib,
+                "disk_per_node_gib": disk_per_node_gib,
+            },
+            bottleneck=Bottleneck.disk_capacity,
+        )
 
     # Calculate service costs (network + backup)
     cap_services = NflxCassandraCapacityModel.service_costs(
@@ -1017,6 +1116,34 @@ class NflxCassandraArguments(BaseModel):
         return cls.model_validate(args)
 
 
+# Instance families Cassandra considers as preferred alternatives.
+# Covers the full decision space: compute/general/memory × local-NVMe/EBS,
+# one representative per meaningful {memory-class × storage-class × generation}.
+# "n"-suffix (enhanced-network) families are intentionally excluded — C* is
+# disk/memory bound and rarely needs the network premium.
+CASSANDRA_PREFERRED_FAMILIES: FrozenSet[str] = frozenset(
+    {
+        # Compute-optimized EBS (~1.9 GiB/vCPU) — CPU-bound workloads
+        "c6a",
+        "c7a",
+        # General-purpose EBS (~3.8 GiB/vCPU)
+        "m6a",
+        "m7a",
+        # General-purpose local NVMe (~3.8 GiB/vCPU)
+        "m6id",
+        # Memory-optimized EBS (~7.6 GiB/vCPU)
+        "r6a",
+        "r7a",
+        # Memory-optimized local NVMe (~7.6–8.0 GiB/vCPU)
+        "r5d",
+        "r6id",
+        # Storage-optimized local NVMe — disk-dense workloads
+        "i4i",
+        "i3en",
+    }
+)
+
+
 class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
     service_name = "cassandra"
     cluster_type = "cassandra"
@@ -1027,6 +1154,10 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
     @staticmethod
     def allowed_cloud_drives() -> Tuple[Optional[str], ...]:
         return ("gp3",)
+
+    @staticmethod
+    def preferred_families() -> Optional[FrozenSet[str]]:
+        return CASSANDRA_PREFERRED_FAMILIES
 
     @staticmethod
     def get_required_cluster_size(
@@ -1147,7 +1278,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         context: RegionContext,
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
-    ) -> Optional[CapacityPlan]:
+    ) -> Union[CapacityPlan, Excuse, None]:
         # Parse extra_model_arguments into a validated model with centralized defaults
         args = NflxCassandraArguments.from_extra_model_arguments(extra_model_arguments)
 
@@ -1173,7 +1304,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_write_buffer_percent = max(0.5, max_write_buffer_percent)
             max_table_buffer_percent = max(0.2, max_table_buffer_percent)
 
-        return _estimate_cassandra_cluster_zonal(
+        result = _estimate_cassandra_cluster_zonal(
             instance=instance,
             drive=drive,
             context=context,
@@ -1195,6 +1326,25 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_page_cache_gib=args.max_page_cache_gib,
             backup_retention_days=args.backup_retention_days,
         )
+
+        # Tag excuses relative to current cluster instance
+        match result:
+            case Excuse():
+                current_capacity = _get_current_capacity(desires)
+                current_instance_name = (
+                    current_capacity.cluster_instance.name
+                    if current_capacity and current_capacity.cluster_instance
+                    else None
+                )
+                return result.model_copy(
+                    update={
+                        "tags": _compute_excuse_tags(
+                            result.instance, current_instance_name
+                        )
+                    }
+                )
+            case _:
+                return result
 
     @staticmethod
     def regret(

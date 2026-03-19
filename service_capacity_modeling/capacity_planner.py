@@ -3,11 +3,13 @@
 import functools
 import logging
 import math
+import re
 from hashlib import blake2b
 from typing import Any
 from typing import Callable
 from typing import cast
 from typing import Dict
+from typing import FrozenSet
 from typing import Generator
 from typing import List
 from typing import Optional
@@ -16,6 +18,7 @@ from typing import Set
 from typing import Tuple
 
 import numpy as np
+from pydantic import Field
 
 from service_capacity_modeling.hardware import HardwareShapes
 from service_capacity_modeling.hardware import shapes
@@ -28,7 +31,16 @@ from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import ExcludeUnsetModel
+from service_capacity_modeling.interface import Excuse
+from service_capacity_modeling.interface import ExcuseTag
+from service_capacity_modeling.explainability import ExplainedPlans
+from service_capacity_modeling.explainability import FamilyEdge
+from service_capacity_modeling.explainability import FamilyGraph
+from service_capacity_modeling.explainability import FamilyTrait
+from service_capacity_modeling.explainability import KNOWN_DATASTORE_FAMILIES
 from service_capacity_modeling.interface import Hardware
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
@@ -53,6 +65,176 @@ from service_capacity_modeling.stats import dist_for_interval
 from service_capacity_modeling.stats import interval_percentile
 
 logger = logging.getLogger(__name__)
+
+# Rank inflation applied by the planner to plans using instance families outside
+# model.preferred_families(). Models declare their preferred set; the planner
+# enforces the bias uniformly so models don't each re-implement it.
+# 0.15 means a non-preferred family needs ~15% lower compute cost to rank above
+# a preferred alternative. Applied to compute cost only (not service costs).
+_PREFERRED_FAMILY_RANK_PENALTY = 0.15
+
+
+class PlannerArguments(ExcludeUnsetModel):
+    """Planner-level configuration, separate from model-specific extra_model_arguments.
+
+    Controls how the planner selects and ranks plans, independent of any
+    particular model's estimation logic. Pass via ``planner_arguments=`` on
+    ``plan_certain``, ``plan_certain_explained``, and ``plan``.
+    """
+
+    max_results_per_family: int = Field(
+        default=1,
+        description="Maximum number of plans to return per instance family. "
+        "Higher values expose within-family size trade-offs "
+        "(e.g., 8×xlarge vs 2×4xlarge).",
+    )
+    preferred_family_penalty: float = Field(
+        default=_PREFERRED_FAMILY_RANK_PENALTY,
+        description="Rank inflation applied to plans using families outside "
+        "model.preferred_families(). A non-preferred family must be this fraction "
+        "cheaper on compute cost to rank above a preferred alternative. "
+        "Set to 0.0 to evaluate all families by pure cost.",
+    )
+
+
+class _CertainResult(ExcludeUnsetModel):
+    """Internal result from _plan_certain: viable plans + rejection excuses."""
+
+    plans: Sequence[CapacityPlan]
+    excuses: Sequence[Excuse] = []
+
+
+def _deduplicate_excuses(excuses: Sequence[Excuse]) -> Sequence[Excuse]:
+    """Deduplicate excuses by (instance, drive, reason) across simulations."""
+    seen: Set[Tuple[str, str, str]] = set()
+    result: List[Excuse] = []
+    for exc in excuses:
+        key = (exc.instance, exc.drive, exc.reason)
+        if key not in seen:
+            seen.add(key)
+            result.append(exc)
+    return result
+
+
+def _family_generation(family: str) -> Optional[int]:
+    """Extract generation number from AWS family name (e.g. 'r7a' → 7)."""
+    m = re.search(r"\d+", family)
+    return int(m.group()) if m else None
+
+
+def _derive_edge_attributes(  # noqa: C901  # pylint: disable=too-many-branches
+    from_trait: FamilyTrait,
+    to_trait: FamilyTrait,
+) -> Tuple[List[Bottleneck], List[Bottleneck]]:
+    """Derive improves/degrades for a family pair from their hardware traits."""
+    improves: List[Bottleneck] = []
+    degrades: List[Bottleneck] = []
+
+    # cost — from loaded pricing (may be internal)
+    if from_trait.cost_per_vcpu_annual and to_trait.cost_per_vcpu_annual:
+        if to_trait.cost_per_vcpu_annual < from_trait.cost_per_vcpu_annual:
+            improves.append(Bottleneck.cost)
+        elif to_trait.cost_per_vcpu_annual > from_trait.cost_per_vcpu_annual:
+            degrades.append(Bottleneck.cost)
+
+    # memory
+    if to_trait.memory_gib_per_vcpu > from_trait.memory_gib_per_vcpu:
+        improves.append(Bottleneck.memory)
+    elif to_trait.memory_gib_per_vcpu < from_trait.memory_gib_per_vcpu:
+        degrades.append(Bottleneck.memory)
+
+    # disk_capacity — local vs EBS
+    if from_trait.has_local_disk and to_trait.has_local_disk:
+        from_disk = from_trait.local_disk_gib_per_vcpu or 0
+        to_disk = to_trait.local_disk_gib_per_vcpu or 0
+        if to_disk > from_disk:
+            improves.append(Bottleneck.disk_capacity)
+        elif to_disk < from_disk:
+            degrades.append(Bottleneck.disk_capacity)
+    elif from_trait.has_local_disk and not to_trait.has_local_disk:
+        improves.append(Bottleneck.disk_capacity)  # EBS: flexible sizing
+    elif not from_trait.has_local_disk and to_trait.has_local_disk:
+        degrades.append(Bottleneck.disk_capacity)  # local: fixed size
+
+    # disk_iops — local NVMe vs EBS is a qualitative change (latency curve,
+    # not just peak IOPS). EBS-to-EBS and local-to-local are omitted: max
+    # IOPS is rarely the bottleneck and latency curves are modeled identically.
+    if from_trait.has_local_disk and not to_trait.has_local_disk:
+        degrades.append(Bottleneck.disk_iops)
+    elif not from_trait.has_local_disk and to_trait.has_local_disk:
+        improves.append(Bottleneck.disk_iops)
+
+    # generation — derived from family name (r7a=7, r6a=6, i4i=4, ...)
+    from_gen = _family_generation(from_trait.family)
+    to_gen = _family_generation(to_trait.family)
+    if from_gen is not None and to_gen is not None:
+        if to_gen > from_gen:
+            improves.append(Bottleneck.generation)
+        elif to_gen < from_gen:
+            degrades.append(Bottleneck.generation)
+
+    return improves, degrades
+
+
+def _build_family_graph(
+    excuses: Sequence[Excuse],
+    hardware: Hardware,
+    preferred_families: Optional[FrozenSet[str]],
+) -> FamilyGraph:
+    """Build an M×N FamilyGraph from derived hardware traits.
+
+    All edge attributes (cost, memory, disk_capacity, disk_iops, generation)
+    are derived at runtime from FamilyTrait values — no hardcoded trade-off
+    tables. The current cluster's family is always included even if it falls
+    outside preferred_families, so consumers always see why their current
+    shape was rejected.
+
+    The graph is always built from preferred_families (or KNOWN_DATASTORE_FAMILIES
+    as fallback), regardless of whether any excuses were generated. This ensures
+    plan_certain_explained() always returns useful alternative-family context.
+    """
+    base = (
+        preferred_families
+        if preferred_families is not None
+        else KNOWN_DATASTORE_FAMILIES
+    )
+    current_shape_families: Set[str] = {
+        e.instance.rsplit(".", 1)[0]
+        for e in excuses
+        if ExcuseTag.current_shape in e.tags
+    }
+    included = base | current_shape_families
+
+    # Index one instance per family — O(M) single pass
+    family_first: Dict[str, Any] = {}
+    for inst in hardware.instances.values():
+        fam = inst.family
+        if fam in included and fam not in family_first:
+            family_first[fam] = inst
+
+    traits = {
+        fam: FamilyTrait.from_instance(family_first[fam])
+        for fam in included
+        if fam in family_first
+    }
+
+    # M×N directed edges — all pairs, attributes fully derived
+    edges: List[FamilyEdge] = []
+    for from_fam, from_trait in traits.items():
+        for to_fam, to_trait in traits.items():
+            if from_fam == to_fam:
+                continue
+            improves, degrades = _derive_edge_attributes(from_trait, to_trait)
+            edges.append(
+                FamilyEdge(
+                    from_family=from_fam,
+                    to_family=to_fam,
+                    improves=improves,
+                    degrades=degrades,
+                )
+            )
+
+    return FamilyGraph(traits=traits, edges=edges)
 
 
 def simulate_interval(
@@ -585,7 +767,7 @@ class CapacityPlanner:
             for percentile_sub_model, percentile_sub_desire in model_percentile_desires[
                 index
             ].items():
-                percentile_sub_plan = self._plan_certain(
+                percentile_sub_result = self._plan_certain(
                     model_name=percentile_sub_model,
                     region=region,
                     desires=percentile_sub_desire,
@@ -596,8 +778,8 @@ class CapacityPlanner:
                     instance_families=instance_families,
                     drives=drives,
                 )
-                if percentile_sub_plan:
-                    percentile_plan.append(percentile_sub_plan)
+                if percentile_sub_result.plans:
+                    percentile_plan.append(percentile_sub_result.plans)
 
             percentile_plans[percentile] = cast(
                 Sequence[CapacityPlan],
@@ -621,7 +803,7 @@ class CapacityPlanner:
     ) -> Sequence[CapacityPlan]:
         mean_plans = []
         for mean_sub_model, mean_sub_desire in model_mean_desires.items():
-            mean_sub_plan = self._plan_certain(
+            mean_sub_result = self._plan_certain(
                 model_name=mean_sub_model,
                 region=region,
                 desires=mean_sub_desire,
@@ -632,8 +814,8 @@ class CapacityPlanner:
                 instance_families=instance_families,
                 drives=drives,
             )
-            if mean_sub_plan:
-                mean_plans.append(mean_sub_plan)
+            if mean_sub_result.plans:
+                mean_plans.append(mean_sub_result.plans)
         mean_plan = cast(
             Sequence[CapacityPlan],
             [functools.reduce(merge_plan, composed) for composed in zip(*mean_plans)],
@@ -652,26 +834,62 @@ class CapacityPlanner:
         num_regions: int = 3,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
         max_results_per_family: int = 1,
+        planner_arguments: Optional[PlannerArguments] = None,
     ) -> Sequence[CapacityPlan]:
+        return self.plan_certain_explained(
+            model_name=model_name,
+            region=region,
+            desires=desires,
+            lifecycles=lifecycles,
+            instance_families=instance_families,
+            drives=drives,
+            num_results=num_results,
+            num_regions=num_regions,
+            extra_model_arguments=extra_model_arguments,
+            max_results_per_family=max_results_per_family,
+            planner_arguments=planner_arguments,
+        ).plans
+
+    def plan_certain_explained(  # pylint: disable=too-many-positional-arguments
+        self,
+        model_name: str,
+        region: str,
+        desires: CapacityDesires,
+        lifecycles: Optional[Sequence[Lifecycle]] = None,
+        instance_families: Optional[Sequence[str]] = None,
+        drives: Optional[Sequence[str]] = None,
+        num_results: Optional[int] = None,
+        num_regions: int = 3,
+        extra_model_arguments: Optional[Dict[str, Any]] = None,
+        max_results_per_family: int = 1,
+        planner_arguments: Optional[PlannerArguments] = None,
+    ) -> ExplainedPlans:
+        """Like plan_certain() but returns excuses and family graph too."""
         if model_name not in self._models:
             raise ValueError(
                 f"model_name={model_name} does not exist. "
                 f"Try {sorted(list(self._models.keys()))}"
             )
 
+        # planner_arguments takes precedence over explicit max_results_per_family
+        pargs = planner_arguments or PlannerArguments(
+            max_results_per_family=max_results_per_family
+        )
+
         desires = desires.model_copy(deep=True)
         _resolve_cluster_instances(desires)
         extra_model_arguments = extra_model_arguments or {}
         lifecycles = lifecycles or self._default_lifecycles
 
-        results = []
+        all_plans: List[Sequence[CapacityPlan]] = []
+        all_excuses: List[Excuse] = []
 
         for sub_model, sub_desires in self._sub_models(
             model_name=model_name,
             desires=desires,
             extra_model_arguments=extra_model_arguments,
         ):
-            sub_plan = self._plan_certain(
+            sub_result = self._plan_certain(
                 model_name=sub_model,
                 region=region,
                 desires=sub_desires,
@@ -681,12 +899,34 @@ class CapacityPlanner:
                 lifecycles=lifecycles,
                 instance_families=instance_families,
                 drives=drives,
-                max_results_per_family=max_results_per_family,
+                planner_arguments=pargs,
             )
-            if sub_plan:
-                results.append(sub_plan)
+            if sub_result.plans:
+                all_plans.append(sub_result.plans)
+            all_excuses.extend(sub_result.excuses)
 
-        return [functools.reduce(merge_plan, composed) for composed in zip(*results)]
+        plans = (
+            [functools.reduce(merge_plan, composed) for composed in zip(*all_plans)]
+            if all_plans
+            else []
+        )
+
+        excuses = _deduplicate_excuses(all_excuses)
+
+        # Build M×N FamilyGraph from hardware traits. preferred_families comes
+        # from the model (None → KNOWN_DATASTORE_FAMILIES). The current cluster's
+        # family is always included regardless of the preferred set.
+        # Use shapes.region() directly — we only need the hardware catalog, not
+        # a full RegionContext (which would do unnecessary deep-copies of services).
+        hardware = self._shapes.region(region)
+        model = self._models[model_name]
+        graph = _build_family_graph(excuses, hardware, model.preferred_families())
+
+        return ExplainedPlans(
+            plans=plans,
+            excuses=excuses,
+            family_graph=graph,
+        )
 
     def _plan_certain(  # pylint: disable=too-many-positional-arguments
         self,
@@ -699,32 +939,59 @@ class CapacityPlanner:
         instance_families: Optional[Sequence[str]] = None,
         drives: Optional[Sequence[str]] = None,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
-        max_results_per_family: int = 1,
-    ) -> Sequence[CapacityPlan]:
+        planner_arguments: Optional[PlannerArguments] = None,
+    ) -> _CertainResult:
         extra_model_arguments = extra_model_arguments or {}
+        pargs = planner_arguments or PlannerArguments()
         model = self._models[model_name]
 
-        plans = []
+        plans: List[CapacityPlan] = []
+        excuses: List[Excuse] = []
+        pref_families = model.preferred_families()
         for instance, drive, context in self.generate_scenarios(
             model, region, desires, num_regions, lifecycles, instance_families, drives
         ):
-            plan = model.capacity_plan(
+            match model.capacity_plan(
                 instance=instance,
                 drive=drive,
                 context=context,
                 desires=desires,
                 extra_model_arguments=extra_model_arguments,
-            )
-            if plan is not None:
-                plans.append(plan)
+            ):
+                case CapacityPlan() as plan:
+                    if (
+                        pref_families is not None
+                        and instance.family not in pref_families
+                        and pargs.preferred_family_penalty > 0
+                    ):
+                        service_cost = sum(
+                            s.annual_cost for s in plan.candidate_clusters.services
+                        )
+                        compute_cost = (
+                            plan.candidate_clusters.total_annual_cost - service_cost
+                        )
+                        plan = plan.model_copy(
+                            update={
+                                "rank": plan.rank
+                                + compute_cost * pargs.preferred_family_penalty
+                            }
+                        )
+                    plans.append(plan)
+                case Excuse() as excuse:
+                    excuses.append(excuse)
+                case None:
+                    pass
 
         # lowest cost first
         plans.sort(key=lambda p: (p.rank, p.candidate_clusters.total_annual_cost))
 
         num_results = num_results or self._default_num_results
-        return reduce_by_family(plans, max_results_per_family=max_results_per_family)[
-            :num_results
-        ]
+        return _CertainResult(
+            plans=reduce_by_family(
+                plans, max_results_per_family=pargs.max_results_per_family
+            )[:num_results],
+            excuses=excuses,
+        )
 
     def _get_model_costs(
         self,
@@ -974,8 +1241,12 @@ class CapacityPlanner:
         extra_model_arguments: Optional[Dict[str, Any]] = None,
         explain: bool = False,
         max_results_per_family: int = 1,
+        planner_arguments: Optional[PlannerArguments] = None,
     ) -> UncertainCapacityPlan:
         extra_model_arguments = extra_model_arguments or {}
+        pargs = planner_arguments or PlannerArguments(
+            max_results_per_family=max_results_per_family
+        )
 
         if not all(0 <= p <= 100 for p in percentiles):
             raise ValueError("percentiles must be an integer in the range [0, 100]")
@@ -998,6 +1269,7 @@ class CapacityPlanner:
             str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]
         ] = {}
         desires_by_model: Dict[str, CapacityDesires] = {}
+        excuses_by_model: Dict[str, List[Excuse]] = {}
         for sub_model, sub_desires in self._sub_models(
             model_name=model_name,
             desires=desires,
@@ -1005,24 +1277,25 @@ class CapacityPlanner:
         ):
             desires_by_model[sub_model] = sub_desires
             model_plans: List[Tuple[CapacityDesires, Sequence[CapacityPlan]]] = []
+            model_excuses: List[Excuse] = []
             for sim_desires in model_desires(sub_desires, simulations):
-                model_plans.append(
-                    (
-                        sim_desires,
-                        self._plan_certain(
-                            model_name=sub_model,
-                            region=region,
-                            desires=sim_desires,
-                            num_results=1,
-                            num_regions=num_regions,
-                            extra_model_arguments=extra_model_arguments,
-                            lifecycles=lifecycles,
-                            instance_families=instance_families,
-                            drives=drives,
-                            max_results_per_family=max_results_per_family,
-                        ),
-                    )
+                sim_result = self._plan_certain(
+                    model_name=sub_model,
+                    region=region,
+                    desires=sim_desires,
+                    num_results=1,
+                    num_regions=num_regions,
+                    extra_model_arguments=extra_model_arguments,
+                    lifecycles=lifecycles,
+                    instance_families=instance_families,
+                    drives=drives,
+                    planner_arguments=pargs,
                 )
+                model_plans.append((sim_desires, sim_result.plans))
+                if explain:
+                    model_excuses.extend(sim_result.excuses)
+            if explain:
+                excuses_by_model[sub_model] = model_excuses
             regret_clusters_by_model[sub_model] = _regret(
                 capacity_plans=[
                     (sim_desires, plan[0]) for sim_desires, plan in model_plans if plan
@@ -1043,7 +1316,7 @@ class CapacityPlanner:
                 zonal_requirements,
                 regional_requirements,
             ),
-            max_results_per_family=max_results_per_family,
+            max_results_per_family=pargs.max_results_per_family,
         )[:num_results]
 
         low_p, high_p = sorted(percentiles)[0], sorted(percentiles)[-1]
@@ -1100,6 +1373,11 @@ class CapacityPlanner:
         )
         if explain:
             result.explanation.regret_clusters_by_model = regret_clusters_by_model
+            result.explanation.excuses_by_model = {
+                model: _deduplicate_excuses(excuses)
+                for model, excuses in excuses_by_model.items()
+                if excuses
+            }
             result.explanation.context["regret"] = least_regret
 
         return result
