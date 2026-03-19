@@ -32,8 +32,7 @@ from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import ExcludeUnsetModel
 from service_capacity_modeling.interface import Excuse
-from service_capacity_modeling.interface import ExcuseTag
-from service_capacity_modeling.interface import normalized_aws_size
+from service_capacity_modeling.explainability import deduplicate_excuses
 from service_capacity_modeling.explainability import ExplainedPlans
 from service_capacity_modeling.explainability import FamilyGraph
 from service_capacity_modeling.interface import Hardware
@@ -55,6 +54,7 @@ from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.org import netflix
+from service_capacity_modeling.models.utils import compute_excuse_tags
 from service_capacity_modeling.models.utils import current_instance_name
 from service_capacity_modeling.models.utils import reduce_by_family
 from service_capacity_modeling.stats import dist_for_interval
@@ -91,43 +91,6 @@ class _CertainResult(ExcludeUnsetModel):
 
     plans: Sequence[CapacityPlan]
     excuses: Sequence[Excuse] = []
-
-
-def _deduplicate_excuses(excuses: Sequence[Excuse]) -> Sequence[Excuse]:
-    """Deduplicate excuses by (instance, drive, reason) across simulations."""
-    seen: Set[Tuple[str, str, str]] = set()
-    result: List[Excuse] = []
-    for exc in excuses:
-        key = (exc.instance, exc.drive, exc.reason)
-        if key not in seen:
-            seen.add(key)
-            result.append(exc)
-    return result
-
-
-def _compute_excuse_tags(
-    excuse_instance: str,
-    current_instance: Optional[str],
-) -> List[ExcuseTag]:
-    """Tag an excuse relative to the current cluster's instance type.
-
-    Applied by the planner uniformly to all model excuses — models return
-    bare Excuse objects and get tagging for free.
-    """
-    if current_instance is None:
-        return []
-    if excuse_instance == current_instance:
-        return [ExcuseTag.current_shape]
-    excuse_family = excuse_instance.rsplit(".", 1)[0]
-    current_family = current_instance.rsplit(".", 1)[0]
-    if excuse_family == current_family:
-        excuse_size = normalized_aws_size(excuse_instance)
-        current_size = normalized_aws_size(current_instance)
-        direction = (
-            ExcuseTag.size_up if excuse_size > current_size else ExcuseTag.size_down
-        )
-        return [ExcuseTag.same_family, direction]
-    return [ExcuseTag.different_family]
 
 
 def simulate_interval(
@@ -804,7 +767,7 @@ class CapacityPlanner:
             else []
         )
 
-        excuses = _deduplicate_excuses(all_excuses)
+        excuses = deduplicate_excuses(all_excuses)
 
         # Build M×N FamilyGraph from hardware traits. preferred_families comes
         # from the model (None → empty base, only the current cluster's family).
@@ -872,7 +835,7 @@ class CapacityPlanner:
                         )
                     plans.append(plan)
                 case Excuse() as excuse:
-                    tags = _compute_excuse_tags(excuse.instance, current_inst)
+                    tags = compute_excuse_tags(excuse.instance, current_inst)
                     excuses.append(
                         excuse.model_copy(update={"tags": tags}) if tags else excuse
                     )
@@ -1271,7 +1234,7 @@ class CapacityPlanner:
         if explain:
             result.explanation.regret_clusters_by_model = regret_clusters_by_model
             result.explanation.excuses_by_model = {
-                model: _deduplicate_excuses(excuses)
+                model: deduplicate_excuses(excuses)
                 for model, excuses in excuses_by_model.items()
                 if excuses
             }

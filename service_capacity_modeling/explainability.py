@@ -295,6 +295,18 @@ STATELESS_SERVICE_FAMILIES: FrozenSet[str] = frozenset(
 )
 
 
+def deduplicate_excuses(excuses: Sequence[Excuse]) -> Sequence[Excuse]:
+    """Deduplicate excuses by (instance, drive, reason) across simulations."""
+    seen: Set[Tuple[str, str, str]] = set()
+    result: List[Excuse] = []
+    for exc in excuses:
+        key = (exc.instance, exc.drive, exc.reason)
+        if key not in seen:
+            seen.add(key)
+            result.append(exc)
+    return result
+
+
 class ExplainedPlans(ExcludeUnsetModel):
     """Plans + excuses + family context.
 

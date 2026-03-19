@@ -21,9 +21,7 @@ from service_capacity_modeling.interface import (
     certain_float,
     certain_int,
 )
-from service_capacity_modeling.capacity_planner import (
-    _compute_excuse_tags,
-)
+from service_capacity_modeling.models.utils import compute_excuse_tags
 
 
 EXTRA_MODEL_ARGS = {"require_local_disks": False}
@@ -216,7 +214,7 @@ class TestFamilyGraph:
     ],
 )
 def test_compute_excuse_tags(excuse_inst, current_inst, expected_tags):
-    assert _compute_excuse_tags(excuse_inst, current_inst) == expected_tags
+    assert compute_excuse_tags(excuse_inst, current_inst) == expected_tags
 
 
 class TestAWSFamilyGraph:
