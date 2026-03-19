@@ -779,8 +779,8 @@ class CapacityPlanner:
         excuses = _deduplicate_excuses(all_excuses)
 
         # Build M×N FamilyGraph from hardware traits. preferred_families comes
-        # from the model (None → STATEFUL_DATASTORE_FAMILIES). The current cluster's
-        # family is always included regardless of the preferred set.
+        # from the model (None → empty base, only the current cluster's family).
+        # Current cluster's family is always included regardless of preferred set.
         # Use shapes.region() directly — we only need the hardware catalog, not
         # a full RegionContext (which would do unnecessary deep-copies of services).
         hardware = self._shapes.region(region)

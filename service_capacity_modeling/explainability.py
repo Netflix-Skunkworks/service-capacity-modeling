@@ -212,15 +212,12 @@ class FamilyGraph(ExcludeUnsetModel):
         outside preferred_families, so consumers always see why their current
         shape was rejected.
 
-        The graph is always populated from preferred_families (or
-        STATEFUL_DATASTORE_FAMILIES as fallback), regardless of whether any excuses
-        were generated.
+        The graph is always populated from preferred_families. If preferred_families
+        is None (model has no declared preference) the base is empty, so only the
+        current cluster's family appears as a node (if current_clusters is set).
+        This prevents stateless models from inheriting storage-optimized families.
         """
-        base = (
-            preferred_families
-            if preferred_families is not None
-            else STATEFUL_DATASTORE_FAMILIES
-        )
+        base = preferred_families if preferred_families is not None else frozenset()
         current_shape_families: Set[str] = {
             e.instance.rsplit(".", 1)[0]
             for e in excuses
@@ -279,6 +276,21 @@ STATEFUL_DATASTORE_FAMILIES: FrozenSet[str] = frozenset(
         "r6id",  # memory-optimized local NVMe (~7.6–8.0 GiB/vCPU)
         "i4i",
         "i3en",  # storage-optimized local NVMe
+    }
+)
+
+# Preferred family set for stateless services (DGW, Java apps, NodeQuark).
+# EBS-only: no local NVMe (storage density is irrelevant), no storage-optimized
+# families (i4i/i3en). Covers the compute × memory × generation axes.
+# Models override preferred_families() to return this set.
+STATELESS_SERVICE_FAMILIES: FrozenSet[str] = frozenset(
+    {
+        "c6a",
+        "c7a",  # compute-optimized EBS (~1.9 GiB/vCPU) — CPU-bound services
+        "m6a",
+        "m7a",  # general-purpose EBS (~3.8 GiB/vCPU) — balanced workloads
+        "r6a",
+        "r7a",  # memory-optimized EBS (~7.6 GiB/vCPU) — heap-heavy services
     }
 )
 

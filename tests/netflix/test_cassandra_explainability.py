@@ -340,13 +340,13 @@ class TestFamilyGraphWithoutExcuses:
         assert "i4i" in graph.traits
         assert "r6a" in graph.traits
 
-    def test_build_family_graph_none_preferred_uses_known_families(self):
-        """preferred_families=None falls back to STATEFUL_DATASTORE_FAMILIES."""
+    def test_build_family_graph_none_preferred_gives_empty_graph(self):
+        """preferred_families=None → empty base, no families imposed on the model."""
         hardware = shapes.region("us-east-1")
         graph = FamilyGraph.build(
             excuses=[],
             hardware=hardware,
             preferred_families=None,
         )
-        assert len(graph.traits) > 0
-        assert len(graph.edges) == len(graph.traits) * (len(graph.traits) - 1)
+        assert len(graph.traits) == 0
+        assert len(graph.edges) == 0
