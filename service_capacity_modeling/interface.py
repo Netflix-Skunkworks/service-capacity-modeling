@@ -1263,12 +1263,82 @@ class CapacityRegretParameters(ExcludeUnsetModel):
     extra: Dict[str, Regret] = {}
 
 
+###############################################################################
+#                     Explainability: Excuses & Family Graph                  #
+###############################################################################
+
+
+@enum_docstrings
+class Bottleneck(StrEnum):
+    """Resource dimensions that can constrain or improve a capacity plan.
+
+    Used by Excuse (what's limiting this shape) and FamilyEdge
+    (what improves/degrades when switching families).
+    """
+
+    cpu = "cpu"
+    """Compute capacity — vCPUs or normalized cores"""
+
+    memory = "memory"
+    """RAM capacity — total GiB of memory available"""
+
+    disk_capacity = "disk_capacity"
+    """Storage capacity — GiB of disk per node"""
+
+    disk_iops = "disk_iops"
+    """Storage IOPS — random and sequential IO throughput"""
+
+    drive_type = "drive_type"
+    """Storage attachment model — local SSD vs attached (EBS)"""
+
+    cluster_size = "cluster_size"
+    """Cluster topology constraint — min/max node count"""
+
+    cost = "cost"
+    """Annual cost"""
+
+    generation = "generation"
+    """Hardware generation — newer gens improve price/performance"""
+
+
+@enum_docstrings
+class ExcuseTag(StrEnum):
+    """Tags that classify an Excuse relative to the current cluster shape."""
+
+    current_shape = "current_shape"
+    """This is the exact instance type the cluster currently runs on."""
+
+    same_family = "same_family"
+    """Same instance family as the current shape (e.g., both m6id)."""
+
+    size_up = "size_up"
+    """Larger size within the same family than the current shape."""
+
+    size_down = "size_down"
+    """Smaller size within the same family than the current shape."""
+
+    different_family = "different_family"
+    """A different instance family from the current shape."""
+
+
+class Excuse(ExcludeUnsetModel):
+    """Structured explanation for why an instance/drive combo was rejected."""
+
+    instance: str
+    drive: str
+    reason: str
+    context: Dict[str, Any] = {}
+    tags: List[ExcuseTag] = []
+    bottleneck: Optional[Bottleneck] = None
+
+
 class PlanExplanation(ExcludeUnsetModel):
     regret_params: CapacityRegretParameters
     regret_clusters_by_model: Dict[
         str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]
     ] = {}
     desires_by_model: Dict[str, CapacityDesires] = {}
+    excuses_by_model: Dict[str, Sequence[Excuse]] = {}
     context: Dict[str, Any] = {}
 
 

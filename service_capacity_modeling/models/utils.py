@@ -2,9 +2,53 @@ import math
 from typing import Dict
 from typing import Iterable
 from typing import List
+from typing import Optional
 from typing import Tuple
 
+from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import ExcuseTag
+from service_capacity_modeling.interface import normalized_aws_size
+
+
+def current_instance_name(desires: CapacityDesires) -> Optional[str]:
+    """Return the current cluster's instance name, or None if not set.
+
+    Checks zonal clusters first, then regional. Used by the planner to
+    tag excuses relative to the current shape.
+    """
+    cc = desires.current_clusters
+    if not cc:
+        return None
+    cur = cc.zonal[0] if cc.zonal else (cc.regional[0] if cc.regional else None)
+    return cur.cluster_instance.name if cur and cur.cluster_instance else None
+
+
+def compute_excuse_tags(
+    excuse_instance: str,
+    current_instance: Optional[str],
+) -> List[ExcuseTag]:
+    """Tag an excuse relative to the current cluster's instance type.
+
+    Returns tags classifying the excuse instance vs the current shape:
+    current_shape, same_family+size_up/down, or different_family.
+    Returns [] when there is no current cluster to compare against.
+    """
+    if current_instance is None:
+        return []
+    if excuse_instance == current_instance:
+        return [ExcuseTag.current_shape]
+    excuse_family = excuse_instance.rsplit(".", 1)[0]
+    current_family = current_instance.rsplit(".", 1)[0]
+    if excuse_family == current_family:
+        direction = (
+            ExcuseTag.size_up
+            if normalized_aws_size(excuse_instance)
+            > normalized_aws_size(current_instance)
+            else ExcuseTag.size_down
+        )
+        return [ExcuseTag.same_family, direction]
+    return [ExcuseTag.different_family]
 
 
 def reduce_by_family(

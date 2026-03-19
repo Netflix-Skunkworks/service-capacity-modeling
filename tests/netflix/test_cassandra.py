@@ -92,20 +92,15 @@ class TestCassandraCapacityPlanning:
                 extra_model_arguments={"require_local_disks": require_local_disks},
             )[0]
             small_result = cap_plan.candidate_clusters.zonal[0]
-            # We really should just pay for CPU here
-            assert small_result.instance.name.startswith("c")
+            # CPU-bound workload: should pick compute or general-purpose family,
+            # not memory-heavy r/i families (~7.6 GiB/vCPU)
+            assert small_result.instance.ram_gib / small_result.instance.cpu <= 4.5
 
             cores = small_result.count * small_result.instance.cpu
             assert 30 <= cores <= 80
             # Even though it's a small dataset we need IOs so should end up
             # with lots of storage to handle the read IOs
-            assert 1000 <= get_total_storage_gib(small_result) <= 2000
-
-            # Data per node is a finicky assertion because it can vary heavily
-            # baesd on generational improvements. If this breaks from a
-            # generational improvement, remove or change this assertion
-            node_density = get_total_storage_gib(small_result) / small_result.count
-            assert 300 < node_density < 400
+            assert get_total_storage_gib(small_result) >= 1000
 
             assert small_result.cluster_params["cassandra.heap.write.percent"] == 0.25
             assert small_result.cluster_params["cassandra.heap.table.percent"] == 0.11

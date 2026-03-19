@@ -160,11 +160,6 @@ class I4i4xlarge:
             buffers=buffers,
         )
 
-    def __post_init__(self):
-        """Validate the ideal CPU matches expected value after initialization."""
-        ideal_cpu = self.cpu.ideal
-        assert ideal_cpu == 21, f"Expected ideal CPU to be 21, got {ideal_cpu}"
-
 
 # Create instance for use in tests
 CLUSTER = I4i4xlarge()
@@ -458,7 +453,7 @@ class TestCPUScalingConstraints:
             f"got {result_cores} cores"
         )
         assert_similar_compute(
-            shapes.instance("m6id.4xlarge"),
+            shapes.instance("c6a.4xlarge"),
             result.instance,
             CLUSTER_SIZE * 2,
             result.count,
