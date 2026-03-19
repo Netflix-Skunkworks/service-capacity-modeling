@@ -2,9 +2,24 @@ import math
 from typing import Dict
 from typing import Iterable
 from typing import List
+from typing import Optional
 from typing import Tuple
 
+from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
+
+
+def current_instance_name(desires: CapacityDesires) -> Optional[str]:
+    """Return the current cluster's instance name, or None if not set.
+
+    Checks zonal clusters first, then regional. Used by the planner to
+    tag excuses relative to the current shape.
+    """
+    cc = desires.current_clusters
+    if not cc:
+        return None
+    cur = cc.zonal[0] if cc.zonal else (cc.regional[0] if cc.regional else None)
+    return cur.cluster_instance.name if cur and cur.cluster_instance else None
 
 
 def reduce_by_family(

@@ -21,7 +21,7 @@ from service_capacity_modeling.interface import (
     certain_float,
     certain_int,
 )
-from service_capacity_modeling.models.org.netflix.cassandra import (
+from service_capacity_modeling.capacity_planner import (
     _compute_excuse_tags,
 )
 

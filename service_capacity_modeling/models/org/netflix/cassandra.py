@@ -32,8 +32,8 @@ from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Bottleneck
+from service_capacity_modeling.explainability import STATEFUL_DATASTORE_FAMILIES
 from service_capacity_modeling.interface import Excuse
-from service_capacity_modeling.interface import ExcuseTag
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
@@ -479,27 +479,6 @@ def _compute_penalties(
     return penalties
 
 
-def _compute_excuse_tags(
-    excuse_instance: str,
-    current_instance: Optional[str],
-) -> List[ExcuseTag]:
-    """Tag an excuse relative to the current cluster's instance type."""
-    if current_instance is None:
-        return []
-    if excuse_instance == current_instance:
-        return [ExcuseTag.current_shape]
-    excuse_family = excuse_instance.rsplit(".", 1)[0]
-    current_family = current_instance.rsplit(".", 1)[0]
-    if excuse_family == current_family:
-        excuse_size = normalized_aws_size(excuse_instance)
-        current_size = normalized_aws_size(current_instance)
-        direction = (
-            ExcuseTag.size_up if excuse_size > current_size else ExcuseTag.size_down
-        )
-        return [ExcuseTag.same_family, direction]
-    return [ExcuseTag.different_family]
-
-
 # pylint: disable=too-many-locals
 # pylint: disable=too-many-return-statements
 # flake8: noqa: C901
@@ -534,13 +513,13 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             drive=drive_name,
             reason=(
                 f"Instance too small: {instance.cpu} vCPUs "
-                f"(min 2), {instance.ram_gib:.0f} GiB RAM (min 16)"
+                f"(min 2), {instance.ram_gib:.0f} GiB RAM (requires > 16 GiB)"
             ),
             context={
                 "cpu": instance.cpu,
                 "ram_gib": instance.ram_gib,
                 "min_cpu": 2,
-                "min_ram_gib": 16,
+                "min_ram_gib_exclusive": 16,
             },
             bottleneck=Bottleneck.cpu if instance.cpu < 2 else Bottleneck.memory,
         )
@@ -1124,8 +1103,6 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
 
     @staticmethod
     def preferred_families() -> Optional[FrozenSet[str]]:
-        from service_capacity_modeling.explainability import STATEFUL_DATASTORE_FAMILIES
-
         return STATEFUL_DATASTORE_FAMILIES
 
     @staticmethod
@@ -1296,24 +1273,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             backup_retention_days=args.backup_retention_days,
         )
 
-        # Tag excuses relative to current cluster instance
-        match result:
-            case Excuse():
-                current_capacity = _get_current_capacity(desires)
-                current_instance_name = (
-                    current_capacity.cluster_instance.name
-                    if current_capacity and current_capacity.cluster_instance
-                    else None
-                )
-                return result.model_copy(
-                    update={
-                        "tags": _compute_excuse_tags(
-                            result.instance, current_instance_name
-                        )
-                    }
-                )
-            case _:
-                return result
+        return result
 
     @staticmethod
     def regret(
