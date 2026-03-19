@@ -5,6 +5,7 @@ from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Tuple
+from typing import Union
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -15,9 +16,11 @@ from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
+from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRegretParameters
+from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
@@ -223,14 +226,27 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     max_regional_size: int = 10000,
     min_instance_memory_gib: int = 12,
     cross_region_replication: Replication = Replication.none,
-) -> Optional[CapacityPlan]:
+) -> Union[CapacityPlan, Excuse, None]:
     # EVCache doesn't like to deploy on single CPU instances
     if instance.cpu < 2:
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive.name,
+            reason=f"Instance too small: requires >=2 vCPU, got {instance.cpu}",
+            bottleneck=Bottleneck.cpu,
+        )
 
     # EVCache doesn't like to deploy to instances with < 7 GiB of ram
     if instance.ram_gib < min_instance_memory_gib:
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive.name,
+            reason=(
+                f"Insufficient memory: requires >={min_instance_memory_gib} GiB, "
+                f"got {instance.ram_gib:.1f} GiB"
+            ),
+            bottleneck=Bottleneck.memory,
+        )
 
     # Based on the disk latency and the read latency SLOs we adjust our
     # working set to keep more or less data in RAM. Faster drives need
@@ -258,9 +274,17 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         copies_per_region=copies_per_region,
     )
 
-    # reject instances without ephemeral drives is the requirements need disk
+    # reject instances without ephemeral drives if the requirements need disk
     if requirement.disk_gib.mid > 0.0 and instance.drive is None:
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive.name,
+            reason=(
+                f"Workload requires {requirement.disk_gib.mid:.0f} GiB disk "
+                "but instance has no ephemeral drive"
+            ),
+            bottleneck=Bottleneck.drive_type,
+        )
 
     # Account for sidecars and base system memory
     base_mem = (
@@ -346,7 +370,19 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     #   * NxN network issues. Sometimes smaller clusters of bigger nodes
     #       are better for network propagation
     if cluster.count > (max_regional_size // copies_per_region):
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive.name,
+            reason=(
+                f"Cluster too large: {cluster.count} nodes/zone "
+                f"exceeds max {max_regional_size // copies_per_region}"
+            ),
+            bottleneck=Bottleneck.disk_capacity,
+            context={
+                "cluster_count": cluster.count,
+                "max_nodes_per_zone": max_regional_size // copies_per_region,
+            },
+        )
 
     # Calculate service costs (network transfer) using the model's service_costs method
     services = NflxEVCacheCapacityModel.service_costs(
@@ -472,7 +508,7 @@ class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
         context: RegionContext,
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
-    ) -> Optional[CapacityPlan]:
+    ) -> Union[CapacityPlan, Excuse, None]:
         # (Arun) EVCache defaults to RF=3 for tier 0 and tier 1
         default_copies = context.zones_in_region
         copies_per_region: int = int(
