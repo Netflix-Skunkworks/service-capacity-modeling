@@ -3,13 +3,11 @@
 import functools
 import logging
 import math
-import re
 from hashlib import blake2b
 from typing import Any
 from typing import Callable
 from typing import cast
 from typing import Dict
-from typing import FrozenSet
 from typing import Generator
 from typing import List
 from typing import Optional
@@ -31,16 +29,11 @@ from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import DataShape
-from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import ExcludeUnsetModel
 from service_capacity_modeling.interface import Excuse
-from service_capacity_modeling.interface import ExcuseTag
 from service_capacity_modeling.explainability import ExplainedPlans
-from service_capacity_modeling.explainability import FamilyEdge
 from service_capacity_modeling.explainability import FamilyGraph
-from service_capacity_modeling.explainability import FamilyTrait
-from service_capacity_modeling.explainability import KNOWN_DATASTORE_FAMILIES
 from service_capacity_modeling.interface import Hardware
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
@@ -66,11 +59,6 @@ from service_capacity_modeling.stats import interval_percentile
 
 logger = logging.getLogger(__name__)
 
-# Rank inflation applied to plans using families outside model.preferred_families().
-# 0.15 means a non-preferred family needs ~15% lower compute cost to rank above
-# a preferred alternative. Applied to compute cost only (not service costs).
-_PREFERRED_FAMILY_RANK_PENALTY = 0.15
-
 
 class PlannerArguments(ExcludeUnsetModel):
     """Planner-level configuration, separate from model-specific extra_model_arguments.
@@ -87,7 +75,7 @@ class PlannerArguments(ExcludeUnsetModel):
         "(e.g., 8×xlarge vs 2×4xlarge).",
     )
     preferred_family_penalty: float = Field(
-        default=_PREFERRED_FAMILY_RANK_PENALTY,
+        default=0.15,
         description="Rank inflation applied to plans using families outside "
         "model.preferred_families(). A non-preferred family must be this fraction "
         "cheaper on compute cost to rank above a preferred alternative. "
@@ -112,127 +100,6 @@ def _deduplicate_excuses(excuses: Sequence[Excuse]) -> Sequence[Excuse]:
             seen.add(key)
             result.append(exc)
     return result
-
-
-def _family_generation(family: str) -> Optional[int]:
-    """Extract generation number from AWS family name (e.g. 'r7a' → 7)."""
-    m = re.search(r"\d+", family)
-    return int(m.group()) if m else None
-
-
-def _derive_edge_attributes(  # noqa: C901  # pylint: disable=too-many-branches
-    from_trait: FamilyTrait,
-    to_trait: FamilyTrait,
-) -> Tuple[List[Bottleneck], List[Bottleneck]]:
-    """Derive improves/degrades for a family pair from their hardware traits."""
-    improves: List[Bottleneck] = []
-    degrades: List[Bottleneck] = []
-
-    # cost — from loaded pricing (may be internal)
-    if from_trait.cost_per_vcpu_annual and to_trait.cost_per_vcpu_annual:
-        if to_trait.cost_per_vcpu_annual < from_trait.cost_per_vcpu_annual:
-            improves.append(Bottleneck.cost)
-        elif to_trait.cost_per_vcpu_annual > from_trait.cost_per_vcpu_annual:
-            degrades.append(Bottleneck.cost)
-
-    # memory
-    if to_trait.memory_gib_per_vcpu > from_trait.memory_gib_per_vcpu:
-        improves.append(Bottleneck.memory)
-    elif to_trait.memory_gib_per_vcpu < from_trait.memory_gib_per_vcpu:
-        degrades.append(Bottleneck.memory)
-
-    # disk_capacity — local vs EBS
-    if from_trait.has_local_disk and to_trait.has_local_disk:
-        from_disk = from_trait.local_disk_gib_per_vcpu or 0
-        to_disk = to_trait.local_disk_gib_per_vcpu or 0
-        if to_disk > from_disk:
-            improves.append(Bottleneck.disk_capacity)
-        elif to_disk < from_disk:
-            degrades.append(Bottleneck.disk_capacity)
-    elif from_trait.has_local_disk and not to_trait.has_local_disk:
-        improves.append(Bottleneck.disk_capacity)  # EBS: flexible sizing
-    elif not from_trait.has_local_disk and to_trait.has_local_disk:
-        degrades.append(Bottleneck.disk_capacity)  # local: fixed size
-
-    # disk_iops — local NVMe vs EBS is a qualitative change (latency curve,
-    # not just peak IOPS). EBS-to-EBS and local-to-local are omitted: max
-    # IOPS is rarely the bottleneck and latency curves are modeled identically.
-    if from_trait.has_local_disk and not to_trait.has_local_disk:
-        degrades.append(Bottleneck.disk_iops)
-    elif not from_trait.has_local_disk and to_trait.has_local_disk:
-        improves.append(Bottleneck.disk_iops)
-
-    # generation — derived from family name (r7a=7, r6a=6, i4i=4, ...)
-    from_gen = _family_generation(from_trait.family)
-    to_gen = _family_generation(to_trait.family)
-    if from_gen is not None and to_gen is not None:
-        if to_gen > from_gen:
-            improves.append(Bottleneck.generation)
-        elif to_gen < from_gen:
-            degrades.append(Bottleneck.generation)
-
-    return improves, degrades
-
-
-def _build_family_graph(
-    excuses: Sequence[Excuse],
-    hardware: Hardware,
-    preferred_families: Optional[FrozenSet[str]],
-) -> FamilyGraph:
-    """Build an M×N FamilyGraph from derived hardware traits.
-
-    All edge attributes (cost, memory, disk_capacity, disk_iops, generation)
-    are derived at runtime from FamilyTrait values — no hardcoded trade-off
-    tables. The current cluster's family is always included even if it falls
-    outside preferred_families, so consumers always see why their current
-    shape was rejected.
-
-    The graph is always built from preferred_families (or KNOWN_DATASTORE_FAMILIES
-    as fallback), regardless of whether any excuses were generated. This ensures
-    plan_certain_explained() always returns useful alternative-family context.
-    """
-    base = (
-        preferred_families
-        if preferred_families is not None
-        else KNOWN_DATASTORE_FAMILIES
-    )
-    current_shape_families: Set[str] = {
-        e.instance.rsplit(".", 1)[0]
-        for e in excuses
-        if ExcuseTag.current_shape in e.tags
-    }
-    included = base | current_shape_families
-
-    # Index one instance per family — O(M) single pass
-    family_first: Dict[str, Any] = {}
-    for inst in hardware.instances.values():
-        fam = inst.family
-        if fam in included and fam not in family_first:
-            family_first[fam] = inst
-
-    traits = {
-        fam: FamilyTrait.from_instance(family_first[fam])
-        for fam in included
-        if fam in family_first
-    }
-
-    # M×N directed edges — all pairs, attributes fully derived
-    edges: List[FamilyEdge] = []
-    for from_fam, from_trait in traits.items():
-        for to_fam, to_trait in traits.items():
-            if from_fam == to_fam:
-                continue
-            improves, degrades = _derive_edge_attributes(from_trait, to_trait)
-            edges.append(
-                FamilyEdge(
-                    from_family=from_fam,
-                    to_family=to_fam,
-                    improves=improves,
-                    degrades=degrades,
-                )
-            )
-
-    return FamilyGraph(traits=traits, edges=edges)
 
 
 def simulate_interval(
@@ -918,7 +785,7 @@ class CapacityPlanner:
         # a full RegionContext (which would do unnecessary deep-copies of services).
         hardware = self._shapes.region(region)
         model = self._models[model_name]
-        graph = _build_family_graph(excuses, hardware, model.preferred_families())
+        graph = FamilyGraph.build(excuses, hardware, model.preferred_families())
 
         return ExplainedPlans(
             plans=plans,

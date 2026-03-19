@@ -2,7 +2,7 @@
 
 import pytest
 
-from service_capacity_modeling.capacity_planner import planner, _build_family_graph
+from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.explainability import (
     ExplainedPlans,
@@ -331,9 +331,9 @@ class TestFamilyGraphWithoutExcuses:
     """Family graph should be populated even when no excuses are generated."""
 
     def test_build_family_graph_no_excuses_returns_populated_graph(self):
-        """_build_family_graph with empty excuses uses preferred_families as base."""
+        """FamilyGraph.build() with empty excuses uses preferred_families as base."""
         hardware = shapes.region("us-east-1")
-        graph = _build_family_graph(
+        graph = FamilyGraph.build(
             excuses=[],
             hardware=hardware,
             preferred_families=KNOWN_DATASTORE_FAMILIES,
@@ -347,7 +347,7 @@ class TestFamilyGraphWithoutExcuses:
     def test_build_family_graph_none_preferred_uses_known_families(self):
         """preferred_families=None falls back to KNOWN_DATASTORE_FAMILIES."""
         hardware = shapes.region("us-east-1")
-        graph = _build_family_graph(
+        graph = FamilyGraph.build(
             excuses=[],
             hardware=hardware,
             preferred_families=None,
