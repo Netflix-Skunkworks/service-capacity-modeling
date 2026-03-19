@@ -199,15 +199,15 @@ class CapacityModel:
     def preferred_families() -> Optional[FrozenSet[str]]:
         """Instance families this model prefers for capacity planning.
 
-        Returns None to use the planner's default (KNOWN_DATASTORE_FAMILIES).
+        Returns None to use the planner's default (STATEFUL_DATASTORE_FAMILIES).
         Override to declare the model's preferred family set. The planner uses
         this for two purposes — both are automatic and require no per-model code:
 
         1. Family graph topology: nodes in plan_certain_explained().family_graph
            come from this set (plus the current cluster's family).
-        2. Rank bias: plans using families outside this set receive a
-           _PREFERRED_FAMILY_RANK_PENALTY rank inflation. A non-preferred family
-           must be ~15% cheaper on compute cost to rank above a preferred one.
+        2. Rank bias: plans using families outside this set receive a 15%
+           rank inflation on compute cost. A non-preferred family must be
+           ~15% cheaper on compute to rank above a preferred one.
         """
         return None
 

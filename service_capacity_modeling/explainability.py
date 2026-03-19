@@ -213,13 +213,13 @@ class FamilyGraph(ExcludeUnsetModel):
         shape was rejected.
 
         The graph is always populated from preferred_families (or
-        KNOWN_DATASTORE_FAMILIES as fallback), regardless of whether any excuses
+        STATEFUL_DATASTORE_FAMILIES as fallback), regardless of whether any excuses
         were generated.
         """
         base = (
             preferred_families
             if preferred_families is not None
-            else KNOWN_DATASTORE_FAMILIES
+            else STATEFUL_DATASTORE_FAMILIES
         )
         current_shape_families: Set[str] = {
             e.instance.rsplit(".", 1)[0]
@@ -260,10 +260,13 @@ class FamilyGraph(ExcludeUnsetModel):
         return cls(traits=traits, edges=edges)
 
 
-# Library-level default family set.  Models override via preferred_families().
-# One representative per {memory-class × storage-class × generation-tier};
+# Default preferred family set for stateful datastores (Cassandra, Kafka, EVCache).
+# Covers the full decision space: one representative per
+# {memory-class × storage-class × generation-tier}.
+# Not appropriate for stateless services (DGW, Java apps) — those models
+# should override preferred_families() with compute/general families only.
 # "n"-suffix (enhanced-network) families are intentionally excluded.
-KNOWN_DATASTORE_FAMILIES: FrozenSet[str] = frozenset(
+STATEFUL_DATASTORE_FAMILIES: FrozenSet[str] = frozenset(
     {
         "c6a",
         "c7a",  # compute-optimized EBS (~1.9 GiB/vCPU)

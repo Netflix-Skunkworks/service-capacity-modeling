@@ -9,7 +9,7 @@ Two penalties interact:
    model.preferred_families(). Models declare their preferred set; the
    planner enforces the bias uniformly (no per-model code needed).
 
-c6id is not in CASSANDRA_PREFERRED_FAMILIES, so it always carries the 15%
+c6id is not in STATEFUL_DATASTORE_FAMILIES, so it always carries the 15%
 planner penalty. c6id is ~18% cheaper per-CPU than m6id. Combined:
   - default (10% model + 15% planner = 25% total): m6id wins
   - disabled model penalty (0% + 15% planner = 15% total): c6id still wins

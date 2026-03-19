@@ -9,7 +9,7 @@ from service_capacity_modeling.explainability import (
     FamilyEdge,
     FamilyGraph,
     FamilyTrait,
-    KNOWN_DATASTORE_FAMILIES,
+    STATEFUL_DATASTORE_FAMILIES,
 )
 from service_capacity_modeling.interface import (
     Bottleneck,
@@ -224,19 +224,15 @@ class TestAWSFamilyGraph:
 
     def test_preferred_families_are_graph_nodes(self, explained_plans):
         # With no current_cluster in desires, all nodes come from
-        # CASSANDRA_PREFERRED_FAMILIES (current_shape_families is empty)
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            CASSANDRA_PREFERRED_FAMILIES,
-        )
-
+        # STATEFUL_DATASTORE_FAMILIES (current_shape_families is empty)
         for fam in explained_plans.family_graph.traits:
-            assert fam in CASSANDRA_PREFERRED_FAMILIES
+            assert fam in STATEFUL_DATASTORE_FAMILIES
 
-    def test_known_datastore_families_are_library_default(self):
+    def test_stateful_datastore_families_are_library_default(self):
         # Sanity-check the library-level constant exists and is non-empty
-        assert len(KNOWN_DATASTORE_FAMILIES) > 0
-        assert "i4i" in KNOWN_DATASTORE_FAMILIES
-        assert "r6a" in KNOWN_DATASTORE_FAMILIES
+        assert len(STATEFUL_DATASTORE_FAMILIES) > 0
+        assert "i4i" in STATEFUL_DATASTORE_FAMILIES
+        assert "r6a" in STATEFUL_DATASTORE_FAMILIES
 
     def test_traits_are_derived(self, explained_plans):
         traits = explained_plans.family_graph.traits
@@ -336,7 +332,7 @@ class TestFamilyGraphWithoutExcuses:
         graph = FamilyGraph.build(
             excuses=[],
             hardware=hardware,
-            preferred_families=KNOWN_DATASTORE_FAMILIES,
+            preferred_families=STATEFUL_DATASTORE_FAMILIES,
         )
         assert len(graph.traits) > 0, (
             "Graph should be populated from preferred_families even with no excuses"
@@ -345,7 +341,7 @@ class TestFamilyGraphWithoutExcuses:
         assert "r6a" in graph.traits
 
     def test_build_family_graph_none_preferred_uses_known_families(self):
-        """preferred_families=None falls back to KNOWN_DATASTORE_FAMILIES."""
+        """preferred_families=None falls back to STATEFUL_DATASTORE_FAMILIES."""
         hardware = shapes.region("us-east-1")
         graph = FamilyGraph.build(
             excuses=[],
