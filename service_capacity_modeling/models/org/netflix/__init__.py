@@ -14,6 +14,7 @@ from .elasticsearch import nflx_elasticsearch_search_capacity_model
 from .entity import nflx_entity_capacity_model
 from .evcache import nflx_evcache_capacity_model
 from .graphkv import nflx_graphkv_capacity_model
+from .identifier import nflx_identifier_capacity_model
 from .kafka import nflx_kafka_capacity_model
 from .key_value import nflx_key_value_capacity_model
 from .read_only_kv import nflx_read_only_kv_capacity_model
@@ -48,5 +49,6 @@ def models() -> Dict[str, Any]:
         "org.netflix.dynamodb": nflx_ddb_capacity_model,
         "org.netflix.wal": nflx_wal_capacity_model,
         "org.netflix.graphkv": nflx_graphkv_capacity_model,
+        "org.netflix.identifier": nflx_identifier_capacity_model,
         "org.netflix.read-only-kv": nflx_read_only_kv_capacity_model,
     }
