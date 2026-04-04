@@ -5,6 +5,7 @@ from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Tuple
+from typing import Union
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -15,9 +16,11 @@ from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
+from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
+from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
@@ -251,22 +254,50 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     min_instance_cpu: int = 2,
     min_instance_memory_gib: int = 12,
     require_same_instance_family: bool = True,
-) -> Optional[CapacityPlan]:
+) -> Union[CapacityPlan, Excuse, None]:
     # Kafka doesn't like to deploy on single CPU instances or with < 12 GiB of ram
     if instance.cpu < min_instance_cpu or instance.ram_gib < min_instance_memory_gib:
-        return None
+        bottleneck = (
+            Bottleneck.memory
+            if instance.ram_gib < min_instance_memory_gib
+            else Bottleneck.cpu
+        )
+        return Excuse(
+            instance=instance.name,
+            drive=drive.name,
+            reason=(
+                f"Instance too small: requires >={min_instance_cpu} vCPU "
+                f"and >={min_instance_memory_gib} GiB RAM"
+            ),
+            bottleneck=bottleneck,
+        )
 
     # if we're not allowed to use attached disks, skip EBS only types
     if instance.drive is None and require_local_disks:
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive.name,
+            reason="Local disks required but instance has no ephemeral drive",
+            bottleneck=Bottleneck.drive_type,
+        )
 
     # if we're not allowed to use local disks, skip ephems
     if instance.drive is not None and require_attached_disks:
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive.name,
+            reason="Attached disks required but instance has local ephemeral drive",
+            bottleneck=Bottleneck.drive_type,
+        )
 
     # Kafka only deploys on gp3 drives right now
     if instance.drive is None and drive.name != "gp3":
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive.name,
+            reason=f"Kafka requires gp3 drives; got {drive.name}",
+            bottleneck=Bottleneck.drive_type,
+        )
 
     # If there is a current cluster, check if we are restricted to same instance family
     current_zonal_cluster = _get_current_zonal_cluster(desires)
@@ -275,7 +306,17 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
         and require_same_instance_family
         and not _is_same_instance_family(current_zonal_cluster, instance.family)
     ):
-        return None
+        current_family = (
+            current_zonal_cluster.cluster_instance.family
+            if current_zonal_cluster.cluster_instance
+            else "unknown"
+        )
+        return Excuse(
+            instance=instance.name,
+            drive=drive.name,
+            reason=f"Same-family constraint: current cluster is {current_family}, "
+            f"instance is {instance.family}",
+        )
 
     requirement, regrets = _estimate_kafka_requirement(
         instance=instance,
@@ -376,7 +417,18 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
         and min_count_for_data <= required_zone_size
         and cluster.count != required_zone_size
     ):
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive.name,
+            reason=(
+                f"Cluster size {cluster.count} does not match "
+                f"required zone size {required_zone_size}"
+            ),
+            context={
+                "cluster_count": cluster.count,
+                "required_zone_size": required_zone_size,
+            },
+        )
 
     # Kafka clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as
@@ -387,7 +439,19 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     #   * NxN network issues. Sometimes smaller clusters of bigger nodes
     #       are better for network propagation
     if cluster.count > (max_regional_size // zones_per_region):
-        return None
+        return Excuse(
+            instance=instance.name,
+            drive=drive.name,
+            reason=(
+                f"Cluster too large: {cluster.count} nodes/zone "
+                f"exceeds max {max_regional_size // zones_per_region}"
+            ),
+            bottleneck=Bottleneck.disk_capacity,
+            context={
+                "cluster_count": cluster.count,
+                "max_nodes_per_zone": max_regional_size // zones_per_region,
+            },
+        )
 
     cluster.cluster_type = NflxKafkaCapacityModel.cluster_type
     zonal_clusters = [cluster] * zones_per_region
@@ -481,7 +545,7 @@ class NflxKafkaCapacityModel(CapacityModel, CostAwareModel):
         context: RegionContext,
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
-    ) -> Optional[CapacityPlan]:
+    ) -> Union[CapacityPlan, Excuse, None]:
         cluster_type: ClusterType = ClusterType(
             extra_model_arguments.get("cluster_type", "high-availability")
         )
