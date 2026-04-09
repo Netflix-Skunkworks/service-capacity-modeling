@@ -28,7 +28,7 @@ SMALL_KV = CapacityDesires(
 
 
 def test_cluster_size_excuse_has_resource_breakdown():
-    """cluster_size excuses should include resource_counts and binding_resource."""
+    """cluster_size excuses should include nodes_required_by and binding_resource."""
     explained = planner.plan_certain_explained(
         model_name="org.netflix.cassandra",
         region="us-east-1",
@@ -39,6 +39,6 @@ def test_cluster_size_excuse_has_resource_breakdown():
     excuses = [e for e in explained.excuses if "driven by" in e.reason]
     assert excuses, "Expected cluster_size excuses with binding resource"
     for e in excuses:
-        rc = e.context["resource_counts"]
-        assert set(rc.keys()) == {"cpu", "memory", "network", "disk", "disk_iops"}
-        assert e.context["binding_resource"] in rc
+        nrb = e.context["nodes_required_by"]
+        assert set(nrb.keys()) == {"cpu", "memory", "network", "storage", "disk_iops"}
+        assert e.context["binding_resource"] in nrb

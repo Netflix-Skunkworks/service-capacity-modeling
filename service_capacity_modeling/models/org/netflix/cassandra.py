@@ -749,10 +749,10 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     # Sometimes we don't want modify cluster topology, so only allow
     # topologies that match the desired zone size
     if required_cluster_size is not None and cluster.count != required_cluster_size:
-        resource_counts = cluster.cluster_params.get("resource_counts", {})
+        nodes_required_by = cluster.cluster_params.get("nodes_required_by", {})
         binding = (
-            max(resource_counts, key=resource_counts.get)
-            if resource_counts
+            max(nodes_required_by, key=nodes_required_by.get)
+            if nodes_required_by
             else "unknown"
         )
         return Excuse(
@@ -766,7 +766,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             context={
                 "computed_count": cluster.count,
                 "required_cluster_size": required_cluster_size,
-                "resource_counts": resource_counts,
+                "nodes_required_by": nodes_required_by,
                 "binding_resource": binding,
             },
             bottleneck=Bottleneck.cluster_size,
