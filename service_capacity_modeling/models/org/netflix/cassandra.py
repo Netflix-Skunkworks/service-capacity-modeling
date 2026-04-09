@@ -665,6 +665,24 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     def max_node_disk(d: Drive) -> int:
         return max(math.ceil(d.max_size_gib / 3), ebs_disk_floor)
 
+    # Apply derived buffer to write_buffer requirement so that scale_down
+    # on memory caps both page cache and memtable space at current allocation.
+    raw_write_buffer_gib = float(requirement.context["write_buffer_gib"])
+    if current_capacity and current_capacity.cluster_instance:
+        existing_write_buffer = (
+            current_capacity.cluster_instance_count.mid
+            * heap_fn(current_capacity.cluster_instance.ram_gib)
+            * max_write_buffer_percent
+            * 0.25
+        )
+        memory_derived = DerivedBuffers.for_components(
+            desires.buffers.derived, [BufferComponent.memory]
+        )
+        raw_write_buffer_gib = memory_derived.calculate_requirement(
+            current_usage=raw_write_buffer_gib,
+            existing_capacity=existing_write_buffer,
+        )
+
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
@@ -688,7 +706,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         # memtable_cleanup_threshold * memtable_size. At Netflix this
         # is 0.11 * 25 * heap
         write_buffer=lambda x: heap_fn(x) * max_write_buffer_percent * 0.25,
-        required_write_buffer_gib=float(requirement.context["write_buffer_gib"]),
+        required_write_buffer_gib=raw_write_buffer_gib,
         max_node_disk_gib=max_node_disk,
     )
 
@@ -731,15 +749,25 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     # Sometimes we don't want modify cluster topology, so only allow
     # topologies that match the desired zone size
     if required_cluster_size is not None and cluster.count != required_cluster_size:
+        resource_counts = cluster.cluster_params.get("resource_counts", {})
+        binding = (
+            max(resource_counts, key=resource_counts.get)
+            if resource_counts
+            else "unknown"
+        )
         return Excuse(
             instance=instance.name,
             drive=drive_name,
             reason=(
-                f"Cluster size {cluster.count} != required {required_cluster_size}"
+                f"Cluster size {cluster.count} "
+                f"(driven by {binding}) "
+                f"!= required {required_cluster_size}"
             ),
             context={
                 "computed_count": cluster.count,
                 "required_cluster_size": required_cluster_size,
+                "resource_counts": resource_counts,
+                "binding_resource": binding,
             },
             bottleneck=Bottleneck.cluster_size,
         )
