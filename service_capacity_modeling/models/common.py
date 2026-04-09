@@ -539,7 +539,10 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     # growth headroom. Models can override for clusters with known disk needs.
     max_node_disk_gib: Callable[[Drive], int] = lambda d: math.ceil(d.max_size_gib / 3),
 ) -> ZoneClusterCapacity:
-    # Per-resource node counts (pre-cluster_size lambda, pre-min_count)
+    # ── Per-resource node counts ──────────────────────────────────────
+    # Each count is computed independently. The final node count is
+    # max(all counts) after cluster_size rounding and min_count.
+
     count_cpu = math.ceil(needed_cores / instance.cpu)
 
     # RAM: max of page cache/working set and write buffer (both consume RAM)
@@ -556,9 +559,10 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
 
     count_storage = 0
     count_disk_iops = 0
+
+    # ── Local drives: storage and IOPS from fixed drive specs ─────────
     if instance.drive is not None and instance.drive.size_gib > 0:
-        disk_per_node = instance.drive.size_gib
-        count_storage = math.ceil(needed_disk_gib / disk_per_node)
+        count_storage = math.ceil(needed_disk_gib / instance.drive.size_gib)
         if adjusted_disk_io_needed != 0.0:
             instance_read_iops = (
                 instance.drive.read_io_per_s
@@ -585,57 +589,67 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
                     adjusted_disk_io_needed / instance_adjusted_io
                 )
 
-    count = max(count_cpu, count_memory, count_network, count_storage, count_disk_iops)
-    count = max(cluster_size(count), min_count)
-    cost = count * instance.annual_cost
-
+    # ── EBS/attached drives: volume sizing may inflate storage/iops ───
+    # EBS sizing depends on the preliminary node count (from non-disk
+    # resources) because per-node volume = total_disk / count.  If the
+    # resulting volume exceeds max_size or max IOPS, we need more nodes.
     attached_drives = []
     if instance.drive is None and needed_disk_gib > 0:
-        # If we don't have disks attach the cloud drive with enough
-        # space and IO for the requirement
+        preliminary_count = max(
+            cluster_size(max(count_cpu, count_memory, count_network)),
+            min_count,
+        )
 
-        # Note that cloud drivers are provisioned _per node_ and must be chosen for
-        # the max of space and IOS.
-        space_gib = max(1, math.ceil(needed_disk_gib / count))
-        read_io, write_io = required_disk_ios(space_gib, count)
+        space_gib = max(1, math.ceil(needed_disk_gib / preliminary_count))
+        read_io, write_io = required_disk_ios(space_gib, preliminary_count)
         read_io, write_io = (
             utils.next_n(read_io, n=200),
             utils.next_n(write_io, n=200),
         )
-        total_ios = read_io + write_io
-        io_gib = cloud_gib_for_io(drive, total_ios, space_gib)
+        io_gib = cloud_gib_for_io(drive, read_io + write_io, space_gib)
 
         # Provision EBS in increments of 100 GiB
         ebs_gib = utils.next_n(max(1, io_gib, space_gib), n=100)
 
+        # Storage constraint: per-node volume exceeds max EBS size
         max_size = max_node_disk_gib(drive)
         if ebs_gib > max_size > 0:
-            ratio = ebs_gib / max_size
-            count = max(cluster_size(math.ceil(count * ratio)), min_count)
-            cost = count * instance.annual_cost
+            count_storage = math.ceil(preliminary_count * ebs_gib / max_size)
             ebs_gib = int(max_size)
 
-        read_io, write_io = required_disk_ios(space_gib, count)
+        # IOPS constraint: total IOPS exceed per-volume max
+        # Recompute IOs with the storage-inflated count
+        effective_count = max(
+            cluster_size(max(preliminary_count, count_storage)), min_count
+        )
+        read_io, write_io = required_disk_ios(space_gib, effective_count)
         read_io, write_io = (
             utils.next_n(read_io, n=200),
             utils.next_n(write_io, n=200),
         )
         if (read_io + write_io) > drive.max_io_per_s:
             ratio = (read_io + write_io) / drive.max_io_per_s
-            count = max(cluster_size(math.ceil(count * ratio)), min_count)
-            cost = count * instance.annual_cost
-            read_io = utils.next_n(read_io * ratio, n=200)
-            write_io = utils.next_n(write_io * ratio, n=200)
+            count_disk_iops = math.ceil(effective_count * ratio)
+            # Recompute IOs at the new count
+            iops_count = max(cluster_size(count_disk_iops), min_count)
+            read_io, write_io = required_disk_ios(space_gib, iops_count)
+            read_io, write_io = (
+                utils.next_n(read_io, n=200),
+                utils.next_n(write_io, n=200),
+            )
 
         attached_drive = drive.model_copy()
         attached_drive.size_gib = ebs_gib
         attached_drive.read_io_per_s = int(round(read_io, 2))
         attached_drive.write_io_per_s = int(round(write_io, 2))
-
-        # TODO: appropriately handle RAID setups for throughput requirements
         attached_drives.append(attached_drive)
 
-        cost = cost + (attached_drive.annual_cost * count)
+    # ── Final count: max across all resources ─────────────────────────
+    count = max(count_cpu, count_memory, count_network, count_storage, count_disk_iops)
+    count = max(cluster_size(count), min_count)
+    cost = count * instance.annual_cost
+    if attached_drives:
+        cost += attached_drives[0].annual_cost * count
 
     logger.debug(
         "For (cpu, memory_gib, disk_gib) = (%s, %s, %s) need (%s, %s, %s, %s)",
