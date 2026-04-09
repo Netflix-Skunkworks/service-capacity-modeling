@@ -112,12 +112,12 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 3.99,
           "effective_disk_per_node_gib": 373,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 3,
-            "disk": 1,
             "disk_iops": 0,
             "memory": 2,
-            "network": 1
+            "network": 1,
+            "storage": 1
           }
         },
         "cluster_type": "cassandra",
@@ -136,12 +136,12 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 3.99,
           "effective_disk_per_node_gib": 373,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 3,
-            "disk": 1,
             "disk_iops": 0,
             "memory": 2,
-            "network": 1
+            "network": 1,
+            "storage": 1
           }
         },
         "cluster_type": "cassandra",
@@ -160,12 +160,12 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 3.99,
           "effective_disk_per_node_gib": 373,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 3,
-            "disk": 1,
             "disk_iops": 0,
             "memory": 2,
-            "network": 1
+            "network": 1,
+            "storage": 1
           }
         },
         "cluster_type": "cassandra",
@@ -202,12 +202,12 @@
           "cassandra.keyspace.rf": 2,
           "cassandra.storage_buffer_ratio": 3.92,
           "effective_disk_per_node_gib": 8100,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 7,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 5,
-            "network": 1
+            "network": 1,
+            "storage": 0
           }
         },
         "cluster_type": "cassandra",
@@ -229,12 +229,12 @@
           "cassandra.keyspace.rf": 2,
           "cassandra.storage_buffer_ratio": 3.92,
           "effective_disk_per_node_gib": 8100,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 7,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 5,
-            "network": 1
+            "network": 1,
+            "storage": 0
           }
         },
         "cluster_type": "cassandra",
@@ -256,12 +256,12 @@
           "cassandra.keyspace.rf": 2,
           "cassandra.storage_buffer_ratio": 3.92,
           "effective_disk_per_node_gib": 8100,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 7,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 5,
-            "network": 1
+            "network": 1,
+            "storage": 0
           }
         },
         "cluster_type": "cassandra",
@@ -295,12 +295,12 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 3.83,
           "effective_disk_per_node_gib": 885,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 8,
-            "disk": 3,
             "disk_iops": 0,
             "memory": 1,
-            "network": 1
+            "network": 1,
+            "storage": 3
           }
         },
         "cluster_type": "cassandra",
@@ -319,12 +319,12 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 3.83,
           "effective_disk_per_node_gib": 885,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 8,
-            "disk": 3,
             "disk_iops": 0,
             "memory": 1,
-            "network": 1
+            "network": 1,
+            "storage": 3
           }
         },
         "cluster_type": "cassandra",
@@ -343,12 +343,12 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 3.83,
           "effective_disk_per_node_gib": 885,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 8,
-            "disk": 3,
             "disk_iops": 0,
             "memory": 1,
-            "network": 1
+            "network": 1,
+            "storage": 3
           }
         },
         "cluster_type": "cassandra",
@@ -385,12 +385,12 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 2.17,
           "effective_disk_per_node_gib": 6600,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 32,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 24,
-            "network": 2
+            "network": 2,
+            "storage": 0
           }
         },
         "cluster_type": "cassandra",
@@ -412,12 +412,12 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 2.17,
           "effective_disk_per_node_gib": 6600,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 32,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 24,
-            "network": 2
+            "network": 2,
+            "storage": 0
           }
         },
         "cluster_type": "cassandra",
@@ -439,12 +439,12 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 2.17,
           "effective_disk_per_node_gib": 6600,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 32,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 24,
-            "network": 2
+            "network": 2,
+            "storage": 0
           }
         },
         "cluster_type": "cassandra",
@@ -481,15 +481,15 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 2.44,
           "effective_disk_per_node_gib": 5100,
-          "rank_penalties": {
-            "family_migration": 0.1
-          },
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 33,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 32,
-            "network": 2
+            "network": 2,
+            "storage": 0
+          },
+          "rank_penalties": {
+            "family_migration": 0.1
           }
         },
         "cluster_type": "cassandra",
@@ -511,15 +511,15 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 2.44,
           "effective_disk_per_node_gib": 5100,
-          "rank_penalties": {
-            "family_migration": 0.1
-          },
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 33,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 32,
-            "network": 2
+            "network": 2,
+            "storage": 0
+          },
+          "rank_penalties": {
+            "family_migration": 0.1
           }
         },
         "cluster_type": "cassandra",
@@ -541,15 +541,15 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 2.44,
           "effective_disk_per_node_gib": 5100,
-          "rank_penalties": {
-            "family_migration": 0.1
-          },
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 33,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 32,
-            "network": 2
+            "network": 2,
+            "storage": 0
+          },
+          "rank_penalties": {
+            "family_migration": 0.1
           }
         },
         "cluster_type": "cassandra",
@@ -586,12 +586,12 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 2.74,
           "effective_disk_per_node_gib": 5700,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 18,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 40,
-            "network": 1
+            "network": 1,
+            "storage": 0
           }
         },
         "cluster_type": "cassandra",
@@ -613,12 +613,12 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 2.74,
           "effective_disk_per_node_gib": 5700,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 18,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 40,
-            "network": 1
+            "network": 1,
+            "storage": 0
           }
         },
         "cluster_type": "cassandra",
@@ -640,12 +640,12 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 2.74,
           "effective_disk_per_node_gib": 5700,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 18,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 40,
-            "network": 1
+            "network": 1,
+            "storage": 0
           }
         },
         "cluster_type": "cassandra",
@@ -670,12 +670,12 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 1164,
           "kafka.copies": 2,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 4,
-            "disk": 5,
             "disk_iops": 0,
             "memory": 6,
-            "network": 1
+            "network": 1,
+            "storage": 5
           }
         },
         "cluster_type": "kafka",
@@ -688,12 +688,12 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 1164,
           "kafka.copies": 2,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 4,
-            "disk": 5,
             "disk_iops": 0,
             "memory": 6,
-            "network": 1
+            "network": 1,
+            "storage": 5
           }
         },
         "cluster_type": "kafka",
@@ -706,12 +706,12 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 1164,
           "kafka.copies": 2,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 4,
-            "disk": 5,
             "disk_iops": 0,
             "memory": 6,
-            "network": 1
+            "network": 1,
+            "storage": 5
           }
         },
         "cluster_type": "kafka",
@@ -736,12 +736,12 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 873,
           "kafka.copies": 2,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 18,
-            "disk": 27,
             "disk_iops": 0,
             "memory": 6,
-            "network": 6
+            "network": 6,
+            "storage": 27
           }
         },
         "cluster_type": "kafka",
@@ -754,12 +754,12 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 873,
           "kafka.copies": 2,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 18,
-            "disk": 27,
             "disk_iops": 0,
             "memory": 6,
-            "network": 6
+            "network": 6,
+            "storage": 27
           }
         },
         "cluster_type": "kafka",
@@ -772,12 +772,12 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 873,
           "kafka.copies": 2,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 18,
-            "disk": 27,
             "disk_iops": 0,
             "memory": 6,
-            "network": 6
+            "network": 6,
+            "storage": 27
           }
         },
         "cluster_type": "kafka",
@@ -802,15 +802,15 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3,
-          "rank_penalties": {
-            "under_spread": 93333.33333333333
-          },
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 2,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 1,
-            "network": 1
+            "network": 1,
+            "storage": 0
+          },
+          "rank_penalties": {
+            "under_spread": 93333.33333333333
           }
         },
         "cluster_type": "evcache",
@@ -823,15 +823,15 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3,
-          "rank_penalties": {
-            "under_spread": 93333.33333333333
-          },
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 2,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 1,
-            "network": 1
+            "network": 1,
+            "storage": 0
+          },
+          "rank_penalties": {
+            "under_spread": 93333.33333333333
           }
         },
         "cluster_type": "evcache",
@@ -844,15 +844,15 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3,
-          "rank_penalties": {
-            "under_spread": 93333.33333333333
-          },
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 2,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 1,
-            "network": 1
+            "network": 1,
+            "storage": 0
+          },
+          "rank_penalties": {
+            "under_spread": 93333.33333333333
           }
         },
         "cluster_type": "evcache",
@@ -877,12 +877,12 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 13,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 1,
-            "network": 1
+            "network": 1,
+            "storage": 0
           }
         },
         "cluster_type": "evcache",
@@ -895,12 +895,12 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 13,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 1,
-            "network": 1
+            "network": 1,
+            "storage": 0
           }
         },
         "cluster_type": "evcache",
@@ -913,12 +913,12 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 13,
-            "disk": 0,
             "disk_iops": 0,
             "memory": 1,
-            "network": 1
+            "network": 1,
+            "storage": 0
           }
         },
         "cluster_type": "evcache",
@@ -945,12 +945,12 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 441,
           "evcache.copies": 2,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 39,
-            "disk": 2,
             "disk_iops": 2,
             "memory": 1,
-            "network": 2
+            "network": 2,
+            "storage": 2
           }
         },
         "cluster_type": "evcache",
@@ -963,12 +963,12 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 441,
           "evcache.copies": 2,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 39,
-            "disk": 2,
             "disk_iops": 2,
             "memory": 1,
-            "network": 2
+            "network": 2,
+            "storage": 2
           }
         },
         "cluster_type": "evcache",
@@ -998,12 +998,12 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 441,
           "evcache.copies": 3,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 39,
-            "disk": 2,
             "disk_iops": 2,
             "memory": 1,
-            "network": 2
+            "network": 2,
+            "storage": 2
           }
         },
         "cluster_type": "evcache",
@@ -1016,12 +1016,12 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 441,
           "evcache.copies": 3,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 39,
-            "disk": 2,
             "disk_iops": 2,
             "memory": 1,
-            "network": 2
+            "network": 2,
+            "storage": 2
           }
         },
         "cluster_type": "evcache",
@@ -1034,12 +1034,12 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 441,
           "evcache.copies": 3,
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 39,
-            "disk": 2,
             "disk_iops": 2,
             "memory": 1,
-            "network": 2
+            "network": 2,
+            "storage": 2
           }
         },
         "cluster_type": "evcache",
@@ -1058,15 +1058,15 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 3.83,
           "effective_disk_per_node_gib": 1676,
-          "rank_penalties": {
-            "large_instance": 0.1
-          },
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 2,
-            "disk": 1,
             "disk_iops": 0,
             "memory": 1,
-            "network": 1
+            "network": 1,
+            "storage": 1
+          },
+          "rank_penalties": {
+            "large_instance": 0.1
           }
         },
         "cluster_type": "cassandra",
@@ -1085,15 +1085,15 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 3.83,
           "effective_disk_per_node_gib": 1676,
-          "rank_penalties": {
-            "large_instance": 0.1
-          },
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 2,
-            "disk": 1,
             "disk_iops": 0,
             "memory": 1,
-            "network": 1
+            "network": 1,
+            "storage": 1
+          },
+          "rank_penalties": {
+            "large_instance": 0.1
           }
         },
         "cluster_type": "cassandra",
@@ -1112,15 +1112,15 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 3.83,
           "effective_disk_per_node_gib": 1676,
-          "rank_penalties": {
-            "large_instance": 0.1
-          },
-          "resource_counts": {
+          "nodes_required_by": {
             "cpu": 2,
-            "disk": 1,
             "disk_iops": 0,
             "memory": 1,
-            "network": 1
+            "network": 1,
+            "storage": 1
+          },
+          "rank_penalties": {
+            "large_instance": 0.1
           }
         },
         "cluster_type": "cassandra",

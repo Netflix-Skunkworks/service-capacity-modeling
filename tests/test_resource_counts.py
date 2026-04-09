@@ -10,6 +10,8 @@ EBS = Drive(name="gp3", size_gib=0)
 M5_4XL = shapes.instance("m5.4xlarge")  # 16 vCPU, 64 GiB
 I4I_4XL = shapes.instance("i4i.4xlarge")
 
+EXPECTED_KEYS = {"cpu", "memory", "network", "storage", "disk_iops"}
+
 
 @pytest.mark.parametrize(
     "cores,mem,disk,net,expected_binding",
@@ -29,12 +31,12 @@ def test_binding_resource(cores, mem, disk, net, expected_binding):
         needed_memory_gib=mem,
         needed_network_mbps=net,
     )
-    rc = cluster.cluster_params["resource_counts"]
-    assert set(rc.keys()) == {"cpu", "memory", "network", "disk", "disk_iops"}
-    assert max(rc, key=rc.get) == expected_binding
+    nrb = cluster.cluster_params["nodes_required_by"]
+    assert set(nrb.keys()) == EXPECTED_KEYS
+    assert max(nrb, key=nrb.get) == expected_binding
 
 
-def test_disk_bound_local():
+def test_storage_bound_local():
     cluster = compute_stateful_zone(
         instance=I4I_4XL,
         drive=I4I_4XL.drive,
@@ -43,13 +45,8 @@ def test_disk_bound_local():
         needed_memory_gib=10,
         needed_network_mbps=100,
     )
-    assert (
-        max(
-            cluster.cluster_params["resource_counts"],
-            key=cluster.cluster_params["resource_counts"].get,
-        )
-        == "disk"
-    )
+    nrb = cluster.cluster_params["nodes_required_by"]
+    assert max(nrb, key=nrb.get) == "storage"
 
 
 def test_write_buffer_merged_into_memory():
@@ -65,4 +62,4 @@ def test_write_buffer_merged_into_memory():
         write_buffer=lambda x: 0.25,  # 0.25 GiB per node
         required_write_buffer_gib=2.0,  # ceil(2.0/0.25) = 8 nodes
     )
-    assert cluster.cluster_params["resource_counts"]["memory"] == 8
+    assert cluster.cluster_params["nodes_required_by"]["memory"] == 8

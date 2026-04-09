@@ -554,11 +554,11 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
 
     count_network = math.ceil(needed_network_mbps / instance.net_mbps)
 
-    count_disk = 0
+    count_storage = 0
     count_disk_iops = 0
     if instance.drive is not None and instance.drive.size_gib > 0:
         disk_per_node = instance.drive.size_gib
-        count_disk = math.ceil(needed_disk_gib / disk_per_node)
+        count_storage = math.ceil(needed_disk_gib / disk_per_node)
         if adjusted_disk_io_needed != 0.0:
             instance_read_iops = (
                 instance.drive.read_io_per_s
@@ -585,7 +585,7 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
                     adjusted_disk_io_needed / instance_adjusted_io
                 )
 
-    count = max(count_cpu, count_memory, count_network, count_disk, count_disk_iops)
+    count = max(count_cpu, count_memory, count_network, count_storage, count_disk_iops)
     count = max(cluster_size(count), min_count)
     cost = count * instance.annual_cost
 
@@ -655,11 +655,11 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
         attached_drives=attached_drives,
         annual_cost=cost,
         cluster_params={
-            "resource_counts": {
+            "nodes_required_by": {
                 "cpu": count_cpu,
                 "memory": count_memory,
                 "network": count_network,
-                "disk": count_disk,
+                "storage": count_storage,
                 "disk_iops": count_disk_iops,
             },
         },
