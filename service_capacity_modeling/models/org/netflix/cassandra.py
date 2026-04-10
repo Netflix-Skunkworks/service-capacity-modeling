@@ -665,6 +665,34 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     def max_node_disk(d: Drive) -> int:
         return max(math.ceil(d.max_size_gib / 3), ebs_disk_floor)
 
+    # Apply derived buffer to write_buffer requirement so that scale_down
+    # on memory caps both page cache and memtable space at current allocation.
+    # Skip when write_buffer_gib is already 0 (e.g. memory-preserve mode
+    # intentionally zeroes it in estimate_memory_experimental).
+    raw_write_buffer_gib = float(requirement.context["write_buffer_gib"])
+    if (
+        raw_write_buffer_gib > 0
+        and current_capacity
+        and current_capacity.cluster_instance
+    ):
+        existing_write_buffer = (
+            current_capacity.cluster_instance_count.mid
+            * heap_fn(current_capacity.cluster_instance.ram_gib)
+            * max_write_buffer_percent
+            * 0.25
+        )
+        # Use exact memory semantics only — no storage fallback.
+        # A disk-only scale_down should not cap memtable sizing.
+        memory_derived = DerivedBuffers.for_components(
+            desires.buffers.derived,
+            [BufferComponent.memory],
+            component_fallbacks={},
+        )
+        raw_write_buffer_gib = memory_derived.calculate_requirement(
+            current_usage=raw_write_buffer_gib,
+            existing_capacity=existing_write_buffer,
+        )
+
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
@@ -688,7 +716,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         # memtable_cleanup_threshold * memtable_size. At Netflix this
         # is 0.11 * 25 * heap
         write_buffer=lambda x: heap_fn(x) * max_write_buffer_percent * 0.25,
-        required_write_buffer_gib=float(requirement.context["write_buffer_gib"]),
+        required_write_buffer_gib=raw_write_buffer_gib,
         max_node_disk_gib=max_node_disk,
     )
 
@@ -731,15 +759,25 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     # Sometimes we don't want modify cluster topology, so only allow
     # topologies that match the desired zone size
     if required_cluster_size is not None and cluster.count != required_cluster_size:
+        nodes_required_by = cluster.cluster_params.get("nodes_required_by", {})
+        binding = (
+            max(nodes_required_by, key=nodes_required_by.get)
+            if nodes_required_by
+            else "unknown"
+        )
         return Excuse(
             instance=instance.name,
             drive=drive_name,
             reason=(
-                f"Cluster size {cluster.count} != required {required_cluster_size}"
+                f"Cluster size {cluster.count} "
+                f"(driven by {binding}) "
+                f"!= required {required_cluster_size}"
             ),
             context={
                 "computed_count": cluster.count,
                 "required_cluster_size": required_cluster_size,
+                "nodes_required_by": nodes_required_by,
+                "binding_resource": binding,
             },
             bottleneck=Bottleneck.cluster_size,
         )
