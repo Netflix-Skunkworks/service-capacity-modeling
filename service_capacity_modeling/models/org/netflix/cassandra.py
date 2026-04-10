@@ -681,8 +681,12 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             * max_write_buffer_percent
             * 0.25
         )
+        # Use exact memory semantics only — no storage fallback.
+        # A disk-only scale_down should not cap memtable sizing.
         memory_derived = DerivedBuffers.for_components(
-            desires.buffers.derived, [BufferComponent.memory]
+            desires.buffers.derived,
+            [BufferComponent.memory],
+            component_fallbacks={},
         )
         raw_write_buffer_gib = memory_derived.calculate_requirement(
             current_usage=raw_write_buffer_gib,
