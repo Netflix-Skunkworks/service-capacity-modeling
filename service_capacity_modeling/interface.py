@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from pydantic import computed_field
 from pydantic import ConfigDict
 from pydantic import Field
+from pydantic import model_validator
 
 from service_capacity_modeling.enum_utils import enum_docstrings
 from service_capacity_modeling.enum_utils import StrEnum
@@ -949,7 +950,12 @@ class BufferIntent(StrEnum):
 
 
 class Buffer(ExcludeUnsetModel):
-    """Represents a buffer (headroom) directive for capacity planning"""
+    """Represents a buffer (headroom) directive for capacity planning
+
+    For derived buffers, the preferred API uses ``ratio`` with optional
+    ``floor`` / ``ceiling`` bounds.  Legacy ``intent`` values (scale_up,
+    scale_down, preserve) remain supported and are normalized internally.
+    """
 
     ratio: float = 1.0
     """The buffer value expressed as a ratio over normal load (e.g. 1.5 =
@@ -957,6 +963,14 @@ class Buffer(ExcludeUnsetModel):
 
     intent: BufferIntent = BufferIntent.desired
     """The intent of this buffer directive (almost always 'desired')"""
+
+    floor: Optional[float] = None
+    """Minimum requirement as a ratio of existing capacity (derived only).
+    E.g. floor=1.0 means never drop below current capacity."""
+
+    ceiling: Optional[float] = None
+    """Maximum requirement as a ratio of existing capacity (derived only).
+    E.g. ceiling=1.0 means never exceed current capacity."""
 
     components: List[str] = [BufferComponent.compute]
     """The capacity components this buffer influences (almost always
@@ -969,6 +983,22 @@ class Buffer(ExcludeUnsetModel):
     explanation: str = ""
     """Optional context for why this buffer exists (e.g. 'background
     processing', 'bursty workload')"""
+
+    @model_validator(mode="after")
+    def _validate_bounds(self) -> "Buffer":
+        if self.floor is not None and self.floor <= 0:
+            raise ValueError("floor must be positive")
+        if self.ceiling is not None and self.ceiling <= 0:
+            raise ValueError("ceiling must be positive")
+        if (
+            self.floor is not None
+            and self.ceiling is not None
+            and self.floor > self.ceiling
+        ):
+            raise ValueError(
+                f"floor ({self.floor}) must not exceed ceiling ({self.ceiling})"
+            )
+        return self
 
 
 class Buffers(ExcludeUnsetModel):
@@ -1004,14 +1034,44 @@ class Buffers(ExcludeUnsetModel):
     default: Buffer = Buffer(ratio=1.5)
     # Desired compute, storage, cpu, memory, etc... buffers
     desired: Dict[str, Buffer] = {}
-    # Derive these buffers from current clusters or model context
-    # Buffer.intent MUST be set on these Buffers to something other than "desired":
-    #   scale    = ratio on top of existing buffers to ensure. Let the "derived"
-    #              buffer multiplied by this ratio "needed". If the "needed" buffer
-    #              is greater than desired, the needed buffer is created. If the
-    #              "needed" buffer is less than desired, the needed buffer is created.
-    #   preserve = ignore desired buffer entirely, just maintain existing buffers
+    # Derive these buffers from current clusters or model context.
+    # Preferred API: ratio + optional floor/ceiling bounds.
+    # Legacy API: Buffer.intent set to scale/scale_up/scale_down/preserve.
     derived: Dict[str, Buffer] = {}
+
+    _LEGACY_DERIVED_INTENTS = frozenset(
+        {
+            BufferIntent.scale,
+            BufferIntent.scale_up,
+            BufferIntent.scale_down,
+            BufferIntent.preserve,
+        }
+    )
+
+    @model_validator(mode="after")
+    def _validate_buffer_contexts(self) -> "Buffers":
+        for name, buf in self.desired.items():
+            if buf.floor is not None or buf.ceiling is not None:
+                raise ValueError(
+                    f"desired buffer '{name}' must not set floor/ceiling "
+                    "(bounds are only valid on derived buffers)"
+                )
+
+        for name, buf in self.derived.items():
+            has_legacy_intent = buf.intent in self._LEGACY_DERIVED_INTENTS
+            has_explicit_bounds = buf.floor is not None or buf.ceiling is not None
+            if has_legacy_intent and has_explicit_bounds:
+                raise ValueError(
+                    f"derived buffer '{name}' mixes legacy intent "
+                    f"'{buf.intent}' with explicit floor/ceiling — "
+                    "use one or the other"
+                )
+            if buf.intent == BufferIntent.preserve and buf.ratio != 1.0:
+                raise ValueError(
+                    f"derived buffer '{name}' has intent 'preserve' "
+                    f"but ratio={buf.ratio} (must be 1.0)"
+                )
+        return self
 
 
 class CapacityDesires(ExcludeUnsetModel):
