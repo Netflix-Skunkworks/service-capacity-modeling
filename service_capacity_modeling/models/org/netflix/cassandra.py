@@ -667,8 +667,14 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
 
     # Apply derived buffer to write_buffer requirement so that scale_down
     # on memory caps both page cache and memtable space at current allocation.
+    # Skip when write_buffer_gib is already 0 (e.g. memory-preserve mode
+    # intentionally zeroes it in estimate_memory_experimental).
     raw_write_buffer_gib = float(requirement.context["write_buffer_gib"])
-    if current_capacity and current_capacity.cluster_instance:
+    if (
+        raw_write_buffer_gib > 0
+        and current_capacity
+        and current_capacity.cluster_instance
+    ):
         existing_write_buffer = (
             current_capacity.cluster_instance_count.mid
             * heap_fn(current_capacity.cluster_instance.ram_gib)
