@@ -9,5 +9,5 @@ if [ ! -d ".tox/pre-commit" ]; then
     tox -e pre-commit --notest
 fi
 
-# Run pre-commit hooks
-exec tox -e pre-commit -- pre-commit run
+# Run the same full-repo hook set CI validates.
+exec tox -e pre-commit -- pre-commit run --all-files

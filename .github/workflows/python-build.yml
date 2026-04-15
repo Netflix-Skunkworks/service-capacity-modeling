@@ -6,6 +6,18 @@ on:
     tags: ["v*"]
   pull_request:
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+    - name: Install Tox and any other packages
+      run: pip install tox
+    - name: Run linters via pre-commit
+      run: tox -e pre-commit
   build:
     runs-on: ubuntu-latest
     strategy:
@@ -19,8 +31,6 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install Tox and any other packages
       run: pip install tox
-    - name: Run linters via pre-commit
-      run: tox -e pre-commit
     - name: Run end-to-end test suite
       run: tox -e py
   release:
@@ -32,7 +42,7 @@ jobs:
       id-token: write
     # Only release on main branch builds, and require a successful build
     if: github.event.ref == 'refs/heads/main'
-    needs: [build]
+    needs: [lint, build]
     steps:
     - name: Checkout
       uses: actions/checkout@v4
