@@ -54,14 +54,12 @@ def test_compositional():
         region="us-east-1",
         desires=uncertain_mid,
         num_results=4,
-        explain=True,
     )
     composed_result = planner.plan(
         model_name="org.netflix.key-value",
         region="us-east-1",
         desires=uncertain_mid,
         num_results=4,
-        explain=True,
     )
 
     # Strictest test: Cassandra regret clusters must be EXACTLY identical

@@ -1332,13 +1332,47 @@ class Excuse(ExcludeUnsetModel):
     bottleneck: Optional[Bottleneck] = None
 
 
+class CountedExcuse(Excuse):
+    """An excuse plus how often it appeared across simulations."""
+
+    count: int = 1
+
+
+class RegretCandidate(ExcludeUnsetModel):
+    """Detailed regret record for a single candidate sampled from one world."""
+
+    plan: CapacityPlan
+    desires: CapacityDesires
+    total_regret: float
+    regret_components: Dict[str, float] = {}
+
+
+class RegretPlanSummary(ExcludeUnsetModel):
+    """Aggregated regret summary for an equivalent returned plan."""
+
+    plan: CapacityPlan
+    equivalent_plan_count: int = 1
+    selected_total_regret: float
+    min_total_regret: float
+    max_total_regret: float
+    mean_total_regret: float
+    selected_regret_components: Dict[str, float] = {}
+    mean_regret_components: Dict[str, float] = {}
+    selected_regret_components_by_model: Dict[str, Dict[str, float]] = {}
+    mean_regret_components_by_model: Dict[str, Dict[str, float]] = {}
+    representative_desires_by_model: Dict[str, CapacityDesires] = {}
+
+
 class PlanExplanation(ExcludeUnsetModel):
     regret_params: CapacityRegretParameters
     regret_clusters_by_model: Dict[
         str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]
     ] = {}
+    regret_details_by_model: Dict[str, Sequence[RegretCandidate]] = {}
+    regret_summaries_by_model: Dict[str, Sequence[RegretPlanSummary]] = {}
     desires_by_model: Dict[str, CapacityDesires] = {}
     excuses_by_model: Dict[str, Sequence[Excuse]] = {}
+    excuse_counts_by_model: Dict[str, Sequence[CountedExcuse]] = {}
     context: Dict[str, Any] = {}
 
 
