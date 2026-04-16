@@ -170,7 +170,6 @@ def _observational_ws_fraction(inputs: MemoryInputs, policy: MemoryPolicy) -> fl
         base_reserves_gib=_get_base_memory(inputs.desires),
         max_page_cache_gib=policy.max_page_cache_gib,
     )
-
     raw_disk_per_node = cc.disk_utilization_gib.mid
     if raw_disk_per_node <= 0:
         raw_disk_per_node = inputs.disk_used_gib / cc.cluster_instance_count.mid
@@ -201,7 +200,7 @@ def _emit(inputs: MemoryInputs, effective_ws: float) -> MemoryEstimate:
     memory_derived = DerivedBuffers.for_components(
         inputs.desires.buffers.derived, [BufferComponent.memory]
     )
-    if memory_derived.preserve and cc and cc.cluster_instance:
+    if memory_derived.is_preserve and cc and cc.cluster_instance:
         layout = memory_layout(
             ram_gib=cc.cluster_instance.ram_gib,
             base_reserves_gib=_get_base_memory(inputs.desires),
