@@ -46,6 +46,8 @@ from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models import RANK_PENALTIES
+from service_capacity_modeling.models.common import COUNT_BOTTLENECK
+from service_capacity_modeling.models.common import REQUIRED_NODES_BY_TYPE
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import DerivedBuffers
@@ -64,6 +66,7 @@ from service_capacity_modeling.models.org.netflix.cassandra_memory import (
     estimate_memory_experimental,
     estimate_memory_legacy,
 )
+from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.models.utils import is_power_of_2
 from service_capacity_modeling.models.utils import next_doubling
 from service_capacity_modeling.models.utils import next_power_of_2
@@ -665,6 +668,35 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     def max_node_disk(d: Drive) -> int:
         return max(math.ceil(d.max_size_gib / 3), ebs_disk_floor)
 
+    # Apply memory-only derived buffers to the write-buffer requirement so
+    # scale_down caps both page cache and memtable space at current allocation.
+    raw_write_buffer_gib = float(requirement.context["write_buffer_gib"])
+    if raw_write_buffer_gib > 0 and current_capacity:
+        try:
+            current_instance = current_capacity.cluster_instance or shapes.instance(
+                current_capacity.cluster_instance_name
+            )
+        except KeyError:
+            current_instance = None
+        if current_instance is not None:
+            # Per-node write buffer = heap × max_write_buffer_percent × 0.25,
+            # matching the write_buffer lambda passed to compute_stateful_zone.
+            existing_write_buffer = (
+                current_capacity.cluster_instance_count.mid
+                * _cass_heap(current_instance.ram_gib)
+                * max_write_buffer_percent
+                * 0.25
+            )
+            memory_derived = DerivedBuffers.for_components(
+                desires.buffers.derived,
+                [BufferComponent.memory],
+                component_fallbacks={},
+            )
+            raw_write_buffer_gib = memory_derived.calculate_requirement(
+                current_usage=raw_write_buffer_gib,
+                existing_capacity=existing_write_buffer,
+            )
+
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
@@ -688,8 +720,9 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         # memtable_cleanup_threshold * memtable_size. At Netflix this
         # is 0.11 * 25 * heap
         write_buffer=lambda x: heap_fn(x) * max_write_buffer_percent * 0.25,
-        required_write_buffer_gib=float(requirement.context["write_buffer_gib"]),
+        required_write_buffer_gib=raw_write_buffer_gib,
         max_node_disk_gib=max_node_disk,
+        include_node_count_breakdown=True,
     )
 
     # Communicate to the actual provision that if we want reduced RF
@@ -731,15 +764,21 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     # Sometimes we don't want modify cluster topology, so only allow
     # topologies that match the desired zone size
     if required_cluster_size is not None and cluster.count != required_cluster_size:
+        required_nodes_by_type = cluster.cluster_params.get(REQUIRED_NODES_BY_TYPE, {})
+        count_bottleneck = cluster.cluster_params.get(COUNT_BOTTLENECK, "unknown")
         return Excuse(
             instance=instance.name,
             drive=drive_name,
             reason=(
-                f"Cluster size {cluster.count} != required {required_cluster_size}"
+                f"Cluster size {cluster.count} "
+                f"(count bottleneck: {count_bottleneck}) "
+                f"!= required {required_cluster_size}"
             ),
             context={
                 "computed_count": cluster.count,
                 "required_cluster_size": required_cluster_size,
+                "required_nodes_by_type": required_nodes_by_type,
+                "count_bottleneck": count_bottleneck,
             },
             bottleneck=Bottleneck.cluster_size,
         )
