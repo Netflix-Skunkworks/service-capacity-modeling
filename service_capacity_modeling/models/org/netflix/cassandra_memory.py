@@ -109,7 +109,7 @@ def estimate_memory_experimental(  # pylint: disable=too-many-positional-argumen
         desires.buffers.derived, [BufferComponent.memory]
     )
     if (
-        memory_derived.preserve
+        memory_derived.is_preserve
         and current_capacity
         and current_capacity.cluster_instance
     ):
