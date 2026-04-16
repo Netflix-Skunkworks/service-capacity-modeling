@@ -60,6 +60,31 @@ def test_storage_bound_local():
     assert counts["disk_capacity"] > counts["cpu"]
 
 
+def test_attached_drive_iops_overflow_recalculates_per_node_iops():
+    cluster = compute_stateful_zone(
+        instance=M5_4XL,
+        drive=Drive(
+            name="tiny-ebs",
+            size_gib=0,
+            max_scale_size_gib=1_000,
+            max_scale_io_per_s=1_000,
+        ),
+        needed_cores=4,
+        needed_disk_gib=100,
+        needed_memory_gib=10,
+        needed_network_mbps=100,
+        required_disk_ios=lambda _size, count: (1200 / count, 0.0),
+        include_node_count_breakdown=True,
+    )
+
+    attached_drive = cluster.attached_drives[0]
+    counts = cluster.cluster_params["required_nodes_by_type"]
+    assert counts["disk_iops"] == 2
+    assert cluster.count == 2
+    assert attached_drive.read_io_per_s == 600
+    assert attached_drive.read_io_per_s < attached_drive.max_io_per_s
+
+
 def test_write_buffer_merged_into_memory():
     """Write buffer inflates memory count (same RAM, different slice)."""
     cluster = compute_stateful_zone(

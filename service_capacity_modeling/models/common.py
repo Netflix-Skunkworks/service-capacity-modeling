@@ -191,8 +191,12 @@ def _attached_drive_plan(
     if (read_io + write_io) > drive.max_io_per_s:
         ratio = (read_io + write_io) / drive.max_io_per_s
         count_disk_iops = math.ceil(effective_count * ratio)
-        read_io = utils.next_n(read_io * ratio, n=200)
-        write_io = utils.next_n(write_io * ratio, n=200)
+        iops_count = max(cluster_size(count_disk_iops), min_count)
+        read_io, write_io = required_disk_ios(space_gib, iops_count)
+        read_io, write_io = (
+            utils.next_n(read_io, n=200),
+            utils.next_n(write_io, n=200),
+        )
 
     attached_drive = drive.model_copy()
     attached_drive.size_gib = ebs_gib
