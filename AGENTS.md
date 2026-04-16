@@ -11,6 +11,9 @@
 - Keep stacked branches linear.
 - Each PR branch should contain only the commits for that layer relative to its base branch.
 - If a branch picks up extra history, rebuild it from the intended base instead of dragging parent commits forward.
+- Common stacked-PR failure mode: a child branch targets the right parent by name, but was branched from the wrong tip or wrong remote copy of that parent.
+- When that happens, GitHub shows a misleading stack: PR descriptions look right, but commit ancestry is wrong and child PRs pull in unrelated parent history.
+- Before pushing stacked branches, verify both the commit DAG and the PR base branch, especially when `origin` and `upstream` both have similarly named branches.
 
 ## Baseline Capture Order
 
