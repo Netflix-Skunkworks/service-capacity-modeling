@@ -10,14 +10,19 @@ import pytest
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.explainability import (
     ExplainedPlans,
+    ExplainedUncertainPlans,
     STATEFUL_DATASTORE_FAMILIES,
 )
 from service_capacity_modeling.interface import (
     Bottleneck,
     CapacityDesires,
+    CountedExcuse,
     DataShape,
     Excuse,
     QueryPattern,
+    RegretCandidate,
+    RegretPlanSummary,
+    UncertainCapacityPlan,
     certain_float,
     certain_int,
 )
@@ -111,34 +116,103 @@ class TestPlanCertainExplained:
         assert len(explained_plans.family_graph.edges) > 0
 
 
-class TestPlanExplainFlag:
-    """Test that plan(explain=True) populates excuses_by_model."""
+class TestPlanExplained:
+    """Test that plan_explained() returns excuses, family graph, and plan."""
 
-    def test_plan_explain_includes_excuses(self):
-        result = planner.plan(
+    @pytest.fixture(scope="class")
+    def explained_uncertain(self):
+        return planner.plan_explained(
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=small_workload,
             simulations=2,
-            explain=True,
             extra_model_arguments=EXTRA_MODEL_ARGS,
         )
-        assert result.explanation.excuses_by_model, (
-            "explain=True should produce excuses for a real workload"
-        )
+
+    def test_returns_explained_uncertain_plans(self, explained_uncertain):
+        assert isinstance(explained_uncertain, ExplainedUncertainPlans)
+
+    def test_plan_is_uncertain_capacity_plan(self, explained_uncertain):
+        assert isinstance(explained_uncertain.plan, UncertainCapacityPlan)
+        assert len(explained_uncertain.plan.least_regret) > 0
+
+    def test_excuses_populated(self, explained_uncertain):
+        assert len(explained_uncertain.excuses) > 0
+        assert all(isinstance(e, Excuse) for e in explained_uncertain.excuses)
+
+    def test_family_graph_populated(self, explained_uncertain):
+        assert len(explained_uncertain.family_graph.traits) > 0
+        assert len(explained_uncertain.family_graph.edges) > 0
+
+    def test_explanation_has_excuses_by_model(self, explained_uncertain):
+        assert explained_uncertain.plan.explanation.excuses_by_model
         excuses_flat = [
-            e for es in result.explanation.excuses_by_model.values() for e in es
+            e
+            for es in explained_uncertain.plan.explanation.excuses_by_model.values()
+            for e in es
         ]
         assert len(excuses_flat) > 0
-        assert all(isinstance(e, Excuse) for e in excuses_flat)
 
-    def test_plan_explain_false_has_no_excuses(self):
-        result = planner.plan(
-            model_name="org.netflix.cassandra",
-            region="us-east-1",
-            desires=small_workload,
-            simulations=2,
-            explain=False,
-            extra_model_arguments=EXTRA_MODEL_ARGS,
+    def test_explanation_has_regret_clusters(self, explained_uncertain):
+        assert explained_uncertain.plan.explanation.regret_clusters_by_model
+
+    def test_explanation_has_regret_details(self, explained_uncertain):
+        details_by_model = explained_uncertain.plan.explanation.regret_details_by_model
+        assert details_by_model
+        details = next(iter(details_by_model.values()))
+        assert len(details) > 0
+        assert all(isinstance(detail, RegretCandidate) for detail in details)
+        assert details[0].total_regret >= 0
+        assert details[0].regret_components
+        assert details[0].world.world_id
+        assert details[0].world.world_label
+
+    def test_explanation_has_regret_summaries(self, explained_uncertain):
+        summaries_by_model = (
+            explained_uncertain.plan.explanation.regret_summaries_by_model
         )
-        assert not result.explanation.excuses_by_model
+        assert summaries_by_model
+        summaries = next(iter(summaries_by_model.values()))
+        assert len(summaries) > 0
+        assert all(isinstance(summary, RegretPlanSummary) for summary in summaries)
+        assert summaries[0].world_count >= 1
+        assert summaries[0].selected_total_regret >= 0
+        assert summaries[0].example_worlds
+        assert summaries[0].example_worlds[0].world_id
+        assert summaries[0].example_worlds[0].world_label
+
+    def test_explained_uncertain_has_least_regret_summaries(self, explained_uncertain):
+        assert len(explained_uncertain.least_regret_summaries) == len(
+            explained_uncertain.plan.least_regret
+        )
+        assert all(
+            isinstance(summary, RegretPlanSummary)
+            for summary in explained_uncertain.least_regret_summaries
+        )
+
+    def test_explained_uncertain_has_counted_excuses(self, explained_uncertain):
+        assert explained_uncertain.excuse_summary
+        assert all(
+            isinstance(excuse, CountedExcuse)
+            for excuse in explained_uncertain.excuse_summary
+        )
+        assert (
+            max(
+                excuse.occurrence_count for excuse in explained_uncertain.excuse_summary
+            )
+            >= 1
+        )
+        assert (
+            max(excuse.world_count for excuse in explained_uncertain.excuse_summary)
+            >= 1
+        )
+        assert explained_uncertain.excuse_summary[0].example_worlds
+        assert explained_uncertain.plan.explanation.excuse_counts_by_model
+
+    def test_plan_wrapper_returns_uncertain_capacity_plan(self, explained_uncertain):
+        """plan() returns UncertainCapacityPlan (not the explained wrapper)."""
+        assert isinstance(explained_uncertain.plan, UncertainCapacityPlan)
+
+    def test_plan_always_has_excuses(self, explained_uncertain):
+        """Excuses are always populated — no explain flag needed."""
+        assert explained_uncertain.plan.explanation.excuses_by_model
