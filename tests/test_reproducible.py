@@ -54,14 +54,12 @@ def test_compositional():
         region="us-east-1",
         desires=uncertain_mid,
         num_results=4,
-        explain=True,
     )
     composed_result = planner.plan(
         model_name="org.netflix.key-value",
         region="us-east-1",
         desires=uncertain_mid,
         num_results=4,
-        explain=True,
     )
 
     # Strictest test: Cassandra regret clusters must be EXACTLY identical
@@ -138,3 +136,28 @@ def test_multiple_options_diversify_with_more_simulations():
         assert f[0] in expected_family_types
     for f in more_simulations_families:
         assert f[0] in expected_family_types
+
+
+def test_composed_explained_worlds_exist_in_all_models():
+    explained = planner.plan_explained(
+        model_name="org.netflix.key-value",
+        region="us-east-1",
+        desires=uncertain_mid,
+        num_results=4,
+        simulations=12,
+    )
+
+    world_ids_by_model = {
+        model_name: {detail.world.world_id for detail in details}
+        for model_name, details in (
+            explained.plan.explanation.regret_details_by_model.items()
+        )
+    }
+    assert world_ids_by_model
+
+    for summary in explained.least_regret_summaries:
+        for example_world in summary.example_worlds:
+            assert all(
+                example_world.world_id in world_ids
+                for world_ids in world_ids_by_model.values()
+            )

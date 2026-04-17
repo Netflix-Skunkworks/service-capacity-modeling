@@ -2,9 +2,10 @@
 
 **Experimental** — this API may change.
 
-This module contains the family graph (FamilyTrait, FamilyEdge, FamilyGraph)
-and ExplainedPlans — types used to explain *why* the planner rejected
-certain instance/drive combinations and what alternatives exist.
+This module contains the family graph (FamilyTrait, FamilyEdge, FamilyGraph),
+ExplainedPlans, and ExplainedUncertainPlans — types used to explain *why*
+the planner rejected certain instance/drive combinations and what
+alternatives exist.
 
 Core contract types (Bottleneck, Excuse) live in interface.py because they
 are part of the CapacityModel.capacity_plan() return type.
@@ -34,6 +35,17 @@ Consumer usage::
     # Serialize both for downstream consumers
     explained.model_dump_json()
     comparison.model_dump_json()
+
+    # Uncertain (stochastic) explained mode
+    explained_uncertain = planner.plan_explained(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=desires,
+        extra_model_arguments=extra,
+    )
+    explained_uncertain.plan          # UncertainCapacityPlan
+    explained_uncertain.excuses       # deduped across all simulations
+    explained_uncertain.family_graph  # hardware trade-off graph
 """
 
 from __future__ import annotations
@@ -50,12 +62,16 @@ from typing import Tuple
 
 from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import CountedExcuse
 from service_capacity_modeling.interface import DriveType
 from service_capacity_modeling.interface import ExcludeUnsetModel
 from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import ExcuseTag
 from service_capacity_modeling.interface import Hardware
 from service_capacity_modeling.interface import Instance
+from service_capacity_modeling.interface import RegretPlanSummary
+from service_capacity_modeling.interface import UncertainCapacityPlan
+from service_capacity_modeling.interface import WorldRef
 
 
 class FamilyTrait(ExcludeUnsetModel):
@@ -297,14 +313,83 @@ STATELESS_SERVICE_FAMILIES: FrozenSet[str] = frozenset(
 
 def deduplicate_excuses(excuses: Sequence[Excuse]) -> Sequence[Excuse]:
     """Deduplicate excuses by (instance, drive, reason) across simulations."""
-    seen: Set[Tuple[str, str, str]] = set()
-    result: List[Excuse] = []
+    seen: Set[Tuple[str, str, str, Optional[Bottleneck], Tuple[str, ...]]] = set()
+    result_by_key: Dict[
+        Tuple[str, str, str, Optional[Bottleneck], Tuple[str, ...]], Excuse
+    ] = {}
+    ordered_keys: List[Tuple[str, str, str, Optional[Bottleneck], Tuple[str, ...]]] = []
     for exc in excuses:
-        key = (exc.instance, exc.drive, exc.reason)
+        key = (
+            exc.instance,
+            exc.drive,
+            exc.reason,
+            exc.bottleneck,
+            tuple(sorted(tag.value for tag in exc.tags)),
+        )
         if key not in seen:
             seen.add(key)
-            result.append(exc)
-    return result
+            result_by_key[key] = exc.model_copy(deep=True)
+            ordered_keys.append(key)
+            continue
+        current = result_by_key[key]
+        if current.context and exc.context and current.context != exc.context:
+            current.context = {}
+    return [result_by_key[key] for key in ordered_keys]
+
+
+def count_excuses(excuses: Sequence[Excuse]) -> Sequence[CountedExcuse]:
+    """Count excuse frequency across simulations without world provenance."""
+    return count_world_excuses(
+        [
+            (WorldRef(world_id=f"w-local-{index}", world_label="local"), exc)
+            for index, exc in enumerate(excuses)
+        ]
+    )
+
+
+def count_world_excuses(
+    world_excuses: Sequence[Tuple[WorldRef, Excuse]],
+) -> Sequence[CountedExcuse]:
+    """Count excuses across worlds and retain bounded example world refs."""
+    keys_in_order: List[
+        Tuple[str, str, str, Optional[Bottleneck], Tuple[str, ...]]
+    ] = []
+    counted: Dict[
+        Tuple[str, str, str, Optional[Bottleneck], Tuple[str, ...]], CountedExcuse
+    ] = {}
+    worlds_seen: Dict[
+        Tuple[str, str, str, Optional[Bottleneck], Tuple[str, ...]], Set[str]
+    ] = {}
+    max_example_worlds = 3
+
+    for world, exc in world_excuses:
+        key = (
+            exc.instance,
+            exc.drive,
+            exc.reason,
+            exc.bottleneck,
+            tuple(sorted(tag.value for tag in exc.tags)),
+        )
+        if key not in counted:
+            counted[key] = CountedExcuse(
+                **exc.model_dump(),
+                occurrence_count=0,
+                world_count=0,
+                example_worlds=[],
+            )
+            worlds_seen[key] = set()
+            keys_in_order.append(key)
+        current = counted[key]
+        current.occurrence_count += 1
+        if world.world_id not in worlds_seen[key]:
+            worlds_seen[key].add(world.world_id)
+            current.world_count += 1
+            if len(current.example_worlds) < max_example_worlds:
+                current.example_worlds = [*current.example_worlds, world]
+        if current.context and exc.context and current.context != exc.context:
+            current.context = {}
+
+    return [counted[key] for key in keys_in_order]
 
 
 class ExplainedPlans(ExcludeUnsetModel):
@@ -317,3 +402,17 @@ class ExplainedPlans(ExcludeUnsetModel):
     plans: Sequence[CapacityPlan]
     excuses: Sequence[Excuse] = []
     family_graph: FamilyGraph = FamilyGraph()
+
+
+class ExplainedUncertainPlans(ExcludeUnsetModel):
+    """Uncertain plans + excuses + family context.
+
+    Mirrors ExplainedPlans but wraps UncertainCapacityPlan instead
+    of deterministic plans. Returned by plan_explained().
+    """
+
+    plan: UncertainCapacityPlan
+    excuses: Sequence[Excuse] = []
+    excuse_summary: Sequence[CountedExcuse] = []
+    family_graph: FamilyGraph = FamilyGraph()
+    least_regret_summaries: Sequence[RegretPlanSummary] = []
