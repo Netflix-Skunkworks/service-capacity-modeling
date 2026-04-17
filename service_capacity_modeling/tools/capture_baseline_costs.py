@@ -34,6 +34,9 @@ from service_capacity_modeling.interface import (
     QueryPattern,
 )
 
+BASELINE_UNCERTAIN_SIMULATIONS = 16
+BASELINE_UNCERTAIN_NUM_RESULTS = 3
+
 
 def _format_cluster(cluster: ClusterCapacity, deployment: str) -> dict[str, Any]:
     """Format a single cluster's details."""
@@ -60,6 +63,43 @@ def _format_cluster(cluster: ClusterCapacity, deployment: str) -> dict[str, Any]
     return info
 
 
+def _capture_candidate(candidate: Any) -> dict[str, Any]:
+    """Serialize a candidate cluster set into a stable regression snapshot."""
+    cluster_details = []
+    for zonal_cluster in candidate.zonal:
+        cluster_details.append(_format_cluster(zonal_cluster, "zonal"))
+    for regional_cluster in candidate.regional:
+        cluster_details.append(_format_cluster(regional_cluster, "regional"))
+
+    return {
+        "total_annual_cost": float(candidate.total_annual_cost),
+        "clusters": cluster_details,
+        "annual_costs": dict(
+            sorted((k, float(v)) for k, v in candidate.annual_costs.items())
+        ),
+    }
+
+
+def _capture_plan_sequence(plans: Any) -> list[dict[str, Any]]:
+    return [_capture_candidate(plan.candidate_clusters) for plan in plans]
+
+
+def _capture_error(
+    scenario_name: str,
+    error: Exception,
+    model_name: str,
+    region: str,
+    desires: CapacityDesires,
+) -> dict[str, Any]:
+    return {
+        "error": str(error),
+        "scenario": scenario_name,
+        "model": model_name,
+        "region": region,
+        "service_tier": desires.service_tier,
+    }
+
+
 def capture_costs(
     model_name: str,
     region: str,
@@ -80,31 +120,53 @@ def capture_costs(
         if not cap_plans:
             return {"error": "No capacity plans generated", "scenario": scenario_name}
 
-        cap_plan = cap_plans[0]
-        candidate = cap_plan.candidate_clusters
-
-        # Build cluster details for each cluster
-        cluster_details = []
-        for zonal_cluster in candidate.zonal:
-            cluster_details.append(_format_cluster(zonal_cluster, "zonal"))
-        for regional_cluster in candidate.regional:
-            cluster_details.append(_format_cluster(regional_cluster, "regional"))
-
         result = {
             "scenario": scenario_name,
             "model": model_name,
             "region": region,
             "service_tier": desires.service_tier,
-            "total_annual_cost": float(candidate.total_annual_cost),
-            "clusters": cluster_details,
-            "annual_costs": dict(
-                sorted((k, float(v)) for k, v in candidate.annual_costs.items())
-            ),
         }
-
+        result.update(_capture_candidate(cap_plans[0].candidate_clusters))
         return result
     except (ValueError, KeyError, AttributeError) as e:
-        return {"error": str(e), "scenario": scenario_name}
+        return _capture_error(scenario_name, e, model_name, region, desires)
+
+
+def capture_uncertain(  # pylint: disable=too-many-positional-arguments
+    model_name: str,
+    region: str,
+    desires: CapacityDesires,
+    extra_args: dict[str, Any] | None = None,
+    scenario_name: str = "",
+    simulations: int = BASELINE_UNCERTAIN_SIMULATIONS,
+    num_results: int = BASELINE_UNCERTAIN_NUM_RESULTS,
+) -> dict[str, Any]:
+    """Capture a compact snapshot from the stochastic planner."""
+    try:
+        cap_plan = planner.plan(
+            model_name=model_name,
+            region=region,
+            desires=desires,
+            simulations=simulations,
+            num_results=num_results,
+            extra_model_arguments=extra_args or {},
+        )
+        return {
+            "scenario": scenario_name,
+            "model": model_name,
+            "region": region,
+            "service_tier": desires.service_tier,
+            "simulations": simulations,
+            "num_results": num_results,
+            "least_regret": _capture_plan_sequence(cap_plan.least_regret),
+            "mean": _capture_plan_sequence(cap_plan.mean),
+            "percentiles": {
+                str(percentile): _capture_plan_sequence(plans)
+                for percentile, plans in sorted(cap_plan.percentiles.items())
+            },
+        }
+    except (ValueError, KeyError, AttributeError) as e:
+        return _capture_error(scenario_name, e, model_name, region, desires)
 
 
 # Define test scenarios for each service
@@ -654,6 +716,17 @@ SCENARIOS: dict[str, dict[str, Any]] = {
     for model, region, desires, extra_args, name in scenarios
 }
 
+UNCERTAIN_SCENARIOS: dict[str, dict[str, Any]] = {
+    name: SCENARIOS[name]
+    for name in (
+        "cassandra_timeseries_ebs",
+        "cassandra_kv_dense_ebs",
+        "cassandra_kv_compact_ebs",
+        "kafka_100mib_throughput",
+        "evcache_large_with_replication",
+        "kv_with_cache",
+    )
+}
 
 if __name__ == "__main__":
     # Capture all scenarios
@@ -669,12 +742,47 @@ if __name__ == "__main__":
             print(f"  Total cost: ${result['total_annual_cost']:,.2f}")
             print(f"  Cost breakdown: {list(result['annual_costs'].keys())}")
 
-    # Save results
-    output_file = Path(__file__).parent / "data" / "baseline_costs.json"
+    uncertain_results = []
+    for scenario_name, scenario in UNCERTAIN_SCENARIOS.items():
+        print(f"Capturing uncertain: {scenario_name}...")
+        result = capture_uncertain(
+            model_name=scenario["model"],
+            region=scenario["region"],
+            desires=scenario["desires"],
+            extra_args=scenario["extra_args"],
+            scenario_name=scenario_name,
+        )
+        uncertain_results.append(result)
+        if "error" in result:
+            print(f"  ERROR: {result['error']}")
+        else:
+            print(
+                "  Least regret families: "
+                + ", ".join(
+                    p["clusters"][0]["instance"]
+                    for p in result["least_regret"]
+                    if p["clusters"]
+                )
+            )
+
+    # Save deterministic results
+    output_dir = Path(__file__).parent / "data"
+    output_file = output_dir / "baseline_costs.json"
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, sort_keys=True)
         f.write("\n")  # Ensure trailing newline for pre-commit
 
+    uncertain_output_file = output_dir / "baseline_uncertain.json"
+    with open(uncertain_output_file, "w", encoding="utf-8") as f:
+        json.dump(uncertain_results, f, indent=2, sort_keys=True)
+        f.write("\n")
+
     print(f"\nResults saved to: {output_file}")
     success_count = len([r for r in results if "error" not in r])
     print(f"Total scenarios captured: {success_count}/{len(results)}")
+    uncertain_success_count = len([r for r in uncertain_results if "error" not in r])
+    print(f"Uncertain results saved to: {uncertain_output_file}")
+    print(
+        f"Total uncertain scenarios captured: "
+        f"{uncertain_success_count}/{len(uncertain_results)}"
+    )
