@@ -34,6 +34,8 @@ from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
+from service_capacity_modeling.interface import NodeCountBreakdown
+from service_capacity_modeling.interface import NodeCountConstraint
 from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
@@ -50,30 +52,6 @@ logger = logging.getLogger(__name__)
 SECONDS_IN_YEAR = 31556926
 
 EFFECTIVE_DISK_PER_NODE_GIB = "effective_disk_per_node_gib"
-REQUIRED_NODES_BY_TYPE = "required_nodes_by_type"
-COUNT_BOTTLENECK = "count_bottleneck"
-
-
-def _select_count_bottleneck(
-    resource_counts: Dict[str, int],
-    cluster_size_count: int,
-    min_count: int,
-) -> Optional[str]:
-    if not resource_counts:
-        return None
-
-    resource_bottleneck = max(
-        resource_counts, key=lambda constraint: resource_counts[constraint]
-    )
-    resource_count = resource_counts[resource_bottleneck]
-    cluster_size_added = max(0, cluster_size_count - resource_count)
-    min_count_added = max(0, min_count - max(resource_count, cluster_size_count))
-
-    if min_count_added > 0:
-        return "min_count"
-    if cluster_size_added > 0:
-        return "cluster_size"
-    return resource_bottleneck
 
 
 def _count_breakdown(
@@ -85,26 +63,18 @@ def _count_breakdown(
     count_disk_iops: int,
     cluster_size_count: int,
     min_count: int,
-) -> Dict[str, Any]:
-    resource_counts = {
-        "cpu": count_cpu,
-        "memory": count_memory,
-        "network": count_network,
-        "disk_capacity": count_disk_capacity,
-        "disk_iops": count_disk_iops,
-    }
-    return {
-        REQUIRED_NODES_BY_TYPE: {
-            **resource_counts,
-            "cluster_size": cluster_size_count,
-            "min_count": min_count,
-        },
-        COUNT_BOTTLENECK: _select_count_bottleneck(
-            resource_counts=resource_counts,
-            cluster_size_count=cluster_size_count,
-            min_count=min_count,
-        ),
-    }
+) -> NodeCountBreakdown:
+    return NodeCountBreakdown(
+        nodes_by_constraint={
+            NodeCountConstraint.cpu: count_cpu,
+            NodeCountConstraint.memory: count_memory,
+            NodeCountConstraint.network: count_network,
+            NodeCountConstraint.disk_capacity: count_disk_capacity,
+            NodeCountConstraint.disk_iops: count_disk_iops,
+            NodeCountConstraint.cluster_size: cluster_size_count,
+            NodeCountConstraint.min_count: min_count,
+        }
+    )
 
 
 def _local_disk_node_counts(
@@ -155,48 +125,53 @@ def _attached_drive_plan(
     required_disk_ios: Callable[[float, int], Tuple[float, float]],
     max_node_disk_gib: Callable[[Drive], int],
 ) -> Tuple[int, int, List[Drive]]:
-    preliminary_resource_count = max(count_cpu, count_memory, count_network)
-    preliminary_count = max(cluster_size(preliminary_resource_count), min_count)
-
-    space_gib = max(1, math.ceil(needed_disk_gib / preliminary_count))
-    read_io, write_io = required_disk_ios(space_gib, preliminary_count)
-    read_io, write_io = (
-        utils.next_n(read_io, n=200),
-        utils.next_n(write_io, n=200),
-    )
-    io_gib = cloud_gib_for_io(drive, read_io + write_io, space_gib)
-    ebs_gib = utils.next_n(max(1, io_gib, space_gib), n=100)
-
-    count_disk_capacity = 0
-    max_size = max_node_disk_gib(drive)
-    if max_size > 0:
-        count_disk_capacity = math.ceil(needed_disk_gib / max_size)
-    if ebs_gib > max_size > 0:
-        count_disk_capacity = max(
-            count_disk_capacity,
-            math.ceil(preliminary_count * ebs_gib / max_size),
-        )
-        ebs_gib = int(max_size)
-
-    effective_count = max(
-        cluster_size(max(preliminary_count, count_disk_capacity)), min_count
-    )
-    read_io, write_io = required_disk_ios(space_gib, effective_count)
-    read_io, write_io = (
-        utils.next_n(read_io, n=200),
-        utils.next_n(write_io, n=200),
-    )
-
-    count_disk_iops = 0
-    if (read_io + write_io) > drive.max_io_per_s:
-        ratio = (read_io + write_io) / drive.max_io_per_s
-        count_disk_iops = math.ceil(effective_count * ratio)
-        iops_count = max(cluster_size(count_disk_iops), min_count)
-        read_io, write_io = required_disk_ios(space_gib, iops_count)
+    def _attached_drive_ios_for_count(node_count: int) -> Tuple[int, float, float]:
+        space_gib = max(1, math.ceil(needed_disk_gib / node_count))
+        read_io, write_io = required_disk_ios(space_gib, node_count)
         read_io, write_io = (
             utils.next_n(read_io, n=200),
             utils.next_n(write_io, n=200),
         )
+        return space_gib, read_io, write_io
+
+    preliminary_resource_count = max(count_cpu, count_memory, count_network)
+    effective_count = max(cluster_size(preliminary_resource_count), min_count)
+    max_size = max_node_disk_gib(drive)
+    count_disk_capacity = 0
+    count_disk_iops = 0
+    ebs_gib = 0
+    read_io = 0.0
+    write_io = 0.0
+
+    for _ in range(10):
+        space_gib, read_io, write_io = _attached_drive_ios_for_count(effective_count)
+        io_gib = cloud_gib_for_io(drive, read_io + write_io, space_gib)
+        ebs_gib = utils.next_n(max(1, io_gib, space_gib), n=100)
+
+        iteration_disk_capacity = 0
+        if max_size > 0:
+            iteration_disk_capacity = max(
+                math.ceil(needed_disk_gib / max_size),
+                math.ceil(effective_count * ebs_gib / max_size),
+            )
+            ebs_gib = min(ebs_gib, int(max_size))
+        count_disk_capacity = max(count_disk_capacity, iteration_disk_capacity)
+
+        iteration_disk_iops = 0
+        if (read_io + write_io) > drive.max_io_per_s:
+            ratio = (read_io + write_io) / drive.max_io_per_s
+            iteration_disk_iops = math.ceil(effective_count * ratio)
+        count_disk_iops = max(count_disk_iops, iteration_disk_iops)
+
+        next_count = max(
+            cluster_size(
+                max(preliminary_resource_count, count_disk_capacity, count_disk_iops)
+            ),
+            min_count,
+        )
+        if next_count <= effective_count:
+            break
+        effective_count = next_count
 
     attached_drive = drive.model_copy()
     attached_drive.size_gib = ebs_gib
@@ -752,9 +727,9 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
         cost,
     )
 
-    cluster_params: Dict[str, Any] = {}
+    node_count_breakdown: Optional[NodeCountBreakdown] = None
     if include_node_count_breakdown:
-        cluster_params = _count_breakdown(
+        node_count_breakdown = _count_breakdown(
             count_cpu=count_cpu,
             count_memory=count_memory,
             count_network=count_network,
@@ -770,7 +745,7 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
         instance=instance,
         attached_drives=attached_drives,
         annual_cost=cost,
-        cluster_params=cluster_params,
+        node_count_breakdown=node_count_breakdown,
     )
 
 

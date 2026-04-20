@@ -4,6 +4,7 @@ import pytest
 
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import NodeCountConstraint
 from service_capacity_modeling.models.common import compute_stateful_zone
 
 EBS = Drive(name="gp3", size_gib=0)
@@ -40,9 +41,14 @@ def test_count_bottleneck_resource(cores, mem, disk, net, expected_bottleneck):
         needed_network_mbps=net,
         include_node_count_breakdown=True,
     )
-    counts = cluster.cluster_params["required_nodes_by_type"]
+    assert cluster.node_count_breakdown is not None
+    counts = {
+        k.value: v for k, v in cluster.node_count_breakdown.nodes_by_constraint.items()
+    }
     assert set(counts.keys()) == EXPECTED_KEYS
-    assert cluster.cluster_params["count_bottleneck"] == expected_bottleneck
+    assert cluster.node_count_breakdown.bottleneck == NodeCountConstraint(
+        expected_bottleneck
+    )
 
 
 def test_storage_bound_local():
@@ -55,8 +61,11 @@ def test_storage_bound_local():
         needed_network_mbps=100,
         include_node_count_breakdown=True,
     )
-    counts = cluster.cluster_params["required_nodes_by_type"]
-    assert cluster.cluster_params["count_bottleneck"] == "disk_capacity"
+    assert cluster.node_count_breakdown is not None
+    counts = {
+        k.value: v for k, v in cluster.node_count_breakdown.nodes_by_constraint.items()
+    }
+    assert cluster.node_count_breakdown.bottleneck == NodeCountConstraint.disk_capacity
     assert counts["disk_capacity"] > counts["cpu"]
 
 
@@ -78,11 +87,71 @@ def test_attached_drive_iops_overflow_recalculates_per_node_iops():
     )
 
     attached_drive = cluster.attached_drives[0]
-    counts = cluster.cluster_params["required_nodes_by_type"]
+    assert cluster.node_count_breakdown is not None
+    counts = {
+        k.value: v for k, v in cluster.node_count_breakdown.nodes_by_constraint.items()
+    }
     assert counts["disk_iops"] == 2
     assert cluster.count == 2
     assert attached_drive.read_io_per_s == 600
     assert attached_drive.read_io_per_s < attached_drive.max_io_per_s
+
+
+def test_attached_drive_capacity_overflow_recalculates_per_node_ios():
+    cluster = compute_stateful_zone(
+        instance=M5_4XL,
+        drive=Drive(
+            name="tiny-ebs",
+            size_gib=0,
+            max_scale_size_gib=100,
+            max_scale_io_per_s=1_000,
+        ),
+        needed_cores=4,
+        needed_disk_gib=200,
+        needed_memory_gib=10,
+        needed_network_mbps=100,
+        required_disk_ios=lambda size, _count: (size * 3.0, 0.0),
+        max_node_disk_gib=lambda d: int(d.max_size_gib),
+        include_node_count_breakdown=True,
+    )
+
+    attached_drive = cluster.attached_drives[0]
+    assert cluster.node_count_breakdown is not None
+    counts = {
+        k.value: v for k, v in cluster.node_count_breakdown.nodes_by_constraint.items()
+    }
+    assert counts["disk_capacity"] == 2
+    assert cluster.count == 2
+    assert attached_drive.size_gib == 100
+    assert attached_drive.read_io_per_s == 400
+
+
+def test_gp2_attached_drive_recomputes_per_node_size_after_count_increase():
+    cluster = compute_stateful_zone(
+        instance=M5_4XL,
+        drive=Drive(
+            name="gp2",
+            size_gib=0,
+            max_scale_size_gib=1_000,
+        ),
+        needed_cores=4,
+        needed_disk_gib=100,
+        needed_memory_gib=10,
+        needed_network_mbps=100,
+        required_disk_ios=lambda _size, count: (7500 / count, 0.0),
+        max_node_disk_gib=lambda d: int(d.max_size_gib),
+        include_node_count_breakdown=True,
+    )
+
+    attached_drive = cluster.attached_drives[0]
+    assert cluster.node_count_breakdown is not None
+    counts = {
+        k.value: v for k, v in cluster.node_count_breakdown.nodes_by_constraint.items()
+    }
+    assert counts["disk_capacity"] == 3
+    assert cluster.count == 3
+    assert attached_drive.size_gib == 900
+    assert attached_drive.read_io_per_s == 2600
 
 
 def test_write_buffer_merged_into_memory():
@@ -99,7 +168,11 @@ def test_write_buffer_merged_into_memory():
         required_write_buffer_gib=2.0,  # ceil(2.0/0.25) = 8 nodes
         include_node_count_breakdown=True,
     )
-    assert cluster.cluster_params["required_nodes_by_type"]["memory"] == 8
+    assert cluster.node_count_breakdown is not None
+    assert (
+        cluster.node_count_breakdown.nodes_by_constraint[NodeCountConstraint.memory]
+        == 8
+    )
 
 
 def test_breakdown_is_opt_in():
@@ -111,8 +184,7 @@ def test_breakdown_is_opt_in():
         needed_memory_gib=10,
         needed_network_mbps=100,
     )
-    assert "required_nodes_by_type" not in cluster.cluster_params
-    assert "count_bottleneck" not in cluster.cluster_params
+    assert cluster.node_count_breakdown is None
 
 
 def test_cluster_size_is_reported_when_rounding_adds_nodes():
@@ -126,11 +198,14 @@ def test_cluster_size_is_reported_when_rounding_adds_nodes():
         cluster_size=lambda x: x if x % 2 == 0 else x + 1,  # round up to even
         include_node_count_breakdown=True,
     )
-    counts = cluster.cluster_params["required_nodes_by_type"]
+    assert cluster.node_count_breakdown is not None
+    counts = {
+        k.value: v for k, v in cluster.node_count_breakdown.nodes_by_constraint.items()
+    }
     assert counts["cpu"] == 3
     assert counts["cluster_size"] == 4
     assert counts["min_count"] == 0
-    assert cluster.cluster_params["count_bottleneck"] == "cluster_size"
+    assert cluster.node_count_breakdown.bottleneck == NodeCountConstraint.cluster_size
     assert cluster.count == 4
 
 
@@ -145,11 +220,14 @@ def test_min_count_is_reported_when_it_adds_nodes():
         min_count=6,
         include_node_count_breakdown=True,
     )
-    counts = cluster.cluster_params["required_nodes_by_type"]
+    assert cluster.node_count_breakdown is not None
+    counts = {
+        k.value: v for k, v in cluster.node_count_breakdown.nodes_by_constraint.items()
+    }
     assert counts["cpu"] == 1
     assert counts["cluster_size"] == 1
     assert counts["min_count"] == 6
-    assert cluster.cluster_params["count_bottleneck"] == "min_count"
+    assert cluster.node_count_breakdown.bottleneck == NodeCountConstraint.min_count
     assert cluster.count == 6
 
 
@@ -164,7 +242,10 @@ def test_topology_constraints_do_not_override_stronger_resource_limits():
         min_count=6,
         include_node_count_breakdown=True,
     )
-    counts = cluster.cluster_params["required_nodes_by_type"]
+    assert cluster.node_count_breakdown is not None
+    counts = {
+        k.value: v for k, v in cluster.node_count_breakdown.nodes_by_constraint.items()
+    }
     assert counts["cpu"] == 40
     assert counts["min_count"] == 6
-    assert cluster.cluster_params["count_bottleneck"] == "cpu"
+    assert cluster.node_count_breakdown.bottleneck == NodeCountConstraint.cpu
