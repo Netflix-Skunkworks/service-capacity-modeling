@@ -5,7 +5,7 @@
       "cpu": 16,
       "cpu_cores": 8,
       "cpu_ghz": 3.6,
-      "cpu_ipc_scale": 1.15,
+      "cpu_ipc_scale": 1.0,
       "ram_gib": 244.14,
       "net_mbps": 100000.0,
       "drive": {
@@ -22,14 +22,15 @@
           "minimum_value": 0.05,
           "maximum_value": 2.0
         }
-      }
+      },
+      "lifecycle": "alpha"
     },
     "p5.48xlarge": {
       "name": "p5.48xlarge",
       "cpu": 192,
       "cpu_cores": 96,
       "cpu_ghz": 3.6,
-      "cpu_ipc_scale": 1.15,
+      "cpu_ipc_scale": 1.0,
       "ram_gib": 1953.12,
       "net_mbps": 3200000.0,
       "drive": {
@@ -46,7 +47,8 @@
           "minimum_value": 0.05,
           "maximum_value": 2.0
         }
-      }
+      },
+      "lifecycle": "alpha"
     }
   }
 }

@@ -192,11 +192,12 @@ def _drive(
     )
 
 
-def pull_family(
+def pull_family(  # pylint: disable=too-many-positional-arguments
     ec2_client: Any,
     family: str,
     cpu_perf: Optional[CPUPerformance] = None,
     io_perf: Optional[IOPerformance] = None,
+    lifecycle: Optional[str] = None,
     debug: bool = False,
 ) -> Sequence[Instance]:
     # flake8: noqa: C901
@@ -280,25 +281,25 @@ def pull_family(
         )
 
     results = []
-    # Now build the instance shapes from the data
     for _, data in instance_jsons_dict.items():
         drive = _drive(disk_type, io_perf, data=data)
         vcpu_count = data["VCpuInfo"]["DefaultVCpus"]
         cpu_cores = data["VCpuInfo"]["DefaultCores"]
         cpu_ipc_scale_factor = deduce_cpu_ipc_scale(vcpu_count, cpu_cores, cpu_perf)
 
-        new_shape = Instance(
-            name=data["InstanceType"],
-            cpu=vcpu_count,
-            cpu_cores=cpu_cores,
-            cpu_ghz=data["ProcessorInfo"]["SustainedClockSpeedInGhz"],
-            cpu_ipc_scale=cpu_ipc_scale_factor,
-            ram_gib=convert_mib_to_gib(data["MemoryInfo"]["SizeInMiB"]),
-            net_mbps=aggregate_network_mbps(data["NetworkInfo"]),
-            drive=drive,
-        )
-
-        results.append(new_shape)
+        shape_kwargs: Dict[str, Any] = {
+            "name": data["InstanceType"],
+            "cpu": vcpu_count,
+            "cpu_cores": cpu_cores,
+            "cpu_ghz": data["ProcessorInfo"]["SustainedClockSpeedInGhz"],
+            "cpu_ipc_scale": cpu_ipc_scale_factor,
+            "ram_gib": convert_mib_to_gib(data["MemoryInfo"]["SizeInMiB"]),
+            "net_mbps": aggregate_network_mbps(data["NetworkInfo"]),
+            "drive": drive,
+        }
+        if lifecycle is not None:
+            shape_kwargs["lifecycle"] = lifecycle
+        results.append(Instance(**shape_kwargs))
     results = sorted(results, key=lambda i: normalized_aws_size(i.name))
     return results
 
@@ -569,6 +570,7 @@ def main(args: Any) -> int:
                 family=family,
                 cpu_perf=cpu_perf,
                 io_perf=io_perf,
+                lifecycle=args.lifecycle,
                 debug=args.debug,
             )
             output_filename = f"auto_{family}.json"
@@ -673,6 +675,16 @@ if __name__ == "__main__":
             "Comma-separated list of database engines for RDS instances. "
             "Required when family starts with 'db.'. "
             "Currently supported: aurora-postgresql"
+        ),
+    )
+    parser.add_argument(
+        "--lifecycle",
+        default=None,
+        choices=["alpha", "beta", "stable", "deprecated", "end-of-life"],
+        help=(
+            "Mark the generated shapes with a lifecycle stage. Use 'alpha' for "
+            "shapes whose hardware parameters (e.g. cpu_ipc_scale) are not yet "
+            "benchmarked and should be treated as provisional."
         ),
     )
     parser.add_argument("--region", choices=regions, default="us-east-1")

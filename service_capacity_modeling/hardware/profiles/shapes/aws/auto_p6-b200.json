@@ -5,7 +5,7 @@
       "cpu": 192,
       "cpu_cores": 96,
       "cpu_ghz": 2.4,
-      "cpu_ipc_scale": 1.33,
+      "cpu_ipc_scale": 1.0,
       "ram_gib": 1953.12,
       "net_mbps": 1600000.0,
       "drive": {
@@ -22,7 +22,8 @@
           "minimum_value": 0.05,
           "maximum_value": 2.0
         }
-      }
+      },
+      "lifecycle": "alpha"
     }
   }
 }

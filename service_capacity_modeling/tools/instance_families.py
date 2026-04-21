@@ -222,30 +222,42 @@ INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
     #     'io_latency_curve': 'ssd',
     #     'cpu_ipc_scale': None
     # },
+    # P-family CPU IPC is provisional: host CPUs feed the GPU rather than
+    # run Netflix's typical CPU-bound workloads, so vendor-family IPC
+    # constants (MILAN_IPC, SAPPHIRE_RAPIDS_IPC, ...) are a poor proxy.
+    # Leaving cpu_ipc_scale as None lets deduce_cpu_ipc_scale fall back on
+    # the SMT heuristic (1.0 for SMT, 1.5 for full cores); all P shapes are
+    # SMT so they land at 1.0 -- explicitly conservative. Lifecycle is
+    # "alpha" until we have real benchmarks for these host CPUs.
     "p4d": {
         "iops_per_gib": "268.4/214.7",
         "io_latency_curve": "5th-gen-ssd",
-        "cpu_ipc_scale": SKYLAKE_IPC,
+        "cpu_ipc_scale": None,
+        "lifecycle": "alpha",
     },
     "p4de": {
         "iops_per_gib": "268.4/214.7",
         "io_latency_curve": "5th-gen-ssd",
-        "cpu_ipc_scale": SKYLAKE_IPC,
+        "cpu_ipc_scale": None,
+        "lifecycle": "alpha",
     },
     "p5": {
         "iops_per_gib": "155.4/77.7",
         "io_latency_curve": "6th-gen-ssd",
-        "cpu_ipc_scale": MILAN_IPC,
+        "cpu_ipc_scale": None,
+        "lifecycle": "alpha",
     },
     "p5en": {
         "iops_per_gib": "155.4/77.7",
         "io_latency_curve": "6th-gen-ssd",
-        "cpu_ipc_scale": SAPPHIRE_RAPIDS_IPC,
+        "cpu_ipc_scale": None,
+        "lifecycle": "alpha",
     },
     "p6-b200": {
         "iops_per_gib": "155.4/77.7",
         "io_latency_curve": "6th-gen-ssd",
-        "cpu_ipc_scale": EMERALD_RAPIDS_IPC,
+        "cpu_ipc_scale": None,
+        "lifecycle": "alpha",
     },
     "r4": {
         "iops_per_gib": None,

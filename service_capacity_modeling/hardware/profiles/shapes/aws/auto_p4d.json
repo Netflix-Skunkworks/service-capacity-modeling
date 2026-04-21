@@ -22,7 +22,8 @@
           "minimum_value": 0.07,
           "maximum_value": 2.0
         }
-      }
+      },
+      "lifecycle": "alpha"
     }
   }
 }
