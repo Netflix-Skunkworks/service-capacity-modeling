@@ -44,7 +44,7 @@ def test_count_bottleneck_resource(cores, mem, disk, net, expected_bottleneck):
     context = cluster.node_count_context
     assert context is not None
     assert {k.value for k in context.required_nodes_by_type} == EXPECTED_KEYS
-    assert context.count_bottleneck == NodeCountConstraint(expected_bottleneck)
+    assert context.resource_bottleneck == NodeCountConstraint(expected_bottleneck)
 
 
 def test_storage_bound_local():
@@ -58,7 +58,7 @@ def test_storage_bound_local():
         include_node_count_breakdown=True,
     )
     counts = cluster.cluster_params["required_nodes_by_type"]
-    assert cluster.cluster_params["count_bottleneck"] == "disk_capacity"
+    assert cluster.cluster_params["resource_bottleneck"] == "disk_capacity"
     assert counts["disk_capacity"] > counts["cpu"]
 
 
@@ -115,7 +115,7 @@ def test_breakdown_is_opt_in():
     )
     assert cluster.node_count_context is None
     assert "required_nodes_by_type" not in cluster.cluster_params
-    assert "count_bottleneck" not in cluster.cluster_params
+    assert "resource_bottleneck" not in cluster.cluster_params
 
 
 def test_cluster_size_is_reported_when_rounding_adds_nodes():
@@ -133,7 +133,7 @@ def test_cluster_size_is_reported_when_rounding_adds_nodes():
     assert counts["cpu"] == 3
     assert counts["cluster_size"] == 4
     assert counts["min_count"] == 0
-    assert cluster.cluster_params["count_bottleneck"] == "cluster_size"
+    assert cluster.cluster_params["resource_bottleneck"] == "cpu"
     assert cluster.count == 4
 
 
@@ -152,7 +152,7 @@ def test_min_count_is_reported_when_it_adds_nodes():
     assert counts["cpu"] == 1
     assert counts["cluster_size"] == 1
     assert counts["min_count"] == 6
-    assert cluster.cluster_params["count_bottleneck"] == "min_count"
+    assert cluster.cluster_params["resource_bottleneck"] == "cpu"
     assert cluster.count == 6
 
 
@@ -170,4 +170,4 @@ def test_topology_constraints_do_not_override_stronger_resource_limits():
     counts = cluster.cluster_params["required_nodes_by_type"]
     assert counts["cpu"] == 40
     assert counts["min_count"] == 6
-    assert cluster.cluster_params["count_bottleneck"] == "cpu"
+    assert cluster.cluster_params["resource_bottleneck"] == "cpu"

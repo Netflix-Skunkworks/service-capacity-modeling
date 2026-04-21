@@ -1156,7 +1156,39 @@ class NodeCountConstraint(StrEnum):
 
 class NodeCountContext(ExcludeUnsetModel):
     required_nodes_by_type: Dict[NodeCountConstraint, int]
-    count_bottleneck: Optional[NodeCountConstraint] = None
+    resource_bottleneck: Optional[NodeCountConstraint] = None
+
+    @classmethod
+    def from_counts(
+        cls,
+        *,
+        count_cpu: int,
+        count_memory: int,
+        count_network: int,
+        count_disk_capacity: int,
+        count_disk_iops: int,
+        cluster_size_count: int,
+        min_count: int,
+    ) -> "NodeCountContext":
+        resource_counts = {
+            NodeCountConstraint.cpu: count_cpu,
+            NodeCountConstraint.memory: count_memory,
+            NodeCountConstraint.network: count_network,
+            NodeCountConstraint.disk_capacity: count_disk_capacity,
+            NodeCountConstraint.disk_iops: count_disk_iops,
+        }
+        resource_bottleneck = max(
+            resource_counts, key=lambda constraint: resource_counts[constraint]
+        )
+
+        return cls(
+            required_nodes_by_type={
+                **resource_counts,
+                NodeCountConstraint.cluster_size: cluster_size_count,
+                NodeCountConstraint.min_count: min_count,
+            },
+            resource_bottleneck=resource_bottleneck,
+        )
 
 
 class ClusterCapacity(ExcludeUnsetModel):
