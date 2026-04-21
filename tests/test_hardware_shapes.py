@@ -126,37 +126,34 @@ def test_performance_increases_with_generation() -> None:
 
 
 def test_memory_proportional_to_cpu() -> None:
-    """Test that memory is proportional to CPU for instances within the same family."""
+    """Test that memory per vCPU is non-decreasing as instance size shrinks.
+
+    AWS's flagship (largest) size in a family sets the baseline ratio; smaller
+    sizes sometimes ship with extra RAM per vCPU as a development/debug
+    concession (e.g. p5.4xlarge at 16 GiB/vCPU vs p5.48xlarge at 10.67). A
+    smaller instance with *less* memory per vCPU than the flagship is still a
+    real bug worth catching.
+    """
     families = get_instance_families()
     region = shapes.region("us-east-1")
-
-    # AWS publishes p5.4xlarge with 16 GiB/vCPU while p5.48xlarge has
-    # 10.67 GiB/vCPU, breaking the family-wide proportionality assumption.
-    skip_families = {"p5"}
+    tolerance = 0.1  # 10% slack below flagship ratio
 
     for family, instances in families.items():
-        if family in skip_families:
-            continue
         if len(instances) <= 1:
             continue
 
-        # Calculate memory per CPU core for all instances in this family
-        mem_to_cpu_ratios: List[Tuple[str, float]] = []
-        for instance_name, _ in instances:
-            instance = region.instances[instance_name]
-            ratio = instance.ram_gib / instance.cpu
-            mem_to_cpu_ratios.append((instance_name, ratio))
+        family_instances = [region.instances[name] for name, _ in instances]
+        flagship = max(family_instances, key=lambda i: i.cpu)
+        flagship_ratio = flagship.ram_gib / flagship.cpu
+        floor = flagship_ratio * (1 - tolerance)
 
-        # All ratios should be approximately the same within a family
-        base_name, base_ratio = mem_to_cpu_ratios[0]
-        for name, ratio in mem_to_cpu_ratios[1:]:
-            # Calculate relative difference as a percentage
-            relative_diff = abs(ratio - base_ratio) / base_ratio * 100
-            max_relative_diff = 10  # Allow for a 10% difference
-            assert relative_diff < max_relative_diff, (
-                f"Memory to CPU ratio mismatch in family {family}: "
-                f"{base_name} has {base_ratio:.2f} GB/core, but {name} has "
-                f"{ratio:.2f} GB/core (difference: {relative_diff:.2f}%)"
+        for instance in family_instances:
+            ratio = instance.ram_gib / instance.cpu
+            assert ratio >= floor, (
+                f"Memory/vCPU below flagship floor in family {family}: "
+                f"{flagship.name} has {flagship_ratio:.2f} GiB/vCPU "
+                f"(floor {floor:.2f}), but {instance.name} has "
+                f"{ratio:.2f} GiB/vCPU"
             )
 
 
