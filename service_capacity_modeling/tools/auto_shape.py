@@ -282,12 +282,6 @@ def pull_family(
     results = []
     # Now build the instance shapes from the data
     for _, data in instance_jsons_dict.items():
-        name = data["InstanceType"]
-        try:
-            normalized_aws_size(name)
-        except AssertionError:
-            print(name)
-
         drive = _drive(disk_type, io_perf, data=data)
         vcpu_count = data["VCpuInfo"]["DefaultVCpus"]
         cpu_cores = data["VCpuInfo"]["DefaultCores"]
