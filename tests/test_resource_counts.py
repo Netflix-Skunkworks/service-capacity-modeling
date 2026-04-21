@@ -84,6 +84,63 @@ def test_attached_drive_iops_overflow_recalculates_per_node_iops():
     assert attached_drive.read_io_per_s < attached_drive.max_io_per_s
 
 
+def test_attached_drive_capacity_overflow_recalculates_per_node_ios():
+    cluster = compute_stateful_zone(
+        instance=M5_4XL,
+        drive=Drive(
+            name="tiny-ebs",
+            size_gib=0,
+            max_scale_size_gib=100,
+            max_scale_io_per_s=1_000,
+        ),
+        needed_cores=4,
+        needed_disk_gib=200,
+        needed_memory_gib=10,
+        needed_network_mbps=100,
+        required_disk_ios=lambda size, _count: (size * 3.0, 0.0),
+        max_node_disk_gib=lambda d: int(d.max_size_gib),
+    )
+
+    attached_drive = cluster.attached_drives[0]
+    assert cluster.node_count_context is not None
+    counts = {
+        k.value: v
+        for k, v in cluster.node_count_context.required_nodes_by_type.items()
+    }
+    assert counts["disk_capacity"] == 2
+    assert cluster.count == 2
+    assert attached_drive.size_gib == 100
+    assert attached_drive.read_io_per_s == 400
+
+
+def test_gp2_attached_drive_recomputes_per_node_size_after_count_increase():
+    cluster = compute_stateful_zone(
+        instance=M5_4XL,
+        drive=Drive(
+            name="gp2",
+            size_gib=0,
+            max_scale_size_gib=1_000,
+        ),
+        needed_cores=4,
+        needed_disk_gib=100,
+        needed_memory_gib=10,
+        needed_network_mbps=100,
+        required_disk_ios=lambda _size, count: (7500 / count, 0.0),
+        max_node_disk_gib=lambda d: int(d.max_size_gib),
+    )
+
+    attached_drive = cluster.attached_drives[0]
+    assert cluster.node_count_context is not None
+    counts = {
+        k.value: v
+        for k, v in cluster.node_count_context.required_nodes_by_type.items()
+    }
+    assert counts["disk_capacity"] == 3
+    assert cluster.count == 3
+    assert attached_drive.size_gib == 900
+    assert attached_drive.read_io_per_s == 2600
+
+
 def test_write_buffer_merged_into_memory():
     """Write buffer inflates memory count (same RAM, different slice)."""
     cluster = compute_stateful_zone(
