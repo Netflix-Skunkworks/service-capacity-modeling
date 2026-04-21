@@ -451,8 +451,10 @@ def parse_db_engines(engines_str: str) -> Sequence[str]:
 
 def _parse_family(family: str) -> Tuple[str, int, str]:
     series = family[0]
+    # Some families encode multiple numbers (e.g. "p6-b200" for the Blackwell
+    # B200 GPU). The first number is always the instance generation.
     num = re.findall(r"\d+", family)
-    assert len(num) == 1
+    assert len(num) >= 1
     gen = int(num[0])
 
     vendor = "intel"

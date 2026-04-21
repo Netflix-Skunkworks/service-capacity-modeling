@@ -242,6 +242,11 @@ INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
         "io_latency_curve": "6th-gen-ssd",
         "cpu_ipc_scale": SAPPHIRE_RAPIDS_IPC,
     },
+    "p6-b200": {
+        "iops_per_gib": "155.4/77.7",
+        "io_latency_curve": "6th-gen-ssd",
+        "cpu_ipc_scale": EMERALD_RAPIDS_IPC,
+    },
     "r4": {
         "iops_per_gib": None,
         "io_latency_curve": None,
