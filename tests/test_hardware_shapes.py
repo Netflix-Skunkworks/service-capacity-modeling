@@ -130,7 +130,13 @@ def test_memory_proportional_to_cpu() -> None:
     families = get_instance_families()
     region = shapes.region("us-east-1")
 
+    # AWS publishes p5.4xlarge with 16 GiB/vCPU while p5.48xlarge has
+    # 10.67 GiB/vCPU, breaking the family-wide proportionality assumption.
+    skip_families = {"p5"}
+
     for family, instances in families.items():
+        if family in skip_families:
+            continue
         if len(instances) <= 1:
             continue
 

@@ -222,26 +222,26 @@ INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
     #     'io_latency_curve': 'ssd',
     #     'cpu_ipc_scale': None
     # },
-    # "p4d": {
-    #     'iops_per_gib': None,
-    #     'io_latency_curve': '5th-gen-ssd',
-    #     'cpu_ipc_scale': None
-    # },
-    # "p4de": {
-    #     'iops_per_gib': None,
-    #     'io_latency_curve': '5th-gen-ssd',
-    #     'cpu_ipc_scale': None
-    # },
-    # "p5": {
-    #     'iops_per_gib': None,
-    #     'io_latency_curve':'6th-gen-ssd',
-    #     'cpu_ipc_scale': None
-    # },
-    # "p5en": {
-    #     'iops_per_gib': None,
-    #     'io_latency_curve': '6th-gen-ssd',
-    #     'cpu_ipc_scale': None
-    # },
+    "p4d": {
+        "iops_per_gib": "268.4/214.7",
+        "io_latency_curve": "5th-gen-ssd",
+        "cpu_ipc_scale": SKYLAKE_IPC,
+    },
+    "p4de": {
+        "iops_per_gib": "268.4/214.7",
+        "io_latency_curve": "5th-gen-ssd",
+        "cpu_ipc_scale": SKYLAKE_IPC,
+    },
+    "p5": {
+        "iops_per_gib": "155.4/77.7",
+        "io_latency_curve": "6th-gen-ssd",
+        "cpu_ipc_scale": MILAN_IPC,
+    },
+    "p5en": {
+        "iops_per_gib": "155.4/77.7",
+        "io_latency_curve": "6th-gen-ssd",
+        "cpu_ipc_scale": SAPPHIRE_RAPIDS_IPC,
+    },
     "r4": {
         "iops_per_gib": None,
         "io_latency_curve": None,

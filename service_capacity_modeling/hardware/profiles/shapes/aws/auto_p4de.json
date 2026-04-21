@@ -1,0 +1,28 @@
+{
+  "instances": {
+    "p4de.24xlarge": {
+      "name": "p4de.24xlarge",
+      "cpu": 96,
+      "cpu_cores": 48,
+      "cpu_ghz": 3.0,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 1098.63,
+      "net_mbps": 100000.0,
+      "drive": {
+        "name": "ephem",
+        "size_gib": 7451,
+        "read_io_per_s": 1999848,
+        "write_io_per_s": 1599730,
+        "single_tenant": true,
+        "read_io_latency_ms": {
+          "low": 0.08,
+          "mid": 0.125,
+          "high": 0.2,
+          "confidence": 0.9,
+          "minimum_value": 0.07,
+          "maximum_value": 2.0
+        }
+      }
+    }
+  }
+}
