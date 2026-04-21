@@ -34,8 +34,6 @@ from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
-from service_capacity_modeling.interface import NodeCountBreakdown
-from service_capacity_modeling.interface import NodeCountConstraint
 from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
@@ -52,6 +50,30 @@ logger = logging.getLogger(__name__)
 SECONDS_IN_YEAR = 31556926
 
 EFFECTIVE_DISK_PER_NODE_GIB = "effective_disk_per_node_gib"
+REQUIRED_NODES_BY_TYPE = "required_nodes_by_type"
+COUNT_BOTTLENECK = "count_bottleneck"
+
+
+def _select_count_bottleneck(
+    resource_counts: Dict[str, int],
+    cluster_size_count: int,
+    min_count: int,
+) -> Optional[str]:
+    if not resource_counts:
+        return None
+
+    resource_bottleneck = max(
+        resource_counts, key=lambda constraint: resource_counts[constraint]
+    )
+    resource_count = resource_counts[resource_bottleneck]
+    cluster_size_added = max(0, cluster_size_count - resource_count)
+    min_count_added = max(0, min_count - max(resource_count, cluster_size_count))
+
+    if min_count_added > 0:
+        return "min_count"
+    if cluster_size_added > 0:
+        return "cluster_size"
+    return resource_bottleneck
 
 
 def _count_breakdown(
@@ -63,18 +85,26 @@ def _count_breakdown(
     count_disk_iops: int,
     cluster_size_count: int,
     min_count: int,
-) -> NodeCountBreakdown:
-    return NodeCountBreakdown(
-        nodes_by_constraint={
-            NodeCountConstraint.cpu: count_cpu,
-            NodeCountConstraint.memory: count_memory,
-            NodeCountConstraint.network: count_network,
-            NodeCountConstraint.disk_capacity: count_disk_capacity,
-            NodeCountConstraint.disk_iops: count_disk_iops,
-            NodeCountConstraint.cluster_size: cluster_size_count,
-            NodeCountConstraint.min_count: min_count,
-        }
-    )
+) -> Dict[str, Any]:
+    resource_counts = {
+        "cpu": count_cpu,
+        "memory": count_memory,
+        "network": count_network,
+        "disk_capacity": count_disk_capacity,
+        "disk_iops": count_disk_iops,
+    }
+    return {
+        REQUIRED_NODES_BY_TYPE: {
+            **resource_counts,
+            "cluster_size": cluster_size_count,
+            "min_count": min_count,
+        },
+        COUNT_BOTTLENECK: _select_count_bottleneck(
+            resource_counts=resource_counts,
+            cluster_size_count=cluster_size_count,
+            min_count=min_count,
+        ),
+    }
 
 
 def _local_disk_node_counts(
@@ -126,7 +156,6 @@ def _attached_drive_plan(
     max_node_disk_gib: Callable[[Drive], int],
 ) -> Tuple[int, int, List[Drive]]:
     preliminary_resource_count = max(count_cpu, count_memory, count_network)
-    count_disk_capacity = 0
     preliminary_count = max(cluster_size(preliminary_resource_count), min_count)
 
     space_gib = max(1, math.ceil(needed_disk_gib / preliminary_count))
@@ -138,6 +167,7 @@ def _attached_drive_plan(
     io_gib = cloud_gib_for_io(drive, read_io + write_io, space_gib)
     ebs_gib = utils.next_n(max(1, io_gib, space_gib), n=100)
 
+    count_disk_capacity = 0
     max_size = max_node_disk_gib(drive)
     if max_size > 0:
         count_disk_capacity = math.ceil(needed_disk_gib / max_size)
@@ -722,9 +752,9 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
         cost,
     )
 
-    node_count_breakdown: Optional[NodeCountBreakdown] = None
+    cluster_params: Dict[str, Any] = {}
     if include_node_count_breakdown:
-        node_count_breakdown = _count_breakdown(
+        cluster_params = _count_breakdown(
             count_cpu=count_cpu,
             count_memory=count_memory,
             count_network=count_network,
@@ -740,7 +770,7 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
         instance=instance,
         attached_drives=attached_drives,
         annual_cost=cost,
-        node_count_breakdown=node_count_breakdown,
+        cluster_params=cluster_params,
     )
 
 

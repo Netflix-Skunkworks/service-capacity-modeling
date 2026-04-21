@@ -1144,7 +1144,6 @@ class CapacityRequirement(ExcludeUnsetModel):
     context: Dict[str, Any] = {}
 
 
-@enum_docstrings
 class NodeCountConstraint(StrEnum):
     cpu = "cpu"
     memory = "memory"
@@ -1155,40 +1154,9 @@ class NodeCountConstraint(StrEnum):
     min_count = "min_count"
 
 
-class NodeCountBreakdown(ExcludeUnsetModel):
-    nodes_by_constraint: Dict[NodeCountConstraint, int]
-
-    @computed_field(return_type=Optional[NodeCountConstraint])  # type: ignore
-    @property
-    def bottleneck(self) -> Optional[NodeCountConstraint]:
-        resource_constraints = (
-            NodeCountConstraint.cpu,
-            NodeCountConstraint.memory,
-            NodeCountConstraint.network,
-            NodeCountConstraint.disk_capacity,
-            NodeCountConstraint.disk_iops,
-        )
-        if not self.nodes_by_constraint:
-            return None
-
-        resource_bottleneck = max(
-            resource_constraints,
-            key=lambda constraint: self.nodes_by_constraint.get(constraint, 0),
-        )
-        resource_count = self.nodes_by_constraint.get(resource_bottleneck, 0)
-        cluster_size_count = self.nodes_by_constraint.get(
-            NodeCountConstraint.cluster_size, resource_count
-        )
-        min_count = self.nodes_by_constraint.get(NodeCountConstraint.min_count, 0)
-
-        min_count_added = max(0, min_count - max(resource_count, cluster_size_count))
-        cluster_size_added = max(0, cluster_size_count - resource_count)
-
-        if min_count_added > 0:
-            return NodeCountConstraint.min_count
-        if cluster_size_added > 0:
-            return NodeCountConstraint.cluster_size
-        return resource_bottleneck
+class NodeCountContext(ExcludeUnsetModel):
+    required_nodes_by_type: Dict[NodeCountConstraint, int]
+    count_bottleneck: Optional[NodeCountConstraint] = None
 
 
 class ClusterCapacity(ExcludeUnsetModel):
@@ -1197,7 +1165,6 @@ class ClusterCapacity(ExcludeUnsetModel):
     count: int
     instance: Instance
     attached_drives: Sequence[Drive] = ()
-    node_count_breakdown: Optional[NodeCountBreakdown] = None
     # When provisioning services we might need to signal they
     # should have certain configuration, for example flags that
     # affect durability shut off
@@ -1205,6 +1172,12 @@ class ClusterCapacity(ExcludeUnsetModel):
     # Override for models with non-standard cost calculation (e.g., Aurora
     # has shared storage so drive cost isn't multiplied by count)
     annual_cost_override: Optional[float] = None
+
+    @property
+    def node_count_context(self) -> Optional[NodeCountContext]:
+        if "required_nodes_by_type" not in self.cluster_params:
+            return None
+        return NodeCountContext.model_validate(self.cluster_params)
 
     @computed_field(return_type=float)  # type: ignore
     @property
