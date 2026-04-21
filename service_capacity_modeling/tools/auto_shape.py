@@ -145,6 +145,18 @@ def convert_gbps_to_mbps(bandwidth_gbps: float) -> float:
     return round(bandwidth_gbps * 1000)
 
 
+def aggregate_network_mbps(network_info: Dict[str, Any]) -> float:
+    """Sum BaselineBandwidthInGbps across every NetworkCard and convert to Mbps.
+
+    AWS reports per-card bandwidth; flagship EFA-enabled instances (p4d, p5,
+    p5en, p6-b200, trn1) ship with 4-32 cards, so reading only card[0] drops
+    the aggregate by the card count.
+    """
+    cards = network_info["NetworkCards"]
+    total_gbps = sum(card["BaselineBandwidthInGbps"] for card in cards)
+    return convert_gbps_to_mbps(total_gbps)
+
+
 def _engine_to_platform(engine: str) -> str:
     """
     Map RDS engine name to Platform enum value.
@@ -288,9 +300,7 @@ def pull_family(
             cpu_ghz=data["ProcessorInfo"]["SustainedClockSpeedInGhz"],
             cpu_ipc_scale=cpu_ipc_scale_factor,
             ram_gib=convert_mib_to_gib(data["MemoryInfo"]["SizeInMiB"]),
-            net_mbps=convert_gbps_to_mbps(
-                data["NetworkInfo"]["NetworkCards"][0]["BaselineBandwidthInGbps"]
-            ),
+            net_mbps=aggregate_network_mbps(data["NetworkInfo"]),
             drive=drive,
         )
 
@@ -317,9 +327,7 @@ def lookup_ec2_instance_specs(
             cpu_cores = ec2_data["VCpuInfo"]["DefaultCores"]
             cpu_ghz = ec2_data["ProcessorInfo"]["SustainedClockSpeedInGhz"]
             ram_gib = convert_mib_to_gib(ec2_data["MemoryInfo"]["SizeInMiB"])
-            net_mbps = convert_gbps_to_mbps(
-                ec2_data["NetworkInfo"]["NetworkCards"][0]["BaselineBandwidthInGbps"]
-            )
+            net_mbps = aggregate_network_mbps(ec2_data["NetworkInfo"])
             if debug:
                 print(
                     f"Looked up {instance_type} -> {vcpu_count} vCPUs, "

@@ -31,7 +31,7 @@
       "cpu_ghz": 3.6,
       "cpu_ipc_scale": 1.15,
       "ram_gib": 1953.12,
-      "net_mbps": 100000.0,
+      "net_mbps": 3200000.0,
       "drive": {
         "name": "ephem",
         "size_gib": 28312,
