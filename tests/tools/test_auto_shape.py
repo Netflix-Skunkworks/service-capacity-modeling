@@ -5,7 +5,7 @@ from pytest import approx
 
 from service_capacity_modeling.tools.auto_shape import deduce_cpu_perf
 from service_capacity_modeling.tools.auto_shape import deduce_io_perf
-from service_capacity_modeling.tools.auto_shape import guess_iops
+from service_capacity_modeling.tools.auto_shape import guess_iops_per_gib
 from service_capacity_modeling.tools.auto_shape import pull_family
 from tests.tools import mock_data
 
@@ -78,10 +78,10 @@ def test_pull_family_m7a(mock_ec2):
     assert shape.drive is None
 
 
-def test_guess_iops():
+def test_guess_iops_per_gib():
     should_exist = ("i4i", "m6id", "r6id", "i3", "i3en")
     for family in should_exist:
-        if guess_iops(family) is None:
+        if guess_iops_per_gib(family) is None:
             assert family == "did not exist"
 
-    assert guess_iops("random shape") is None
+    assert guess_iops_per_gib("random shape") is None
