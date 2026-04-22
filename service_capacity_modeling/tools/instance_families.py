@@ -10,6 +10,7 @@ from typing import Dict
 # Intel
 HASWELL_IPC = 0.85
 SKYLAKE_IPC = 1.0
+CASCADE_LAKE_IPC = SKYLAKE_IPC
 ICELAKE_IPC = SKYLAKE_IPC * 1.15
 SAPPHIRE_RAPIDS_IPC = ICELAKE_IPC * 1.12
 EMERALD_RAPIDS_IPC = SAPPHIRE_RAPIDS_IPC * 1.03
@@ -222,23 +223,19 @@ INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
     #     'io_latency_curve': 'ssd',
     #     'cpu_ipc_scale': None
     # },
-    # P-family CPU IPC is provisional: host CPUs feed the GPU rather than
-    # run Netflix's typical CPU-bound workloads, so vendor-family IPC
-    # constants (MILAN_IPC, SAPPHIRE_RAPIDS_IPC, ...) are a poor proxy.
-    # Leaving cpu_ipc_scale as None lets deduce_cpu_ipc_scale fall back on
-    # the SMT heuristic (1.0 for SMT, 1.5 for full cores); all P shapes are
-    # SMT so they land at 1.0 -- explicitly conservative. Lifecycle is
-    # "alpha" until we have real benchmarks for these host CPUs.
+    # Keep P-family shapes at lifecycle "alpha" while they remain experimental
+    # for planner use. p4d/p4de run on Cascade Lake, which we currently model
+    # the same as Skylake.
     "p4d": {
         "iops_per_gib": "268.4/214.7",
         "io_latency_curve": "5th-gen-ssd",
-        "cpu_ipc_scale": None,
+        "cpu_ipc_scale": CASCADE_LAKE_IPC,
         "lifecycle": "alpha",
     },
     "p4de": {
         "iops_per_gib": "268.4/214.7",
         "io_latency_curve": "5th-gen-ssd",
-        "cpu_ipc_scale": None,
+        "cpu_ipc_scale": CASCADE_LAKE_IPC,
         "lifecycle": "alpha",
     },
     "p5": {
