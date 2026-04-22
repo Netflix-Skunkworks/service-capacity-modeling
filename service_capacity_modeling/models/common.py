@@ -477,6 +477,45 @@ def network_services(
 
 
 # ---------------------------------------------------------------------------
+# Stateless region
+# ---------------------------------------------------------------------------
+
+
+def compute_stateless_region(  # pylint: disable=too-many-positional-arguments
+    instance: Instance,
+    needed_cores: int,
+    needed_memory_gib: float,
+    needed_network_mbps: float,
+    num_zones: int = 3,
+) -> RegionClusterCapacity:
+    """Computes a regional cluster of a stateless app
+
+    Basically just takes into cpu, memory, and network
+
+    returns: (count of instances, annual cost in dollars)
+    """
+
+    # Stateless apps basically just use CPU resources and network
+    count = max(2, math.ceil(needed_cores / instance.cpu))
+
+    # Now take into account the network bandwidth
+    count = max(count, math.ceil(needed_network_mbps / instance.net_mbps))
+
+    # Now take into account the needed memory
+    count = max(count, math.ceil(needed_memory_gib / instance.ram_gib))
+
+    # Try to keep zones balanced
+    count = utils.next_n(count, num_zones)
+
+    return RegionClusterCapacity(
+        cluster_type="stateless-app",
+        count=count,
+        instance=instance,
+        annual_cost=count * instance.annual_cost,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Stateful zone
 # ---------------------------------------------------------------------------
 
@@ -704,45 +743,6 @@ def cloud_gib_for_io(drive: Drive, total_ios: float, space_gib: float) -> int:
     if drive.name == "gp2":
         return gp2_gib_for_io(total_ios)
     return int(space_gib)
-
-
-# ---------------------------------------------------------------------------
-# Stateless region
-# ---------------------------------------------------------------------------
-
-
-def compute_stateless_region(  # pylint: disable=too-many-positional-arguments
-    instance: Instance,
-    needed_cores: int,
-    needed_memory_gib: float,
-    needed_network_mbps: float,
-    num_zones: int = 3,
-) -> RegionClusterCapacity:
-    """Computes a regional cluster of a stateless app
-
-    Basically just takes into cpu, memory, and network
-
-    returns: (count of instances, annual cost in dollars)
-    """
-
-    # Stateless apps basically just use CPU resources and network
-    count = max(2, math.ceil(needed_cores / instance.cpu))
-
-    # Now take into account the network bandwidth
-    count = max(count, math.ceil(needed_network_mbps / instance.net_mbps))
-
-    # Now take into account the needed memory
-    count = max(count, math.ceil(needed_memory_gib / instance.ram_gib))
-
-    # Try to keep zones balanced
-    count = utils.next_n(count, num_zones)
-
-    return RegionClusterCapacity(
-        cluster_type="stateless-app",
-        count=count,
-        instance=instance,
-        annual_cost=count * instance.annual_cost,
-    )
 
 
 class WorkingSetEstimator:
