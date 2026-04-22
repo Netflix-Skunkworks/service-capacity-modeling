@@ -541,6 +541,13 @@ def main(args: Any) -> int:
                     "RDS instances (db.* families) as they use managed storage.",
                     file=sys.stderr,
                 )
+            if args.lifecycle is not None:
+                print(
+                    "WARNING: --lifecycle is ignored for RDS instances (db.* "
+                    "families); extend pull_rds_family to plumb it through if "
+                    "you need per-engine lifecycle tags.",
+                    file=sys.stderr,
+                )
             cpu_perf = deduce_cpu_perf(
                 family=rds_family,
                 ipc_scale_factor=args.cpu_ipc_scale,
