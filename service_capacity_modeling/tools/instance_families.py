@@ -107,7 +107,7 @@ INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
     # },
     # "i3": {'iops_per_gib': None, 'io_latency_curve': 'ssd', 'cpu_ipc_scale': None},
     "i7i": {
-        "iops_per_gib": "170/93.5",
+        "iops_per_gib": None,  # falls back to aws_iops_per_gib["i7i"] defaults
         "io_latency_curve": "7th-gen-ephemeral",
         "cpu_ipc_scale": EMERALD_RAPIDS_IPC,
         "cpu_turbo_single_ghz": 4.0,
