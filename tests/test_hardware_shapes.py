@@ -1,10 +1,19 @@
 import re
 from typing import Dict
+from typing import FrozenSet
 from typing import List
 from typing import Tuple
 
+import pytest
+
 from service_capacity_modeling.hardware import Instance
 from service_capacity_modeling.hardware import shapes
+
+# Families where AWS deliberately ships smaller sizes with extra RAM/vCPU
+# (e.g. p5.4xlarge = 16 GiB/vCPU vs p5.48xlarge = 10.67). These fail the
+# strict within-family ratio test but still obey the weaker "monotone
+# non-increasing as vCPU grows" invariant enforced below.
+ASYMMETRIC_RAM_FAMILIES: FrozenSet[str] = frozenset({"p5"})
 
 
 def test_r6id() -> None:
@@ -125,36 +134,49 @@ def test_performance_increases_with_generation() -> None:
     )
 
 
-def test_memory_proportional_to_cpu() -> None:
-    """Test that memory per vCPU is non-decreasing as instance size shrinks.
+def _multi_size_families() -> List[str]:
+    return [f for f, insts in get_instance_families().items() if len(insts) > 1]
 
-    AWS's flagship (largest) size in a family sets the baseline ratio; smaller
-    sizes sometimes ship with extra RAM per vCPU as a development/debug
-    concession (e.g. p5.4xlarge at 16 GiB/vCPU vs p5.48xlarge at 10.67). A
-    smaller instance with *less* memory per vCPU than the flagship is still a
-    real bug worth catching.
-    """
-    families = get_instance_families()
+
+@pytest.mark.parametrize(
+    "family",
+    sorted(f for f in _multi_size_families() if f not in ASYMMETRIC_RAM_FAMILIES),
+)
+def test_memory_uniform_ratio(family: str) -> None:
+    """Every size in the family shares the same RAM/vCPU ratio within 10%."""
     region = shapes.region("us-east-1")
-    tolerance = 0.1  # 10% slack below flagship ratio
+    instances = [region.instances[name] for name, _ in get_instance_families()[family]]
 
-    for family, instances in families.items():
-        if len(instances) <= 1:
-            continue
+    base = instances[0]
+    base_ratio = base.ram_gib / base.cpu
+    for instance in instances[1:]:
+        ratio = instance.ram_gib / instance.cpu
+        relative_diff = abs(ratio - base_ratio) / base_ratio
+        assert relative_diff < 0.1, (
+            f"{family}: {base.name} has {base_ratio:.2f} GiB/vCPU, "
+            f"{instance.name} has {ratio:.2f} — relative diff "
+            f"{relative_diff:.1%} exceeds 10%"
+        )
 
-        family_instances = [region.instances[name] for name, _ in instances]
-        flagship = max(family_instances, key=lambda i: i.cpu)
-        flagship_ratio = flagship.ram_gib / flagship.cpu
-        floor = flagship_ratio * (1 - tolerance)
 
-        for instance in family_instances:
-            ratio = instance.ram_gib / instance.cpu
-            assert ratio >= floor, (
-                f"Memory/vCPU below flagship floor in family {family}: "
-                f"{flagship.name} has {flagship_ratio:.2f} GiB/vCPU "
-                f"(floor {floor:.2f}), but {instance.name} has "
-                f"{ratio:.2f} GiB/vCPU"
-            )
+@pytest.mark.parametrize("family", sorted(ASYMMETRIC_RAM_FAMILIES))
+def test_memory_non_increasing_as_size_grows(family: str) -> None:
+    """Within an asymmetric family, RAM/vCPU must not rise as vCPU grows.
+
+    Smaller sizes may ship with extra RAM per vCPU (AWS debug/dev pattern);
+    a smaller size with *less* RAM per vCPU than a larger one is a bug.
+    """
+    region = shapes.region("us-east-1")
+    instances = sorted(
+        (region.instances[name] for name, _ in get_instance_families()[family]),
+        key=lambda i: i.cpu,
+    )
+    ratios = [(i.name, i.ram_gib / i.cpu) for i in instances]
+    for (small_name, small_ratio), (big_name, big_ratio) in zip(ratios, ratios[1:]):
+        assert small_ratio >= big_ratio * 0.9, (
+            f"{family}: {small_name} has {small_ratio:.2f} GiB/vCPU but larger "
+            f"{big_name} has {big_ratio:.2f} — RAM/vCPU must not increase with size"
+        )
 
 
 def test_network_bandwidth_scales_with_size() -> None:
