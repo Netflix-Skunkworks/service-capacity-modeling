@@ -1,4 +1,4 @@
-"""Tests for opt-in node-count explainability in compute_stateful_zone."""
+"""Tests for node-count explainability in compute_stateful_zone."""
 
 import pytest
 
@@ -39,7 +39,6 @@ def test_count_bottleneck_resource(cores, mem, disk, net, expected_bottleneck):
         needed_disk_gib=disk,
         needed_memory_gib=mem,
         needed_network_mbps=net,
-        include_node_count_breakdown=True,
     )
     context = cluster.node_count_context
     assert context is not None
@@ -55,7 +54,6 @@ def test_storage_bound_local():
         needed_disk_gib=20_000,
         needed_memory_gib=10,
         needed_network_mbps=100,
-        include_node_count_breakdown=True,
     )
     counts = cluster.cluster_params["required_nodes_by_type"]
     assert cluster.cluster_params["resource_bottleneck"] == "disk_capacity"
@@ -76,7 +74,6 @@ def test_attached_drive_iops_overflow_recalculates_per_node_iops():
         needed_memory_gib=10,
         needed_network_mbps=100,
         required_disk_ios=lambda _size, count: (1200 / count, 0.0),
-        include_node_count_breakdown=True,
     )
 
     attached_drive = cluster.attached_drives[0]
@@ -99,23 +96,8 @@ def test_write_buffer_merged_into_memory():
         reserve_memory=lambda x: 4.0,
         write_buffer=lambda x: 0.25,  # 0.25 GiB per node
         required_write_buffer_gib=2.0,  # ceil(2.0/0.25) = 8 nodes
-        include_node_count_breakdown=True,
     )
     assert cluster.cluster_params["required_nodes_by_type"]["memory"] == 8
-
-
-def test_breakdown_is_opt_in():
-    cluster = compute_stateful_zone(
-        instance=M5_4XL,
-        drive=EBS,
-        needed_cores=48,
-        needed_disk_gib=100,
-        needed_memory_gib=10,
-        needed_network_mbps=100,
-    )
-    assert cluster.node_count_context is None
-    assert "required_nodes_by_type" not in cluster.cluster_params
-    assert "resource_bottleneck" not in cluster.cluster_params
 
 
 def test_cluster_size_is_reported_when_rounding_adds_nodes():
@@ -127,7 +109,6 @@ def test_cluster_size_is_reported_when_rounding_adds_nodes():
         needed_memory_gib=10,
         needed_network_mbps=100,
         cluster_size=lambda x: x if x % 2 == 0 else x + 1,  # round up to even
-        include_node_count_breakdown=True,
     )
     counts = cluster.cluster_params["required_nodes_by_type"]
     assert counts["cpu"] == 3
@@ -146,7 +127,6 @@ def test_min_count_is_reported_when_it_adds_nodes():
         needed_memory_gib=10,
         needed_network_mbps=100,
         min_count=6,
-        include_node_count_breakdown=True,
     )
     counts = cluster.cluster_params["required_nodes_by_type"]
     assert counts["cpu"] == 1
@@ -165,7 +145,6 @@ def test_topology_constraints_do_not_override_stronger_resource_limits():
         needed_memory_gib=10,
         needed_network_mbps=100,
         min_count=6,
-        include_node_count_breakdown=True,
     )
     counts = cluster.cluster_params["required_nodes_by_type"]
     assert counts["cpu"] == 40
