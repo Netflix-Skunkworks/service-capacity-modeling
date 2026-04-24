@@ -1144,6 +1144,89 @@ class CapacityRequirement(ExcludeUnsetModel):
     context: Dict[str, Any] = {}
 
 
+class NodeCountConstraint(StrEnum):
+    cpu = "cpu"
+    memory = "memory"
+    network = "network"
+    disk_capacity = "disk_capacity"
+    disk_iops = "disk_iops"
+    cluster_size = "cluster_size"
+    min_count = "min_count"
+
+
+# Resource constraints (cpu/memory/network/disk_*) are the inputs to the
+# bottleneck derivation; cluster_size and min_count are topology floors
+# applied afterwards.
+_RESOURCE_CONSTRAINTS = frozenset(
+    {
+        NodeCountConstraint.cpu,
+        NodeCountConstraint.memory,
+        NodeCountConstraint.network,
+        NodeCountConstraint.disk_capacity,
+        NodeCountConstraint.disk_iops,
+    }
+)
+
+
+class NodeCountContext(ExcludeUnsetModel):
+    """Per-constraint breakdown of node counts for a stateful-zone plan.
+
+    JSON shape (stable contract for external readers including non-Python
+    consumers):
+      {
+        "required_nodes_by_type": {
+          "cpu": <int>, "memory": <int>, "network": <int>,
+          "disk_capacity": <int>, "disk_iops": <int>,
+          "cluster_size": <int>, "min_count": <int>
+        },
+        "resource_bottleneck": "cpu" | "memory" | "network" |
+                               "disk_capacity" | "disk_iops" | null
+      }
+    `resource_bottleneck` is derived from `required_nodes_by_type` — the
+    resource constraint with the highest count. It is serialized for reader
+    convenience but recomputed on deserialization; any stale value in a
+    hand-edited JSON is ignored.
+    """
+
+    required_nodes_by_type: Dict[NodeCountConstraint, int]
+
+    @computed_field(return_type=Optional[NodeCountConstraint])  # type: ignore
+    @property
+    def resource_bottleneck(self) -> Optional[NodeCountConstraint]:
+        counts = {
+            k: v
+            for k, v in self.required_nodes_by_type.items()
+            if k in _RESOURCE_CONSTRAINTS
+        }
+        if not counts:
+            return None
+        return max(counts, key=lambda c: counts[c])
+
+    @classmethod
+    def from_counts(
+        cls,
+        *,
+        count_cpu: int,
+        count_memory: int,
+        count_network: int,
+        count_disk_capacity: int,
+        count_disk_iops: int,
+        cluster_size_count: int,
+        min_count: int,
+    ) -> "NodeCountContext":
+        return cls(
+            required_nodes_by_type={
+                NodeCountConstraint.cpu: count_cpu,
+                NodeCountConstraint.memory: count_memory,
+                NodeCountConstraint.network: count_network,
+                NodeCountConstraint.disk_capacity: count_disk_capacity,
+                NodeCountConstraint.disk_iops: count_disk_iops,
+                NodeCountConstraint.cluster_size: cluster_size_count,
+                NodeCountConstraint.min_count: min_count,
+            },
+        )
+
+
 class ClusterCapacity(ExcludeUnsetModel):
     cluster_type: str
 
@@ -1157,6 +1240,12 @@ class ClusterCapacity(ExcludeUnsetModel):
     # Override for models with non-standard cost calculation (e.g., Aurora
     # has shared storage so drive cost isn't multiplied by count)
     annual_cost_override: Optional[float] = None
+
+    @property
+    def node_count_context(self) -> Optional[NodeCountContext]:
+        if "required_nodes_by_type" not in self.cluster_params:
+            return None
+        return NodeCountContext.model_validate(self.cluster_params)
 
     @computed_field(return_type=float)  # type: ignore
     @property
