@@ -62,6 +62,23 @@ latency_curve_ms: Dict[str, FixedInterval] = {
 #
 # To derive: take the largest size's total IOPS from the AWS docs and divide by
 # its total instance-store GiB.
+#
+# ---- Accuracy note ----
+#
+# A single per-GiB rate per family is an approximation: AWS's actual published
+# rate varies slightly by drive SKU within a family (e.g. m6id's 118 GB drive
+# rates ~305/GiB, its 1900 GB drive rates ~303/GiB). The rates here are
+# calibrated to match AWS's largest drive, which is where the rate stabilizes.
+#
+# Expected drift against AWS published values after regeneration:
+#   - uniform-drive families (p*, trn*, dl1, f2): ~0% (exact)
+#   - linearly-scaling NVMe families (m6id, r6id, c6id, i4i, i7i): <1%
+#   - non-linear families (c5d at 12xl/24xl): up to ~3%
+#   - pre-existing AWS irregularities (i3 writes, m5d 600 GB drives): up to ~3%
+#
+# All within capacity-planning noise. If a downstream model ever needs tighter
+# accuracy for a specific family, add a per-drive-SKU override rather than
+# retuning this table.
 aws_iops_per_gib: Dict[str, Tuple[float, float]] = {
     # General Purpose and Memory Share IOPs
     "5ad": (421.4, 207.1),
