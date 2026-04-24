@@ -104,8 +104,7 @@ def test_attached_drive_capacity_overflow_recalculates_per_node_ios():
     attached_drive = cluster.attached_drives[0]
     assert cluster.node_count_context is not None
     counts = {
-        k.value: v
-        for k, v in cluster.node_count_context.required_nodes_by_type.items()
+        k.value: v for k, v in cluster.node_count_context.required_nodes_by_type.items()
     }
     assert counts["disk_capacity"] == 2
     assert cluster.count == 2
@@ -132,8 +131,7 @@ def test_gp2_attached_drive_recomputes_per_node_size_after_count_increase():
     attached_drive = cluster.attached_drives[0]
     assert cluster.node_count_context is not None
     counts = {
-        k.value: v
-        for k, v in cluster.node_count_context.required_nodes_by_type.items()
+        k.value: v for k, v in cluster.node_count_context.required_nodes_by_type.items()
     }
     assert counts["disk_capacity"] == 3
     assert cluster.count == 3
