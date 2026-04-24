@@ -1,10 +1,19 @@
 import re
 from typing import Dict
+from typing import FrozenSet
 from typing import List
 from typing import Tuple
 
+import pytest
+
 from service_capacity_modeling.hardware import Instance
 from service_capacity_modeling.hardware import shapes
+
+# Families where AWS deliberately ships smaller sizes with extra RAM/vCPU
+# (e.g. p5.4xlarge = 16 GiB/vCPU vs p5.48xlarge = 10.67). These fail the
+# strict within-family ratio test but still obey the weaker "monotone
+# non-increasing as vCPU grows" invariant enforced below.
+ASYMMETRIC_RAM_FAMILIES: FrozenSet[str] = frozenset({"p5"})
 
 
 def test_r6id() -> None:
@@ -125,33 +134,49 @@ def test_performance_increases_with_generation() -> None:
     )
 
 
-def test_memory_proportional_to_cpu() -> None:
-    """Test that memory is proportional to CPU for instances within the same family."""
-    families = get_instance_families()
+def _multi_size_families() -> List[str]:
+    return [f for f, insts in get_instance_families().items() if len(insts) > 1]
+
+
+@pytest.mark.parametrize(
+    "family",
+    sorted(f for f in _multi_size_families() if f not in ASYMMETRIC_RAM_FAMILIES),
+)
+def test_memory_uniform_ratio(family: str) -> None:
+    """Every size in the family shares the same RAM/vCPU ratio within 10%."""
     region = shapes.region("us-east-1")
+    instances = [region.instances[name] for name, _ in get_instance_families()[family]]
 
-    for family, instances in families.items():
-        if len(instances) <= 1:
-            continue
+    base = instances[0]
+    base_ratio = base.ram_gib / base.cpu
+    for instance in instances[1:]:
+        ratio = instance.ram_gib / instance.cpu
+        relative_diff = abs(ratio - base_ratio) / base_ratio
+        assert relative_diff < 0.1, (
+            f"{family}: {base.name} has {base_ratio:.2f} GiB/vCPU, "
+            f"{instance.name} has {ratio:.2f} — relative diff "
+            f"{relative_diff:.1%} exceeds 10%"
+        )
 
-        # Calculate memory per CPU core for all instances in this family
-        mem_to_cpu_ratios: List[Tuple[str, float]] = []
-        for instance_name, _ in instances:
-            instance = region.instances[instance_name]
-            ratio = instance.ram_gib / instance.cpu
-            mem_to_cpu_ratios.append((instance_name, ratio))
 
-        # All ratios should be approximately the same within a family
-        base_name, base_ratio = mem_to_cpu_ratios[0]
-        for name, ratio in mem_to_cpu_ratios[1:]:
-            # Calculate relative difference as a percentage
-            relative_diff = abs(ratio - base_ratio) / base_ratio * 100
-            max_relative_diff = 10  # Allow for a 10% difference
-            assert relative_diff < max_relative_diff, (
-                f"Memory to CPU ratio mismatch in family {family}: "
-                f"{base_name} has {base_ratio:.2f} GB/core, but {name} has "
-                f"{ratio:.2f} GB/core (difference: {relative_diff:.2f}%)"
-            )
+@pytest.mark.parametrize("family", sorted(ASYMMETRIC_RAM_FAMILIES))
+def test_memory_non_increasing_as_size_grows(family: str) -> None:
+    """Within an asymmetric family, RAM/vCPU must not rise as vCPU grows.
+
+    Smaller sizes may ship with extra RAM per vCPU (AWS debug/dev pattern);
+    a smaller size with *less* RAM per vCPU than a larger one is a bug.
+    """
+    region = shapes.region("us-east-1")
+    instances = sorted(
+        (region.instances[name] for name, _ in get_instance_families()[family]),
+        key=lambda i: i.cpu,
+    )
+    ratios = [(i.name, i.ram_gib / i.cpu) for i in instances]
+    for (small_name, small_ratio), (big_name, big_ratio) in zip(ratios, ratios[1:]):
+        assert small_ratio >= big_ratio * 0.9, (
+            f"{family}: {small_name} has {small_ratio:.2f} GiB/vCPU but larger "
+            f"{big_name} has {big_ratio:.2f} — RAM/vCPU must not increase with size"
+        )
 
 
 def test_network_bandwidth_scales_with_size() -> None:

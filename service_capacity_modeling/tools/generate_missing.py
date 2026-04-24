@@ -23,8 +23,8 @@ def build_command(family: str, params: Dict[str, Any], output_path: Path) -> Lis
     cmd = [sys.executable, str(auto_shape_path)]
 
     # Add optional parameters if they are provided
-    if params.get("xl_iops") is not None:
-        cmd.extend(["--xl-iops", params["xl_iops"]])
+    if params.get("iops_per_gib") is not None:
+        cmd.extend(["--iops-per-gib", params["iops_per_gib"]])
 
     if params.get("io_latency_curve") is not None:
         cmd.extend(["--io-latency-curve", params["io_latency_curve"]])
@@ -33,6 +33,9 @@ def build_command(family: str, params: Dict[str, Any], output_path: Path) -> Lis
         cpu_ipc_scale = float(params["cpu_ipc_scale"])
         rounded_cpu_ipc_scale = float(f"{cpu_ipc_scale:.2f}")
         cmd.extend(["--cpu-ipc-scale", str(rounded_cpu_ipc_scale)])
+
+    if params.get("lifecycle") is not None:
+        cmd.extend(["--lifecycle", params["lifecycle"]])
 
     # Add output path
     cmd.extend(["--output-path", str(output_path)])

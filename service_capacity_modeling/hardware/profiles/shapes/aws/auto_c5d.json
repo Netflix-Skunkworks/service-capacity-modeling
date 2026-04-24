@@ -11,8 +11,8 @@
       "drive": {
         "name": "ephem",
         "size_gib": 47,
-        "read_io_per_s": 20000,
-        "write_io_per_s": 9000,
+        "read_io_per_s": 20215,
+        "write_io_per_s": 9094,
         "single_tenant": false,
         "read_io_latency_ms": {
           "low": 0.08,
@@ -35,8 +35,8 @@
       "drive": {
         "name": "ephem",
         "size_gib": 93,
-        "read_io_per_s": 40000,
-        "write_io_per_s": 18000,
+        "read_io_per_s": 39999,
+        "write_io_per_s": 17996,
         "single_tenant": false,
         "read_io_latency_ms": {
           "low": 0.08,
@@ -59,8 +59,8 @@
       "drive": {
         "name": "ephem",
         "size_gib": 186,
-        "read_io_per_s": 80000,
-        "write_io_per_s": 36000,
+        "read_io_per_s": 79999,
+        "write_io_per_s": 35991,
         "single_tenant": false,
         "read_io_latency_ms": {
           "low": 0.08,
@@ -83,8 +83,8 @@
       "drive": {
         "name": "ephem",
         "size_gib": 373,
-        "read_io_per_s": 160000,
-        "write_io_per_s": 72000,
+        "read_io_per_s": 160427,
+        "write_io_per_s": 72176,
         "single_tenant": false,
         "read_io_latency_ms": {
           "low": 0.08,
@@ -107,8 +107,8 @@
       "drive": {
         "name": "ephem",
         "size_gib": 838,
-        "read_io_per_s": 360000,
-        "write_io_per_s": 162000,
+        "read_io_per_s": 360424,
+        "write_io_per_s": 162153,
         "single_tenant": true,
         "read_io_latency_ms": {
           "low": 0.08,
@@ -131,8 +131,8 @@
       "drive": {
         "name": "ephem",
         "size_gib": 1676,
-        "read_io_per_s": 480000,
-        "write_io_per_s": 216000,
+        "read_io_per_s": 720848,
+        "write_io_per_s": 324306,
         "single_tenant": true,
         "read_io_latency_ms": {
           "low": 0.08,
@@ -155,8 +155,8 @@
       "drive": {
         "name": "ephem",
         "size_gib": 1676,
-        "read_io_per_s": 720000,
-        "write_io_per_s": 324000,
+        "read_io_per_s": 720848,
+        "write_io_per_s": 324306,
         "single_tenant": true,
         "read_io_latency_ms": {
           "low": 0.08,
@@ -179,8 +179,8 @@
       "drive": {
         "name": "ephem",
         "size_gib": 3353,
-        "read_io_per_s": 960000,
-        "write_io_per_s": 432000,
+        "read_io_per_s": 1442125,
+        "write_io_per_s": 648806,
         "single_tenant": true,
         "read_io_latency_ms": {
           "low": 0.08,

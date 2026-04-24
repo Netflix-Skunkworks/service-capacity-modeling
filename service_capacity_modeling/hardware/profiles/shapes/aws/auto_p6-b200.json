@@ -1,0 +1,29 @@
+{
+  "instances": {
+    "p6-b200.48xlarge": {
+      "name": "p6-b200.48xlarge",
+      "cpu": 192,
+      "cpu_cores": 96,
+      "cpu_ghz": 2.4,
+      "cpu_ipc_scale": 1.0,
+      "ram_gib": 1953.12,
+      "net_mbps": 1600000.0,
+      "drive": {
+        "name": "ephem",
+        "size_gib": 28312,
+        "read_io_per_s": 4399685,
+        "write_io_per_s": 2199842,
+        "single_tenant": true,
+        "read_io_latency_ms": {
+          "low": 0.1,
+          "mid": 0.125,
+          "high": 0.17,
+          "confidence": 0.9,
+          "minimum_value": 0.05,
+          "maximum_value": 2.0
+        }
+      },
+      "lifecycle": "alpha"
+    }
+  }
+}

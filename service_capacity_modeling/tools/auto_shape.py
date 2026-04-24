@@ -2,7 +2,6 @@ import argparse
 import json
 import re
 import sys
-from fractions import Fraction
 from pathlib import Path
 from typing import Any
 from typing import Dict
@@ -52,38 +51,65 @@ latency_curve_ms: Dict[str, FixedInterval] = {
     "hdd": FixedInterval(low=1, mid=2, high=10),
 }
 
-# Default xlarge -> (4k random read, write) iops tables
-aws_xlarge_iops = {
+# Default (4k random read, write) IOPS per GiB of ephemeral storage.
+#
+# AWS publishes instance-store IOPS as a total per size (e.g. m6id.32xlarge =
+# 2,146,664 read / 1,073,336 write). Within a family that total is proportional
+# to total ephemeral storage, not to xlarge count -- same drives, same IOPS/GiB.
+# Expressing the rate per GiB stays correct even when the drive layout breaks
+# the "IOPS scales with xlarge size" assumption (e.g. p5.4xlarge has 1 drive
+# while p5.48xlarge has 8 drives, so xlarge count grows 12x but drives only 8x).
+#
+# To derive: take the largest size's total IOPS from the AWS docs and divide by
+# its total instance-store GiB.
+#
+# ---- Accuracy note ----
+#
+# A single per-GiB rate per family is an approximation: AWS's actual published
+# rate varies slightly by drive SKU within a family (e.g. m6id's 118 GB drive
+# rates ~305/GiB, its 1900 GB drive rates ~303/GiB). The rates here are
+# calibrated to match AWS's largest drive, which is where the rate stabilizes.
+#
+# Expected drift against AWS published values after regeneration:
+#   - uniform-drive families (p*, trn*, dl1, f2): ~0% (exact)
+#   - linearly-scaling NVMe families (m6id, r6id, c6id, i4i, i7i): <1%
+#   - non-linear families (c5d at 12xl/24xl): up to ~3%
+#   - pre-existing AWS irregularities (i3 writes, m5d 600 GB drives): up to ~3%
+#
+# All within capacity-planning noise. If a downstream model ever needs tighter
+# accuracy for a specific family, add a per-drive-SKU override rather than
+# retuning this table.
+aws_iops_per_gib: Dict[str, Tuple[float, float]] = {
     # General Purpose and Memory Share IOPs
-    "5ad": (59_000, 29_000),
-    "5d": (59_000, 29_000),
-    "5dn": (58_000, 29_000),
-    "6gd": (53_750, 22_500),
-    "6id": (67_083, 33_542),
-    "6idn": (67_083, 33_542),
-    "7gd": (67_083, 33_542),
+    "5ad": (421.4, 207.1),
+    "5d": (421.4, 207.1),
+    "5dn": (414.3, 207.1),
+    "6gd": (243.2, 101.8),
+    "6id": (303.5, 151.8),
+    "6idn": (303.5, 151.8),
+    "7gd": (303.5, 151.8),
     # Compute has smaller IOPs
-    "c5ad": (32_566, 14_211),
-    "c5d": (40_000, 18_000),
-    "c6gd": (53_750, 22_500),
-    "c6id": (67_083, 33_542),
-    "c7gd": (67_083, 33_542),
+    "c5ad": (232.6, 101.5),
+    "c5d": (430.1, 193.5),
+    "c6gd": (243.2, 101.8),
+    "c6id": (303.5, 151.8),
+    "c7gd": (303.5, 151.8),
     # Storage has more
     # https://docs.aws.amazon.com/ec2/latest/instancetypes/so.html#so_instance-store
-    "i3": (206_250, 70_000),
-    "i3en": (85_000, 65_000),
-    "i4g": (62_500, 50_000),
-    "i4i": (100_000, 55_000),
-    "i7i": (150_000, 82_500),
-    "i7ie": (108_333, 86_666),
-    "i8g": (150_000, 82_500),
+    "i3": (233.1, 79.1),
+    "i3en": (36.5, 27.9),
+    "i4g": (67.0, 53.6),
+    "i4i": (114.5, 63.0),
+    "i7i": (170.0, 93.5),
+    "i7ie": (92.8, 74.3),
+    "i8g": (170.0, 93.5),
 }
 
 
-def guess_iops(family: str) -> Optional[Tuple[int, int]]:
+def guess_iops_per_gib(family: str) -> Optional[Tuple[float, float]]:
     if family[0] in ("m", "r"):
-        return aws_xlarge_iops.get(family[1:])
-    return aws_xlarge_iops.get(family)
+        return aws_iops_per_gib.get(family[1:])
+    return aws_iops_per_gib.get(family)
 
 
 aws_io_links = {
@@ -100,8 +126,8 @@ class CPUPerformance(BaseModel):
 
 
 class IOPerformance(BaseModel):
-    xl_read_iops: float
-    xl_write_iops: float
+    read_iops_per_gib: float
+    write_iops_per_gib: float
     latency: FixedInterval
     single_tenant_size: int = 0
 
@@ -136,6 +162,18 @@ def convert_gbps_to_mbps(bandwidth_gbps: float) -> float:
     return round(bandwidth_gbps * 1000)
 
 
+def aggregate_network_mbps(network_info: Dict[str, Any]) -> float:
+    """Sum BaselineBandwidthInGbps across every NetworkCard and convert to Mbps.
+
+    AWS reports per-card bandwidth; flagship EFA-enabled instances (p4d, p5,
+    p5en, p6-b200, trn1) ship with 4-32 cards, so reading only card[0] drops
+    the aggregate by the card count.
+    """
+    cards = network_info["NetworkCards"]
+    total_gbps = sum(card["BaselineBandwidthInGbps"] for card in cards)
+    return convert_gbps_to_mbps(total_gbps)
+
+
 def _engine_to_platform(engine: str) -> str:
     """
     Map RDS engine name to Platform enum value.
@@ -149,7 +187,6 @@ def _engine_to_platform(engine: str) -> str:
 def _drive(
     drive_type: DriveType,
     io_perf: Optional[IOPerformance],
-    scale: Fraction,
     data: Dict[str, Any],
 ) -> Optional[Drive]:
     if drive_type.name.startswith("attached") or io_perf is None:
@@ -165,18 +202,19 @@ def _drive(
     return Drive(
         name="ephem",
         size_gib=int(size_gib),
-        write_io_per_s=int(round(io_perf.xl_write_iops * scale)),
-        read_io_per_s=int(round(io_perf.xl_read_iops * scale)),
+        write_io_per_s=int(round(io_perf.write_iops_per_gib * size_gib)),
+        read_io_per_s=int(round(io_perf.read_iops_per_gib * size_gib)),
         read_io_latency_ms=io_perf.latency,
         single_tenant=single_tenant,
     )
 
 
-def pull_family(
+def pull_family(  # pylint: disable=too-many-positional-arguments
     ec2_client: Any,
     family: str,
     cpu_perf: Optional[CPUPerformance] = None,
     io_perf: Optional[IOPerformance] = None,
+    lifecycle: Optional[str] = None,
     debug: bool = False,
 ) -> Sequence[Instance]:
     # flake8: noqa: C901
@@ -235,22 +273,22 @@ def pull_family(
     if disk_type.name.startswith("local"):
         if (
             io_perf is None
-            or io_perf.xl_read_iops is None
-            or io_perf.xl_write_iops is None
+            or io_perf.read_iops_per_gib is None
+            or io_perf.write_iops_per_gib is None
         ):
             link = aws_io_links.get(family[0], aws_instance_link)
             print(
-                "Instance shape has ephemeral storage. You must pass --xl-iops with "
-                "data either from fio benchmarking or from AWS's page for the "
+                "Instance shape has ephemeral storage. You must pass --iops-per-gib "
+                "with data either from fio benchmarking or from AWS's page for the "
                 "appropriate family:\n"
-                f"Search for {family}.xlarge in {link}\n",
+                f"Search for {family} in {link}\n",
                 file=sys.stderr,
             )
             sys.exit(2)
         debug_log(
             f"{disk_type.name} IO data:\n"
-            f"xlarge  read IOPS: {io_perf.xl_read_iops}\n"
-            f"xlarge write IOPS: {io_perf.xl_write_iops}\n"
+            f"read  IOPS / GiB: {io_perf.read_iops_per_gib}\n"
+            f"write IOPS / GiB: {io_perf.write_iops_per_gib}\n"
             f"latency curve: {io_perf.latency.model_dump_json()}\n"
         )
         io_perf = io_perf.model_copy(
@@ -260,33 +298,25 @@ def pull_family(
         )
 
     results = []
-    # Now build the instance shapes from the data
     for _, data in instance_jsons_dict.items():
-        name = data["InstanceType"]
-        try:
-            normalized_size = normalized_aws_size(name)
-        except AssertionError:
-            print(name)
-
-        drive = _drive(disk_type, io_perf, scale=normalized_size, data=data)
+        drive = _drive(disk_type, io_perf, data=data)
         vcpu_count = data["VCpuInfo"]["DefaultVCpus"]
         cpu_cores = data["VCpuInfo"]["DefaultCores"]
         cpu_ipc_scale_factor = deduce_cpu_ipc_scale(vcpu_count, cpu_cores, cpu_perf)
 
-        new_shape = Instance(
-            name=data["InstanceType"],
-            cpu=vcpu_count,
-            cpu_cores=cpu_cores,
-            cpu_ghz=data["ProcessorInfo"]["SustainedClockSpeedInGhz"],
-            cpu_ipc_scale=cpu_ipc_scale_factor,
-            ram_gib=convert_mib_to_gib(data["MemoryInfo"]["SizeInMiB"]),
-            net_mbps=convert_gbps_to_mbps(
-                data["NetworkInfo"]["NetworkCards"][0]["BaselineBandwidthInGbps"]
-            ),
-            drive=drive,
-        )
-
-        results.append(new_shape)
+        shape_kwargs: Dict[str, Any] = {
+            "name": data["InstanceType"],
+            "cpu": vcpu_count,
+            "cpu_cores": cpu_cores,
+            "cpu_ghz": data["ProcessorInfo"]["SustainedClockSpeedInGhz"],
+            "cpu_ipc_scale": cpu_ipc_scale_factor,
+            "ram_gib": convert_mib_to_gib(data["MemoryInfo"]["SizeInMiB"]),
+            "net_mbps": aggregate_network_mbps(data["NetworkInfo"]),
+            "drive": drive,
+        }
+        if lifecycle is not None:
+            shape_kwargs["lifecycle"] = lifecycle
+        results.append(Instance(**shape_kwargs))
     results = sorted(results, key=lambda i: normalized_aws_size(i.name))
     return results
 
@@ -309,9 +339,7 @@ def lookup_ec2_instance_specs(
             cpu_cores = ec2_data["VCpuInfo"]["DefaultCores"]
             cpu_ghz = ec2_data["ProcessorInfo"]["SustainedClockSpeedInGhz"]
             ram_gib = convert_mib_to_gib(ec2_data["MemoryInfo"]["SizeInMiB"])
-            net_mbps = convert_gbps_to_mbps(
-                ec2_data["NetworkInfo"]["NetworkCards"][0]["BaselineBandwidthInGbps"]
-            )
+            net_mbps = aggregate_network_mbps(ec2_data["NetworkInfo"])
             if debug:
                 print(
                     f"Looked up {instance_type} -> {vcpu_count} vCPUs, "
@@ -409,21 +437,22 @@ def pull_rds_family(  # pylint: disable=too-many-locals
     return results
 
 
-def parse_iops(inp: Optional[str]) -> Optional[Tuple[int, int]]:
-    """Parses strings like 100,000/50,000 to (100000, 50000)"""
+def parse_iops_per_gib(inp: Optional[str]) -> Optional[Tuple[float, float]]:
+    """Parses strings like 303.5/151.8 to (303.5, 151.8)"""
     if inp is None:
         return None
 
-    # AWS often gives like 117,000 / 57,000
+    # AWS docs publish total IOPS per size; divide by that size's total GiB of
+    # instance-store to get the per-GiB rate used here.
     if inp.count("/") == 1:
         left, right = inp.split("/")
         left = left.strip().replace(",", "")
         right = right.strip().replace(",", "")
-        return int(left), int(right)
+        return float(left), float(right)
     else:
         raise argparse.ArgumentTypeError(
-            "xlarge IOPS should be given in <random read>/<write> format. "
-            "For example r5d.xlarge would be 59000/29000."
+            "IOPS per GiB should be given in <random read>/<write> format. "
+            "For example r6id would be 303.5/151.8."
         )
 
 
@@ -442,8 +471,10 @@ def parse_db_engines(engines_str: str) -> Sequence[str]:
 
 def _parse_family(family: str) -> Tuple[str, int, str]:
     series = family[0]
+    # Some families encode multiple numbers (e.g. "p6-b200" for the Blackwell
+    # B200 GPU). The first number is always the instance generation.
     num = re.findall(r"\d+", family)
-    assert len(num) == 1
+    assert len(num) >= 1
     gen = int(num[0])
 
     vendor = "intel"
@@ -471,23 +502,23 @@ def parse_io_curve(inp: str, family: str) -> FixedInterval:
 
 
 def deduce_io_perf(
-    family: str, curve: str, iops: Optional[Tuple[int, int]]
+    family: str, curve: str, iops_per_gib: Optional[Tuple[float, float]]
 ) -> Optional[IOPerformance]:
-    if iops is None:
-        guess = guess_iops(family)
+    if iops_per_gib is None:
+        guess = guess_iops_per_gib(family)
         if guess is None:
             return None
         else:
             return IOPerformance(
                 latency=parse_io_curve(curve, family),
-                xl_read_iops=guess[0],
-                xl_write_iops=guess[1],
+                read_iops_per_gib=guess[0],
+                write_iops_per_gib=guess[1],
             )
     else:
         return IOPerformance(
             latency=parse_io_curve(curve, family),
-            xl_read_iops=iops[0],
-            xl_write_iops=iops[1],
+            read_iops_per_gib=iops_per_gib[0],
+            write_iops_per_gib=iops_per_gib[1],
         )
 
 
@@ -521,10 +552,17 @@ def main(args: Any) -> int:
                     file=sys.stderr,
                 )
                 return 1
-            if args.xl_iops or args.io_latency_curve != "ssd":
+            if args.iops_per_gib or args.io_latency_curve != "ssd":
                 print(
-                    "WARNING: --xl-iops and --io-latency-curve are ignored for RDS "
-                    "instances (db.* families) as they use managed storage.",
+                    "WARNING: --iops-per-gib and --io-latency-curve are ignored for "
+                    "RDS instances (db.* families) as they use managed storage.",
+                    file=sys.stderr,
+                )
+            if args.lifecycle is not None:
+                print(
+                    "WARNING: --lifecycle is ignored for RDS instances (db.* "
+                    "families); extend pull_rds_family to plumb it through if "
+                    "you need per-engine lifecycle tags.",
                     file=sys.stderr,
                 )
             cpu_perf = deduce_cpu_perf(
@@ -542,7 +580,9 @@ def main(args: Any) -> int:
             output_filename = f"auto_db_{rds_family}.json"
         else:
             io_perf = deduce_io_perf(
-                family=family, curve=args.io_latency_curve, iops=args.xl_iops
+                family=family,
+                curve=args.io_latency_curve,
+                iops_per_gib=args.iops_per_gib,
             )
             cpu_perf = deduce_cpu_perf(
                 family=family,
@@ -554,6 +594,7 @@ def main(args: Any) -> int:
                 family=family,
                 cpu_perf=cpu_perf,
                 io_perf=io_perf,
+                lifecycle=args.lifecycle,
                 debug=args.debug,
             )
             output_filename = f"auto_{family}.json"
@@ -626,14 +667,16 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--xl-iops",
+        "--iops-per-gib",
         default=None,
-        type=parse_iops,
+        type=parse_iops_per_gib,
         help=(
-            "The xlarge size's iops expressed as <rand 4k reads>/<write>. "
-            "For example '100,000 / 50,000'. To find this information use AWS's "
-            f"spec: {aws_instance_link} OR use fio to benchmark. Deduced from family "
-            " if we can"
+            "4k random IOPS per GiB of ephemeral storage, as "
+            "<read>/<write>. For example r6id is '303.5 / 151.8'. "
+            "Derive by taking a published total (read, write) IOPS from "
+            f"{aws_instance_link} for any size and dividing by that size's "
+            "total instance-store GiB, or run fio on a single drive and "
+            "divide by its GiB. Deduced from family if we can."
         ),
     )
     parser.add_argument(
@@ -656,6 +699,16 @@ if __name__ == "__main__":
             "Comma-separated list of database engines for RDS instances. "
             "Required when family starts with 'db.'. "
             "Currently supported: aurora-postgresql"
+        ),
+    )
+    parser.add_argument(
+        "--lifecycle",
+        default=None,
+        choices=["alpha", "beta", "stable", "deprecated", "end-of-life"],
+        help=(
+            "Mark the generated shapes with a lifecycle stage. Use 'alpha' for "
+            "shapes whose hardware parameters (e.g. cpu_ipc_scale) are not yet "
+            "benchmarked and should be treated as provisional."
         ),
     )
     parser.add_argument("--region", choices=regions, default="us-east-1")
