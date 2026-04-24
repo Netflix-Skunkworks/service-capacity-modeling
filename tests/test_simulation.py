@@ -1,6 +1,7 @@
 import numpy as np
 
 from service_capacity_modeling.capacity_planner import model_desires
+from service_capacity_modeling.capacity_planner import model_worlds
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
@@ -157,3 +158,57 @@ def test_model_desires():
         samples.add((rps.mid, wps.mid, rl.mid))
 
     assert len(samples) == 10
+
+
+def test_model_worlds_are_stable_across_reruns():
+    world_run_1 = list(model_worlds(desires, 5))
+    world_run_2 = list(model_worlds(desires, 5))
+
+    assert [world.world_id for world, _ in world_run_1] == [
+        world.world_id for world, _ in world_run_2
+    ]
+    assert [world.world_label for world, _ in world_run_1] == [
+        world.world_label for world, _ in world_run_2
+    ]
+
+
+def test_model_worlds_change_when_sampled_desires_change():
+    world_a = next(
+        model_worlds(
+            CapacityDesires(
+                service_tier=1,
+                query_pattern=QueryPattern(
+                    estimated_read_per_second=certain_int(1_000),
+                    estimated_write_per_second=certain_int(500),
+                    estimated_mean_read_latency_ms=certain_float(1),
+                    estimated_mean_write_latency_ms=certain_float(1),
+                ),
+                data_shape=DataShape(
+                    estimated_state_size_gib=certain_int(100),
+                ),
+            ),
+            1,
+        )
+    )[0]
+    world_b = next(
+        model_worlds(
+            CapacityDesires(
+                service_tier=1,
+                query_pattern=QueryPattern(
+                    estimated_read_per_second=certain_int(2_000),
+                    estimated_write_per_second=certain_int(500),
+                    estimated_mean_read_latency_ms=certain_float(1),
+                    estimated_mean_write_latency_ms=certain_float(1),
+                ),
+                data_shape=DataShape(
+                    estimated_state_size_gib=certain_int(100),
+                ),
+            ),
+            1,
+        )
+    )[0]
+
+    assert world_a.world_id != world_b.world_id
+    assert "reads=" in world_a.world_label
+    assert "writes=" in world_a.world_label
+    assert "state=" in world_a.world_label
