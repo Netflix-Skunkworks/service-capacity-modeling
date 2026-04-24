@@ -64,6 +64,7 @@ from service_capacity_modeling.models.org.netflix.cassandra_memory import (
     estimate_memory_experimental,
     estimate_memory_legacy,
 )
+from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.models.utils import is_power_of_2
 from service_capacity_modeling.models.utils import next_doubling
 from service_capacity_modeling.models.utils import next_power_of_2
@@ -665,6 +666,35 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     def max_node_disk(d: Drive) -> int:
         return max(math.ceil(d.max_size_gib / 3), ebs_disk_floor)
 
+    # Apply memory-only derived buffers to the write-buffer requirement so
+    # scale_down caps both page cache and memtable space at current allocation.
+    raw_write_buffer_gib = float(requirement.context["write_buffer_gib"])
+    if raw_write_buffer_gib > 0 and current_capacity:
+        try:
+            current_instance = current_capacity.cluster_instance or shapes.instance(
+                current_capacity.cluster_instance_name
+            )
+        except KeyError:
+            current_instance = None
+        if current_instance is not None:
+            # Per-node write buffer = heap × max_write_buffer_percent × 0.25,
+            # matching the write_buffer lambda passed to compute_stateful_zone.
+            existing_write_buffer = (
+                current_capacity.cluster_instance_count.mid
+                * _cass_heap(current_instance.ram_gib)
+                * max_write_buffer_percent
+                * 0.25
+            )
+            memory_derived = DerivedBuffers.for_components(
+                desires.buffers.derived,
+                [BufferComponent.memory],
+                component_fallbacks={},
+            )
+            raw_write_buffer_gib = memory_derived.calculate_requirement(
+                current_usage=raw_write_buffer_gib,
+                existing_capacity=existing_write_buffer,
+            )
+
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
@@ -688,7 +718,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         # memtable_cleanup_threshold * memtable_size. At Netflix this
         # is 0.11 * 25 * heap
         write_buffer=lambda x: heap_fn(x) * max_write_buffer_percent * 0.25,
-        required_write_buffer_gib=float(requirement.context["write_buffer_gib"]),
+        required_write_buffer_gib=raw_write_buffer_gib,
         max_node_disk_gib=max_node_disk,
     )
 
@@ -731,15 +761,30 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     # Sometimes we don't want modify cluster topology, so only allow
     # topologies that match the desired zone size
     if required_cluster_size is not None and cluster.count != required_cluster_size:
+        node_counts = cluster.node_count_context
+        required_nodes_by_type = (
+            {k.value: v for k, v in node_counts.required_nodes_by_type.items()}
+            if node_counts is not None
+            else {}
+        )
+        resource_bottleneck = (
+            node_counts.resource_bottleneck.value
+            if node_counts is not None and node_counts.resource_bottleneck is not None
+            else "unknown"
+        )
         return Excuse(
             instance=instance.name,
             drive=drive_name,
             reason=(
-                f"Cluster size {cluster.count} != required {required_cluster_size}"
+                f"Cluster size {cluster.count} "
+                f"(resource bottleneck: {resource_bottleneck}) "
+                f"!= required {required_cluster_size}"
             ),
             context={
                 "computed_count": cluster.count,
                 "required_cluster_size": required_cluster_size,
+                "required_nodes_by_type": required_nodes_by_type,
+                "resource_bottleneck": resource_bottleneck,
             },
             bottleneck=Bottleneck.cluster_size,
         )
