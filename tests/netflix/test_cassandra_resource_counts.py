@@ -35,7 +35,7 @@ SMALL_KV = CapacityDesires(
 )
 
 
-def test_cluster_size_excuse_has_count_bottleneck_details():
+def test_cluster_size_excuse_has_resource_bottleneck_details():
     explained = planner.plan_certain_explained(
         model_name="org.netflix.cassandra",
         region="us-east-1",
@@ -43,7 +43,7 @@ def test_cluster_size_excuse_has_count_bottleneck_details():
         extra_model_arguments={"required_cluster_size": 2, "require_local_disks": True},
         num_results=5,
     )
-    excuses = [e for e in explained.excuses if "count bottleneck:" in e.reason]
+    excuses = [e for e in explained.excuses if "resource bottleneck:" in e.reason]
     assert excuses, "Expected cluster_size excuses with count bottleneck details"
     for e in excuses:
         counts = e.context["required_nodes_by_type"]
@@ -56,8 +56,8 @@ def test_cluster_size_excuse_has_count_bottleneck_details():
             "cluster_size",
             "min_count",
         }
-        assert e.context["count_bottleneck"] in counts
-        assert e.context["count_bottleneck"] in e.reason
+        assert e.context["resource_bottleneck"] in counts
+        assert e.context["resource_bottleneck"] in e.reason
 
 
 WRITE_HEAVY_KV = CapacityDesires(
@@ -124,7 +124,7 @@ def test_memory_scale_down_caps_write_buffer():
     capped_counts = capped_zone.cluster_params["required_nodes_by_type"]
 
     assert "memory" in capped_counts
-    assert capped_zone.cluster_params["count_bottleneck"] is not None
+    assert capped_zone.cluster_params["resource_bottleneck"] is not None
 
     for plan in uncapped_plans:
         zone = plan.candidate_clusters.zonal[0]

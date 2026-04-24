@@ -46,8 +46,6 @@ from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models import RANK_PENALTIES
-from service_capacity_modeling.models.common import COUNT_BOTTLENECK
-from service_capacity_modeling.models.common import REQUIRED_NODES_BY_TYPE
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import DerivedBuffers
@@ -722,7 +720,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         write_buffer=lambda x: heap_fn(x) * max_write_buffer_percent * 0.25,
         required_write_buffer_gib=raw_write_buffer_gib,
         max_node_disk_gib=max_node_disk,
-        include_node_count_breakdown=True,
     )
 
     # Communicate to the actual provision that if we want reduced RF
@@ -764,21 +761,30 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     # Sometimes we don't want modify cluster topology, so only allow
     # topologies that match the desired zone size
     if required_cluster_size is not None and cluster.count != required_cluster_size:
-        required_nodes_by_type = cluster.cluster_params.get(REQUIRED_NODES_BY_TYPE, {})
-        count_bottleneck = cluster.cluster_params.get(COUNT_BOTTLENECK, "unknown")
+        node_counts = cluster.node_count_context
+        required_nodes_by_type = (
+            {k.value: v for k, v in node_counts.required_nodes_by_type.items()}
+            if node_counts is not None
+            else {}
+        )
+        resource_bottleneck = (
+            node_counts.resource_bottleneck.value
+            if node_counts is not None and node_counts.resource_bottleneck is not None
+            else "unknown"
+        )
         return Excuse(
             instance=instance.name,
             drive=drive_name,
             reason=(
                 f"Cluster size {cluster.count} "
-                f"(count bottleneck: {count_bottleneck}) "
+                f"(resource bottleneck: {resource_bottleneck}) "
                 f"!= required {required_cluster_size}"
             ),
             context={
                 "computed_count": cluster.count,
                 "required_cluster_size": required_cluster_size,
                 "required_nodes_by_type": required_nodes_by_type,
-                "count_bottleneck": count_bottleneck,
+                "resource_bottleneck": resource_bottleneck,
             },
             bottleneck=Bottleneck.cluster_size,
         )
