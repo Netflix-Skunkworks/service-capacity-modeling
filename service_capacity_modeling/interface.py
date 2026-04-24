@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from pydantic import computed_field
 from pydantic import ConfigDict
 from pydantic import Field
+from pydantic import model_validator
 
 from service_capacity_modeling.enum_utils import enum_docstrings
 from service_capacity_modeling.enum_utils import StrEnum
@@ -947,13 +948,26 @@ class BufferIntent(StrEnum):
 
     Example 2: need 20 cores but have 40 → scale down to 20 cores."""
 
+    floor = "floor"
+    """Set a minimum requirement as a fraction of existing capacity. ratio specifies
+    the fraction (e.g. ratio=0.8 means never drop below 80% of current capacity).
+    Only valid in buffers.derived."""
+
+    ceiling = "ceiling"
+    """Set a maximum requirement as a fraction of existing capacity. ratio specifies
+    the fraction (e.g. ratio=1.2 means never exceed 120% of current capacity).
+    Only valid in buffers.derived."""
+
 
 class Buffer(ExcludeUnsetModel):
     """Represents a buffer (headroom) directive for capacity planning"""
 
     ratio: float = 1.0
     """The buffer value expressed as a ratio over normal load (e.g. 1.5 =
-    50% headroom)"""
+    50% headroom).
+
+    For derived buffers with intent=floor or intent=ceiling, ratio is the
+    bound expressed as a fraction of existing capacity."""
 
     intent: BufferIntent = BufferIntent.desired
     """The intent of this buffer directive (almost always 'desired')"""
@@ -1004,14 +1018,33 @@ class Buffers(ExcludeUnsetModel):
     default: Buffer = Buffer(ratio=1.5)
     # Desired compute, storage, cpu, memory, etc... buffers
     desired: Dict[str, Buffer] = {}
-    # Derive these buffers from current clusters or model context
-    # Buffer.intent MUST be set on these Buffers to something other than "desired":
-    #   scale    = ratio on top of existing buffers to ensure. Let the "derived"
-    #              buffer multiplied by this ratio "needed". If the "needed" buffer
-    #              is greater than desired, the needed buffer is created. If the
-    #              "needed" buffer is less than desired, the needed buffer is created.
-    #   preserve = ignore desired buffer entirely, just maintain existing buffers
+    # Derive these buffers from current clusters or model context.
+    # Use intent to specify the policy:
+    #   scale      = ratio × current usage
+    #   scale_up   = scale + floor at 1× existing (sugar)
+    #   scale_down = scale + ceiling at 1× existing (sugar)
+    #   preserve   = floor=1× and ceiling=1× (sugar)
+    #   floor      = ratio = minimum fraction of existing capacity
+    #   ceiling    = ratio = maximum fraction of existing capacity
     derived: Dict[str, Buffer] = {}
+
+    @model_validator(mode="after")
+    def _validate_buffer_contexts(self) -> "Buffers":
+        for name, buf in self.desired.items():
+            if buf.intent != BufferIntent.desired:
+                raise ValueError(
+                    f"desired buffer '{name}' has intent '{buf.intent}' "
+                    "which is only valid in buffers.derived"
+                )
+
+        for name, buf in self.derived.items():
+            if buf.intent == BufferIntent.desired:
+                raise ValueError(
+                    f"derived buffer '{name}' has intent 'desired' — "
+                    "use scale/scale_up/scale_down/preserve/floor/ceiling "
+                    "instead"
+                )
+        return self
 
 
 class CapacityDesires(ExcludeUnsetModel):

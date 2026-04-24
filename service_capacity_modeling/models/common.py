@@ -917,7 +917,6 @@ def merge_plan(
 
 class DerivedBuffers(BaseModel):
     scale: float = Field(default=1, gt=0)
-    preserve: bool = False
     # When present, this is the maximum ratio of the current usage
     ceiling: Optional[float] = Field(
         default=None,
@@ -925,6 +924,15 @@ class DerivedBuffers(BaseModel):
     )
     # When present, this is the minimum ratio of the current usage
     floor: Optional[float] = Field(default=None, gt=0)
+
+    @property
+    def is_preserve(self) -> bool:
+        """True when this policy pins the requirement to existing capacity.
+
+        Equivalent to the old ``preserve=True`` boolean — the requirement
+        is both floored and capped at 1× existing capacity with no scaling.
+        """
+        return self.scale == 1 and self.floor == 1 and self.ceiling == 1
 
     @staticmethod
     def for_components(
@@ -935,30 +943,41 @@ class DerivedBuffers(BaseModel):
         expanded_components = _expand_components(components, component_fallbacks)
 
         scale = 1.0
-        preserve = False
-        ceiling = None
-        floor = None
+        ceiling: Optional[float] = None
+        floor: Optional[float] = None
 
         for bfr in buffer.values():
             if not expanded_components.intersection(bfr.components):
                 continue
 
-            if bfr.intent in [
+            if bfr.intent == BufferIntent.preserve:
+                # Preserve pins both bounds to existing capacity, no scale change
+                floor = max(floor or 0, 1.0)
+                ceiling = min(ceiling if ceiling is not None else float("inf"), 1.0)
+            elif bfr.intent in (
                 BufferIntent.scale,
                 BufferIntent.scale_up,
                 BufferIntent.scale_down,
-            ]:
+            ):
                 scale = combine_buffer_ratios(scale, bfr.ratio)
-            if bfr.intent == BufferIntent.scale_up:
-                floor = 1  # Create a floor of 1.0x the current usage
-            if bfr.intent == BufferIntent.scale_down:
-                ceiling = 1  # Create a ceiling of 1.0x the current usage
-            if bfr.intent == BufferIntent.preserve:
-                preserve = True
+                if bfr.intent == BufferIntent.scale_up:
+                    floor = max(floor or 0, 1.0)
+                elif bfr.intent == BufferIntent.scale_down:
+                    ceiling = min(ceiling if ceiling is not None else float("inf"), 1.0)
+            elif bfr.intent == BufferIntent.floor:
+                floor = max(floor or 0, bfr.ratio)
+            elif bfr.intent == BufferIntent.ceiling:
+                ceiling = min(
+                    ceiling if ceiling is not None else float("inf"), bfr.ratio
+                )
+            # desired intent: no derived policy
 
-        return DerivedBuffers(
-            scale=scale, preserve=preserve, ceiling=ceiling, floor=floor
-        )
+        if floor is not None and ceiling is not None and floor > ceiling:
+            raise ValueError(
+                f"Merged derived policy has floor ({floor}) > ceiling ({ceiling})"
+            )
+
+        return DerivedBuffers(scale=scale, ceiling=ceiling, floor=floor)
 
     def calculate_requirement(
         self,
@@ -966,9 +985,6 @@ class DerivedBuffers(BaseModel):
         existing_capacity: float,
         desired_buffer_ratio: float = 1.0,
     ) -> float:
-        if self.preserve:
-            return existing_capacity
-
         requirement = self.scale * current_usage * desired_buffer_ratio
         if self.ceiling is not None:
             requirement = min(requirement, self.ceiling * existing_capacity)
