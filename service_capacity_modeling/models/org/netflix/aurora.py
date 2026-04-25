@@ -11,6 +11,9 @@ from pydantic import Field
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
@@ -30,11 +33,15 @@ from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 
 logger = logging.getLogger(__name__)
+
+# Buffer component for P95 to provisioned headroom on existing writer CPU utilization.
+AURORA_WRITER_CPU_BUFFER = "aurora-writer-cpu"
 
 
 def _existing_writer_cpu_floor_cores(
@@ -45,6 +52,10 @@ def _existing_writer_cpu_floor_cores(
     cc = desires.current_clusters
     if not cc or not cc.regional:
         return 0
+    writer_cpu_buffer = buffer_for_components(
+        buffers=desires.buffers,
+        components=[AURORA_WRITER_CPU_BUFFER],
+    )
     best = 0
     for row in cc.regional:
         ref = row.cluster_instance
@@ -52,9 +63,9 @@ def _existing_writer_cpu_floor_cores(
         if ref is None or ref.cpu <= 0 or cpu_pct < 1.0:
             continue
         # ref.cpu * (cpu_pct/100): Number of cores on the reference writer.
-        # An extra headroom of 1.15 is added above point utilization since
-        # cpu_pct is P95.
-        load_cores_on_ref = float(ref.cpu) * (cpu_pct / 100.0) * 1.15
+        # An extra headroom of writer_cpu_buffer.ratio (defaults to 1.15) is added above
+        # point utilization since cpu_pct is P95.
+        load_cores_on_ref = float(ref.cpu) * (cpu_pct / 100.0) * writer_cpu_buffer.ratio
         need_on_candidate = normalize_cores(load_cores_on_ref, instance, ref)
         best = max(best, need_on_candidate)
     return best
@@ -85,7 +96,9 @@ def _estimate_aurora_requirement(
     # When `current_clusters` includes an existing writer, account for it as well
     # as query-pattern staffing. The latter alone may yield fewer cores than the
     # writer already needs.
-    needed_cores = max(needed_cores, _existing_writer_cpu_floor_cores(instance, desires))
+    needed_cores = max(
+        needed_cores, _existing_writer_cpu_floor_cores(instance, desires)
+    )
 
     # 20% head room for replication, backups etc.
     needed_network_mbps = simple_network_mbps(desires) * 1.2
@@ -343,6 +356,19 @@ class NflxAuroraCapacityModel(CapacityModel):
         return Platform.aurora_mysql, Platform.aurora_postgres
 
     @staticmethod
+    def default_buffers(writer_cpu_ratio: float = 1.15) -> Buffers:
+        """Headroom over observed writer CPU (P95) when sizing from current_clusters."""
+        return Buffers(
+            desired={
+                AURORA_WRITER_CPU_BUFFER: Buffer(
+                    ratio=writer_cpu_ratio,
+                    components=[BufferComponent.cpu, AURORA_WRITER_CPU_BUFFER],
+                    explanation="Headroom over observed Aurora writer CPU utilization.",
+                ),
+            },
+        )
+
+    @staticmethod
     def default_desires(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> CapacityDesires:
@@ -397,6 +423,7 @@ class NflxAuroraCapacityModel(CapacityModel):
                     low=0.05, mid=0.10, high=0.20, confidence=0.8
                 )
             ),
+            buffers=NflxAuroraCapacityModel.default_buffers(),
         )
 
 
