@@ -6,6 +6,8 @@ from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import CurrentClusters
+from service_capacity_modeling.interface import CurrentRegionClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
@@ -91,6 +93,38 @@ tier_3 = CapacityDesires(
         estimated_state_size_gib=certain_int(200),
     ),
 )
+
+
+def test_observed_cpu_utilization_raises_requirement_over_low_rps():
+    """Number of cores due to low RPS would have been small but higher
+    CPU% on the current writer still forces a large type."""
+    desires = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(10),
+            estimated_write_per_second=certain_int(10),
+            estimated_mean_read_latency_ms=certain_float(5.0),
+            estimated_mean_write_latency_ms=certain_float(8.0),
+        ),
+        data_shape=DataShape(estimated_state_size_gib=certain_int(20)),
+        current_clusters=CurrentClusters(
+            regional=[
+                CurrentRegionClusterCapacity(
+                    cluster_instance_name="db.r6g.4xlarge",
+                    cluster_instance_count=certain_int(1),
+                    cpu_utilization=certain_float(88.0),
+                )
+            ]
+        ),
+    )
+    cap_plan = planner.plan_certain(
+        model_name="org.netflix.aurora",
+        region="us-east-1",
+        desires=desires,
+    )
+    assert len(cap_plan) >= 1
+    resp = cap_plan[0].candidate_clusters.regional[0].instance
+    assert resp.cpu >= 16
 
 
 def test_tier_0_not_supported():

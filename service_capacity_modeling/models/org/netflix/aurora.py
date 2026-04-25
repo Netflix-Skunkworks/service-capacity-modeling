@@ -37,6 +37,29 @@ from service_capacity_modeling.models.common import sqrt_staffed_cores
 logger = logging.getLogger(__name__)
 
 
+def _existing_writer_cpu_floor_cores(
+    instance: Instance, desires: CapacityDesires
+) -> int:
+    """Minimum cores required on candidate instance from the existing
+    cluster in `desires` (`current_clusters.regional`)."""
+    cc = desires.current_clusters
+    if not cc or not cc.regional:
+        return 0
+    best = 0
+    for row in cc.regional:
+        ref = row.cluster_instance
+        cpu_pct = row.cpu_utilization.mid
+        if ref is None or ref.cpu <= 0 or cpu_pct < 1.0:
+            continue
+        # ref.cpu * (cpu_pct/100): Number of cores on the reference writer.
+        # An extra headroom of 1.15 is added above point utilization since
+        # cpu_pct is P95.
+        load_cores_on_ref = float(ref.cpu) * (cpu_pct / 100.0) * 1.15
+        need_on_candidate = normalize_cores(load_cores_on_ref, instance, ref)
+        best = max(best, need_on_candidate)
+    return best
+
+
 def _estimate_aurora_requirement(
     instance: Instance, desires: CapacityDesires, db_type: str
 ) -> CapacityRequirement:
@@ -59,7 +82,12 @@ def _estimate_aurora_requirement(
         reference_shape=desires.reference_shape,
     )
 
-    # 20% head room For replication, backups etc.
+    # When `current_clusters` includes an existing writer, account for it as well
+    # as query-pattern staffing. The latter alone may yield fewer cores than the
+    # writer already needs.
+    needed_cores = max(needed_cores, _existing_writer_cpu_floor_cores(instance, desires))
+
+    # 20% head room for replication, backups etc.
     needed_network_mbps = simple_network_mbps(desires) * 1.2
     needed_disk = round(desires.data_shape.estimated_state_size_gib.mid, 2)
 
