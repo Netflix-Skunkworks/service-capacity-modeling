@@ -1645,19 +1645,20 @@ class CapacityPlanner:
         world_plans_by_model: Dict[str, List[_WorldPlan]] = {
             model: [] for model in base_desires_by_model
         }
-        world_order: List[str] = []
+        # Sample fully defaulted model desires, but keep one top-level world id
+        # sequence so composed models can still merge by sampled world.
+        base_worlds = [world for world, _ in model_worlds(desires, simulations)]
+        world_order = [world.world_id for world in base_worlds]
 
-        for world, world_desires in model_worlds(desires, simulations):
-            world_order.append(world.world_id)
-            for sub_model, sub_desires in self._sub_models(
-                model_name=model_name,
-                desires=world_desires,
-                extra_model_arguments=extra_model_arguments,
+        for sub_model, sub_desires in base_desires_by_model.items():
+            for index, sim_desires in enumerate(
+                model_desires(sub_desires, simulations)
             ):
+                world = base_worlds[index]
                 sim_result = self._plan_certain(
                     model_name=sub_model,
                     region=region,
-                    desires=sub_desires,
+                    desires=sim_desires,
                     num_results=1,
                     num_regions=num_regions,
                     extra_model_arguments=extra_model_arguments,
@@ -1677,7 +1678,7 @@ class CapacityPlanner:
                     world_plans_by_model.setdefault(sub_model, []).append(
                         _WorldPlan(
                             world=world,
-                            desires=sub_desires,
+                            desires=sim_desires,
                             plan=sim_result.plans[0],
                         )
                     )
