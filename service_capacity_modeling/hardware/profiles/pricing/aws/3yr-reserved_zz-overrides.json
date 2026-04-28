@@ -35,9 +35,6 @@
       "net.intra.region": {
         "annual_cost_per_gib": 0.02
       },
-      "crdb_core_license": {
-        "annual_cost_per_core": 0
-      },
       "dynamo.standard": {
         "annual_cost_per_gib": 3,
         "annual_cost_per_read_io": 0.00013,
