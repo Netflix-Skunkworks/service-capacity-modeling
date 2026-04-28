@@ -1,10 +1,12 @@
 import pytest
+from pydantic import ValidationError
 from pytest import approx
 
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import BufferIntent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import cpu_headroom_target
@@ -272,3 +274,178 @@ def test_derived_buffer_validation():
 
     with pytest.raises(ValueError):
         DerivedBuffers.for_components(derived_buffers, [BufferComponent.storage])
+
+
+# ──────────────────────────────────────────────────────────────────
+# Buffer context validation
+# ──────────────────────────────────────────────────────────────────
+
+
+def test_desired_rejects_derived_only_intents():
+    """Derived-only intents must not appear in buffers.desired"""
+    for intent in [
+        BufferIntent.scale,
+        BufferIntent.scale_up,
+        BufferIntent.scale_down,
+        BufferIntent.preserve,
+        BufferIntent.floor,
+        BufferIntent.ceiling,
+    ]:
+        with pytest.raises(ValidationError):
+            Buffers(desired={"x": Buffer(intent=intent, components=["memory"])})
+
+
+def test_preserve_with_non_unit_ratio_normalized():
+    """preserve intent ignores ratio — for backward compat, ratio is accepted
+    but the normalization always uses scale=1, floor=1, ceiling=1."""
+    buffers = Buffers(
+        derived={
+            "mem": Buffer(
+                intent=BufferIntent.preserve,
+                ratio=2.0,
+                components=["memory"],
+            )
+        }
+    )
+    db = DerivedBuffers.for_components(buffers.derived, [BufferComponent.memory])
+    assert db.is_preserve  # ratio is ignored, still normalizes to preserve
+
+
+# ──────────────────────────────────────────────────────────────────
+# DerivedBuffers normalization from legacy intents
+# ──────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "intent,ratio,exp_scale,exp_floor,exp_ceiling",
+    [
+        (BufferIntent.preserve, 1.0, 1, 1, 1),
+        (BufferIntent.scale_up, 1.5, 1.5, 1, None),
+        (BufferIntent.scale_down, 0.8, 0.8, None, 1),
+        (BufferIntent.scale, 2.0, 2.0, None, None),
+        (BufferIntent.floor, 0.8, 1.0, 0.8, None),
+        (BufferIntent.ceiling, 1.2, 1.0, None, 1.2),
+    ],
+    ids=["preserve", "scale_up", "scale_down", "scale", "floor", "ceiling"],
+)
+def test_intent_normalization(intent, ratio, exp_scale, exp_floor, exp_ceiling):
+    """Each intent normalizes to the correct (scale, floor, ceiling) triple."""
+    derived = {
+        "x": Buffer(intent=intent, ratio=ratio, components=[BufferComponent.memory])
+    }
+    db = DerivedBuffers.for_components(derived, [BufferComponent.memory])
+    assert db.scale == exp_scale
+    assert db.floor == exp_floor
+    assert db.ceiling == exp_ceiling
+
+
+def test_scale_with_floor_and_ceiling_intents_combine():
+    """scale + floor + ceiling as separate entries combine correctly"""
+    derived = {
+        "scale": Buffer(
+            intent=BufferIntent.scale,
+            ratio=1.5,
+            components=[BufferComponent.memory],
+        ),
+        "min": Buffer(
+            intent=BufferIntent.floor,
+            ratio=0.8,
+            components=[BufferComponent.memory],
+        ),
+        "max": Buffer(
+            intent=BufferIntent.ceiling,
+            ratio=1.2,
+            components=[BufferComponent.memory],
+        ),
+    }
+    db = DerivedBuffers.for_components(derived, [BufferComponent.memory])
+    assert db.scale == 1.5
+    assert db.floor == 0.8
+    assert db.ceiling == 1.2
+
+
+# ──────────────────────────────────────────────────────────────────
+# DerivedBuffers combination semantics
+# ──────────────────────────────────────────────────────────────────
+
+
+def test_multiple_floors_merge_max():
+    """Multiple floor-intent buffers → take the max"""
+    derived = {
+        "a": Buffer(
+            intent=BufferIntent.floor, ratio=0.5, components=[BufferComponent.memory]
+        ),
+        "b": Buffer(
+            intent=BufferIntent.floor, ratio=0.8, components=[BufferComponent.memory]
+        ),
+    }
+    db = DerivedBuffers.for_components(derived, [BufferComponent.memory])
+    assert db.floor == 0.8
+
+
+def test_multiple_ceilings_merge_min():
+    """Multiple ceiling-intent buffers → take the min"""
+    derived = {
+        "a": Buffer(
+            intent=BufferIntent.ceiling, ratio=1.5, components=[BufferComponent.memory]
+        ),
+        "b": Buffer(
+            intent=BufferIntent.ceiling, ratio=1.2, components=[BufferComponent.memory]
+        ),
+    }
+    db = DerivedBuffers.for_components(derived, [BufferComponent.memory])
+    assert db.ceiling == 1.2
+
+
+def test_merged_floor_exceeds_ceiling_rejected():
+    """Merged policy where floor > ceiling raises ValueError"""
+    derived = {
+        "a": Buffer(
+            intent=BufferIntent.floor, ratio=2.0, components=[BufferComponent.memory]
+        ),
+        "b": Buffer(
+            intent=BufferIntent.ceiling, ratio=1.0, components=[BufferComponent.memory]
+        ),
+    }
+    with pytest.raises(ValueError, match="floor.*ceiling"):
+        DerivedBuffers.for_components(derived, [BufferComponent.memory])
+
+
+# ──────────────────────────────────────────────────────────────────
+# calculate_requirement with normalized policies
+# ──────────────────────────────────────────────────────────────────
+
+
+def test_preserve_calculate_requirement():
+    """Preserve-normalized policy returns existing_capacity"""
+    db = DerivedBuffers(scale=1, floor=1, ceiling=1)
+    assert db.is_preserve
+    # Regardless of current_usage or desired_buffer_ratio, result = existing
+    assert db.calculate_requirement(50, 100) == 100
+    assert db.calculate_requirement(150, 100) == 100
+    assert db.calculate_requirement(50, 100, desired_buffer_ratio=2.0) == 100
+
+
+def test_scale_up_calculate_requirement():
+    """scale_up: floor=1 means never drop below existing capacity"""
+    db = DerivedBuffers(scale=1.5, floor=1)
+    # Under-provisioned: need 150, have 100 → scale up to 150
+    assert db.calculate_requirement(100, 100) == 150
+    # Over-provisioned: need 30, have 100 → floor pins to 100
+    assert db.calculate_requirement(20, 100) == 100
+
+
+def test_scale_down_calculate_requirement():
+    """scale_down: ceiling=1 means never exceed existing capacity"""
+    db = DerivedBuffers(scale=0.8, ceiling=1)
+    # Over-provisioned: need 80, have 100 → scale down to 80
+    assert db.calculate_requirement(100, 100) == 80
+    # Under-provisioned: need 160, have 100 → ceiling caps to 100
+    assert db.calculate_requirement(200, 100) == 100
+
+
+def test_plain_scale_calculate_requirement():
+    """Plain scale with no bounds: just multiply"""
+    db = DerivedBuffers(scale=2.0)
+    assert db.calculate_requirement(50, 100) == 100
+    assert db.calculate_requirement(50, 100, desired_buffer_ratio=1.5) == 150
