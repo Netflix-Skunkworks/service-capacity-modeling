@@ -586,9 +586,10 @@ class TestStorageAndCPUIntegration:
         result_cores = result.count * result.instance.cpu
         result_storage = result.count * get_drive_size_gib(result)
 
-        # With EBS, planner selects compute-optimized instances with attached storage
+        # With bounded memory sizing, EBS can use the cheaper compute-optimized
+        # shape while still satisfying CPU and storage scale-up requirements.
         assert_similar_compute(
-            shapes.instance("m7i.4xlarge"),
+            shapes.instance("c6a.4xlarge"),
             result.instance,
             CLUSTER_SIZE * 4,
             result.count,
@@ -660,7 +661,10 @@ class TestStorageAndCPUIntegration:
         result_cores = result.count * result.instance.cpu
         result_storage = result.count * get_drive_size_gib(result)
         assert_similar_compute(
-            shapes.instance("m6id.8xlarge"), result.instance, 8, result.count
+            shapes.instance("c6a.4xlarge"),
+            result.instance,
+            CLUSTER_SIZE * 4,
+            result.count,
         )
         assert result_cores >= CLUSTER.total_vcpu * 2
 

@@ -61,9 +61,12 @@ from service_capacity_modeling.models.common import zonal_requirements_from_curr
 from service_capacity_modeling.models.org.netflix.cassandra_memory import (
     _get_base_memory,
     _cass_heap,
-    estimate_memory_experimental,
-    estimate_memory_legacy,
+    memory_layout,
+    MemoryInputs,
+    MemoryPolicy,
+    estimate_memory,
 )
+from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.models.utils import is_power_of_2
 from service_capacity_modeling.models.utils import next_doubling
 from service_capacity_modeling.models.utils import next_power_of_2
@@ -288,8 +291,9 @@ def _estimate_cassandra_requirement(
     max_rps_to_disk: int,
     zones_per_region: int = 3,
     copies_per_region: int = 3,
+    required_cluster_size: Optional[int] = None,
     experimental_memory_model: bool = False,
-    max_page_cache_gib: float = 32.0,
+    max_page_cache_gib: float = 28.0,
 ) -> CapacityRequirement:
     # Input: regional desires → Output: zonal requirement
     disk_buffer = buffer_for_components(
@@ -324,6 +328,7 @@ def _estimate_cassandra_requirement(
     needed_cores = math.ceil(capacity_requirement.cpu_cores.mid)
     needed_disk = capacity_requirement.disk_gib.mid
     needed_network_mbps = capacity_requirement.network_mbps.mid
+    base_mem = _get_base_memory(desires)
 
     # it can be 0 for cases where disk utilization is not passed as a part of current cluster capacity
     if needed_disk == 0:
@@ -338,6 +343,15 @@ def _estimate_cassandra_requirement(
     estimated_cores_per_region = math.ceil(
         (needed_cores * zones_per_region) / instance.cpu
     )
+    planned_page_cache_nodes = max(1, math.ceil(needed_cores / instance.cpu))
+    if current_capacity is not None:
+        planned_page_cache_nodes = max(
+            planned_page_cache_nodes,
+            math.ceil(current_capacity.cluster_instance_count.mid),
+        )
+    if required_cluster_size is not None:
+        planned_page_cache_nodes = max(planned_page_cache_nodes, required_cluster_size)
+
     # Generally speaking we want fewer than some number of reads per second
     # hitting disk per instance. If we don't have many reads we don't need to
     # hold much data in memory.
@@ -366,26 +380,28 @@ def _estimate_cassandra_requirement(
         )
 
     # Compute effective working set and memory requirement.
-    if experimental_memory_model:
-        mem = estimate_memory_experimental(
-            current_capacity=current_capacity,
-            working_set=working_set,
-            rps_working_set=rps_working_set,
-            disk_used_gib=disk_used_gib,
-            desires=desires,
-            write_buffer_gib=write_buffer_gib,
+    mem_inputs = MemoryInputs(
+        current_capacity=current_capacity,
+        desires=desires,
+        disk_used_gib=disk_used_gib,
+        write_buffer_gib=write_buffer_gib,
+        zones_per_region=zones_per_region,
+        ws_slo_bound=working_set,
+        ws_rps_bound=rps_working_set,
+        effective_page_cache_gib_per_node=memory_layout(
+            ram_gib=instance.ram_gib,
+            base_reserves_gib=base_mem,
             max_page_cache_gib=max_page_cache_gib,
-        )
-    else:
-        mem = estimate_memory_legacy(
-            working_set=working_set,
-            rps_working_set=rps_working_set,
-            disk_used_gib=disk_used_gib,
-            zones_per_region=zones_per_region,
-            write_buffer_gib=write_buffer_gib,
-        )
-    effective_working_set = mem.effective_working_set
-    needed_memory = mem.needed_memory_gib
+        ).page_cache_capacity_gib,
+        planned_page_cache_nodes=planned_page_cache_nodes,
+    )
+    mem_policy = MemoryPolicy(
+        max_page_cache_gib=max_page_cache_gib,
+        use_observational_anchor=experimental_memory_model,
+    )
+    mem = estimate_memory(mem_inputs, mem_policy)
+    effective_working_set = mem.effective_ws_fraction
+    needed_memory = mem.page_cache_demand_gib
     write_buffer_gib = mem.write_buffer_gib
 
     logger.debug(
@@ -501,7 +517,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     large_instance_regret: float = 0.2,
     different_family_regret: float = 0.10,
     experimental_memory_model: bool = False,
-    max_page_cache_gib: float = 32.0,
+    max_page_cache_gib: float = 28.0,
     backup_retention_days: Optional[float] = None,
 ) -> Union[CapacityPlan, Excuse, None]:
     drive_name = drive.name
@@ -603,6 +619,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         max_rps_to_disk=max_rps_to_disk,
         zones_per_region=zones_per_region,
         copies_per_region=copies_per_region,
+        required_cluster_size=required_cluster_size,
         experimental_memory_model=experimental_memory_model,
         max_page_cache_gib=max_page_cache_gib,
     )
@@ -655,15 +672,47 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
 
     base_mem = _get_base_memory(desires)
 
-    heap_fn = _cass_heap_for_write_buffer(
-        instance=instance,
-        max_zonal_size=max_regional_size // zones_per_region,
-        write_buffer_gib=requirement.context["write_buffer_gib"],
-        buffer_percent=(max_write_buffer_percent * max_table_buffer_percent),
-    )
+    # Heap is RAM-fit-aware: leaves room for base + page cache so the three
+    # pieces sum to <= ram_gib on small instances. Same formula as the one
+    # used in the observational anchor.
+    def heap_fn(ram_gib: float) -> float:
+        return memory_layout(
+            ram_gib=ram_gib,
+            base_reserves_gib=base_mem,
+            max_page_cache_gib=max_page_cache_gib,
+        ).heap_gib
 
     def max_node_disk(d: Drive) -> int:
         return max(math.ceil(d.max_size_gib / 3), ebs_disk_floor)
+
+    # Apply memory-only derived buffers to the write-buffer requirement so
+    # scale_down caps both page cache and memtable space at current allocation.
+    raw_write_buffer_gib = float(requirement.context["write_buffer_gib"])
+    if raw_write_buffer_gib > 0 and current_capacity:
+        try:
+            current_instance = current_capacity.cluster_instance or shapes.instance(
+                current_capacity.cluster_instance_name
+            )
+        except KeyError:
+            current_instance = None
+        if current_instance is not None:
+            # Per-node write buffer = heap × max_write_buffer_percent × 0.25,
+            # matching the write_buffer lambda passed to compute_stateful_zone.
+            existing_write_buffer = (
+                current_capacity.cluster_instance_count.mid
+                * _cass_heap(current_instance.ram_gib)
+                * max_write_buffer_percent
+                * 0.25
+            )
+            memory_derived = DerivedBuffers.for_components(
+                desires.buffers.derived,
+                [BufferComponent.memory],
+                component_fallbacks={},
+            )
+            raw_write_buffer_gib = memory_derived.calculate_requirement(
+                current_usage=raw_write_buffer_gib,
+                existing_capacity=existing_write_buffer,
+            )
 
     cluster = compute_stateful_zone(
         instance=instance,
@@ -683,12 +732,17 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         min_count=min_count,
         # TODO: Take reserve memory calculation into account during buffer calculation
         # C* heap usage takes away from OS page cache memory
-        reserve_memory=lambda x: base_mem + heap_fn(x),
+        reserve_memory=lambda x: x
+        - memory_layout(
+            ram_gib=x,
+            base_reserves_gib=base_mem,
+            max_page_cache_gib=max_page_cache_gib,
+        ).page_cache_capacity_gib,
         # C* heap buffers the writes at roughly a rate of
         # memtable_cleanup_threshold * memtable_size. At Netflix this
         # is 0.11 * 25 * heap
         write_buffer=lambda x: heap_fn(x) * max_write_buffer_percent * 0.25,
-        required_write_buffer_gib=float(requirement.context["write_buffer_gib"]),
+        required_write_buffer_gib=raw_write_buffer_gib,
         max_node_disk_gib=max_node_disk,
     )
 
@@ -731,15 +785,30 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     # Sometimes we don't want modify cluster topology, so only allow
     # topologies that match the desired zone size
     if required_cluster_size is not None and cluster.count != required_cluster_size:
+        node_counts = cluster.node_count_context
+        required_nodes_by_type = (
+            {k.value: v for k, v in node_counts.required_nodes_by_type.items()}
+            if node_counts is not None
+            else {}
+        )
+        resource_bottleneck = (
+            node_counts.resource_bottleneck.value
+            if node_counts is not None and node_counts.resource_bottleneck is not None
+            else "unknown"
+        )
         return Excuse(
             instance=instance.name,
             drive=drive_name,
             reason=(
-                f"Cluster size {cluster.count} != required {required_cluster_size}"
+                f"Cluster size {cluster.count} "
+                f"(resource bottleneck: {resource_bottleneck}) "
+                f"!= required {required_cluster_size}"
             ),
             context={
                 "computed_count": cluster.count,
                 "required_cluster_size": required_cluster_size,
+                "required_nodes_by_type": required_nodes_by_type,
+                "resource_bottleneck": resource_bottleneck,
             },
             bottleneck=Bottleneck.cluster_size,
         )
@@ -825,22 +894,6 @@ def _cass_io_per_read(node_size_gib: float, sstable_size_mb: int = 160) -> int:
     # One disk IO per data read and one per index read (assume we miss
     # the key cache)
     return 2 * levels
-
-
-def _cass_heap_for_write_buffer(
-    instance: Instance,
-    write_buffer_gib: float,
-    max_zonal_size: int,
-    buffer_percent: float,
-) -> Callable[[float], float]:
-    # If there is no way we can get enough heap with the max zonal size, try
-    # letting max heap grow to 31 GiB per node to get more write buffer
-    if write_buffer_gib > (
-        max_zonal_size * _cass_heap(instance.ram_gib) * buffer_percent
-    ):
-        return lambda x: _cass_heap(x, max_heap_gib=30)
-    else:
-        return _cass_heap
 
 
 def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
@@ -1009,7 +1062,7 @@ class NflxCassandraArguments(BaseModel):
         "disk/SLO estimate. When False (default), uses the legacy memory sizing.",
     )
     max_page_cache_gib: float = Field(
-        default=32.0,
+        default=28.0,
         description="Maximum page cache (GiB) to assume per node when computing "
         "working set in the experimental memory model. Caps the effective page "
         "cache at this value regardless of instance RAM. Set to 0 to disable "
