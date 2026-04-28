@@ -271,8 +271,7 @@ class NflxRDSCapacityModel(CapacityModel):
                 estimated_mean_write_size_bytes=Interval(
                     low=64, mid=512, high=2048, confidence=0.90
                 ),
-                # probably closer to CRDB than Cassandra. Query by PK in MySQL takes
-                # total of ~300 ms end to end
+                # Query by PK in MySQL takes total of ~300 ms end to end
                 estimated_mean_read_latency_ms=Interval(
                     low=5, mid=30, high=150, confidence=0.90
                 ),
