@@ -103,6 +103,7 @@ class NflxPostgresCapacityModel(CapacityModel):
                     low=0.05, mid=0.10, high=0.20, confidence=0.8
                 )
             ),
+            buffers=nflx_aurora_capacity_model.default_buffers(),
         )
 
 
