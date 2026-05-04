@@ -500,11 +500,11 @@
       "cassandra.backup.s3-standard": 37961.555153961184,
       "cassandra.net.inter.region": 29695.330215990543,
       "cassandra.net.intra.region": 89085.99064797163,
-      "cassandra.zonal-clusters": 627456.0
+      "cassandra.zonal-clusters": 609920.64
     },
     "clusters": [
       {
-        "annual_cost": 209152.0,
+        "annual_cost": 203306.88,
         "attached_drives": [
           "gp3 : 1200GB"
         ],
@@ -517,27 +517,24 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 2.44,
           "effective_disk_per_node_gib": 5100,
-          "rank_penalties": {
-            "family_migration": 0.1
-          },
           "required_nodes_by_type": {
             "cluster_size": 64,
-            "cpu": 33,
+            "cpu": 25,
             "disk_capacity": 15,
-            "disk_iops": 0,
+            "disk_iops": 51,
             "memory": 32,
             "min_count": 16,
-            "network": 2
+            "network": 1
           },
-          "resource_bottleneck": "cpu"
+          "resource_bottleneck": "disk_iops"
         },
         "cluster_type": "cassandra",
         "count": 64,
         "deployment": "zonal",
-        "instance": "r5.2xlarge"
+        "instance": "r6a.2xlarge"
       },
       {
-        "annual_cost": 209152.0,
+        "annual_cost": 203306.88,
         "attached_drives": [
           "gp3 : 1200GB"
         ],
@@ -550,27 +547,24 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 2.44,
           "effective_disk_per_node_gib": 5100,
-          "rank_penalties": {
-            "family_migration": 0.1
-          },
           "required_nodes_by_type": {
             "cluster_size": 64,
-            "cpu": 33,
+            "cpu": 25,
             "disk_capacity": 15,
-            "disk_iops": 0,
+            "disk_iops": 51,
             "memory": 32,
             "min_count": 16,
-            "network": 2
+            "network": 1
           },
-          "resource_bottleneck": "cpu"
+          "resource_bottleneck": "disk_iops"
         },
         "cluster_type": "cassandra",
         "count": 64,
         "deployment": "zonal",
-        "instance": "r5.2xlarge"
+        "instance": "r6a.2xlarge"
       },
       {
-        "annual_cost": 209152.0,
+        "annual_cost": 203306.88,
         "attached_drives": [
           "gp3 : 1200GB"
         ],
@@ -583,31 +577,28 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.storage_buffer_ratio": 2.44,
           "effective_disk_per_node_gib": 5100,
-          "rank_penalties": {
-            "family_migration": 0.1
-          },
           "required_nodes_by_type": {
             "cluster_size": 64,
-            "cpu": 33,
+            "cpu": 25,
             "disk_capacity": 15,
-            "disk_iops": 0,
+            "disk_iops": 51,
             "memory": 32,
             "min_count": 16,
-            "network": 2
+            "network": 1
           },
-          "resource_bottleneck": "cpu"
+          "resource_bottleneck": "disk_iops"
         },
         "cluster_type": "cassandra",
         "count": 64,
         "deployment": "zonal",
-        "instance": "r5.2xlarge"
+        "instance": "r6a.2xlarge"
       }
     ],
     "model": "org.netflix.cassandra",
     "region": "us-east-1",
     "scenario": "cassandra_kv_dense_ebs",
     "service_tier": 1,
-    "total_annual_cost": 784198.88
+    "total_annual_cost": 766663.52
   },
   {
     "annual_costs": {

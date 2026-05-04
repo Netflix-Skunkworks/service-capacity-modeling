@@ -677,48 +677,57 @@ def _attached_drive_plan(
     required_disk_ios: Callable[[float, int], Tuple[float, float]],
     max_node_disk_gib: Callable[[Drive], int],
 ) -> Tuple[int, int, List[Drive]]:
-    preliminary_resource_count = max(count_cpu, count_memory, count_network)
-    preliminary_count = max(cluster_size(preliminary_resource_count), min_count)
-
-    space_gib = max(1, math.ceil(needed_disk_gib / preliminary_count))
-    read_io, write_io = required_disk_ios(space_gib, preliminary_count)
-    read_io, write_io = (
-        utils.next_n(read_io, n=200),
-        utils.next_n(write_io, n=200),
-    )
-    io_gib = cloud_gib_for_io(drive, read_io + write_io, space_gib)
-    ebs_gib = utils.next_n(max(1, io_gib, space_gib), n=100)
-
-    count_disk_capacity = 0
-    max_size = max_node_disk_gib(drive)
-    if max_size > 0:
-        count_disk_capacity = math.ceil(needed_disk_gib / max_size)
-    if ebs_gib > max_size > 0:
-        count_disk_capacity = max(
-            count_disk_capacity,
-            math.ceil(preliminary_count * ebs_gib / max_size),
-        )
-        ebs_gib = int(max_size)
-
-    effective_count = max(
-        cluster_size(max(preliminary_count, count_disk_capacity)), min_count
-    )
-    read_io, write_io = required_disk_ios(space_gib, effective_count)
-    read_io, write_io = (
-        utils.next_n(read_io, n=200),
-        utils.next_n(write_io, n=200),
-    )
-
-    count_disk_iops = 0
-    if (read_io + write_io) > drive.max_io_per_s:
-        ratio = (read_io + write_io) / drive.max_io_per_s
-        count_disk_iops = math.ceil(effective_count * ratio)
-        iops_count = max(cluster_size(count_disk_iops), min_count)
-        read_io, write_io = required_disk_ios(space_gib, iops_count)
+    # Iterate: sizing the EBS volume can force the node count up (disk-cap or
+    # IOPS overflow), which in turn changes per-node size and IOPS, which can
+    # force the count up again. Each pass recomputes with the updated count;
+    # converges within a few iterations.
+    def _ios_for_count(node_count: int) -> Tuple[int, float, float]:
+        space_gib = max(1, math.ceil(needed_disk_gib / node_count))
+        read_io, write_io = required_disk_ios(space_gib, node_count)
         read_io, write_io = (
             utils.next_n(read_io, n=200),
             utils.next_n(write_io, n=200),
         )
+        return space_gib, read_io, write_io
+
+    preliminary_resource_count = max(count_cpu, count_memory, count_network)
+    effective_count = max(cluster_size(preliminary_resource_count), min_count)
+    max_size = max_node_disk_gib(drive)
+    count_disk_capacity = 0
+    count_disk_iops = 0
+    ebs_gib = 0
+    read_io = 0.0
+    write_io = 0.0
+
+    for _ in range(10):
+        space_gib, read_io, write_io = _ios_for_count(effective_count)
+        io_gib = cloud_gib_for_io(drive, read_io + write_io, space_gib)
+        ebs_gib = utils.next_n(max(1, io_gib, space_gib), n=100)
+
+        iteration_disk_capacity = 0
+        if max_size > 0:
+            iteration_disk_capacity = max(
+                math.ceil(needed_disk_gib / max_size),
+                math.ceil(effective_count * ebs_gib / max_size),
+            )
+            ebs_gib = min(ebs_gib, int(max_size))
+        count_disk_capacity = max(count_disk_capacity, iteration_disk_capacity)
+
+        iteration_disk_iops = 0
+        if (read_io + write_io) > drive.max_io_per_s:
+            ratio = (read_io + write_io) / drive.max_io_per_s
+            iteration_disk_iops = math.ceil(effective_count * ratio)
+        count_disk_iops = max(count_disk_iops, iteration_disk_iops)
+
+        next_count = max(
+            cluster_size(
+                max(preliminary_resource_count, count_disk_capacity, count_disk_iops)
+            ),
+            min_count,
+        )
+        if next_count <= effective_count:
+            break
+        effective_count = next_count
 
     attached_drive = drive.model_copy()
     attached_drive.size_gib = ebs_gib
