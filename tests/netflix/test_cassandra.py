@@ -21,6 +21,10 @@ from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.org.netflix.cassandra import (
+    _default_cluster_size_mode,
+    _get_cluster_size_lambda,
+    _get_min_count,
+    CassandraClusterSizeMode,
     NflxCassandraCapacityModel,
 )
 from tests.util import assert_minimum_storage_gib
@@ -559,8 +563,33 @@ class TestCassandraCurrentCapacity:
             },
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
-        # Doubles a 3 node cluster to 6
         assert result.count == 6
+
+    def test_capacity_non_power_of_two_with_doubling_mode(self):
+        cluster_capacity = CurrentZoneClusterCapacity(
+            cluster_instance_name="r5d.4xlarge",
+            cluster_instance_count=fixed_float(3),
+            cpu_utilization=certain_float(80),
+            memory_utilization_gib=certain_float(32.0),
+            disk_utilization_gib=certain_float(2048),
+            network_utilization_mbps=certain_float(128.0),
+        )
+        desires = CapacityDesires(
+            service_tier=1,
+            current_clusters=CurrentClusters(zonal=[cluster_capacity]),
+        )
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_local_disks": True,
+                "cluster_size_mode": "doubling",
+            },
+        )[0]
+        result = cap_plan.candidate_clusters.zonal[0]
+        counts = result.cluster_params["required_nodes_by_type"]
+        assert counts["min_count"] == 6
 
     def test_capacity_non_power_of_two_with_required_size(self):
         cluster_capacity = CurrentZoneClusterCapacity(
@@ -584,6 +613,7 @@ class TestCassandraCurrentCapacity:
             extra_model_arguments={
                 "require_local_disks": True,
                 "required_cluster_size": 24,
+                "cluster_size_mode": "unrestricted",
             },
         )[0]
 
@@ -636,6 +666,160 @@ class TestCassandraExtraModelArguments:
                 tier, extra_model_arguments
             )
 
+    @pytest.mark.parametrize("tier", [2, 3, 4])
+    def test_non_critical_tiers_do_not_round_cluster_size(self, tier):
+        cluster_size = _get_cluster_size_lambda(
+            cluster_size_mode=_default_cluster_size_mode(tier),
+        )
+
+        assert (
+            _get_min_count(
+                tier=tier,
+                required_cluster_size=None,
+                needed_disk_gib=3,
+                disk_per_node_gib=1,
+                cluster_size_lambda=cluster_size,
+            )
+            == 3
+        )
+
+    def test_cluster_size_lambda_defaults_to_doubling_mode(self):
+        cluster_size = _get_cluster_size_lambda()
+
+        assert cluster_size(3) == 4
+
+    @pytest.mark.parametrize(
+        "tier, expected_mode",
+        [
+            (0, CassandraClusterSizeMode.doubling),
+            (1, CassandraClusterSizeMode.doubling),
+            (2, CassandraClusterSizeMode.unrestricted),
+            (3, CassandraClusterSizeMode.unrestricted),
+            (4, CassandraClusterSizeMode.unrestricted),
+        ],
+    )
+    def test_default_cluster_size_mode_is_tier_based(self, tier, expected_mode):
+        assert _default_cluster_size_mode(tier) == expected_mode
+
+    @pytest.mark.parametrize("tier", [2, 3, 4])
+    def test_non_critical_tiers_do_not_round_above_required_cluster_size(self, tier):
+        cluster_size = _get_cluster_size_lambda(
+            cluster_size_mode=_default_cluster_size_mode(tier),
+        )
+
+        assert (
+            _get_min_count(
+                tier=tier,
+                required_cluster_size=5,
+                needed_disk_gib=6,
+                disk_per_node_gib=1,
+                cluster_size_lambda=cluster_size,
+            )
+            == 6
+        )
+
+    @pytest.mark.parametrize("tier", [0, 1])
+    def test_critical_tiers_keep_doubling_cluster_size(self, tier):
+        cluster_size = _get_cluster_size_lambda(
+            cluster_size_mode=_default_cluster_size_mode(tier),
+        )
+
+        assert (
+            _get_min_count(
+                tier=tier,
+                required_cluster_size=None,
+                needed_disk_gib=3,
+                disk_per_node_gib=1,
+                cluster_size_lambda=cluster_size,
+            )
+            == 4
+        )
+
+    @pytest.mark.parametrize("tier", [2, 3, 4])
+    def test_cluster_size_mode_can_force_doubling_for_non_critical_tiers(self, tier):
+        cluster_size = _get_cluster_size_lambda(
+            cluster_size_mode=CassandraClusterSizeMode.doubling,
+        )
+
+        assert (
+            _get_min_count(
+                tier=tier,
+                required_cluster_size=None,
+                needed_disk_gib=3,
+                disk_per_node_gib=1,
+                cluster_size_lambda=cluster_size,
+            )
+            == 4
+        )
+
+    def test_cluster_size_mode_does_not_double_from_required_size(self):
+        cluster_size = _get_cluster_size_lambda(
+            cluster_size_mode=CassandraClusterSizeMode.doubling,
+            required_cluster_size=5,
+        )
+
+        assert (
+            _get_min_count(
+                tier=2,
+                required_cluster_size=5,
+                needed_disk_gib=6,
+                disk_per_node_gib=1,
+                cluster_size_lambda=cluster_size,
+            )
+            == 6
+        )
+
+    def test_required_cluster_size_remains_the_min_count_floor(self):
+        cluster_size = _get_cluster_size_lambda(
+            cluster_size_mode=CassandraClusterSizeMode.doubling,
+            required_cluster_size=5,
+        )
+
+        assert (
+            _get_min_count(
+                tier=2,
+                required_cluster_size=5,
+                needed_disk_gib=4,
+                disk_per_node_gib=1,
+                cluster_size_lambda=cluster_size,
+            )
+            == 5
+        )
+
+    def test_cluster_size_mode_doubles_from_current_non_power_of_two_size(self):
+        cluster_size = _get_cluster_size_lambda(
+            cluster_size_mode=CassandraClusterSizeMode.doubling,
+            current_cluster_size=6,
+        )
+
+        assert (
+            _get_min_count(
+                tier=2,
+                required_cluster_size=None,
+                needed_disk_gib=7,
+                disk_per_node_gib=1,
+                cluster_size_lambda=cluster_size,
+            )
+            == 12
+        )
+
+    @pytest.mark.parametrize("tier", [0, 1])
+    def test_cluster_size_mode_can_force_unrestricted_for_critical_tiers(self, tier):
+        cluster_size = _get_cluster_size_lambda(
+            cluster_size_mode=CassandraClusterSizeMode.unrestricted,
+        )
+
+        assert (
+            _get_min_count(
+                tier=tier,
+                required_cluster_size=None,
+                needed_disk_gib=3,
+                disk_per_node_gib=1,
+                cluster_size_lambda=cluster_size,
+            )
+            == 3
+        )
+
     def test_page_cache_cap_default(self):
         from service_capacity_modeling.models.org.netflix.cassandra import (
             NflxCassandraArguments,
@@ -643,3 +827,46 @@ class TestCassandraExtraModelArguments:
 
         args = NflxCassandraArguments.from_extra_model_arguments({})
         assert args.max_page_cache_gib == 28.0
+
+    def test_cluster_size_mode_extra_argument(self):
+        from service_capacity_modeling.models.org.netflix.cassandra import (
+            NflxCassandraArguments,
+        )
+
+        assert (
+            NflxCassandraArguments.from_extra_model_arguments({}).cluster_size_mode
+            is None
+        )
+        assert (
+            NflxCassandraArguments.from_extra_model_arguments(
+                {"cluster_size_mode": "doubling"}
+            ).cluster_size_mode
+            == CassandraClusterSizeMode.doubling
+        )
+        assert (
+            NflxCassandraArguments.from_extra_model_arguments(
+                {"cluster_size_mode": "unrestricted"}
+            ).cluster_size_mode
+            == CassandraClusterSizeMode.unrestricted
+        )
+
+    def test_cluster_size_mode_schema_exposes_enum_docstrings(self):
+        from service_capacity_modeling.models.org.netflix.cassandra import (
+            NflxCassandraArguments,
+        )
+
+        schema = NflxCassandraArguments.model_json_schema()
+        cluster_size_mode = schema["$defs"]["CassandraClusterSizeMode"]
+
+        assert cluster_size_mode["oneOf"] == [
+            {
+                "const": CassandraClusterSizeMode.doubling.value,
+                "title": CassandraClusterSizeMode.doubling.name,
+                "description": CassandraClusterSizeMode.doubling.__doc__,
+            },
+            {
+                "const": CassandraClusterSizeMode.unrestricted.value,
+                "title": CassandraClusterSizeMode.unrestricted.name,
+                "description": CassandraClusterSizeMode.unrestricted.__doc__,
+            },
+        ]

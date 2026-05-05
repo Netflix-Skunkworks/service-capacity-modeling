@@ -16,6 +16,8 @@ from pydantic import BaseModel
 from pydantic import Field
 from pydantic import model_validator
 
+from service_capacity_modeling.enum_utils import enum_docstrings
+from service_capacity_modeling.enum_utils import StrEnum
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
@@ -77,6 +79,19 @@ BACKGROUND_BUFFER = "background"
 CRITICAL_TIERS: Set[int] = {0, 1}
 # cluster size aka nodes per ASG
 CRITICAL_TIER_MIN_CLUSTER_SIZE = 2
+
+
+@enum_docstrings
+class CassandraClusterSizeMode(StrEnum):
+    """Controls Cassandra zonal cluster count rounding."""
+
+    doubling = "doubling"
+    """Round constrained Cassandra counts by doubling from an existing non-power
+    current cluster size. New clusters still round to the next power of two.
+    required_cluster_size remains a floor and does not become the doubling base."""
+
+    unrestricted = "unrestricted"
+    """Use the raw required cluster count without Cassandra cluster-size rounding."""
 
 
 # --- CRR network and backup cost helpers ---
@@ -249,7 +264,7 @@ def _get_min_count(
         required_cluster_size or 0,
         min_nodes_for_disk,
     )
-    # Ensure that the min count is an increment of the cluster size constraint (doubling)
+    # Apply any Cassandra cluster-size constraint after the hard floor is known.
     return cluster_size_lambda(min_count)
 
 
@@ -511,15 +526,26 @@ def _get_current_capacity(desires: CapacityDesires) -> Optional[CurrentClusterCa
 
 
 def _get_cluster_size_lambda(
-    current_cluster_size: int,
-    required_cluster_size: Optional[int],
+    cluster_size_mode: CassandraClusterSizeMode = CassandraClusterSizeMode.doubling,
+    current_cluster_size: int = 0,
+    required_cluster_size: Optional[int] = None,
 ) -> Callable[[int], int]:
-    if required_cluster_size:
-        return lambda x: next_doubling(x, base=required_cluster_size)
-    elif current_cluster_size and not is_power_of_2(current_cluster_size):
+    if cluster_size_mode == CassandraClusterSizeMode.unrestricted:
+        return lambda x: x
+
+    if current_cluster_size and not is_power_of_2(current_cluster_size):
         return lambda x: next_doubling(x, base=current_cluster_size)
-    else:  # New provisionings
-        return next_power_of_2
+
+    if required_cluster_size:
+        return lambda x: x
+
+    return next_power_of_2
+
+
+def _default_cluster_size_mode(tier: int) -> CassandraClusterSizeMode:
+    if tier in CRITICAL_TIERS:
+        return CassandraClusterSizeMode.doubling
+    return CassandraClusterSizeMode.unrestricted
 
 
 def _compute_penalties(
@@ -573,6 +599,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     max_regional_size: int = 192,
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
+    cluster_size_mode: CassandraClusterSizeMode = CassandraClusterSizeMode.doubling,
     large_instance_regret: float = 0.2,
     different_family_regret: float = 0.10,
     max_page_cache_gib: float = DEFAULT_MAX_PAGE_CACHE_GIB,
@@ -718,7 +745,9 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
 
     current_cluster_size = _get_current_cluster_size(desires)
     cluster_size_lambda = _get_cluster_size_lambda(
-        current_cluster_size, required_cluster_size
+        cluster_size_mode,
+        current_cluster_size=current_cluster_size,
+        required_cluster_size=required_cluster_size,
     )
     min_count = _get_min_count(
         tier=desires.service_tier,
@@ -757,7 +786,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             _cass_io_per_read(size) * math.ceil(read_io_per_sec / count),
             write_io_per_sec / count,
         ),
-        # C* clusters provision in powers of 2 because doubling
+        # Critical C* clusters grow by doubling from the current cluster size.
         cluster_size=cluster_size_lambda,
         min_count=min_count,
         reserve_memory=lambda x: x - memory_layout(x).page_cache_capacity_gib,
@@ -1119,6 +1148,15 @@ class NflxCassandraArguments(BaseModel):
         default=1.3,
         description="Compute success buffer for very large clusters (adaptive lower bound).",
     )
+    cluster_size_mode: Optional[CassandraClusterSizeMode] = Field(
+        default=None,
+        description="Optional override for zonal Cassandra cluster count rounding. "
+        "When unset, critical tiers use doubling-based counts and non-critical tiers "
+        "are unrestricted. 'doubling' rounds by repeatedly doubling from the "
+        "non-power-of-two current size, or by using the next power of two for new "
+        "clusters. It does not use required_cluster_size as the doubling base. "
+        "'unrestricted' disables cluster-size rounding for all tiers.",
+    )
 
     @model_validator(mode="after")
     def _check_storage_buffer_bounds(self) -> "NflxCassandraArguments":
@@ -1335,6 +1373,8 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_attached_data_per_node_gib=args.max_attached_data_per_node_gib,
             max_write_buffer_percent=max_write_buffer_percent,
             max_table_buffer_percent=max_table_buffer_percent,
+            cluster_size_mode=args.cluster_size_mode
+            or _default_cluster_size_mode(desires.service_tier),
             large_instance_regret=args.large_instance_regret,
             different_family_regret=args.different_family_regret,
             max_page_cache_gib=args.max_page_cache_gib,
