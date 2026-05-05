@@ -62,6 +62,9 @@ from service_capacity_modeling.stats import interval_percentile
 
 logger = logging.getLogger(__name__)
 
+IntervalSampler = Callable[[Interval, str, int], Sequence[Interval]]
+IntervalPercentileSampler = Callable[[Interval, Sequence[int]], Sequence[Interval]]
+
 
 class PlannerArguments(ExcludeUnsetModel):
     """Planner-level configuration, separate from model-specific extra_model_arguments.
@@ -126,7 +129,9 @@ def simulate_interval(
 # e.g. read_per_second[100, 1000] -> [rps[107, 107], rps[756, 756], ...]
 # num_sims concrete values are generated.
 def model_desires(
-    desires: CapacityDesires, num_sims: int = 1000
+    desires: CapacityDesires,
+    num_sims: int = 1000,
+    interval_sampler: Optional[IntervalSampler] = None,
 ) -> Generator[CapacityDesires, None, None]:
     query_pattern = desires.query_pattern.model_copy(deep=True)
     data_shape = desires.data_shape.model_copy(deep=True)
@@ -135,7 +140,11 @@ def model_desires(
     for field in sorted(QueryPattern.model_fields):
         d = getattr(query_pattern, field)
         if isinstance(d, Interval):
-            query_pattern_simulation[field] = simulate_interval(d, field)(num_sims)
+            query_pattern_simulation[field] = (
+                interval_sampler(d, field, num_sims)
+                if interval_sampler is not None
+                else simulate_interval(d, field)(num_sims)
+            )
         else:
             query_pattern_simulation[field] = [d] * num_sims
 
@@ -143,7 +152,11 @@ def model_desires(
     for field in sorted(DataShape.model_fields):
         d = getattr(data_shape, field)
         if isinstance(d, Interval):
-            data_shape_simulation[field] = simulate_interval(d, field)(num_sims)
+            data_shape_simulation[field] = (
+                interval_sampler(d, field, num_sims)
+                if interval_sampler is not None
+                else simulate_interval(d, field)(num_sims)
+            )
         else:
             data_shape_simulation[field] = [d] * num_sims
 
@@ -167,6 +180,7 @@ def model_desires(
 def model_desires_percentiles(
     desires: CapacityDesires,
     percentiles: Sequence[int] = (5, 25, 50, 75, 95),
+    interval_percentile_sampler: Optional[IntervalPercentileSampler] = None,
 ) -> Tuple[Sequence[CapacityDesires], CapacityDesires]:
     query_pattern = desires.query_pattern.model_copy(deep=True)
     data_shape = desires.data_shape.model_copy(deep=True)
@@ -176,7 +190,11 @@ def model_desires_percentiles(
     for field in sorted(QueryPattern.model_fields):
         d = getattr(query_pattern, field)
         if isinstance(d, Interval):
-            query_pattern_simulation[field] = interval_percentile(d, percentiles)
+            query_pattern_simulation[field] = (
+                interval_percentile_sampler(d, percentiles)
+                if interval_percentile_sampler is not None
+                else interval_percentile(d, percentiles)
+            )
             if d.can_simulate:
                 query_pattern_means[field] = certain_float(d.mid)
             else:
@@ -190,7 +208,11 @@ def model_desires_percentiles(
     for field in sorted(DataShape.model_fields):
         d = getattr(data_shape, field)
         if isinstance(d, Interval):
-            data_shape_simulation[field] = interval_percentile(d, percentiles)
+            data_shape_simulation[field] = (
+                interval_percentile_sampler(d, percentiles)
+                if interval_percentile_sampler is not None
+                else interval_percentile(d, percentiles)
+            )
             if d.can_simulate:
                 data_shape_means[field] = certain_float(d.mid)
             else:
@@ -549,6 +571,7 @@ class CapacityPlanner:
         num_results: Optional[int] = None,
         num_regions: int = 3,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
+        interval_percentile_sampler: Optional[IntervalPercentileSampler] = None,
     ) -> Tuple[Sequence[CapacityPlan], Dict[int, Sequence[CapacityPlan]]]:
         if model_name not in self._models:
             raise ValueError(
@@ -573,7 +596,9 @@ class CapacityPlanner:
             extra_model_arguments=extra_model_arguments,
         ):
             percentile_inputs, mean_desires = model_desires_percentiles(
-                desires=sub_desires, percentiles=sorted_percentiles
+                desires=sub_desires,
+                percentiles=sorted_percentiles,
+                interval_percentile_sampler=interval_percentile_sampler,
             )
             model_mean_desires[sub_model] = mean_desires
             index = 0
@@ -1102,6 +1127,8 @@ class CapacityPlanner:
         explain: bool = False,
         max_results_per_family: int = 1,
         planner_arguments: Optional[PlannerArguments] = None,
+        interval_sampler: Optional[IntervalSampler] = None,
+        interval_percentile_sampler: Optional[IntervalPercentileSampler] = None,
     ) -> UncertainCapacityPlan:
         extra_model_arguments = extra_model_arguments or {}
         pargs = planner_arguments or PlannerArguments(
@@ -1138,7 +1165,11 @@ class CapacityPlanner:
             desires_by_model[sub_model] = sub_desires
             model_plans: List[Tuple[CapacityDesires, Sequence[CapacityPlan]]] = []
             model_excuses: List[Excuse] = []
-            for sim_desires in model_desires(sub_desires, simulations):
+            for sim_desires in model_desires(
+                sub_desires,
+                simulations,
+                interval_sampler=interval_sampler,
+            ):
                 sim_result = self._plan_certain(
                     model_name=sub_model,
                     region=region,
@@ -1212,6 +1243,7 @@ class CapacityPlanner:
             extra_model_arguments=extra_model_arguments,
             num_regions=num_regions,
             instance_families=instance_families,
+            interval_percentile_sampler=interval_percentile_sampler,
         )
 
         result = UncertainCapacityPlan(

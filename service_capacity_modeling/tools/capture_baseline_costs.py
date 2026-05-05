@@ -12,6 +12,7 @@ Usage:
 import json
 from pathlib import Path
 from typing import Any
+from typing import Sequence
 
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import (
@@ -36,6 +37,57 @@ from service_capacity_modeling.interface import (
 
 BASELINE_UNCERTAIN_SIMULATIONS = 16
 BASELINE_UNCERTAIN_NUM_RESULTS = 3
+
+
+def _deterministic_interval_value(interval: Interval, probability: float) -> float:
+    confidence = min(max(interval.confidence, 0.01), 0.99)
+    low_p = (1 - confidence) / 2.0
+    high_p = 1 - low_p
+
+    if probability <= low_p:
+        span = low_p or 1.0
+        return interval.minimum + (interval.low - interval.minimum) * (
+            probability / span
+        )
+    if probability <= 0.5:
+        span = 0.5 - low_p
+        return interval.low + (interval.mid - interval.low) * (
+            (probability - low_p) / span
+        )
+    if probability <= high_p:
+        span = high_p - 0.5
+        return interval.mid + (interval.high - interval.mid) * (
+            (probability - 0.5) / span
+        )
+
+    span = 1 - high_p or 1.0
+    return interval.high + (interval.maximum - interval.high) * (
+        (probability - high_p) / span
+    )
+
+
+def _deterministic_interval_samples(
+    interval: Interval,
+    name: str,  # pylint: disable=unused-argument
+    count: int,
+) -> Sequence[Interval]:
+    if not interval.can_simulate:
+        return [interval] * count
+    return [
+        certain_float(_deterministic_interval_value(interval, (index + 0.5) / count))
+        for index in range(count)
+    ]
+
+
+def _deterministic_interval_percentile(
+    interval: Interval, percentiles: Sequence[int]
+) -> list[Interval]:
+    if not interval.can_simulate:
+        return [interval] * len(percentiles)
+    return [
+        certain_float(_deterministic_interval_value(interval, percentile / 100))
+        for percentile in percentiles
+    ]
 
 
 def _format_cluster(cluster: ClusterCapacity, deployment: str) -> dict[str, Any]:
@@ -150,6 +202,8 @@ def capture_uncertain(  # pylint: disable=too-many-positional-arguments
             simulations=simulations,
             num_results=num_results,
             extra_model_arguments=extra_args or {},
+            interval_sampler=_deterministic_interval_samples,
+            interval_percentile_sampler=_deterministic_interval_percentile,
         )
         return {
             "scenario": scenario_name,
