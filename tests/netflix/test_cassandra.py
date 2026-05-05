@@ -21,6 +21,8 @@ from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.org.netflix.cassandra import (
+    _get_cluster_size_lambda,
+    _get_min_count,
     NflxCassandraCapacityModel,
 )
 from tests.util import assert_minimum_storage_gib
@@ -635,6 +637,63 @@ class TestCassandraExtraModelArguments:
             NflxCassandraCapacityModel.get_required_cluster_size(
                 tier, extra_model_arguments
             )
+
+    @pytest.mark.parametrize("tier", [2, 3, 4])
+    def test_non_critical_tiers_do_not_round_cluster_size(self, tier):
+        cluster_size = _get_cluster_size_lambda(
+            tier=tier,
+            current_cluster_size=0,
+            required_cluster_size=None,
+        )
+
+        assert (
+            _get_min_count(
+                tier=tier,
+                required_cluster_size=None,
+                needed_disk_gib=3,
+                disk_per_node_gib=1,
+                cluster_size_lambda=cluster_size,
+            )
+            == 3
+        )
+
+    @pytest.mark.parametrize("tier", [2, 3, 4])
+    def test_non_critical_tiers_do_not_round_above_required_cluster_size(self, tier):
+        cluster_size = _get_cluster_size_lambda(
+            tier=tier,
+            current_cluster_size=0,
+            required_cluster_size=5,
+        )
+
+        assert (
+            _get_min_count(
+                tier=tier,
+                required_cluster_size=5,
+                needed_disk_gib=6,
+                disk_per_node_gib=1,
+                cluster_size_lambda=cluster_size,
+            )
+            == 6
+        )
+
+    @pytest.mark.parametrize("tier", [0, 1])
+    def test_critical_tiers_keep_power_of_two_cluster_size(self, tier):
+        cluster_size = _get_cluster_size_lambda(
+            tier=tier,
+            current_cluster_size=0,
+            required_cluster_size=None,
+        )
+
+        assert (
+            _get_min_count(
+                tier=tier,
+                required_cluster_size=None,
+                needed_disk_gib=3,
+                disk_per_node_gib=1,
+                cluster_size_lambda=cluster_size,
+            )
+            == 4
+        )
 
     def test_page_cache_cap_default(self):
         from service_capacity_modeling.models.org.netflix.cassandra import (

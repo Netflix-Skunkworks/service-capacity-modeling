@@ -511,9 +511,12 @@ def _get_current_capacity(desires: CapacityDesires) -> Optional[CurrentClusterCa
 
 
 def _get_cluster_size_lambda(
+    tier: int,
     current_cluster_size: int,
     required_cluster_size: Optional[int],
 ) -> Callable[[int], int]:
+    if tier not in CRITICAL_TIERS:
+        return lambda x: x
     if required_cluster_size:
         return lambda x: next_doubling(x, base=required_cluster_size)
     elif current_cluster_size and not is_power_of_2(current_cluster_size):
@@ -718,7 +721,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
 
     current_cluster_size = _get_current_cluster_size(desires)
     cluster_size_lambda = _get_cluster_size_lambda(
-        current_cluster_size, required_cluster_size
+        desires.service_tier, current_cluster_size, required_cluster_size
     )
     min_count = _get_min_count(
         tier=desires.service_tier,
@@ -757,7 +760,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             _cass_io_per_read(size) * math.ceil(read_io_per_sec / count),
             write_io_per_sec / count,
         ),
-        # C* clusters provision in powers of 2 because doubling
+        # Critical C* clusters provision in powers of 2 because doubling
         cluster_size=cluster_size_lambda,
         min_count=min_count,
         reserve_memory=lambda x: x - memory_layout(x).page_cache_capacity_gib,
