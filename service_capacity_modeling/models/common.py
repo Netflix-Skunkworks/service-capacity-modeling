@@ -917,12 +917,12 @@ def merge_plan(
 
 class DerivedBuffers(BaseModel):
     scale: float = Field(default=1, gt=0)
-    # When present, this is the maximum ratio of the current usage
+    # When present, this is the maximum fraction of existing capacity.
     ceiling: Optional[float] = Field(
         default=None,
         gt=0,
     )
-    # When present, this is the minimum ratio of the current usage
+    # When present, this is the minimum fraction of existing capacity.
     floor: Optional[float] = Field(default=None, gt=0)
 
     @property

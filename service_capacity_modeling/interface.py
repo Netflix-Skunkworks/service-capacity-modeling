@@ -914,25 +914,28 @@ class BufferComponent(StrEnum):
 
 @enum_docstrings
 class BufferIntent(StrEnum):
-    """Defines the intent of buffer directives for capacity planning"""
+    """Defines how a buffer directive affects capacity planning."""
 
     desired = "desired"
-    """Most buffers show "desired" buffer, this is the default"""
+    """Headroom over modeled demand. This is the default and is only valid in
+    buffers.desired."""
 
     scale = "scale"
-    """Ratio on top of existing buffers to ensure exists. Generally combined with a
-    different desired buffer to ensure we don't just scale needlessly. This means we
-    can scale up or down as long as we meet the desired buffer."""
+    """Set the derived requirement from current usage multiplied by ratio and any
+    desired headroom the caller applies. The requirement may move up or down
+    because this intent does not add a bound from existing capacity."""
 
     preserve = "preserve"
-    """DEPRECATED - Use scale_up/scale_down instead. Ignores model preferences, just
-    preserve existing buffers. We rarely actually want to do this since it can cause
-    severe over provisioning."""
+    """Pin the derived requirement to existing capacity. This ignores ratio and is
+    syntactic sugar for scale=1 plus floor=1 and ceiling=1.
+
+    Prefer scale_up or scale_down when only one side should be bounded."""
 
     scale_up = "scale_up"
-    """Scale up if necessary to meet the desired buffer. If the existing resource is
-    over-provisioned, do not reduce the requirement. If under-provisioned, the
-    requirement can be increased to meet the desired buffer.
+    """Set the derived requirement from current usage multiplied by ratio and any
+    desired headroom the caller applies, with a floor at 1x existing capacity.
+    The requirement may grow, but it will not shrink below what is already
+    provisioned. This is syntactic sugar for scale plus floor=1.
 
     Example: need 20 cores but have 10 → scale up to 20 cores.
 
@@ -940,22 +943,23 @@ class BufferIntent(StrEnum):
     at least 40 cores."""
 
     scale_down = "scale_down"
-    """Scale down if necessary to meet the desired buffer. If the existing resource is
-    under-provisioned, do not increase the requirement. If over-provisioned, the
-    requirement can be decreased to meet the desired buffer.
+    """Set the derived requirement from current usage multiplied by ratio and any
+    desired headroom the caller applies, with a ceiling at 1x existing capacity.
+    The requirement may shrink, but it will not grow above what is already
+    provisioned. This is syntactic sugar for scale plus ceiling=1.
 
     Example: need 20 cores but have 10 → maintain buffer and do not scale up.
 
     Example 2: need 20 cores but have 40 → scale down to 20 cores."""
 
     floor = "floor"
-    """Set a minimum requirement as a fraction of existing capacity. ratio specifies
-    the fraction (e.g. ratio=0.8 means never drop below 80% of current capacity).
+    """Add a minimum bound as a fraction of existing capacity. For example,
+    ratio=0.8 means the requirement will not fall below 80% of existing capacity.
     Only valid in buffers.derived."""
 
     ceiling = "ceiling"
-    """Set a maximum requirement as a fraction of existing capacity. ratio specifies
-    the fraction (e.g. ratio=1.2 means never exceed 120% of current capacity).
+    """Add a maximum bound as a fraction of existing capacity. For example,
+    ratio=1.2 means the requirement will not exceed 120% of existing capacity.
     Only valid in buffers.derived."""
 
 
@@ -963,11 +967,12 @@ class Buffer(ExcludeUnsetModel):
     """Represents a buffer (headroom) directive for capacity planning"""
 
     ratio: float = 1.0
-    """The buffer value expressed as a ratio over normal load (e.g. 1.5 =
-    50% headroom).
+    """The numeric multiplier for this buffer.
 
-    For derived buffers with intent=floor or intent=ceiling, ratio is the
-    bound expressed as a fraction of existing capacity."""
+    For desired buffers, ratio is headroom over modeled demand (e.g. 1.5 =
+    50% headroom). For derived scale intents, ratio multiplies current usage
+    before any desired headroom that caller applies. For floor and ceiling
+    intents, ratio is a bound against existing capacity. Preserve ignores ratio."""
 
     intent: BufferIntent = BufferIntent.desired
     """The intent of this buffer directive (almost always 'desired')"""
@@ -1018,14 +1023,17 @@ class Buffers(ExcludeUnsetModel):
     default: Buffer = Buffer(ratio=1.5)
     # Desired compute, storage, cpu, memory, etc... buffers
     desired: Dict[str, Buffer] = {}
-    # Derive these buffers from current clusters or model context.
-    # Use intent to specify the policy:
+    # Derived buffers compute requirements from current clusters or model
+    # context. Scale intents set a requirement from current usage; bound
+    # intents clamp that requirement against existing capacity. The scale_up,
+    # scale_down, and preserve intents are shorthand for common scale/bound
+    # combinations:
     #   scale      = ratio * current usage
-    #   scale_up   = scale + floor at 1x existing (sugar)
-    #   scale_down = scale + ceiling at 1x existing (sugar)
-    #   preserve   = floor=1x and ceiling=1x (sugar)
-    #   floor      = ratio = minimum fraction of existing capacity
-    #   ceiling    = ratio = maximum fraction of existing capacity
+    #   scale_up   = scale plus floor=1
+    #   scale_down = scale plus ceiling=1
+    #   preserve   = scale=1 plus floor=1 and ceiling=1
+    #   floor      = minimum fraction of existing capacity
+    #   ceiling    = maximum fraction of existing capacity
     derived: Dict[str, Buffer] = {}
 
     @model_validator(mode="after")
