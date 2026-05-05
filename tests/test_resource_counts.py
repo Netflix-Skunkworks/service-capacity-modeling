@@ -4,6 +4,7 @@ import pytest
 
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import NodeCountContext
 from service_capacity_modeling.interface import NodeCountConstraint
 from service_capacity_modeling.models.common import compute_stateful_zone
 
@@ -44,6 +45,35 @@ def test_count_bottleneck_resource(cores, mem, disk, net, expected_bottleneck):
     assert context is not None
     assert {k.value for k in context.required_nodes_by_type} == EXPECTED_KEYS
     assert context.resource_bottleneck == NodeCountConstraint(expected_bottleneck)
+
+
+def test_memory_tie_does_not_hide_non_memory_bottleneck():
+    cluster = compute_stateful_zone(
+        instance=M5_4XL,
+        drive=EBS,
+        needed_cores=32,  # ceil(32/16) = 2 nodes
+        needed_disk_gib=100,
+        needed_memory_gib=122,  # ceil(122/61.04) = 2 nodes
+        needed_network_mbps=100,
+    )
+
+    counts = cluster.cluster_params["required_nodes_by_type"]
+    assert counts["cpu"] == counts["memory"] == 2
+    assert cluster.cluster_params["resource_bottleneck"] == "cpu"
+
+
+def test_non_memory_tie_order_is_stable():
+    context = NodeCountContext.from_counts(
+        count_cpu=1,
+        count_memory=3,
+        count_network=3,
+        count_disk_capacity=3,
+        count_disk_iops=3,
+        cluster_size_count=3,
+        min_count=0,
+    )
+
+    assert context.resource_bottleneck == NodeCountConstraint.network
 
 
 def test_storage_bound_local():

@@ -1166,6 +1166,17 @@ _RESOURCE_CONSTRAINTS = frozenset(
         NodeCountConstraint.disk_iops,
     }
 )
+_BOTTLENECK_TIE_ORDER = (
+    NodeCountConstraint.cpu,
+    NodeCountConstraint.network,
+    NodeCountConstraint.disk_capacity,
+    NodeCountConstraint.disk_iops,
+    NodeCountConstraint.memory,
+)
+
+
+def _bottleneck_tie_rank(constraint: NodeCountConstraint) -> int:
+    return len(_BOTTLENECK_TIE_ORDER) - _BOTTLENECK_TIE_ORDER.index(constraint)
 
 
 class NodeCountContext(ExcludeUnsetModel):
@@ -1183,9 +1194,10 @@ class NodeCountContext(ExcludeUnsetModel):
                                "disk_capacity" | "disk_iops" | null
       }
     `resource_bottleneck` is derived from `required_nodes_by_type` — the
-    resource constraint with the highest count. It is serialized for reader
-    convenience but recomputed on deserialization; any stale value in a
-    hand-edited JSON is ignored.
+    resource constraint with the highest count, with memory losing ties to
+    non-memory resources. It is serialized for reader convenience but
+    recomputed on deserialization; any stale value in a hand-edited JSON is
+    ignored.
     """
 
     required_nodes_by_type: Dict[NodeCountConstraint, int]
@@ -1200,7 +1212,7 @@ class NodeCountContext(ExcludeUnsetModel):
         }
         if not counts:
             return None
-        return max(counts, key=lambda c: counts[c])
+        return max(counts, key=lambda c: (counts[c], _bottleneck_tie_rank(c)))
 
     @classmethod
     def from_counts(

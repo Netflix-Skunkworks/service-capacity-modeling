@@ -306,7 +306,6 @@ scenarios.append(
         cassandra_timeseries_ebs,
         {
             "require_local_disks": False,
-            "experimental_memory_model": True,
         },
         "cassandra_timeseries_ebs",
     )
@@ -369,7 +368,6 @@ scenarios.append(
         {
             "require_local_disks": False,
             "require_attached_disks": True,
-            "experimental_memory_model": True,
         },
         "cassandra_kv_dense_ebs",
     )
@@ -431,7 +429,6 @@ scenarios.append(
         {
             "require_local_disks": False,
             "require_attached_disks": True,
-            "experimental_memory_model": True,
         },
         "cassandra_kv_compact_ebs",
     )
