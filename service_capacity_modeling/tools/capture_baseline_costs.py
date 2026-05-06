@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pylint: disable=too-many-lines
 """
 Capture current cost outputs for regression testing.
 
@@ -18,8 +19,11 @@ Usage:
 import json
 import math
 import os
+from dataclasses import dataclass
+from difflib import unified_diff
+from itertools import islice
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import (
@@ -47,23 +51,81 @@ BASELINE_UNCERTAIN_NUM_RESULTS = 3
 BASELINE_UNCERTAIN_SNAPSHOT_FORMAT = "seeded-scipy-cost-preserve-v1"
 BASELINE_UNCERTAIN_COST_REL_TOLERANCE = 0.01
 BASELINE_UNCERTAIN_COST_ABS_TOLERANCE = 1.0
+COST_KEYS = frozenset(("annual_cost", "total_annual_cost", "instance_cost"))
 BASELINE_UNCERTAIN_SNAPSHOT_NOTE = (
     "Uses the planner's seeded SciPy uncertainty sampling. When regenerating "
-    "an existing snapshot, cost values within 1% or $1 are preserved because "
-    "scipy.optimize distribution fitting can produce tiny output drift across "
-    "CPU/libm builds. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
+    "an existing snapshot, cost values are serialized to cents and values "
+    "within 1% or $1 are preserved because scipy.optimize distribution fitting "
+    "can produce tiny output drift across CPU/libm builds. Set "
+    "SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
 )
 
 
-def _preserve_existing_cost(actual: float, existing: Any) -> float:
+@dataclass
+class CostPreservationStats:
+    preserved: int = 0
+    exceeded: int = 0
+    max_abs_delta: float = 0.0
+    max_rel_delta: float = 0.0
+    max_delta_path: str = ""
+
+    def record(
+        self, path: str, actual: float, existing: float, preserved: bool
+    ) -> None:
+        abs_delta = abs(actual - existing)
+        rel_delta = abs_delta / max(abs(existing), 1.0)
+        if preserved:
+            self.preserved += 1
+        else:
+            self.exceeded += 1
+        if abs_delta > self.max_abs_delta:
+            self.max_abs_delta = abs_delta
+            self.max_rel_delta = rel_delta
+            self.max_delta_path = path
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (float, int)) and not isinstance(value, bool)
+
+
+def _is_cost_key(key: str) -> bool:
+    return key in COST_KEYS or key == "annual_costs"
+
+
+def _round_cost(value: Any) -> float:
+    return round(float(value), 2)
+
+
+def _round_cost_leaves(value: Any, cost_context: bool = False) -> Any:
+    if _is_number(value) and cost_context:
+        return _round_cost(value)
+    if isinstance(value, list):
+        return [_round_cost_leaves(item, cost_context) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _round_cost_leaves(item, cost_context or _is_cost_key(key))
+            for key, item in value.items()
+        }
+    return value
+
+
+def _preserve_existing_cost(
+    actual: float,
+    existing: Any,
+    path: str,
+    stats: CostPreservationStats,
+) -> float:
     if not isinstance(existing, (float, int)):
         return actual
-    if math.isclose(
+    existing_float = float(existing)
+    preserved = math.isclose(
         actual,
-        float(existing),
+        existing_float,
         rel_tol=BASELINE_UNCERTAIN_COST_REL_TOLERANCE,
         abs_tol=BASELINE_UNCERTAIN_COST_ABS_TOLERANCE,
-    ):
+    )
+    stats.record(path, actual, existing_float, preserved)
+    if preserved:
         return existing
     return actual
 
@@ -71,17 +133,25 @@ def _preserve_existing_cost(actual: float, existing: Any) -> float:
 def _preserve_existing_costs(
     actual: Any,
     existing: Any,
+    stats: CostPreservationStats,
+    path: str = "$",
     cost_context: bool = False,
 ) -> Any:
-    if isinstance(actual, (float, int)) and cost_context:
-        return _preserve_existing_cost(float(actual), existing)
+    if _is_number(actual) and cost_context:
+        return _preserve_existing_cost(float(actual), existing, path, stats)
 
     if isinstance(actual, list) and isinstance(existing, list):
         if len(actual) != len(existing):
             return actual
         return [
-            _preserve_existing_costs(actual_item, existing_item, cost_context)
-            for actual_item, existing_item in zip(actual, existing)
+            _preserve_existing_costs(
+                actual_item,
+                existing_item,
+                stats,
+                f"{path}[{idx}]",
+                cost_context,
+            )
+            for idx, (actual_item, existing_item) in enumerate(zip(actual, existing))
         ]
 
     if isinstance(actual, dict) and isinstance(existing, dict):
@@ -91,9 +161,9 @@ def _preserve_existing_costs(
             key: _preserve_existing_costs(
                 value,
                 existing[key],
-                cost_context
-                or key in ("annual_cost", "total_annual_cost")
-                or key == "annual_costs",
+                stats,
+                f"{path}.{key}",
+                cost_context or _is_cost_key(key),
             )
             for key, value in actual.items()
         }
@@ -116,13 +186,64 @@ def _load_existing_uncertain_results(path: Path) -> dict[str, dict[str, Any]]:
 def _stabilize_uncertain_results(
     actual_results: list[dict[str, Any]],
     existing_results: dict[str, dict[str, Any]],
+    stats: CostPreservationStats,
 ) -> list[dict[str, Any]]:
     if not existing_results:
         return actual_results
     return [
-        _preserve_existing_costs(result, existing_results.get(result["scenario"], {}))
+        _preserve_existing_costs(
+            result,
+            existing_results.get(result["scenario"], {}),
+            stats,
+            f"$.{result['scenario']}",
+        )
         for result in actual_results
     ]
+
+
+def _print_text_diff_preview(old_text: str, new_text: str, path: Path) -> None:
+    diff_lines = unified_diff(
+        old_text.splitlines(),
+        new_text.splitlines(),
+        fromfile=f"{path} before",
+        tofile=f"{path} after",
+        lineterm="",
+    )
+    preview = list(islice(diff_lines, 80))
+    if preview:
+        print("  Diff preview:")
+        for line in preview:
+            print(f"    {line}")
+
+
+def _write_json_snapshot(path: Path, data: Any) -> bool:
+    old_text = path.read_text(encoding="utf-8") if path.exists() else None
+    new_text = json.dumps(data, indent=2, sort_keys=True) + "\n"
+
+    if old_text == new_text:
+        return False
+
+    path.write_text(new_text, encoding="utf-8")
+    print(f"Snapshot changed: {path}")
+    if old_text is not None:
+        _print_text_diff_preview(old_text, new_text, path)
+    return True
+
+
+def _print_cost_preservation_summary(stats: CostPreservationStats) -> None:
+    if stats.preserved == 0 and stats.exceeded == 0:
+        return
+    print(
+        "Uncertain cost preservation: "
+        f"preserved {stats.preserved} cost value(s), "
+        f"left {stats.exceeded} beyond tolerance."
+    )
+    if stats.max_delta_path:
+        print(
+            "  Largest regenerated cost drift: "
+            f"${stats.max_abs_delta:,.2f} ({stats.max_rel_delta:.4%}) at "
+            f"{stats.max_delta_path}"
+        )
 
 
 def _format_cluster(cluster: ClusterCapacity, deployment: str) -> dict[str, Any]:
@@ -145,9 +266,11 @@ def _format_cluster(cluster: ClusterCapacity, deployment: str) -> dict[str, Any]
 
     # Add cluster_params if present (e.g., replica_count, partitions_per_node)
     if cluster.cluster_params:
-        info["cluster_params"] = dict(sorted(cluster.cluster_params.items()))
+        info["cluster_params"] = _round_cost_leaves(
+            dict(sorted(cluster.cluster_params.items()))
+        )
 
-    return info
+    return cast(dict[str, Any], _round_cost_leaves(info))
 
 
 def _capture_candidate(candidate: Any) -> dict[str, Any]:
@@ -158,13 +281,18 @@ def _capture_candidate(candidate: Any) -> dict[str, Any]:
     for regional_cluster in candidate.regional:
         cluster_details.append(_format_cluster(regional_cluster, "regional"))
 
-    return {
-        "total_annual_cost": float(candidate.total_annual_cost),
-        "clusters": cluster_details,
-        "annual_costs": dict(
-            sorted((k, float(v)) for k, v in candidate.annual_costs.items())
+    return cast(
+        dict[str, Any],
+        _round_cost_leaves(
+            {
+                "total_annual_cost": float(candidate.total_annual_cost),
+                "clusters": cluster_details,
+                "annual_costs": dict(
+                    sorted((k, float(v)) for k, v in candidate.annual_costs.items())
+                ),
+            },
         ),
-    }
+    )
 
 
 def _capture_plan_sequence(plans: Any) -> list[dict[str, Any]]:
@@ -832,9 +960,10 @@ if __name__ == "__main__":
     uncertain_results = []
     print(
         "\nCapturing uncertain baselines with seeded SciPy sampling. "
-        "Existing snapshot costs within 1% or $1 are preserved while writing "
-        "to avoid platform-specific noise from scipy.optimize distribution "
-        "fitting. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
+        "Costs are serialized to cents; existing snapshot costs within 1% "
+        "or $1 are preserved while writing to avoid platform-specific noise "
+        "from scipy.optimize distribution fitting. Set "
+        "SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
     )
     for scenario_name, scenario in UNCERTAIN_SCENARIOS.items():
         print(f"Capturing uncertain: {scenario_name}...")
@@ -861,18 +990,17 @@ if __name__ == "__main__":
     # Save regression snapshots
     output_dir = Path(__file__).parent / "data"
     output_file = output_dir / "baseline_costs.json"
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2, sort_keys=True)
-        f.write("\n")  # Ensure trailing newline for pre-commit
+    _write_json_snapshot(output_file, results)
 
     uncertain_output_file = output_dir / "baseline_uncertain.json"
+    cost_preservation_stats = CostPreservationStats()
     uncertain_results = _stabilize_uncertain_results(
         uncertain_results,
         _load_existing_uncertain_results(uncertain_output_file),
+        cost_preservation_stats,
     )
-    with open(uncertain_output_file, "w", encoding="utf-8") as f:
-        json.dump(uncertain_results, f, indent=2, sort_keys=True)
-        f.write("\n")
+    _print_cost_preservation_summary(cost_preservation_stats)
+    _write_json_snapshot(uncertain_output_file, uncertain_results)
 
     print(f"\nResults saved to: {output_file}")
     success_count = len([r for r in results if "error" not in r])

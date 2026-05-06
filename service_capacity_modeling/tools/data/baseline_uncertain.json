@@ -3,10 +3,10 @@
     "least_regret": [
       {
         "annual_costs": {
-          "cassandra.backup.s3-standard": 405481.92149738566,
-          "cassandra.net.inter.region": 1190853.6608613518,
-          "cassandra.net.intra.region": 3572560.9825840555,
-          "cassandra.zonal-clusters": 1457600.6400000001
+          "cassandra.backup.s3-standard": 405481.92,
+          "cassandra.net.inter.region": 1190853.66,
+          "cassandra.net.intra.region": 3572560.98,
+          "cassandra.zonal-clusters": 1457600.64
         },
         "clusters": [
           {
@@ -115,10 +115,10 @@
     "mean": [
       {
         "annual_costs": {
-          "cassandra.backup.s3-standard": 353277.0672346802,
-          "cassandra.net.inter.region": 1009641.2273436785,
-          "cassandra.net.intra.region": 3028923.6820310354,
-          "cassandra.zonal-clusters": 1478336.6400000001
+          "cassandra.backup.s3-standard": 353277.07,
+          "cassandra.net.inter.region": 1009641.23,
+          "cassandra.net.intra.region": 3028923.68,
+          "cassandra.zonal-clusters": 1478336.64
         },
         "clusters": [
           {
@@ -225,10 +225,10 @@
       },
       {
         "annual_costs": {
-          "cassandra.backup.s3-standard": 353277.0672346802,
-          "cassandra.net.inter.region": 1009641.2273436785,
-          "cassandra.net.intra.region": 3028923.6820310354,
-          "cassandra.zonal-clusters": 1564863.3599999999
+          "cassandra.backup.s3-standard": 353277.07,
+          "cassandra.net.inter.region": 1009641.23,
+          "cassandra.net.intra.region": 3028923.68,
+          "cassandra.zonal-clusters": 1564863.36
         },
         "clusters": [
           {
@@ -340,10 +340,10 @@
       "5": [
         {
           "annual_costs": {
-            "cassandra.backup.s3-standard": 233074.95698382912,
-            "cassandra.net.inter.region": 564776.7496072351,
-            "cassandra.net.intra.region": 1694330.248821705,
-            "cassandra.zonal-clusters": 1409216.6400000001
+            "cassandra.backup.s3-standard": 233074.96,
+            "cassandra.net.inter.region": 564776.75,
+            "cassandra.net.intra.region": 1694330.25,
+            "cassandra.zonal-clusters": 1409216.64
           },
           "clusters": [
             {
@@ -450,10 +450,10 @@
         },
         {
           "annual_costs": {
-            "cassandra.backup.s3-standard": 233074.95698382912,
-            "cassandra.net.inter.region": 564776.7496072351,
-            "cassandra.net.intra.region": 1694330.248821705,
-            "cassandra.zonal-clusters": 1495743.3599999999
+            "cassandra.backup.s3-standard": 233074.96,
+            "cassandra.net.inter.region": 564776.75,
+            "cassandra.net.intra.region": 1694330.25,
+            "cassandra.zonal-clusters": 1495743.36
           },
           "clusters": [
             {
@@ -562,10 +562,10 @@
       "50": [
         {
           "annual_costs": {
-            "cassandra.backup.s3-standard": 342869.5600652009,
-            "cassandra.net.inter.region": 968024.8720495387,
-            "cassandra.net.intra.region": 2904074.616148616,
-            "cassandra.zonal-clusters": 1471424.6400000001
+            "cassandra.backup.s3-standard": 342869.56,
+            "cassandra.net.inter.region": 968024.87,
+            "cassandra.net.intra.region": 2904074.62,
+            "cassandra.zonal-clusters": 1471424.64
           },
           "clusters": [
             {
@@ -672,10 +672,10 @@
         },
         {
           "annual_costs": {
-            "cassandra.backup.s3-standard": 342869.5600652009,
-            "cassandra.net.inter.region": 968024.8720495387,
-            "cassandra.net.intra.region": 2904074.616148616,
-            "cassandra.zonal-clusters": 1557951.3599999999
+            "cassandra.backup.s3-standard": 342869.56,
+            "cassandra.net.inter.region": 968024.87,
+            "cassandra.net.intra.region": 2904074.62,
+            "cassandra.zonal-clusters": 1557951.36
           },
           "clusters": [
             {
@@ -788,17 +788,17 @@
     "service_tier": 1,
     "simulations": 16,
     "snapshot_format": "seeded-scipy-cost-preserve-v1",
-    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce tiny output drift across CPU/libm builds. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
+    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values are serialized to cents and values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce tiny output drift across CPU/libm builds. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
   },
   {
     "least_regret": [
       {
         "annual_costs": {
-          "kafka.zonal-clusters": 13494.059999999998
+          "kafka.zonal-clusters": 13494.06
         },
         "clusters": [
           {
-            "annual_cost": 4498.0199999999995,
+            "annual_cost": 4498.02,
             "cluster_params": {
               "effective_disk_per_node_gib": 1164,
               "kafka.copies": 2,
@@ -819,7 +819,7 @@
             "instance": "i3en.large"
           },
           {
-            "annual_cost": 4498.0199999999995,
+            "annual_cost": 4498.02,
             "cluster_params": {
               "effective_disk_per_node_gib": 1164,
               "kafka.copies": 2,
@@ -840,7 +840,7 @@
             "instance": "i3en.large"
           },
           {
-            "annual_cost": 4498.0199999999995,
+            "annual_cost": 4498.02,
             "cluster_params": {
               "effective_disk_per_node_gib": 1164,
               "kafka.copies": 2,
@@ -867,11 +867,11 @@
     "mean": [
       {
         "annual_costs": {
-          "kafka.zonal-clusters": 13494.059999999998
+          "kafka.zonal-clusters": 13494.06
         },
         "clusters": [
           {
-            "annual_cost": 4498.0199999999995,
+            "annual_cost": 4498.02,
             "cluster_params": {
               "effective_disk_per_node_gib": 1164,
               "kafka.copies": 2,
@@ -892,7 +892,7 @@
             "instance": "i3en.large"
           },
           {
-            "annual_cost": 4498.0199999999995,
+            "annual_cost": 4498.02,
             "cluster_params": {
               "effective_disk_per_node_gib": 1164,
               "kafka.copies": 2,
@@ -913,7 +913,7 @@
             "instance": "i3en.large"
           },
           {
-            "annual_cost": 4498.0199999999995,
+            "annual_cost": 4498.02,
             "cluster_params": {
               "effective_disk_per_node_gib": 1164,
               "kafka.copies": 2,
@@ -1476,22 +1476,22 @@
     "service_tier": 1,
     "simulations": 16,
     "snapshot_format": "seeded-scipy-cost-preserve-v1",
-    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce tiny output drift across CPU/libm builds. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
+    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values are serialized to cents and values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce tiny output drift across CPU/libm builds. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
   },
   {
     "least_regret": [
       {
         "annual_costs": {
-          "cassandra.backup.s3-standard": 19184.434642913817,
-          "cassandra.net.inter.region": 78646.77717536688,
-          "cassandra.net.intra.region": 235940.33152610064,
-          "cassandra.zonal-clusters": 44260.020000000004,
+          "cassandra.backup.s3-standard": 19184.43,
+          "cassandra.net.inter.region": 78646.78,
+          "cassandra.net.intra.region": 235940.33,
+          "cassandra.zonal-clusters": 44260.02,
           "evcache.zonal-clusters": 150306.39,
           "nflx-java-app.regional-clusters": 108432.87
         },
         "clusters": [
           {
-            "annual_cost": 50102.130000000005,
+            "annual_cost": 50102.13,
             "cluster_params": {
               "effective_disk_per_node_gib": 441,
               "evcache.copies": 3,
@@ -1512,7 +1512,7 @@
             "instance": "c6id.2xlarge"
           },
           {
-            "annual_cost": 50102.130000000005,
+            "annual_cost": 50102.13,
             "cluster_params": {
               "effective_disk_per_node_gib": 441,
               "evcache.copies": 3,
@@ -1533,7 +1533,7 @@
             "instance": "c6id.2xlarge"
           },
           {
-            "annual_cost": 50102.130000000005,
+            "annual_cost": 50102.13,
             "cluster_params": {
               "effective_disk_per_node_gib": 441,
               "evcache.copies": 3,
@@ -1658,16 +1658,16 @@
       },
       {
         "annual_costs": {
-          "cassandra.backup.s3-standard": 18441.540387680056,
-          "cassandra.net.inter.region": 75766.5887735784,
-          "cassandra.net.intra.region": 227299.76632073522,
-          "cassandra.zonal-clusters": 44260.020000000004,
+          "cassandra.backup.s3-standard": 18441.54,
+          "cassandra.net.inter.region": 75766.59,
+          "cassandra.net.intra.region": 227299.77,
+          "cassandra.zonal-clusters": 44260.02,
           "evcache.zonal-clusters": 150306.39,
           "nflx-java-app.regional-clusters": 105994.83
         },
         "clusters": [
           {
-            "annual_cost": 50102.130000000005,
+            "annual_cost": 50102.13,
             "cluster_params": {
               "effective_disk_per_node_gib": 441,
               "evcache.copies": 3,
@@ -1688,7 +1688,7 @@
             "instance": "c6id.2xlarge"
           },
           {
-            "annual_cost": 50102.130000000005,
+            "annual_cost": 50102.13,
             "cluster_params": {
               "effective_disk_per_node_gib": 441,
               "evcache.copies": 3,
@@ -1709,7 +1709,7 @@
             "instance": "c6id.2xlarge"
           },
           {
-            "annual_cost": 50102.130000000005,
+            "annual_cost": 50102.13,
             "cluster_params": {
               "effective_disk_per_node_gib": 441,
               "evcache.copies": 3,
@@ -1834,16 +1834,16 @@
       },
       {
         "annual_costs": {
-          "cassandra.backup.s3-standard": 16085.217869522095,
-          "cassandra.net.inter.region": 65774.09840002656,
-          "cassandra.net.intra.region": 197322.29520007968,
+          "cassandra.backup.s3-standard": 16085.22,
+          "cassandra.net.inter.region": 65774.1,
+          "cassandra.net.intra.region": 197322.3,
           "cassandra.zonal-clusters": 30828.0,
           "evcache.zonal-clusters": 150306.39,
           "nflx-java-app.regional-clusters": 111150.0
         },
         "clusters": [
           {
-            "annual_cost": 50102.130000000005,
+            "annual_cost": 50102.13,
             "cluster_params": {
               "effective_disk_per_node_gib": 441,
               "evcache.copies": 3,
@@ -1864,7 +1864,7 @@
             "instance": "c6id.2xlarge"
           },
           {
-            "annual_cost": 50102.130000000005,
+            "annual_cost": 50102.13,
             "cluster_params": {
               "effective_disk_per_node_gib": 441,
               "evcache.copies": 3,
@@ -1885,7 +1885,7 @@
             "instance": "c6id.2xlarge"
           },
           {
-            "annual_cost": 50102.130000000005,
+            "annual_cost": 50102.13,
             "cluster_params": {
               "effective_disk_per_node_gib": 441,
               "evcache.copies": 3,
@@ -2003,16 +2003,16 @@
     "mean": [
       {
         "annual_costs": {
-          "cassandra.backup.s3-standard": 18088.365884902953,
-          "cassandra.net.inter.region": 74238.32553997636,
-          "cassandra.net.intra.region": 222714.97661992908,
-          "cassandra.zonal-clusters": 44260.020000000004,
+          "cassandra.backup.s3-standard": 18088.37,
+          "cassandra.net.inter.region": 74238.33,
+          "cassandra.net.intra.region": 222714.98,
+          "cassandra.zonal-clusters": 44260.02,
           "evcache.zonal-clusters": 150306.39,
           "nflx-java-app.regional-clusters": 108432.87
         },
         "clusters": [
           {
-            "annual_cost": 50102.130000000005,
+            "annual_cost": 50102.13,
             "cluster_params": {
               "effective_disk_per_node_gib": 441,
               "evcache.copies": 3,
@@ -2033,7 +2033,7 @@
             "instance": "c6id.2xlarge"
           },
           {
-            "annual_cost": 50102.130000000005,
+            "annual_cost": 50102.13,
             "cluster_params": {
               "effective_disk_per_node_gib": 441,
               "evcache.copies": 3,
@@ -2054,7 +2054,7 @@
             "instance": "c6id.2xlarge"
           },
           {
-            "annual_cost": 50102.130000000005,
+            "annual_cost": 50102.13,
             "cluster_params": {
               "effective_disk_per_node_gib": 441,
               "evcache.copies": 3,
@@ -2179,16 +2179,16 @@
       },
       {
         "annual_costs": {
-          "cassandra.backup.s3-standard": 18088.365884902953,
-          "cassandra.net.inter.region": 74238.32553997636,
-          "cassandra.net.intra.region": 222714.97661992908,
-          "cassandra.zonal-clusters": 46243.979999999996,
-          "evcache.zonal-clusters": 169647.53999999998,
+          "cassandra.backup.s3-standard": 18088.37,
+          "cassandra.net.inter.region": 74238.33,
+          "cassandra.net.intra.region": 222714.98,
+          "cassandra.zonal-clusters": 46243.98,
+          "evcache.zonal-clusters": 169647.54,
           "nflx-java-app.regional-clusters": 110355.0
         },
         "clusters": [
           {
-            "annual_cost": 56549.17999999999,
+            "annual_cost": 56549.18,
             "cluster_params": {
               "effective_disk_per_node_gib": 186,
               "evcache.copies": 3,
@@ -2209,7 +2209,7 @@
             "instance": "c5d.2xlarge"
           },
           {
-            "annual_cost": 56549.17999999999,
+            "annual_cost": 56549.18,
             "cluster_params": {
               "effective_disk_per_node_gib": 186,
               "evcache.copies": 3,
@@ -2230,7 +2230,7 @@
             "instance": "c5d.2xlarge"
           },
           {
-            "annual_cost": 56549.17999999999,
+            "annual_cost": 56549.18,
             "cluster_params": {
               "effective_disk_per_node_gib": 186,
               "evcache.copies": 3,
@@ -2360,16 +2360,16 @@
       "5": [
         {
           "annual_costs": {
-            "cassandra.backup.s3-standard": 14567.10685798645,
-            "cassandra.net.inter.region": 59425.92804506421,
-            "cassandra.net.intra.region": 178277.78413519263,
+            "cassandra.backup.s3-standard": 14567.11,
+            "cassandra.net.inter.region": 59425.93,
+            "cassandra.net.intra.region": 178277.78,
             "cassandra.zonal-clusters": 30828.0,
             "evcache.zonal-clusters": 150306.39,
             "nflx-java-app.regional-clusters": 104049.0
           },
           "clusters": [
             {
-              "annual_cost": 50102.130000000005,
+              "annual_cost": 50102.13,
               "cluster_params": {
                 "effective_disk_per_node_gib": 441,
                 "evcache.copies": 3,
@@ -2390,7 +2390,7 @@
               "instance": "c6id.2xlarge"
             },
             {
-              "annual_cost": 50102.130000000005,
+              "annual_cost": 50102.13,
               "cluster_params": {
                 "effective_disk_per_node_gib": 441,
                 "evcache.copies": 3,
@@ -2411,7 +2411,7 @@
               "instance": "c6id.2xlarge"
             },
             {
-              "annual_cost": 50102.130000000005,
+              "annual_cost": 50102.13,
               "cluster_params": {
                 "effective_disk_per_node_gib": 441,
                 "evcache.copies": 3,
@@ -2527,16 +2527,16 @@
         },
         {
           "annual_costs": {
-            "cassandra.backup.s3-standard": 14567.10685798645,
-            "cassandra.net.inter.region": 59425.92804506421,
-            "cassandra.net.intra.region": 178277.78413519263,
+            "cassandra.backup.s3-standard": 14567.11,
+            "cassandra.net.inter.region": 59425.93,
+            "cassandra.net.intra.region": 178277.78,
             "cassandra.zonal-clusters": 37518.0,
-            "evcache.zonal-clusters": 169647.53999999998,
+            "evcache.zonal-clusters": 169647.54,
             "nflx-java-app.regional-clusters": 105150.0
           },
           "clusters": [
             {
-              "annual_cost": 56549.17999999999,
+              "annual_cost": 56549.18,
               "cluster_params": {
                 "effective_disk_per_node_gib": 186,
                 "evcache.copies": 3,
@@ -2557,7 +2557,7 @@
               "instance": "c5d.2xlarge"
             },
             {
-              "annual_cost": 56549.17999999999,
+              "annual_cost": 56549.18,
               "cluster_params": {
                 "effective_disk_per_node_gib": 186,
                 "evcache.copies": 3,
@@ -2578,7 +2578,7 @@
               "instance": "c5d.2xlarge"
             },
             {
-              "annual_cost": 56549.17999999999,
+              "annual_cost": 56549.18,
               "cluster_params": {
                 "effective_disk_per_node_gib": 186,
                 "evcache.copies": 3,
@@ -2696,16 +2696,16 @@
       "50": [
         {
           "annual_costs": {
-            "cassandra.backup.s3-standard": 17479.02113031006,
-            "cassandra.net.inter.region": 71710.81326901913,
-            "cassandra.net.intra.region": 215132.43980705738,
+            "cassandra.backup.s3-standard": 17479.02,
+            "cassandra.net.inter.region": 71710.81,
+            "cassandra.net.intra.region": 215132.44,
             "cassandra.zonal-clusters": 30828.0,
             "evcache.zonal-clusters": 150306.39,
             "nflx-java-app.regional-clusters": 108432.87
           },
           "clusters": [
             {
-              "annual_cost": 50102.130000000005,
+              "annual_cost": 50102.13,
               "cluster_params": {
                 "effective_disk_per_node_gib": 441,
                 "evcache.copies": 3,
@@ -2726,7 +2726,7 @@
               "instance": "c6id.2xlarge"
             },
             {
-              "annual_cost": 50102.130000000005,
+              "annual_cost": 50102.13,
               "cluster_params": {
                 "effective_disk_per_node_gib": 441,
                 "evcache.copies": 3,
@@ -2747,7 +2747,7 @@
               "instance": "c6id.2xlarge"
             },
             {
-              "annual_cost": 50102.130000000005,
+              "annual_cost": 50102.13,
               "cluster_params": {
                 "effective_disk_per_node_gib": 441,
                 "evcache.copies": 3,
@@ -2863,16 +2863,16 @@
         },
         {
           "annual_costs": {
-            "cassandra.backup.s3-standard": 17479.02113031006,
-            "cassandra.net.inter.region": 71710.81326901913,
-            "cassandra.net.intra.region": 215132.43980705738,
+            "cassandra.backup.s3-standard": 17479.02,
+            "cassandra.net.inter.region": 71710.81,
+            "cassandra.net.intra.region": 215132.44,
             "cassandra.zonal-clusters": 37518.0,
-            "evcache.zonal-clusters": 169647.53999999998,
+            "evcache.zonal-clusters": 169647.54,
             "nflx-java-app.regional-clusters": 110355.0
           },
           "clusters": [
             {
-              "annual_cost": 56549.17999999999,
+              "annual_cost": 56549.18,
               "cluster_params": {
                 "effective_disk_per_node_gib": 186,
                 "evcache.copies": 3,
@@ -2893,7 +2893,7 @@
               "instance": "c5d.2xlarge"
             },
             {
-              "annual_cost": 56549.17999999999,
+              "annual_cost": 56549.18,
               "cluster_params": {
                 "effective_disk_per_node_gib": 186,
                 "evcache.copies": 3,
@@ -2914,7 +2914,7 @@
               "instance": "c5d.2xlarge"
             },
             {
-              "annual_cost": 56549.17999999999,
+              "annual_cost": 56549.18,
               "cluster_params": {
                 "effective_disk_per_node_gib": 186,
                 "evcache.copies": 3,
@@ -3032,16 +3032,16 @@
       "95": [
         {
           "annual_costs": {
-            "cassandra.backup.s3-standard": 23503.92992591858,
-            "cassandra.net.inter.region": 96809.59791317582,
-            "cassandra.net.intra.region": 290428.79373952746,
-            "cassandra.zonal-clusters": 44260.020000000004,
+            "cassandra.backup.s3-standard": 23503.93,
+            "cassandra.net.inter.region": 96809.6,
+            "cassandra.net.intra.region": 290428.79,
+            "cassandra.zonal-clusters": 44260.02,
             "evcache.zonal-clusters": 150306.39,
             "nflx-java-app.regional-clusters": 116270.07
           },
           "clusters": [
             {
-              "annual_cost": 50102.130000000005,
+              "annual_cost": 50102.13,
               "cluster_params": {
                 "effective_disk_per_node_gib": 441,
                 "evcache.copies": 3,
@@ -3062,7 +3062,7 @@
               "instance": "c6id.2xlarge"
             },
             {
-              "annual_cost": 50102.130000000005,
+              "annual_cost": 50102.13,
               "cluster_params": {
                 "effective_disk_per_node_gib": 441,
                 "evcache.copies": 3,
@@ -3083,7 +3083,7 @@
               "instance": "c6id.2xlarge"
             },
             {
-              "annual_cost": 50102.130000000005,
+              "annual_cost": 50102.13,
               "cluster_params": {
                 "effective_disk_per_node_gib": 441,
                 "evcache.copies": 3,
@@ -3208,16 +3208,16 @@
         },
         {
           "annual_costs": {
-            "cassandra.backup.s3-standard": 23503.92992591858,
-            "cassandra.net.inter.region": 96809.59791317582,
-            "cassandra.net.intra.region": 290428.79373952746,
-            "cassandra.zonal-clusters": 46243.979999999996,
-            "evcache.zonal-clusters": 169647.53999999998,
+            "cassandra.backup.s3-standard": 23503.93,
+            "cassandra.net.inter.region": 96809.6,
+            "cassandra.net.intra.region": 290428.79,
+            "cassandra.zonal-clusters": 46243.98,
+            "evcache.zonal-clusters": 169647.54,
             "nflx-java-app.regional-clusters": 116661.0
           },
           "clusters": [
             {
-              "annual_cost": 56549.17999999999,
+              "annual_cost": 56549.18,
               "cluster_params": {
                 "effective_disk_per_node_gib": 186,
                 "evcache.copies": 3,
@@ -3238,7 +3238,7 @@
               "instance": "c5d.2xlarge"
             },
             {
-              "annual_cost": 56549.17999999999,
+              "annual_cost": 56549.18,
               "cluster_params": {
                 "effective_disk_per_node_gib": 186,
                 "evcache.copies": 3,
@@ -3259,7 +3259,7 @@
               "instance": "c5d.2xlarge"
             },
             {
-              "annual_cost": 56549.17999999999,
+              "annual_cost": 56549.18,
               "cluster_params": {
                 "effective_disk_per_node_gib": 186,
                 "evcache.copies": 3,
@@ -3389,6 +3389,6 @@
     "service_tier": 1,
     "simulations": 16,
     "snapshot_format": "seeded-scipy-cost-preserve-v1",
-    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce tiny output drift across CPU/libm builds. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
+    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values are serialized to cents and values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce tiny output drift across CPU/libm builds. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
   }
 ]
