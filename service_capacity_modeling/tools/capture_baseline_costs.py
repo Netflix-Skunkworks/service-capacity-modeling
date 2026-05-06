@@ -102,7 +102,7 @@ def _preserve_existing_costs(
 
 
 def _load_existing_uncertain_results(path: Path) -> dict[str, dict[str, Any]]:
-    if not path.exists():
+    if os.environ.get("SCM_BASELINE_PRESERVE_COSTS", "1") == "0" or not path.exists():
         return {}
     with open(path, encoding="utf-8") as existing_file:
         existing_results = json.load(existing_file)
@@ -117,7 +117,7 @@ def _stabilize_uncertain_results(
     actual_results: list[dict[str, Any]],
     existing_results: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    if os.environ.get("SCM_BASELINE_PRESERVE_COSTS", "1") == "0":
+    if not existing_results:
         return actual_results
     return [
         _preserve_existing_costs(result, existing_results.get(result["scenario"], {}))
