@@ -7,10 +7,11 @@ This script runs capacity planning for various scenarios and captures
 the cost breakdowns to use as baselines for regression tests.
 
 Uncertain baselines intentionally exercise the planner's seeded SciPy sampling
-path. SciPy's numeric fitting can converge to slightly different beta/gamma
-parameters on different CPU/libm builds, so the writer preserves existing cost
-values when a regenerated value is within the documented drift tolerance. The
-snapshot should catch recommendation shape changes, not tiny platform noise.
+path. SciPy's numeric fitting can converge to different beta/gamma parameters
+across SciPy releases and CPU/libm builds, so test environments pin the
+supported SciPy range and the writer preserves existing cost values when a
+regenerated value is within the documented drift tolerance. The snapshot should
+catch recommendation shape changes, not tiny platform noise.
 
 Usage:
     python -m service_capacity_modeling.tools.capture_baseline_costs
@@ -56,7 +57,9 @@ BASELINE_UNCERTAIN_SNAPSHOT_NOTE = (
     "Uses the planner's seeded SciPy uncertainty sampling. When regenerating "
     "an existing snapshot, cost values are serialized to cents and values "
     "within 1% or $1 are preserved because scipy.optimize distribution fitting "
-    "can produce tiny output drift across CPU/libm builds. Set "
+    "can produce output drift across SciPy releases and CPU/libm builds. The "
+    "test environments pin the supported SciPy range; widen it only with an "
+    "intentional baseline refresh. Set "
     "SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
 )
 
@@ -962,7 +965,8 @@ if __name__ == "__main__":
         "\nCapturing uncertain baselines with seeded SciPy sampling. "
         "Costs are serialized to cents; existing snapshot costs within 1% "
         "or $1 are preserved while writing to avoid platform-specific noise "
-        "from scipy.optimize distribution fitting. Set "
+        "from scipy.optimize distribution fitting. The tested SciPy range is "
+        "pinned to avoid optimizer-version churn. Set "
         "SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
     )
     for scenario_name, scenario in UNCERTAIN_SCENARIOS.items():

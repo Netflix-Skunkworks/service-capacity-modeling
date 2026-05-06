@@ -16,9 +16,10 @@ from service_capacity_modeling.tools.capture_baseline_costs import (
 _BASELINE_HELP = (
     "Uncertain snapshots exercise seeded SciPy sampling. The capture tool "
     "preserves existing cost values when regenerated values are within 1% or "
-    "$1 because scipy.optimize distribution fitting can produce tiny "
-    "platform-specific float drift across CPU/libm builds. Structural changes "
-    "or meaningful cost movement should be reviewed, then refreshed with: "
+    "$1 because scipy.optimize distribution fitting can produce drift across "
+    "SciPy releases and CPU/libm builds. CI pins the tested SciPy range; widen "
+    "it only with an intentional baseline refresh. Structural changes or "
+    "meaningful cost movement should be reviewed, then refreshed with: "
     "tox -e capture-baseline\n"
     "To auto-update on commit: pre-commit install"
 )
