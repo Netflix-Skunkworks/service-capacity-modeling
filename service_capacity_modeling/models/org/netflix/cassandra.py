@@ -600,6 +600,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
     cluster_size_mode: CassandraClusterSizeMode = CassandraClusterSizeMode.doubling,
+    allow_ebs_volume_shrink: bool = False,
     large_instance_regret: float = 0.2,
     different_family_regret: float = 0.10,
     max_page_cache_gib: float = DEFAULT_MAX_PAGE_CACHE_GIB,
@@ -726,6 +727,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     ebs_disk_floor = 0
     if (
         is_ebs
+        and not allow_ebs_volume_shrink
         and current_disk_utilization is not None
         and current_disk_utilization.mid > 0
     ):
@@ -1157,6 +1159,12 @@ class NflxCassandraArguments(BaseModel):
         "clusters. It does not use required_cluster_size as the doubling base. "
         "'unrestricted' disables cluster-size rounding for all tiers.",
     )
+    allow_ebs_volume_shrink: bool = Field(
+        default=False,
+        description="Allow existing Cassandra clusters on attached EBS volumes to "
+        "recommend a smaller attached volume when requirements shrink. Defaults "
+        "false to preserve the current EBS per-node disk floor.",
+    )
 
     @model_validator(mode="after")
     def _check_storage_buffer_bounds(self) -> "NflxCassandraArguments":
@@ -1375,6 +1383,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_table_buffer_percent=max_table_buffer_percent,
             cluster_size_mode=args.cluster_size_mode
             or _default_cluster_size_mode(desires.service_tier),
+            allow_ebs_volume_shrink=args.allow_ebs_volume_shrink,
             large_instance_regret=args.large_instance_regret,
             different_family_regret=args.different_family_regret,
             max_page_cache_gib=args.max_page_cache_gib,
