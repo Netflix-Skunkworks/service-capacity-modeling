@@ -8,12 +8,19 @@ import pytest
 
 from service_capacity_modeling import tools as scm_tools
 from service_capacity_modeling.tools.capture_baseline_costs import (
+    BASELINE_UNCERTAIN_SNAPSHOT_FORMAT,
     UNCERTAIN_SCENARIOS,
     capture_uncertain,
 )
 
 _BASELINE_HELP = (
-    "To fix: tox -e capture-baseline\nTo auto-update on commit: pre-commit install"
+    "Uncertain snapshots exercise seeded SciPy sampling. The capture tool "
+    "preserves existing cost values when regenerated values are within 1% or "
+    "$1 because scipy.optimize distribution fitting can produce tiny "
+    "platform-specific float drift across CPU/libm builds. Structural changes "
+    "or meaningful cost movement should be reviewed, then refreshed with: "
+    "tox -e capture-baseline\n"
+    "To auto-update on commit: pre-commit install"
 )
 
 
@@ -136,6 +143,11 @@ class TestUncertainBaselineDrift:
         )
         assert baseline["simulations"] == actual["simulations"]
         assert baseline["num_results"] == actual["num_results"]
+        assert (
+            baseline["snapshot_format"]
+            == actual["snapshot_format"]
+            == (BASELINE_UNCERTAIN_SNAPSHOT_FORMAT)
+        )
 
         _assert_plan_sequence_matches(
             actual["least_regret"],

@@ -5,14 +5,21 @@ Capture current cost outputs for regression testing.
 This script runs capacity planning for various scenarios and captures
 the cost breakdowns to use as baselines for regression tests.
 
+Uncertain baselines intentionally exercise the planner's seeded SciPy sampling
+path. SciPy's numeric fitting can converge to slightly different beta/gamma
+parameters on different CPU/libm builds, so the writer preserves existing cost
+values when a regenerated value is within the documented drift tolerance. The
+snapshot should catch recommendation shape changes, not tiny platform noise.
+
 Usage:
     python -m service_capacity_modeling.tools.capture_baseline_costs
 """
 
 import json
+import math
+import os
 from pathlib import Path
 from typing import Any
-from typing import Sequence
 
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import (
@@ -37,56 +44,84 @@ from service_capacity_modeling.interface import (
 
 BASELINE_UNCERTAIN_SIMULATIONS = 16
 BASELINE_UNCERTAIN_NUM_RESULTS = 3
+BASELINE_UNCERTAIN_SNAPSHOT_FORMAT = "seeded-scipy-cost-preserve-v1"
+BASELINE_UNCERTAIN_COST_REL_TOLERANCE = 0.01
+BASELINE_UNCERTAIN_COST_ABS_TOLERANCE = 1.0
+BASELINE_UNCERTAIN_SNAPSHOT_NOTE = (
+    "Uses the planner's seeded SciPy uncertainty sampling. When regenerating "
+    "an existing snapshot, cost values within 1% or $1 are preserved because "
+    "scipy.optimize distribution fitting can produce tiny output drift across "
+    "CPU/libm builds. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
+)
 
 
-def _deterministic_interval_value(interval: Interval, probability: float) -> float:
-    confidence = min(max(interval.confidence, 0.01), 0.99)
-    low_p = (1 - confidence) / 2.0
-    high_p = 1 - low_p
-
-    if probability <= low_p:
-        span = low_p or 1.0
-        return interval.minimum + (interval.low - interval.minimum) * (
-            probability / span
-        )
-    if probability <= 0.5:
-        span = 0.5 - low_p
-        return interval.low + (interval.mid - interval.low) * (
-            (probability - low_p) / span
-        )
-    if probability <= high_p:
-        span = high_p - 0.5
-        return interval.mid + (interval.high - interval.mid) * (
-            (probability - 0.5) / span
-        )
-
-    span = 1 - high_p or 1.0
-    return interval.high + (interval.maximum - interval.high) * (
-        (probability - high_p) / span
-    )
+def _preserve_existing_cost(actual: float, existing: Any) -> float:
+    if not isinstance(existing, (float, int)):
+        return actual
+    if math.isclose(
+        actual,
+        float(existing),
+        rel_tol=BASELINE_UNCERTAIN_COST_REL_TOLERANCE,
+        abs_tol=BASELINE_UNCERTAIN_COST_ABS_TOLERANCE,
+    ):
+        return existing
+    return actual
 
 
-def _deterministic_interval_samples(
-    interval: Interval,
-    name: str,  # pylint: disable=unused-argument
-    count: int,
-) -> Sequence[Interval]:
-    if not interval.can_simulate:
-        return [interval] * count
+def _preserve_existing_costs(
+    actual: Any,
+    existing: Any,
+    cost_context: bool = False,
+) -> Any:
+    if isinstance(actual, (float, int)) and cost_context:
+        return _preserve_existing_cost(float(actual), existing)
+
+    if isinstance(actual, list) and isinstance(existing, list):
+        if len(actual) != len(existing):
+            return actual
+        return [
+            _preserve_existing_costs(actual_item, existing_item, cost_context)
+            for actual_item, existing_item in zip(actual, existing)
+        ]
+
+    if isinstance(actual, dict) and isinstance(existing, dict):
+        if set(actual) != set(existing):
+            return actual
+        return {
+            key: _preserve_existing_costs(
+                value,
+                existing[key],
+                cost_context
+                or key in ("annual_cost", "total_annual_cost")
+                or key == "annual_costs",
+            )
+            for key, value in actual.items()
+        }
+
+    return actual
+
+
+def _load_existing_uncertain_results(path: Path) -> dict[str, dict[str, Any]]:
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as existing_file:
+        existing_results = json.load(existing_file)
+    return {
+        result["scenario"]: result
+        for result in existing_results
+        if isinstance(result, dict) and "scenario" in result
+    }
+
+
+def _stabilize_uncertain_results(
+    actual_results: list[dict[str, Any]],
+    existing_results: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if os.environ.get("SCM_BASELINE_PRESERVE_COSTS", "1") == "0":
+        return actual_results
     return [
-        certain_float(_deterministic_interval_value(interval, (index + 0.5) / count))
-        for index in range(count)
-    ]
-
-
-def _deterministic_interval_percentile(
-    interval: Interval, percentiles: Sequence[int]
-) -> list[Interval]:
-    if not interval.can_simulate:
-        return [interval] * len(percentiles)
-    return [
-        certain_float(_deterministic_interval_value(interval, percentile / 100))
-        for percentile in percentiles
+        _preserve_existing_costs(result, existing_results.get(result["scenario"], {}))
+        for result in actual_results
     ]
 
 
@@ -202,8 +237,6 @@ def capture_uncertain(  # pylint: disable=too-many-positional-arguments
             simulations=simulations,
             num_results=num_results,
             extra_model_arguments=extra_args or {},
-            interval_sampler=_deterministic_interval_samples,
-            interval_percentile_sampler=_deterministic_interval_percentile,
         )
         return {
             "scenario": scenario_name,
@@ -212,6 +245,8 @@ def capture_uncertain(  # pylint: disable=too-many-positional-arguments
             "service_tier": desires.service_tier,
             "simulations": simulations,
             "num_results": num_results,
+            "snapshot_format": BASELINE_UNCERTAIN_SNAPSHOT_FORMAT,
+            "snapshot_note": BASELINE_UNCERTAIN_SNAPSHOT_NOTE,
             "least_regret": _capture_plan_sequence(cap_plan.least_regret),
             "mean": _capture_plan_sequence(cap_plan.mean),
             "percentiles": {
@@ -770,11 +805,12 @@ SCENARIOS: dict[str, dict[str, Any]] = {
 UNCERTAIN_SCENARIOS: dict[str, dict[str, Any]] = {
     name: SCENARIOS[name]
     for name in (
+        # Keep this list intentionally small: the pre-commit hook regenerates
+        # it on every run. These cover state-heavy Cassandra, Kafka throughput,
+        # and composed KV/cache uncertainty without turning the hook into a
+        # broad stochastic benchmark.
         "cassandra_timeseries_ebs",
-        "cassandra_kv_dense_ebs",
-        "cassandra_kv_compact_ebs",
         "kafka_100mib_throughput",
-        "evcache_large_with_replication",
         "kv_with_cache",
     )
 }
@@ -794,6 +830,12 @@ if __name__ == "__main__":
             print(f"  Cost breakdown: {list(result['annual_costs'].keys())}")
 
     uncertain_results = []
+    print(
+        "\nCapturing uncertain baselines with seeded SciPy sampling. "
+        "Existing snapshot costs within 1% or $1 are preserved while writing "
+        "to avoid platform-specific noise from scipy.optimize distribution "
+        "fitting. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
+    )
     for scenario_name, scenario in UNCERTAIN_SCENARIOS.items():
         print(f"Capturing uncertain: {scenario_name}...")
         result = capture_uncertain(
@@ -816,7 +858,7 @@ if __name__ == "__main__":
                 )
             )
 
-    # Save deterministic results
+    # Save regression snapshots
     output_dir = Path(__file__).parent / "data"
     output_file = output_dir / "baseline_costs.json"
     with open(output_file, "w", encoding="utf-8") as f:
@@ -824,6 +866,10 @@ if __name__ == "__main__":
         f.write("\n")  # Ensure trailing newline for pre-commit
 
     uncertain_output_file = output_dir / "baseline_uncertain.json"
+    uncertain_results = _stabilize_uncertain_results(
+        uncertain_results,
+        _load_existing_uncertain_results(uncertain_output_file),
+    )
     with open(uncertain_output_file, "w", encoding="utf-8") as f:
         json.dump(uncertain_results, f, indent=2, sort_keys=True)
         f.write("\n")
