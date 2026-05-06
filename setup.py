@@ -11,7 +11,10 @@ setuptools.setup(
     packages=setuptools.find_packages(exclude=("tests*", "notebooks*")),
     install_requires=[
         "pydantic>2.0",
-        "scipy",
+        # The uncertain planner regression snapshots exercise scipy.optimize
+        # distribution fitting. Keep CI on the tested optimizer behavior until
+        # the snapshot tolerance is intentionally refreshed for a newer SciPy.
+        "scipy<1.17",
         "numpy",
         "isodate",
     ],

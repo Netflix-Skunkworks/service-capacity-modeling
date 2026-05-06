@@ -45,11 +45,11 @@
   },
   {
     "annual_costs": {
-      "aurora-cluster.regional-clusters": 3447.644
+      "aurora-cluster.regional-clusters": 3447.64
     },
     "clusters": [
       {
-        "annual_cost": 1862.3139999999999,
+        "annual_cost": 1862.31,
         "attached_drives": [
           "aurora : 60GB"
         ],
@@ -70,11 +70,11 @@
   },
   {
     "annual_costs": {
-      "aurora-cluster.regional-clusters": 2204.4579999999996
+      "aurora-cluster.regional-clusters": 2204.46
     },
     "clusters": [
       {
-        "annual_cost": 2204.4579999999996,
+        "annual_cost": 2204.46,
         "attached_drives": [
           "aurora : 240GB"
         ],
@@ -95,9 +95,9 @@
   },
   {
     "annual_costs": {
-      "cassandra.backup.s3-standard": 35857.951769805906,
-      "cassandra.net.inter.region": 148476.65107995272,
-      "cassandra.net.intra.region": 445429.95323985815,
+      "cassandra.backup.s3-standard": 35857.95,
+      "cassandra.net.inter.region": 148476.65,
+      "cassandra.net.intra.region": 445429.95,
       "cassandra.zonal-clusters": 29508.0
     },
     "clusters": [
@@ -191,9 +191,9 @@
   },
   {
     "annual_costs": {
-      "cassandra.backup.s3-standard": 179339.15084902954,
-      "cassandra.net.inter.region": 742383.2553997636,
-      "cassandra.net.intra.region": 1113574.8830996454,
+      "cassandra.backup.s3-standard": 179339.15,
+      "cassandra.net.inter.region": 742383.26,
+      "cassandra.net.intra.region": 1113574.88,
       "cassandra.zonal-clusters": 69031.92
     },
     "clusters": [
@@ -296,9 +296,9 @@
   },
   {
     "annual_costs": {
-      "cassandra.backup.s3-standard": 11239.234730941773,
-      "cassandra.net.inter.region": 44542.995323985815,
-      "cassandra.net.intra.region": 133628.98597195745,
+      "cassandra.backup.s3-standard": 11239.23,
+      "cassandra.net.inter.region": 44543.0,
+      "cassandra.net.intra.region": 133628.99,
       "cassandra.zonal-clusters": 61656.0
     },
     "clusters": [
@@ -392,10 +392,10 @@
   },
   {
     "annual_costs": {
-      "cassandra.backup.s3-standard": 353277.0672346802,
-      "cassandra.net.inter.region": 1009641.2273436785,
-      "cassandra.net.intra.region": 3028923.6820310354,
-      "cassandra.zonal-clusters": 1478336.6400000001
+      "cassandra.backup.s3-standard": 353277.07,
+      "cassandra.net.inter.region": 1009641.23,
+      "cassandra.net.intra.region": 3028923.68,
+      "cassandra.zonal-clusters": 1478336.64
     },
     "clusters": [
       {
@@ -506,9 +506,9 @@
   },
   {
     "annual_costs": {
-      "cassandra.backup.s3-standard": 37961.555153961184,
-      "cassandra.net.inter.region": 29695.330215990543,
-      "cassandra.net.intra.region": 89085.99064797163,
+      "cassandra.backup.s3-standard": 37961.56,
+      "cassandra.net.inter.region": 29695.33,
+      "cassandra.net.intra.region": 89085.99,
       "cassandra.zonal-clusters": 459327.36
     },
     "clusters": [
@@ -611,9 +611,9 @@
   },
   {
     "annual_costs": {
-      "cassandra.backup.s3-standard": 15626.777788490295,
-      "cassandra.net.inter.region": 7423.832553997636,
-      "cassandra.net.intra.region": 22271.497661992908,
+      "cassandra.backup.s3-standard": 15626.78,
+      "cassandra.net.inter.region": 7423.83,
+      "cassandra.net.intra.region": 22271.5,
       "cassandra.zonal-clusters": 202015.68
     },
     "clusters": [
@@ -716,11 +716,11 @@
   },
   {
     "annual_costs": {
-      "kafka.zonal-clusters": 13494.059999999998
+      "kafka.zonal-clusters": 13494.06
     },
     "clusters": [
       {
-        "annual_cost": 4498.0199999999995,
+        "annual_cost": 4498.02,
         "cluster_params": {
           "effective_disk_per_node_gib": 1164,
           "kafka.copies": 2,
@@ -741,7 +741,7 @@
         "instance": "i3en.large"
       },
       {
-        "annual_cost": 4498.0199999999995,
+        "annual_cost": 4498.02,
         "cluster_params": {
           "effective_disk_per_node_gib": 1164,
           "kafka.copies": 2,
@@ -762,7 +762,7 @@
         "instance": "i3en.large"
       },
       {
-        "annual_cost": 4498.0199999999995,
+        "annual_cost": 4498.02,
         "cluster_params": {
           "effective_disk_per_node_gib": 1164,
           "kafka.copies": 2,
@@ -791,11 +791,11 @@
   },
   {
     "annual_costs": {
-      "kafka.zonal-clusters": 98036.72999999998
+      "kafka.zonal-clusters": 98036.73
     },
     "clusters": [
       {
-        "annual_cost": 32678.909999999996,
+        "annual_cost": 32678.91,
         "cluster_params": {
           "effective_disk_per_node_gib": 873,
           "kafka.copies": 2,
@@ -816,7 +816,7 @@
         "instance": "i4i.xlarge"
       },
       {
-        "annual_cost": 32678.909999999996,
+        "annual_cost": 32678.91,
         "cluster_params": {
           "effective_disk_per_node_gib": 873,
           "kafka.copies": 2,
@@ -837,7 +837,7 @@
         "instance": "i4i.xlarge"
       },
       {
-        "annual_cost": 32678.909999999996,
+        "annual_cost": 32678.91,
         "cluster_params": {
           "effective_disk_per_node_gib": 873,
           "kafka.copies": 2,
@@ -950,7 +950,7 @@
   },
   {
     "annual_costs": {
-      "evcache.zonal-clusters": 31265.129999999997
+      "evcache.zonal-clusters": 31265.13
     },
     "clusters": [
       {
@@ -1025,13 +1025,13 @@
   },
   {
     "annual_costs": {
-      "evcache.net.inter.region": 30095.029830932617,
-      "evcache.net.intra.region": 45142.544746398926,
-      "evcache.zonal-clusters": 100204.26000000001
+      "evcache.net.inter.region": 30095.03,
+      "evcache.net.intra.region": 45142.54,
+      "evcache.zonal-clusters": 100204.26
     },
     "clusters": [
       {
-        "annual_cost": 50102.130000000005,
+        "annual_cost": 50102.13,
         "cluster_params": {
           "effective_disk_per_node_gib": 441,
           "evcache.copies": 2,
@@ -1052,7 +1052,7 @@
         "instance": "c6id.2xlarge"
       },
       {
-        "annual_cost": 50102.130000000005,
+        "annual_cost": 50102.13,
         "cluster_params": {
           "effective_disk_per_node_gib": 441,
           "evcache.copies": 2,
@@ -1081,16 +1081,16 @@
   },
   {
     "annual_costs": {
-      "cassandra.backup.s3-standard": 18088.365884902953,
-      "cassandra.net.inter.region": 74238.32553997636,
-      "cassandra.net.intra.region": 222714.97661992908,
-      "cassandra.zonal-clusters": 44260.020000000004,
+      "cassandra.backup.s3-standard": 18088.37,
+      "cassandra.net.inter.region": 74238.33,
+      "cassandra.net.intra.region": 222714.98,
+      "cassandra.zonal-clusters": 44260.02,
       "evcache.zonal-clusters": 150306.39,
       "nflx-java-app.regional-clusters": 108432.87
     },
     "clusters": [
       {
-        "annual_cost": 50102.130000000005,
+        "annual_cost": 50102.13,
         "cluster_params": {
           "effective_disk_per_node_gib": 441,
           "evcache.copies": 3,
@@ -1111,7 +1111,7 @@
         "instance": "c6id.2xlarge"
       },
       {
-        "annual_cost": 50102.130000000005,
+        "annual_cost": 50102.13,
         "cluster_params": {
           "effective_disk_per_node_gib": 441,
           "evcache.copies": 3,
@@ -1132,7 +1132,7 @@
         "instance": "c6id.2xlarge"
       },
       {
-        "annual_cost": 50102.130000000005,
+        "annual_cost": 50102.13,
         "cluster_params": {
           "effective_disk_per_node_gib": 441,
           "evcache.copies": 3,

@@ -1,17 +1,30 @@
 #!/usr/bin/env python3
+# pylint: disable=too-many-lines
 """
 Capture current cost outputs for regression testing.
 
 This script runs capacity planning for various scenarios and captures
 the cost breakdowns to use as baselines for regression tests.
 
+Uncertain baselines intentionally exercise the planner's seeded SciPy sampling
+path. SciPy's numeric fitting can converge to different beta/gamma parameters
+across SciPy releases and CPU/libm builds, so test environments pin the
+supported SciPy range and the writer preserves existing cost values when a
+regenerated value is within the documented drift tolerance. The snapshot should
+catch recommendation shape changes, not tiny platform noise.
+
 Usage:
     python -m service_capacity_modeling.tools.capture_baseline_costs
 """
 
 import json
+import math
+import os
+from dataclasses import dataclass
+from difflib import unified_diff
+from itertools import islice
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import (
@@ -34,6 +47,207 @@ from service_capacity_modeling.interface import (
     QueryPattern,
 )
 
+BASELINE_UNCERTAIN_SIMULATIONS = 16
+BASELINE_UNCERTAIN_NUM_RESULTS = 3
+BASELINE_UNCERTAIN_SNAPSHOT_FORMAT = "seeded-scipy-cost-preserve-v1"
+BASELINE_UNCERTAIN_COST_REL_TOLERANCE = 0.01
+BASELINE_UNCERTAIN_COST_ABS_TOLERANCE = 1.0
+COST_KEYS = frozenset(("annual_cost", "total_annual_cost", "instance_cost"))
+BASELINE_UNCERTAIN_SNAPSHOT_NOTE = (
+    "Uses the planner's seeded SciPy uncertainty sampling. When regenerating "
+    "an existing snapshot, cost values are serialized to cents and values "
+    "within 1% or $1 are preserved because scipy.optimize distribution fitting "
+    "can produce output drift across SciPy releases and CPU/libm builds. The "
+    "test environments pin the supported SciPy range; widen it only with an "
+    "intentional baseline refresh. Set "
+    "SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
+)
+
+
+@dataclass
+class CostPreservationStats:
+    preserved: int = 0
+    exceeded: int = 0
+    max_abs_delta: float = 0.0
+    max_rel_delta: float = 0.0
+    max_delta_path: str = ""
+
+    def record(
+        self, path: str, actual: float, existing: float, preserved: bool
+    ) -> None:
+        abs_delta = abs(actual - existing)
+        rel_delta = abs_delta / max(abs(existing), 1.0)
+        if preserved:
+            self.preserved += 1
+        else:
+            self.exceeded += 1
+        if abs_delta > self.max_abs_delta:
+            self.max_abs_delta = abs_delta
+            self.max_rel_delta = rel_delta
+            self.max_delta_path = path
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (float, int)) and not isinstance(value, bool)
+
+
+def _is_cost_key(key: str) -> bool:
+    return key in COST_KEYS or key == "annual_costs"
+
+
+def _round_cost(value: Any) -> float:
+    return round(float(value), 2)
+
+
+def _round_cost_leaves(value: Any, cost_context: bool = False) -> Any:
+    if _is_number(value) and cost_context:
+        return _round_cost(value)
+    if isinstance(value, list):
+        return [_round_cost_leaves(item, cost_context) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _round_cost_leaves(item, cost_context or _is_cost_key(key))
+            for key, item in value.items()
+        }
+    return value
+
+
+def _preserve_existing_cost(
+    actual: float,
+    existing: Any,
+    path: str,
+    stats: CostPreservationStats,
+) -> float:
+    if not isinstance(existing, (float, int)):
+        return actual
+    existing_float = float(existing)
+    preserved = math.isclose(
+        actual,
+        existing_float,
+        rel_tol=BASELINE_UNCERTAIN_COST_REL_TOLERANCE,
+        abs_tol=BASELINE_UNCERTAIN_COST_ABS_TOLERANCE,
+    )
+    stats.record(path, actual, existing_float, preserved)
+    if preserved:
+        return existing
+    return actual
+
+
+def _preserve_existing_costs(
+    actual: Any,
+    existing: Any,
+    stats: CostPreservationStats,
+    path: str = "$",
+    cost_context: bool = False,
+) -> Any:
+    if _is_number(actual) and cost_context:
+        return _preserve_existing_cost(float(actual), existing, path, stats)
+
+    if isinstance(actual, list) and isinstance(existing, list):
+        if len(actual) != len(existing):
+            return actual
+        return [
+            _preserve_existing_costs(
+                actual_item,
+                existing_item,
+                stats,
+                f"{path}[{idx}]",
+                cost_context,
+            )
+            for idx, (actual_item, existing_item) in enumerate(zip(actual, existing))
+        ]
+
+    if isinstance(actual, dict) and isinstance(existing, dict):
+        if set(actual) != set(existing):
+            return actual
+        return {
+            key: _preserve_existing_costs(
+                value,
+                existing[key],
+                stats,
+                f"{path}.{key}",
+                cost_context or _is_cost_key(key),
+            )
+            for key, value in actual.items()
+        }
+
+    return actual
+
+
+def _load_existing_uncertain_results(path: Path) -> dict[str, dict[str, Any]]:
+    if os.environ.get("SCM_BASELINE_PRESERVE_COSTS", "1") == "0" or not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as existing_file:
+        existing_results = json.load(existing_file)
+    return {
+        result["scenario"]: result
+        for result in existing_results
+        if isinstance(result, dict) and "scenario" in result
+    }
+
+
+def _stabilize_uncertain_results(
+    actual_results: list[dict[str, Any]],
+    existing_results: dict[str, dict[str, Any]],
+    stats: CostPreservationStats,
+) -> list[dict[str, Any]]:
+    if not existing_results:
+        return actual_results
+    return [
+        _preserve_existing_costs(
+            result,
+            existing_results.get(result["scenario"], {}),
+            stats,
+            f"$.{result['scenario']}",
+        )
+        for result in actual_results
+    ]
+
+
+def _print_text_diff_preview(old_text: str, new_text: str, path: Path) -> None:
+    diff_lines = unified_diff(
+        old_text.splitlines(),
+        new_text.splitlines(),
+        fromfile=f"{path} before",
+        tofile=f"{path} after",
+        lineterm="",
+    )
+    preview = list(islice(diff_lines, 80))
+    if preview:
+        print("  Diff preview:")
+        for line in preview:
+            print(f"    {line}")
+
+
+def _write_json_snapshot(path: Path, data: Any) -> bool:
+    old_text = path.read_text(encoding="utf-8") if path.exists() else None
+    new_text = json.dumps(data, indent=2, sort_keys=True) + "\n"
+
+    if old_text == new_text:
+        return False
+
+    path.write_text(new_text, encoding="utf-8")
+    print(f"Snapshot changed: {path}")
+    if old_text is not None:
+        _print_text_diff_preview(old_text, new_text, path)
+    return True
+
+
+def _print_cost_preservation_summary(stats: CostPreservationStats) -> None:
+    if stats.preserved == 0 and stats.exceeded == 0:
+        return
+    print(
+        "Uncertain cost preservation: "
+        f"preserved {stats.preserved} cost value(s), "
+        f"left {stats.exceeded} beyond tolerance."
+    )
+    if stats.max_delta_path:
+        print(
+            "  Largest regenerated cost drift: "
+            f"${stats.max_abs_delta:,.2f} ({stats.max_rel_delta:.4%}) at "
+            f"{stats.max_delta_path}"
+        )
+
 
 def _format_cluster(cluster: ClusterCapacity, deployment: str) -> dict[str, Any]:
     """Format a single cluster's details."""
@@ -55,9 +269,53 @@ def _format_cluster(cluster: ClusterCapacity, deployment: str) -> dict[str, Any]
 
     # Add cluster_params if present (e.g., replica_count, partitions_per_node)
     if cluster.cluster_params:
-        info["cluster_params"] = dict(sorted(cluster.cluster_params.items()))
+        info["cluster_params"] = _round_cost_leaves(
+            dict(sorted(cluster.cluster_params.items()))
+        )
 
-    return info
+    return cast(dict[str, Any], _round_cost_leaves(info))
+
+
+def _capture_candidate(candidate: Any) -> dict[str, Any]:
+    """Serialize a candidate cluster set into a stable regression snapshot."""
+    cluster_details = []
+    for zonal_cluster in candidate.zonal:
+        cluster_details.append(_format_cluster(zonal_cluster, "zonal"))
+    for regional_cluster in candidate.regional:
+        cluster_details.append(_format_cluster(regional_cluster, "regional"))
+
+    return cast(
+        dict[str, Any],
+        _round_cost_leaves(
+            {
+                "total_annual_cost": float(candidate.total_annual_cost),
+                "clusters": cluster_details,
+                "annual_costs": dict(
+                    sorted((k, float(v)) for k, v in candidate.annual_costs.items())
+                ),
+            },
+        ),
+    )
+
+
+def _capture_plan_sequence(plans: Any) -> list[dict[str, Any]]:
+    return [_capture_candidate(plan.candidate_clusters) for plan in plans]
+
+
+def _capture_error(
+    scenario_name: str,
+    error: Exception,
+    model_name: str,
+    region: str,
+    desires: CapacityDesires,
+) -> dict[str, Any]:
+    return {
+        "error": str(error),
+        "scenario": scenario_name,
+        "model": model_name,
+        "region": region,
+        "service_tier": desires.service_tier,
+    }
 
 
 def capture_costs(
@@ -80,31 +338,55 @@ def capture_costs(
         if not cap_plans:
             return {"error": "No capacity plans generated", "scenario": scenario_name}
 
-        cap_plan = cap_plans[0]
-        candidate = cap_plan.candidate_clusters
-
-        # Build cluster details for each cluster
-        cluster_details = []
-        for zonal_cluster in candidate.zonal:
-            cluster_details.append(_format_cluster(zonal_cluster, "zonal"))
-        for regional_cluster in candidate.regional:
-            cluster_details.append(_format_cluster(regional_cluster, "regional"))
-
         result = {
             "scenario": scenario_name,
             "model": model_name,
             "region": region,
             "service_tier": desires.service_tier,
-            "total_annual_cost": float(candidate.total_annual_cost),
-            "clusters": cluster_details,
-            "annual_costs": dict(
-                sorted((k, float(v)) for k, v in candidate.annual_costs.items())
-            ),
         }
-
+        result.update(_capture_candidate(cap_plans[0].candidate_clusters))
         return result
     except (ValueError, KeyError, AttributeError) as e:
-        return {"error": str(e), "scenario": scenario_name}
+        return _capture_error(scenario_name, e, model_name, region, desires)
+
+
+def capture_uncertain(  # pylint: disable=too-many-positional-arguments
+    model_name: str,
+    region: str,
+    desires: CapacityDesires,
+    extra_args: dict[str, Any] | None = None,
+    scenario_name: str = "",
+    simulations: int = BASELINE_UNCERTAIN_SIMULATIONS,
+    num_results: int = BASELINE_UNCERTAIN_NUM_RESULTS,
+) -> dict[str, Any]:
+    """Capture a compact snapshot from the stochastic planner."""
+    try:
+        cap_plan = planner.plan(
+            model_name=model_name,
+            region=region,
+            desires=desires,
+            simulations=simulations,
+            num_results=num_results,
+            extra_model_arguments=extra_args or {},
+        )
+        return {
+            "scenario": scenario_name,
+            "model": model_name,
+            "region": region,
+            "service_tier": desires.service_tier,
+            "simulations": simulations,
+            "num_results": num_results,
+            "snapshot_format": BASELINE_UNCERTAIN_SNAPSHOT_FORMAT,
+            "snapshot_note": BASELINE_UNCERTAIN_SNAPSHOT_NOTE,
+            "least_regret": _capture_plan_sequence(cap_plan.least_regret),
+            "mean": _capture_plan_sequence(cap_plan.mean),
+            "percentiles": {
+                str(percentile): _capture_plan_sequence(plans)
+                for percentile, plans in sorted(cap_plan.percentiles.items())
+            },
+        }
+    except (ValueError, KeyError, AttributeError) as e:
+        return _capture_error(scenario_name, e, model_name, region, desires)
 
 
 # Define test scenarios for each service
@@ -651,6 +933,18 @@ SCENARIOS: dict[str, dict[str, Any]] = {
     for model, region, desires, extra_args, name in scenarios
 }
 
+UNCERTAIN_SCENARIOS: dict[str, dict[str, Any]] = {
+    name: SCENARIOS[name]
+    for name in (
+        # Keep this list intentionally small: the pre-commit hook regenerates
+        # it on every run. These cover state-heavy Cassandra, Kafka throughput,
+        # and composed KV/cache uncertainty without turning the hook into a
+        # broad stochastic benchmark.
+        "cassandra_timeseries_ebs",
+        "kafka_100mib_throughput",
+        "kv_with_cache",
+    )
+}
 
 if __name__ == "__main__":
     # Capture all scenarios
@@ -666,12 +960,58 @@ if __name__ == "__main__":
             print(f"  Total cost: ${result['total_annual_cost']:,.2f}")
             print(f"  Cost breakdown: {list(result['annual_costs'].keys())}")
 
-    # Save results
-    output_file = Path(__file__).parent / "data" / "baseline_costs.json"
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2, sort_keys=True)
-        f.write("\n")  # Ensure trailing newline for pre-commit
+    uncertain_results = []
+    print(
+        "\nCapturing uncertain baselines with seeded SciPy sampling. "
+        "Costs are serialized to cents; existing snapshot costs within 1% "
+        "or $1 are preserved while writing to avoid platform-specific noise "
+        "from scipy.optimize distribution fitting. The tested SciPy range is "
+        "pinned to avoid optimizer-version churn. Set "
+        "SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
+    )
+    for scenario_name, scenario in UNCERTAIN_SCENARIOS.items():
+        print(f"Capturing uncertain: {scenario_name}...")
+        result = capture_uncertain(
+            model_name=scenario["model"],
+            region=scenario["region"],
+            desires=scenario["desires"],
+            extra_args=scenario["extra_args"],
+            scenario_name=scenario_name,
+        )
+        uncertain_results.append(result)
+        if "error" in result:
+            print(f"  ERROR: {result['error']}")
+        else:
+            print(
+                "  Least regret families: "
+                + ", ".join(
+                    p["clusters"][0]["instance"]
+                    for p in result["least_regret"]
+                    if p["clusters"]
+                )
+            )
+
+    # Save regression snapshots
+    output_dir = Path(__file__).parent / "data"
+    output_file = output_dir / "baseline_costs.json"
+    _write_json_snapshot(output_file, results)
+
+    uncertain_output_file = output_dir / "baseline_uncertain.json"
+    cost_preservation_stats = CostPreservationStats()
+    uncertain_results = _stabilize_uncertain_results(
+        uncertain_results,
+        _load_existing_uncertain_results(uncertain_output_file),
+        cost_preservation_stats,
+    )
+    _print_cost_preservation_summary(cost_preservation_stats)
+    _write_json_snapshot(uncertain_output_file, uncertain_results)
 
     print(f"\nResults saved to: {output_file}")
     success_count = len([r for r in results if "error" not in r])
     print(f"Total scenarios captured: {success_count}/{len(results)}")
+    uncertain_success_count = len([r for r in uncertain_results if "error" not in r])
+    print(f"Uncertain results saved to: {uncertain_output_file}")
+    print(
+        f"Total uncertain scenarios captured: "
+        f"{uncertain_success_count}/{len(uncertain_results)}"
+    )
