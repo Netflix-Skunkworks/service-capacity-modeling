@@ -260,6 +260,60 @@ class TestCassandraStorage:
         # constrains memory denominator → more nodes → higher total IOs
         assert 4_000 < write_ios < 16_000
 
+    def test_existing_ebs_volume_shrink_requires_extra_argument(self):
+        current_drive_size_gib = 6000
+        current_cluster = CurrentZoneClusterCapacity(
+            cluster_instance=shapes.instance("m6a.4xlarge"),
+            cluster_instance_name="m6a.4xlarge",
+            cluster_drive=simple_drive(size_gib=current_drive_size_gib),
+            cluster_instance_count=certain_int(8),
+            cluster_type="cassandra",
+            cpu_utilization=certain_float(1),
+            memory_utilization_gib=certain_float(8),
+            disk_utilization_gib=certain_float(4000),
+            network_utilization_mbps=certain_float(1),
+        )
+        desires = CapacityDesires(
+            service_tier=1,
+            current_clusters=CurrentClusters(zonal=[current_cluster]),
+            query_pattern=QueryPattern(
+                access_pattern=AccessPattern.latency,
+                estimated_read_per_second=certain_int(100),
+                estimated_write_per_second=certain_int(100),
+            ),
+            data_shape=DataShape(estimated_state_size_gib=certain_int(100)),
+            buffers=Buffers(
+                derived={
+                    "storage": Buffer(
+                        ratio=0.5,
+                        intent=BufferIntent.scale_down,
+                        components=[BufferComponent.storage],
+                    )
+                }
+            ),
+        )
+
+        def plan(allow_ebs_volume_shrink: bool):
+            return planner.plan_certain(
+                model_name="org.netflix.cassandra",
+                region="us-east-1",
+                desires=desires,
+                extra_model_arguments={
+                    "require_attached_disks": True,
+                    "require_local_disks": False,
+                    "cluster_size_mode": "unrestricted",
+                    "allow_ebs_volume_shrink": allow_ebs_volume_shrink,
+                },
+                instance_families=["m6a"],
+                num_results=1,
+            )[0].candidate_clusters.zonal[0]
+
+        default_result = plan(False)
+        shrink_result = plan(True)
+
+        assert default_result.attached_drives[0].size_gib >= current_drive_size_gib
+        assert shrink_result.attached_drives[0].size_gib < current_drive_size_gib
+
 
 class TestCassandraThroughput:
     """Test high throughput scenarios."""
@@ -848,6 +902,24 @@ class TestCassandraExtraModelArguments:
                 {"cluster_size_mode": "unrestricted"}
             ).cluster_size_mode
             == CassandraClusterSizeMode.unrestricted
+        )
+
+    def test_allow_ebs_volume_shrink_extra_argument(self):
+        from service_capacity_modeling.models.org.netflix.cassandra import (
+            NflxCassandraArguments,
+        )
+
+        assert (
+            NflxCassandraArguments.from_extra_model_arguments(
+                {}
+            ).allow_ebs_volume_shrink
+            is False
+        )
+        assert (
+            NflxCassandraArguments.from_extra_model_arguments(
+                {"allow_ebs_volume_shrink": True}
+            ).allow_ebs_volume_shrink
+            is True
         )
 
     def test_cluster_size_mode_schema_exposes_enum_docstrings(self):
