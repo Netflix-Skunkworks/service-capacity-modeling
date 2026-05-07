@@ -922,17 +922,24 @@ class BufferIntent(StrEnum):
     scale = "scale"
     """Ratio on top of existing buffers to ensure exists. Generally combined with a
     different desired buffer to ensure we don't just scale needlessly. This means we
-    can scale up or down as long as we meet the desired buffer."""
+    can scale up or down as long as we meet the desired buffer.
+
+    Mechanically, this is ratio * current usage with no floor or ceiling bound
+    against existing capacity."""
 
     preserve = "preserve"
     """DEPRECATED - Use scale_up/scale_down instead. Ignores model preferences, just
     preserve existing buffers. We rarely actually want to do this since it can cause
-    severe over provisioning."""
+    severe over provisioning.
+
+    Mechanically, this is syntactic sugar for scale=1 plus floor=1 and ceiling=1."""
 
     scale_up = "scale_up"
     """Scale up if necessary to meet the desired buffer. If the existing resource is
     over-provisioned, do not reduce the requirement. If under-provisioned, the
     requirement can be increased to meet the desired buffer.
+
+    Mechanically, this is syntactic sugar for scale plus floor=1.
 
     Example: need 20 cores but have 10 → scale up to 20 cores.
 
@@ -944,18 +951,20 @@ class BufferIntent(StrEnum):
     under-provisioned, do not increase the requirement. If over-provisioned, the
     requirement can be decreased to meet the desired buffer.
 
+    Mechanically, this is syntactic sugar for scale plus ceiling=1.
+
     Example: need 20 cores but have 10 → maintain buffer and do not scale up.
 
     Example 2: need 20 cores but have 40 → scale down to 20 cores."""
 
     floor = "floor"
-    """Set a minimum requirement as a fraction of existing capacity. ratio specifies
-    the fraction (e.g. ratio=0.8 means never drop below 80% of current capacity).
+    """Set a minimum requirement as a ratio of existing capacity. For example,
+    ratio=0.8 means never drop below 80% of existing capacity.
     Only valid in buffers.derived."""
 
     ceiling = "ceiling"
-    """Set a maximum requirement as a fraction of existing capacity. ratio specifies
-    the fraction (e.g. ratio=1.2 means never exceed 120% of current capacity).
+    """Set a maximum requirement as a ratio of existing capacity. For example,
+    ratio=1.2 means never exceed 120% of existing capacity.
     Only valid in buffers.derived."""
 
 
@@ -966,8 +975,10 @@ class Buffer(ExcludeUnsetModel):
     """The buffer value expressed as a ratio over normal load (e.g. 1.5 =
     50% headroom).
 
-    For derived buffers with intent=floor or intent=ceiling, ratio is the
-    bound expressed as a fraction of existing capacity."""
+    For derived buffers with intent=scale, intent=scale_up, or
+    intent=scale_down, ratio scales current usage. For intent=floor or
+    intent=ceiling, ratio is the bound expressed as a ratio of existing
+    capacity. Preserve ignores ratio."""
 
     intent: BufferIntent = BufferIntent.desired
     """The intent of this buffer directive (almost always 'desired')"""
@@ -1023,9 +1034,10 @@ class Buffers(ExcludeUnsetModel):
     #   scale      = ratio * current usage
     #   scale_up   = scale + floor at 1x existing (sugar)
     #   scale_down = scale + ceiling at 1x existing (sugar)
-    #   preserve   = floor=1x and ceiling=1x (sugar)
-    #   floor      = ratio = minimum fraction of existing capacity
-    #   ceiling    = ratio = maximum fraction of existing capacity
+    #   preserve   = scale=1 + floor at 1x existing + ceiling at 1x existing
+    #                (sugar)
+    #   floor      = ratio = minimum ratio of existing capacity
+    #   ceiling    = ratio = maximum ratio of existing capacity
     derived: Dict[str, Buffer] = {}
 
     @model_validator(mode="after")
