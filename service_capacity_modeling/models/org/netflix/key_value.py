@@ -103,7 +103,8 @@ class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
         )
         force_evcache: bool = extra_model_arguments.get("kv_force_evcache", False)
         use_evcache = force_evcache or (
-            target_consistency in (
+            target_consistency
+            in (
                 AccessConsistency.eventual,
                 AccessConsistency.best_effort,
             )
