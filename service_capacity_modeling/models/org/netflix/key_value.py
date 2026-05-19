@@ -34,15 +34,15 @@ from service_capacity_modeling.models.common import cluster_infra_cost
 class NflxKeyValueArguments(NflxJavaAppArguments):
     kv_evcache_read_write_ratio_threshold: float = Field(
         default=0.9,
-        description="Minimum read/write ratio required to attach EVCache (alongside the RPS threshold)",
+        description="Minimum read/write ratio to attach EVCache (alongside RPS threshold)",
     )
     estimated_kv_cache_hit_rate: float = Field(
         default=0.8,
-        description="Fraction of KV reads served by EVCache, used to scale down Cassandra RPS",
+        description="Fraction of KV reads served by EVCache; scales down Cassandra RPS",
     )
     kv_force_evcache: bool = Field(
         default=False,
-        description="Force EVCache to be attached regardless of RPS or consistency thresholds",
+        description="Force EVCache attachment regardless of RPS or consistency thresholds",
     )
 
 
