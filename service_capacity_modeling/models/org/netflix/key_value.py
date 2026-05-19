@@ -34,7 +34,7 @@ from service_capacity_modeling.models.common import cluster_infra_cost
 class NflxKeyValueArguments(NflxJavaAppArguments):
     kv_evcache_read_write_ratio_threshold: float = Field(
         default=0.9,
-        description="Minimum read/write ratio to attach EVCache (alongside RPS threshold)",
+        description="Min read/write ratio to attach EVCache (alongside RPS threshold)",
     )
     estimated_kv_cache_hit_rate: float = Field(
         default=0.8,
@@ -42,7 +42,7 @@ class NflxKeyValueArguments(NflxJavaAppArguments):
     )
     kv_force_evcache: bool = Field(
         default=False,
-        description="Force EVCache attachment regardless of RPS or consistency thresholds",
+        description="Attach EVCache regardless of RPS or consistency thresholds",
     )
 
 
