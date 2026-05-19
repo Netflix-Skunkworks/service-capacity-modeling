@@ -6,7 +6,10 @@ from typing import Optional
 from typing import Sequence
 from typing import Tuple
 
+from pydantic import Field
+
 from .stateless_java import nflx_java_app_capacity_model
+from .stateless_java import NflxJavaAppArguments
 from .stateless_java import NflxJavaAppCapacityModel
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
@@ -26,6 +29,21 @@ from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import cluster_infra_cost
+
+
+class NflxKeyValueArguments(NflxJavaAppArguments):
+    kv_evcache_read_write_ratio_threshold: float = Field(
+        default=0.9,
+        description="Minimum read/write ratio required to attach EVCache (alongside the RPS threshold)",
+    )
+    estimated_kv_cache_hit_rate: float = Field(
+        default=0.8,
+        description="Fraction of KV reads served by EVCache, used to scale down Cassandra RPS",
+    )
+    kv_force_evcache: bool = Field(
+        default=False,
+        description="Force EVCache to be attached regardless of RPS or consistency thresholds",
+    )
 
 
 class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
@@ -63,7 +81,7 @@ class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
 
     @staticmethod
     def extra_model_arguments_schema() -> Dict[str, Any]:
-        return nflx_java_app_capacity_model.extra_model_arguments_schema()
+        return NflxKeyValueArguments.model_json_schema()
 
     @staticmethod
     def compose_with(
@@ -83,12 +101,16 @@ class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
         evcache_rw_ratio_threshold: float = extra_model_arguments.get(
             "kv_evcache_read_write_ratio_threshold", 0.9
         )
-        use_evcache = target_consistency in (
-            AccessConsistency.eventual,
-            AccessConsistency.best_effort,
-        ) and (
-            rps > 250_000
-            or (rps > 100_000 and read_write_ratio > evcache_rw_ratio_threshold)
+        force_evcache: bool = extra_model_arguments.get("kv_force_evcache", False)
+        use_evcache = force_evcache or (
+            target_consistency in (
+                AccessConsistency.eventual,
+                AccessConsistency.best_effort,
+            )
+            and (
+                rps > 250_000
+                or (rps > 100_000 and read_write_ratio > evcache_rw_ratio_threshold)
+            )
         )
 
         if use_evcache:
