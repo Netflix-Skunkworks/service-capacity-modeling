@@ -143,13 +143,17 @@ def deduce_cpu_ipc_scale(
 ) -> float:
     """
     Deduce CPU IPC scale factor from vCPU and core counts.
-    If all vCPUs are full cores (no SMT), use 1.5, otherwise 1.0.
+    Combine IPC gain and HT as independent factors:
+        - arch_ipc: per-physical core IPC compared to baseline=Skylake (IPC = 1.0)
+        - ht_factor: hyperthreading impact, 1.5 when no SMT (vcpu = cpu_cores), 1.0 when SMT (vcpu = 2x cpu_cores)
+    Both factors are always applied
     """
+    arch_ipc = 1.0
     if cpu_perf is not None and cpu_perf.ipc_scale_factor is not None:
-        return cpu_perf.ipc_scale_factor
-    if vcpu_count == cpu_cores:
-        return 1.5
-    return 1.0
+        arch_ipc = cpu_perf.ipc_scale_factor
+    ht_factor = 1.5 if vcpu_count == cpu_cores else 1.0
+
+    return arch_ipc * ht_factor
 
 
 def convert_mib_to_gib(size_mib: float) -> float:
