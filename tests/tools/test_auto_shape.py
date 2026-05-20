@@ -7,6 +7,8 @@ from service_capacity_modeling.tools.auto_shape import deduce_cpu_perf
 from service_capacity_modeling.tools.auto_shape import deduce_io_perf
 from service_capacity_modeling.tools.auto_shape import guess_iops_per_gib
 from service_capacity_modeling.tools.auto_shape import pull_family
+from service_capacity_modeling.tools.auto_shape import CPUPerformance
+from service_capacity_modeling.tools.auto_shape import deduce_cpu_ipc_scale
 from tests.tools import mock_data
 
 
@@ -85,3 +87,30 @@ def test_guess_iops_per_gib():
             assert family == "did not exist"
 
     assert guess_iops_per_gib("random shape") is None
+
+
+# Tests IPC and HT scale factors
+def test_deduce_cpu_ipc_scale_no_ht_multiplies_both_factors():
+    # no-HT (vcpu == cores): arch IPC × 1.5
+    perf = CPUPerformance(ipc_scale_factor=1.2995)  # GENOA_IPC
+    result = deduce_cpu_ipc_scale(vcpu_count=2, cpu_cores=2, cpu_perf=perf)
+    assert result == approx(1.2995 * 1.5, rel=0.01)  # ≈ 1.949
+
+
+def test_deduce_cpu_ipc_scale_ht_on_no_ht_factor():
+    # HT on (vcpu != cores): arch IPC only, ht_factor = 1.0
+    perf = CPUPerformance(ipc_scale_factor=1.15)  # MILAN_IPC
+    result = deduce_cpu_ipc_scale(vcpu_count=2, cpu_cores=1, cpu_perf=perf)
+    assert result == approx(1.15)
+
+
+def test_deduce_cpu_ipc_scale_no_perf_ht_on():
+    # no arch IPC provided, HT on: defaults to 1.0
+    result = deduce_cpu_ipc_scale(vcpu_count=2, cpu_cores=1, cpu_perf=None)
+    assert result == approx(1.0)
+
+
+def test_deduce_cpu_ipc_scale_no_perf_no_ht():
+    # no arch IPC provided, HT off: 1.0 × 1.5
+    result = deduce_cpu_ipc_scale(vcpu_count=2, cpu_cores=2, cpu_perf=None)
+    assert result == approx(1.5)
