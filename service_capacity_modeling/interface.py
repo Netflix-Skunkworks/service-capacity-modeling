@@ -1478,6 +1478,34 @@ class Excuse(ExcludeUnsetModel):
     bottleneck: Optional[Bottleneck] = None
 
 
+class SampleRef(ExcludeUnsetModel):
+    """Stable reference to one sampled input in the uncertain planner."""
+
+    sample_id: str
+    sample_label: str
+
+
+class ExcuseSummary(Excuse):
+    """An excuse plus how often it appeared across simulations."""
+
+    occurrence_count: int = 1
+    sample_count: int = 1
+    example_samples: Sequence[SampleRef] = Field(default_factory=list)
+
+
+class RegretPlanSummary(ExcludeUnsetModel):
+    """Aggregated regret summary for one returned plan shape."""
+
+    plan: CapacityPlan
+    sample_count: int = 1
+    selected_total_regret: float
+    mean_total_regret: float
+    mean_regret_components_by_model: Dict[str, Dict[str, float]] = Field(
+        default_factory=dict
+    )
+    example_samples: Sequence[SampleRef] = Field(default_factory=list)
+
+
 class PlanExplanation(ExcludeUnsetModel):
     regret_params: CapacityRegretParameters
     regret_clusters_by_model: Dict[

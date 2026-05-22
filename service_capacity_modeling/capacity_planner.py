@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # pylint: disable=too-many-lines
 import functools
-import logging
+import json
 import math
 from hashlib import blake2b
 from typing import Any
@@ -14,8 +14,6 @@ from typing import Optional
 from typing import Sequence
 from typing import Set
 from typing import Tuple
-
-import numpy as np
 from pydantic import Field
 
 from service_capacity_modeling.hardware import HardwareShapes
@@ -32,8 +30,10 @@ from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import ExcludeUnsetModel
 from service_capacity_modeling.interface import Excuse
+from service_capacity_modeling.explainability import count_sample_excuses
 from service_capacity_modeling.explainability import deduplicate_excuses
 from service_capacity_modeling.explainability import ExplainedPlans
+from service_capacity_modeling.explainability import ExplainedUncertainPlans
 from service_capacity_modeling.explainability import FamilyGraph
 from service_capacity_modeling.interface import Hardware
 from service_capacity_modeling.interface import Instance
@@ -48,6 +48,7 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.interface import UncertainCapacityPlan
+from service_capacity_modeling.interface import SampleRef
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
@@ -57,10 +58,22 @@ from service_capacity_modeling.models.org import netflix
 from service_capacity_modeling.models.utils import compute_excuse_tags
 from service_capacity_modeling.models.utils import current_instance_name
 from service_capacity_modeling.models.utils import reduce_by_family
+from service_capacity_modeling.regret_explainability import (
+    considered_alternative_summaries,
+)
+from service_capacity_modeling.regret_explainability import (
+    merge_regret_candidates_positional,
+)
+from service_capacity_modeling.regret_explainability import MergedRegretCandidate
+from service_capacity_modeling.regret_explainability import RegretCandidate
+from service_capacity_modeling.regret_explainability import regret_detailed
+from service_capacity_modeling.regret_explainability import SampledPlan
+from service_capacity_modeling.regret_explainability import summaries_for_least_regret
+from service_capacity_modeling.regret_explainability import (
+    summarize_regret_candidates,
+)
 from service_capacity_modeling.stats import dist_for_interval
 from service_capacity_modeling.stats import interval_percentile
-
-logger = logging.getLogger(__name__)
 
 
 class PlannerArguments(ExcludeUnsetModel):
@@ -91,6 +104,13 @@ class _CertainResult(ExcludeUnsetModel):
 
     plans: Sequence[CapacityPlan]
     excuses: Sequence[Excuse] = []
+
+
+class _UncertainResult(ExcludeUnsetModel):
+    plan: UncertainCapacityPlan
+    merged_regret_candidates: Sequence[MergedRegretCandidate]
+    all_sample_excuses: Sequence[Tuple[SampleRef, Excuse]]
+    num_results: int
 
 
 def simulate_interval(
@@ -162,6 +182,52 @@ def model_desires(
         d.query_pattern = query_pattern
         d.data_shape = data_shape
         yield d
+
+
+def _sample_fingerprint_payload(desires: CapacityDesires) -> str:
+    return json.dumps(
+        desires.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _format_sample_value(value: float, suffix: str = "") -> str:
+    value = float(value)
+    abs_value = abs(value)
+    if abs_value >= 1_000_000_000:
+        return f"{value / 1_000_000_000:.1f}B{suffix}"
+    if abs_value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M{suffix}"
+    if abs_value >= 1_000:
+        return f"{value / 1_000:.1f}k{suffix}"
+    if value.is_integer():
+        return f"{int(value)}{suffix}"
+    return f"{value:.1f}{suffix}"
+
+
+def _sample_ref_for_desires(desires: CapacityDesires, index: int) -> SampleRef:
+    payload = _sample_fingerprint_payload(desires)
+    fingerprint = blake2b(payload.encode(), digest_size=4).hexdigest()
+    reads = desires.query_pattern.estimated_read_per_second.mid
+    writes = desires.query_pattern.estimated_write_per_second.mid
+    state = desires.data_shape.estimated_state_size_gib.mid
+    label = " ".join(
+        (
+            f"reads={_format_sample_value(reads)}",
+            f"writes={_format_sample_value(writes)}",
+            f"state={_format_sample_value(state, 'GiB')}",
+        )
+    )
+    return SampleRef(sample_id=f"s-{index:04d}-{fingerprint}", sample_label=label)
+
+
+def model_samples(
+    desires: CapacityDesires,
+    num_sims: int = 1000,
+) -> Generator[Tuple[SampleRef, CapacityDesires], None, None]:
+    for index, sample_desires in enumerate(model_desires(desires, num_sims)):
+        yield (_sample_ref_for_desires(sample_desires, index), sample_desires)
 
 
 def model_desires_percentiles(
@@ -374,73 +440,35 @@ def _allow_drive(
     return True
 
 
-def _regret(
-    capacity_plans: Sequence[Tuple[CapacityDesires, CapacityPlan]],
-    regret_params: CapacityRegretParameters,
-    model: CapacityModel,
-) -> Sequence[Tuple[CapacityPlan, CapacityDesires, float]]:
-    plans_by_regret = []
-
-    # Unfortunately has to be O(N^2) since regret isn't symmetric.
-    # We could create the entire NxN regret matrix and use
-    # einsum('ij->i') to quickly do a row wise sum, but that would
-    # require a _lot_ more memory than this ...
-    regret = np.zeros(len(capacity_plans), dtype=np.float64)
-    for i, proposed_plan in enumerate(capacity_plans):
-        for j, optimal_plan in enumerate(capacity_plans):
-            if j == i:
-                regret[j] = 0
-
-            regret[j] = sum(
-                model.regret(
-                    regret_params=regret_params,
-                    optimal_plan=optimal_plan[1],
-                    proposed_plan=proposed_plan[1],
-                ).values()
-            )
-        plans_by_regret.append(
-            (proposed_plan[1], proposed_plan[0], np.einsum("i->", regret))
-        )
-
-    plans_by_regret.sort(key=lambda p: p[2])
-    return plans_by_regret
-
-
-def _add_requirement(
-    requirement: CapacityRequirement, accum: Dict[str, Dict[str, List[Interval]]]
-) -> None:
-    if requirement.requirement_type not in accum:
-        accum[requirement.requirement_type] = {}
-
-    requirements = accum[requirement.requirement_type]
-
-    for field in sorted(CapacityRequirement.model_fields):
-        d = getattr(requirement, field)
-        if isinstance(d, Interval):
-            if field not in requirements:
-                requirements[field] = [d]
-            else:
-                requirements[field].append(d)
-
-
-def _merge_models(
-    plans_by_model: List[List[CapacityPlan]],
+def _requirements_from_samples(
     zonal_requirements: Dict[str, Dict[str, List[Interval]]],
     regional_requirements: Dict[str, Dict[str, List[Interval]]],
-) -> List[CapacityPlan]:
-    capacity_plans = []
-    for composed in zip(*filter(lambda x: x, plans_by_model)):
-        merged_plans = [functools.reduce(merge_plan, composed)]
-        if len(merged_plans) == 0:
-            continue
+    percentiles: Tuple[int, ...],
+) -> Requirements:
+    low_p, high_p = sorted(percentiles)[0], sorted(percentiles)[-1]
 
-        capacity_plans.append(merged_plans[0])
-        plan_requirements = merged_plans[0].requirements
-        for req in plan_requirements.zonal:
-            _add_requirement(req, zonal_requirements)
-        for req in plan_requirements.regional:
-            _add_requirement(req, regional_requirements)
-    return capacity_plans
+    def build_requirements(
+        samples_by_type: Dict[str, Dict[str, List[Interval]]],
+    ) -> List[CapacityRequirement]:
+        return [
+            CapacityRequirement(
+                requirement_type=req_type,
+                **{
+                    field: interval(
+                        samples=[sample.mid for sample in samples],
+                        low_p=low_p,
+                        high_p=high_p,
+                    )
+                    for field, samples in req_samples.items()
+                },
+            )
+            for req_type, req_samples in samples_by_type.items()
+        ]
+
+    return Requirements(
+        zonal=build_requirements(zonal_requirements),
+        regional=build_requirements(regional_requirements),
+    )
 
 
 def _in_allowed(inp: str, allowed: Sequence[str]) -> bool:
@@ -1084,7 +1112,6 @@ class CapacityPlanner:
             drive = Drive.get_managed_drive()
             yield instance, drive, context
 
-    # pylint: disable=too-many-locals
     def plan(  # pylint: disable=too-many-positional-arguments
         self,
         model_name: str,
@@ -1099,10 +1126,106 @@ class CapacityPlanner:
         drives: Optional[Sequence[str]] = None,
         regret_params: Optional[CapacityRegretParameters] = None,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
-        explain: bool = False,
         max_results_per_family: int = 1,
         planner_arguments: Optional[PlannerArguments] = None,
     ) -> UncertainCapacityPlan:
+        return self._plan_uncertain(
+            model_name=model_name,
+            region=region,
+            desires=desires,
+            percentiles=percentiles,
+            simulations=simulations,
+            num_results=num_results,
+            num_regions=num_regions,
+            lifecycles=lifecycles,
+            instance_families=instance_families,
+            drives=drives,
+            regret_params=regret_params,
+            extra_model_arguments=extra_model_arguments,
+            max_results_per_family=max_results_per_family,
+            planner_arguments=planner_arguments,
+        ).plan
+
+    def plan_explained(  # pylint: disable=too-many-positional-arguments
+        self,
+        model_name: str,
+        region: str,
+        desires: CapacityDesires,
+        percentiles: Tuple[int, ...] = (5, 50, 95),
+        simulations: Optional[int] = None,
+        num_results: Optional[int] = None,
+        num_regions: int = 3,
+        lifecycles: Optional[Sequence[Lifecycle]] = None,
+        instance_families: Optional[Sequence[str]] = None,
+        drives: Optional[Sequence[str]] = None,
+        regret_params: Optional[CapacityRegretParameters] = None,
+        extra_model_arguments: Optional[Dict[str, Any]] = None,
+        max_results_per_family: int = 1,
+        planner_arguments: Optional[PlannerArguments] = None,
+    ) -> ExplainedUncertainPlans:
+        """Like plan() but returns excuses and family graph too."""
+        uncertain_result = self._plan_uncertain(
+            model_name=model_name,
+            region=region,
+            desires=desires,
+            percentiles=percentiles,
+            simulations=simulations,
+            num_results=num_results,
+            num_regions=num_regions,
+            lifecycles=lifecycles,
+            instance_families=instance_families,
+            drives=drives,
+            regret_params=regret_params,
+            extra_model_arguments=extra_model_arguments,
+            max_results_per_family=max_results_per_family,
+            planner_arguments=planner_arguments,
+        )
+        regret_summary_map = summarize_regret_candidates(
+            uncertain_result.merged_regret_candidates
+        )
+        least_regret_summaries = summaries_for_least_regret(
+            uncertain_result.plan.least_regret, regret_summary_map
+        )
+        considered_alternatives = considered_alternative_summaries(
+            uncertain_result.plan.least_regret,
+            regret_summary_map,
+            uncertain_result.num_results,
+        )
+
+        all_excuses = [excuse for _, excuse in uncertain_result.all_sample_excuses]
+        deduped_excuses = deduplicate_excuses(all_excuses)
+        excuse_summary = count_sample_excuses(uncertain_result.all_sample_excuses)
+        hardware = self._shapes.region(region)
+        model = self._models[model_name]
+        graph = FamilyGraph.build(deduped_excuses, hardware, model.preferred_families())
+
+        return ExplainedUncertainPlans(
+            plan=uncertain_result.plan,
+            excuses=deduped_excuses,
+            excuse_summary=excuse_summary,
+            family_graph=graph,
+            least_regret_summaries=least_regret_summaries,
+            considered_alternatives=considered_alternatives,
+        )
+
+    # pylint: disable=too-many-locals
+    def _plan_uncertain(  # pylint: disable=too-many-positional-arguments
+        self,
+        model_name: str,
+        region: str,
+        desires: CapacityDesires,
+        percentiles: Tuple[int, ...] = (5, 50, 95),
+        simulations: Optional[int] = None,
+        num_results: Optional[int] = None,
+        num_regions: int = 3,
+        lifecycles: Optional[Sequence[Lifecycle]] = None,
+        instance_families: Optional[Sequence[str]] = None,
+        drives: Optional[Sequence[str]] = None,
+        regret_params: Optional[CapacityRegretParameters] = None,
+        extra_model_arguments: Optional[Dict[str, Any]] = None,
+        max_results_per_family: int = 1,
+        planner_arguments: Optional[PlannerArguments] = None,
+    ) -> _UncertainResult:
         extra_model_arguments = extra_model_arguments or {}
         pargs = planner_arguments or PlannerArguments(
             max_results_per_family=max_results_per_family
@@ -1121,88 +1244,38 @@ class CapacityPlanner:
         num_results = num_results or self._default_num_results
         lifecycles = lifecycles or self._default_lifecycles
 
-        # requirement types -> values
         zonal_requirements: Dict[str, Dict[str, List[Interval]]] = {}
         regional_requirements: Dict[str, Dict[str, List[Interval]]] = {}
 
-        regret_clusters_by_model: Dict[
-            str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]
-        ] = {}
-        desires_by_model: Dict[str, CapacityDesires] = {}
-        excuses_by_model: Dict[str, List[Excuse]] = {}
-        for sub_model, sub_desires in self._sub_models(
+        (
+            base_desires_by_model,
+            regret_clusters_by_model,
+            regret_details_by_model,
+            excuses_by_model,
+            all_sample_excuses,
+        ) = self._collect_uncertain_sample_data(
             model_name=model_name,
+            region=region,
             desires=desires,
+            simulations=simulations,
+            num_regions=num_regions,
+            lifecycles=lifecycles,
+            instance_families=instance_families,
+            drives=drives,
+            regret_params=regret_params,
             extra_model_arguments=extra_model_arguments,
-        ):
-            desires_by_model[sub_model] = sub_desires
-            model_plans: List[Tuple[CapacityDesires, Sequence[CapacityPlan]]] = []
-            model_excuses: List[Excuse] = []
-            for sim_desires in model_desires(sub_desires, simulations):
-                sim_result = self._plan_certain(
-                    model_name=sub_model,
-                    region=region,
-                    desires=sim_desires,
-                    num_results=1,
-                    num_regions=num_regions,
-                    extra_model_arguments=extra_model_arguments,
-                    lifecycles=lifecycles,
-                    instance_families=instance_families,
-                    drives=drives,
-                    planner_arguments=pargs,
-                )
-                model_plans.append((sim_desires, sim_result.plans))
-                if explain:
-                    model_excuses.extend(sim_result.excuses)
-            if explain:
-                excuses_by_model[sub_model] = model_excuses
-            regret_clusters_by_model[sub_model] = _regret(
-                capacity_plans=[
-                    (sim_desires, plan[0]) for sim_desires, plan in model_plans if plan
-                ],
-                regret_params=regret_params,
-                model=self._models[sub_model],
-            )
+            planner_arguments=pargs,
+        )
 
-        # Now accumulate across the composed models and return the top N
-        # by distinct hardware type
+        merged_regret_candidates = merge_regret_candidates_positional(
+            regret_details_by_model=regret_details_by_model,
+            zonal_requirements=zonal_requirements,
+            regional_requirements=regional_requirements,
+        )
         least_regret = reduce_by_family(
-            _merge_models(
-                # First param is the actual plan which we care about
-                [
-                    [plan[0] for plan in component]
-                    for component in regret_clusters_by_model.values()
-                ],
-                zonal_requirements,
-                regional_requirements,
-            ),
+            [candidate.plan for candidate in merged_regret_candidates],
             max_results_per_family=pargs.max_results_per_family,
         )[:num_results]
-
-        low_p, high_p = sorted(percentiles)[0], sorted(percentiles)[-1]
-
-        final_zonal = []
-        final_regional = []
-        for req_type, samples in zonal_requirements.items():
-            req = CapacityRequirement(
-                requirement_type=req_type,
-                **{
-                    k: interval(samples=[i.mid for i in v], low_p=low_p, high_p=high_p)
-                    for k, v in samples.items()
-                },
-            )
-            final_zonal.append(req)
-        for req_type, samples in regional_requirements.items():
-            req = CapacityRequirement(
-                requirement_type=req_type,
-                **{
-                    k: interval(samples=[i.mid for i in v], low_p=low_p, high_p=high_p)
-                    for k, v in samples.items()
-                },
-            )
-            final_regional.append(req)
-
-        final_requirement = Requirements(zonal=final_zonal, regional=final_regional)
 
         mean_plan, percentile_plans = self._plan_percentiles(
             model_name=model_name,
@@ -1214,8 +1287,12 @@ class CapacityPlanner:
             instance_families=instance_families,
         )
 
-        result = UncertainCapacityPlan(
-            requirements=final_requirement,
+        uncertain_plan = UncertainCapacityPlan(
+            requirements=_requirements_from_samples(
+                zonal_requirements,
+                regional_requirements,
+                percentiles,
+            ),
             least_regret=least_regret,
             mean=mean_plan,
             percentiles=percentile_plans,
@@ -1224,23 +1301,118 @@ class CapacityPlanner:
                 desires_by_model={
                     model: desires.merge_with(
                         self._models[model].default_desires(
-                            desires_by_model[model], extra_model_arguments
+                            base_desires_by_model[model], extra_model_arguments
                         )
                     )
                     for model in regret_clusters_by_model
                 },
+                regret_clusters_by_model=regret_clusters_by_model,
+                excuses_by_model={
+                    model: deduplicate_excuses(excuses)
+                    for model, excuses in excuses_by_model.items()
+                    if excuses
+                },
             ),
         )
-        if explain:
-            result.explanation.regret_clusters_by_model = regret_clusters_by_model
-            result.explanation.excuses_by_model = {
-                model: deduplicate_excuses(excuses)
-                for model, excuses in excuses_by_model.items()
-                if excuses
-            }
-            result.explanation.context["regret"] = least_regret
 
-        return result
+        return _UncertainResult(
+            plan=uncertain_plan,
+            merged_regret_candidates=merged_regret_candidates,
+            all_sample_excuses=all_sample_excuses,
+            num_results=num_results,
+        )
+
+    def _collect_uncertain_sample_data(  # pylint: disable=too-many-positional-arguments
+        self,
+        model_name: str,
+        region: str,
+        desires: CapacityDesires,
+        simulations: int,
+        num_regions: int,
+        lifecycles: Sequence[Lifecycle],
+        instance_families: Optional[Sequence[str]],
+        drives: Optional[Sequence[str]],
+        regret_params: CapacityRegretParameters,
+        extra_model_arguments: Dict[str, Any],
+        planner_arguments: PlannerArguments,
+    ) -> Tuple[
+        Dict[str, CapacityDesires],
+        Dict[str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]],
+        Dict[str, Sequence[RegretCandidate]],
+        Dict[str, List[Excuse]],
+        List[Tuple[SampleRef, Excuse]],
+    ]:
+        base_desires_by_model = dict(
+            self._sub_models(
+                model_name=model_name,
+                desires=desires,
+                extra_model_arguments=extra_model_arguments,
+            )
+        )
+        regret_clusters_by_model: Dict[
+            str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]
+        ] = {}
+        regret_details_by_model: Dict[str, Sequence[RegretCandidate]] = {}
+        excuses_by_model: Dict[str, List[Excuse]] = {
+            model: [] for model in base_desires_by_model
+        }
+        all_sample_excuses: List[Tuple[SampleRef, Excuse]] = []
+        sample_plans_by_model: Dict[str, List[SampledPlan]] = {
+            model: [] for model in base_desires_by_model
+        }
+        # Sample IDs are derived from the base (undefaulted) desires so composed
+        # sub-models share the same ID sequence for positional merges. Labels
+        # describe the base sampling distribution, not sub-model resolved values.
+        base_samples = [sample for sample, _ in model_samples(desires, simulations)]
+
+        for sub_model, sub_desires in base_desires_by_model.items():
+            for index, sim_desires in enumerate(
+                model_desires(sub_desires, simulations)
+            ):
+                sample = base_samples[index]
+                sim_result = self._plan_certain(
+                    model_name=sub_model,
+                    region=region,
+                    desires=sim_desires,
+                    num_results=1,
+                    num_regions=num_regions,
+                    extra_model_arguments=extra_model_arguments,
+                    lifecycles=lifecycles,
+                    instance_families=instance_families,
+                    drives=drives,
+                    planner_arguments=planner_arguments,
+                )
+                excuses_by_model.setdefault(sub_model, []).extend(sim_result.excuses)
+                sample_excuses = [(sample, excuse) for excuse in sim_result.excuses]
+                all_sample_excuses.extend(sample_excuses)
+                if sim_result.plans:
+                    sample_plans_by_model.setdefault(sub_model, []).append(
+                        SampledPlan(
+                            sample=sample,
+                            desires=sim_desires,
+                            plan=sim_result.plans[0],
+                        )
+                    )
+
+        for sub_model, sample_plans in sample_plans_by_model.items():
+            regret_details = regret_detailed(
+                capacity_plans=sample_plans,
+                regret_params=regret_params,
+                model=self._models[sub_model],
+            )
+            regret_details_by_model[sub_model] = regret_details
+            regret_clusters_by_model[sub_model] = [
+                (candidate.plan, candidate.desires, candidate.total_regret)
+                for candidate in regret_details
+            ]
+
+        return (
+            base_desires_by_model,
+            regret_clusters_by_model,
+            regret_details_by_model,
+            excuses_by_model,
+            all_sample_excuses,
+        )
 
     def _sub_models(
         self,
