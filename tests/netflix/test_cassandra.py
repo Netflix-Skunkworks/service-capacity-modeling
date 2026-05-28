@@ -41,9 +41,10 @@ EXTRA_MODEL_ARGS = {"require_local_disks": False}
 # Property test configuration for Cassandra model.
 # See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
 PROPERTY_TEST_CONFIG = {
-    # "org.netflix.cassandra": {
-    #     "extra_model_arguments": {},
-    # },
+    "org.netflix.cassandra": {
+        # Tier 0 can choose a smaller, cheaper family than tier 2 for same workload.
+        "skip_tests": ["test_all_models_tier_capacity_relationship"],
+    },
 }
 
 small_but_high_qps = CapacityDesires(

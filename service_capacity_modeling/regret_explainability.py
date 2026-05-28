@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 from typing import Dict
+from typing import Iterator
 from typing import List
 from typing import Sequence
 from typing import Tuple
@@ -226,6 +227,118 @@ def merge_plan_components(plans: Sequence[CapacityPlan]) -> CapacityPlan:
     return merged_plan
 
 
+def _candidate_counts_description(
+    regret_details_by_model: Dict[str, Sequence[RegretCandidate]],
+) -> str:
+    return ", ".join(
+        f"{name}={len(candidates)}"
+        for name, candidates in sorted(regret_details_by_model.items())
+    )
+
+
+def _add_requirements_from_positional_candidates(
+    regret_details_by_model: Dict[str, Sequence[RegretCandidate]],
+    zonal_requirements: Dict[str, Dict[str, List[Interval]]],
+    regional_requirements: Dict[str, Dict[str, List[Interval]]],
+) -> None:
+    for candidate in _iter_regret_candidates_positional(regret_details_by_model):
+        add_plan_requirements(candidate.plan, zonal_requirements, regional_requirements)
+
+
+def _merged_regret_candidate(
+    model_names: Sequence[str],
+    components: Sequence[RegretCandidate],
+) -> MergedRegretCandidate:
+    return MergedRegretCandidate(
+        samples=[detail.sample for detail in components],
+        plan=merge_plan_components([detail.plan for detail in components]),
+        total_regret=sum(d.total_regret for d in components),
+        regret_components_by_model={
+            name: dict(detail.regret_components)
+            for name, detail in zip(model_names, components)
+        },
+    )
+
+
+def _validate_regret_candidate_counts(
+    regret_details_by_model: Dict[str, Sequence[RegretCandidate]],
+) -> None:
+    counts = {
+        name: len(candidates) for name, candidates in regret_details_by_model.items()
+    }
+    expected_count = next(iter(counts.values()))
+    if any(count == 0 or count != expected_count for count in counts.values()):
+        raise RuntimeError(
+            "Cannot merge composed regret provenance with invalid candidate "
+            f"counts: {_candidate_counts_description(regret_details_by_model)}"
+        )
+
+
+def _iter_regret_candidates_positional(
+    regret_details_by_model: Dict[str, Sequence[RegretCandidate]],
+) -> Iterator[MergedRegretCandidate]:
+    model_names = list(regret_details_by_model)
+    if not model_names:
+        return
+
+    _validate_regret_candidate_counts(regret_details_by_model)
+    lists = [regret_details_by_model[name] for name in model_names]
+    for components in zip(*lists):
+        yield _merged_regret_candidate(model_names, components)
+
+
+def _merge_regret_candidates_cross_product_bounded(
+    regret_details_by_model: Dict[str, Sequence[RegretCandidate]],
+    max_per_model: int,
+    max_results: int,
+) -> List[MergedRegretCandidate]:
+    model_names = list(regret_details_by_model)
+    if len(model_names) != 2:
+        raise ValueError("Cross-product regret merge requires exactly two models")
+    if any(len(regret_details_by_model[name]) == 0 for name in model_names):
+        raise RuntimeError(
+            "Cannot merge composed regret provenance with empty candidate counts: "
+            f"{_candidate_counts_description(regret_details_by_model)}"
+        )
+
+    left_model, right_model = model_names
+    left_candidates = regret_details_by_model[left_model][:max_per_model]
+    right_candidates = regret_details_by_model[right_model][:max_per_model]
+    merged = [
+        _merged_regret_candidate(model_names, (left, right))
+        for left in left_candidates
+        for right in right_candidates
+    ]
+    merged.sort(key=lambda candidate: candidate.total_regret)
+    return merged[:max_results]
+
+
+def merge_regret_candidates_bounded(
+    regret_details_by_model: Dict[str, Sequence[RegretCandidate]],
+    zonal_requirements: Dict[str, Dict[str, List[Interval]]],
+    regional_requirements: Dict[str, Dict[str, List[Interval]]],
+    max_per_model: int,
+    max_results: int,
+) -> List[MergedRegretCandidate]:
+    if len(regret_details_by_model) == 2:
+        _add_requirements_from_positional_candidates(
+            regret_details_by_model=regret_details_by_model,
+            zonal_requirements=zonal_requirements,
+            regional_requirements=regional_requirements,
+        )
+        return _merge_regret_candidates_cross_product_bounded(
+            regret_details_by_model=regret_details_by_model,
+            max_per_model=max_per_model,
+            max_results=max_results,
+        )
+
+    return merge_regret_candidates_positional(
+        regret_details_by_model=regret_details_by_model,
+        zonal_requirements=zonal_requirements,
+        regional_requirements=regional_requirements,
+    )
+
+
 def merge_regret_candidates_positional(
     regret_details_by_model: Dict[str, Sequence[RegretCandidate]],
     zonal_requirements: Dict[str, Dict[str, List[Interval]]],
@@ -242,33 +355,9 @@ def merge_regret_candidates_positional(
     if not model_names:
         return []
 
-    counts = {name: len(regret_details_by_model[name]) for name in model_names}
-    expected_count = next(iter(counts.values()))
-    if any(count == 0 or count != expected_count for count in counts.values()):
-        counts_description = ", ".join(
-            f"{name}={count}" for name, count in sorted(counts.items())
-        )
-        raise RuntimeError(
-            "Cannot merge composed regret provenance with invalid candidate "
-            f"counts: {counts_description}"
-        )
-
-    lists = [regret_details_by_model[name] for name in model_names]
-    merged: List[MergedRegretCandidate] = []
-    for components in zip(*lists):
-        merged_plan = merge_plan_components([detail.plan for detail in components])
-        add_plan_requirements(merged_plan, zonal_requirements, regional_requirements)
-        merged.append(
-            MergedRegretCandidate(
-                samples=[detail.sample for detail in components],
-                plan=merged_plan,
-                total_regret=sum(d.total_regret for d in components),
-                regret_components_by_model={
-                    name: dict(detail.regret_components)
-                    for name, detail in zip(model_names, components)
-                },
-            )
-        )
+    merged = list(_iter_regret_candidates_positional(regret_details_by_model))
+    for candidate in merged:
+        add_plan_requirements(candidate.plan, zonal_requirements, regional_requirements)
     return merged
 
 

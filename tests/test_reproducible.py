@@ -14,6 +14,9 @@ from service_capacity_modeling.interface import SampleRef
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.regret_explainability import MergedRegretCandidate
 from service_capacity_modeling.regret_explainability import (
+    merge_regret_candidates_bounded,
+)
+from service_capacity_modeling.regret_explainability import (
     merge_regret_candidates_positional,
 )
 from service_capacity_modeling.regret_explainability import plan_signature
@@ -284,6 +287,47 @@ def test_composed_regret_merge_keeps_all_component_samples():
     )
 
     assert [sample.sample_id for sample in merged[0].samples] == ["s-1", "s-2"]
+
+
+def test_cross_product_regret_merge_includes_non_positional_pairs():
+    def candidate(model: str, index: int, regret: float) -> RegretCandidate:
+        plan = CapacityPlan(
+            requirements=Requirements(),
+            candidate_clusters=Clusters(
+                annual_costs={f"{model}-{index}": Decimal(str(regret))},
+                services=[
+                    ServiceCapacity(
+                        service_type=model,
+                        annual_cost=regret,
+                        service_params={"index": index},
+                    )
+                ],
+            ),
+        )
+        return RegretCandidate(
+            sample=SampleRef(sample_id=f"{model}-{index}", sample_label=model),
+            plan=plan,
+            desires=uncertain_mid,
+            total_regret=regret,
+        )
+
+    merged = merge_regret_candidates_bounded(
+        regret_details_by_model={
+            "cassandra": [candidate("cassandra", 1, 1), candidate("cassandra", 2, 2)],
+            "evcache": [candidate("evcache", 1, 10), candidate("evcache", 2, 11)],
+        },
+        zonal_requirements={},
+        regional_requirements={},
+        max_per_model=2,
+        max_results=4,
+    )
+
+    merged_sample_ids = {
+        tuple(sample.sample_id for sample in item.samples) for item in merged
+    }
+    assert ("cassandra-1", "evcache-2") in merged_sample_ids
+    assert ("cassandra-2", "evcache-1") in merged_sample_ids
+    assert [item.total_regret for item in merged] == [11, 12, 12, 13]
 
 
 def test_plan_signature_keeps_service_parameters():

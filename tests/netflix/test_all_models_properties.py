@@ -341,6 +341,10 @@ def test_all_models_tier_capacity_relationship(model_name, data):
     """
     from tests.netflix.property_test_utils import _get_model_config
 
+    skip_tests = _get_model_config(model_name, "skip_tests", default=[])
+    if "test_all_models_tier_capacity_relationship" in skip_tests:
+        pytest.skip(f"{model_name} opts out of tier capacity relationship test")
+
     # Get model's valid ranges
     read_qps_range = _get_model_config(model_name, "read_qps_range")
     write_qps_range = _get_model_config(model_name, "write_qps_range")

@@ -60,16 +60,12 @@ from service_capacity_modeling.models.utils import current_instance_name
 from service_capacity_modeling.models.utils import reduce_by_family
 from service_capacity_modeling.regret_explainability import (
     considered_alternative_summaries,
-)
-from service_capacity_modeling.regret_explainability import (
-    merge_regret_candidates_positional,
-)
-from service_capacity_modeling.regret_explainability import MergedRegretCandidate
-from service_capacity_modeling.regret_explainability import RegretCandidate
-from service_capacity_modeling.regret_explainability import regret_detailed
-from service_capacity_modeling.regret_explainability import SampledPlan
-from service_capacity_modeling.regret_explainability import summaries_for_least_regret
-from service_capacity_modeling.regret_explainability import (
+    merge_regret_candidates_bounded,
+    MergedRegretCandidate,
+    RegretCandidate,
+    regret_detailed,
+    SampledPlan,
+    summaries_for_least_regret,
     summarize_regret_candidates,
 )
 from service_capacity_modeling.stats import dist_for_interval
@@ -1267,10 +1263,12 @@ class CapacityPlanner:
             planner_arguments=pargs,
         )
 
-        merged_regret_candidates = merge_regret_candidates_positional(
+        merged_regret_candidates = merge_regret_candidates_bounded(
             regret_details_by_model=regret_details_by_model,
             zonal_requirements=zonal_requirements,
             regional_requirements=regional_requirements,
+            max_per_model=min(32, simulations),
+            max_results=simulations,
         )
         least_regret = reduce_by_family(
             [candidate.plan for candidate in merged_regret_candidates],
@@ -1357,9 +1355,7 @@ class CapacityPlanner:
             model: [] for model in base_desires_by_model
         }
         all_sample_excuses: List[Tuple[SampleRef, Excuse]] = []
-        sample_plans_by_model: Dict[str, List[SampledPlan]] = {
-            model: [] for model in base_desires_by_model
-        }
+        sample_plans_by_model: Dict[str, List[SampledPlan]] = {}
         # Sample IDs are derived from the base (undefaulted) desires so composed
         # sub-models share the same ID sequence for positional merges. Labels
         # describe the base sampling distribution, not sub-model resolved values.
