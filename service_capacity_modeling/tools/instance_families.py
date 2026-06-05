@@ -20,6 +20,7 @@ GRANITE_RAPIDS_IPC = SAPPHIRE_RAPIDS_IPC * 1.10
 ROME_IPC = 1.03
 MILAN_IPC = SKYLAKE_IPC * 1.15
 GENOA_IPC = MILAN_IPC * 1.13
+TURIN_IPC = 1.325  # GENOA_IPC * ~1.02 — frequency-driven gains, minimal IPC uplift
 
 INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
     "c5": {
@@ -76,6 +77,13 @@ INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
         "cpu_ipc_scale": SAPPHIRE_RAPIDS_IPC,
         "cpu_turbo_single_ghz": 3.8,
         "cpu_turbo_all_ghz": 3.2,
+    },
+    "c8a": {
+        "iops_per_gib": None,
+        "io_latency_curve": None,
+        "cpu_ipc_scale": TURIN_IPC,
+        "cpu_turbo_single_ghz": 4.5,
+        "cpu_turbo_all_ghz": 3.8,
     },
     "c8i": {
         "iops_per_gib": None,
@@ -211,6 +219,13 @@ INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
         "cpu_turbo_single_ghz": 3.8,
         "cpu_turbo_all_ghz": 3.2,
     },
+    "m8a": {
+        "iops_per_gib": None,
+        "io_latency_curve": None,
+        "cpu_ipc_scale": TURIN_IPC,
+        "cpu_turbo_single_ghz": 4.5,
+        "cpu_turbo_all_ghz": 3.8,
+    },
     "m8i": {
         "iops_per_gib": None,
         "io_latency_curve": None,
@@ -326,6 +341,13 @@ INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
         "cpu_ipc_scale": SAPPHIRE_RAPIDS_IPC,
         "cpu_turbo_single_ghz": 3.8,
         "cpu_turbo_all_ghz": 3.2,
+    },
+    "r8a": {
+        "iops_per_gib": None,
+        "io_latency_curve": None,
+        "cpu_ipc_scale": TURIN_IPC,
+        "cpu_turbo_single_ghz": 4.5,
+        "cpu_turbo_all_ghz": 3.8,
     },
     "r8i": {
         "iops_per_gib": None,
