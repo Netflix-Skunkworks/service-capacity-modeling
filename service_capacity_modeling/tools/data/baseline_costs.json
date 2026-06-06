@@ -791,78 +791,78 @@
   },
   {
     "annual_costs": {
-      "kafka.zonal-clusters": 98036.73
+      "kafka.zonal-clusters": 85336.02
     },
     "clusters": [
       {
-        "annual_cost": 32678.91,
+        "annual_cost": 28445.34,
         "cluster_params": {
-          "effective_disk_per_node_gib": 873,
+          "effective_disk_per_node_gib": 1164,
           "kafka.copies": 2,
           "required_nodes_by_type": {
-            "cluster_size": 27,
-            "cpu": 18,
-            "disk_capacity": 27,
+            "cluster_size": 33,
+            "cpu": 33,
+            "disk_capacity": 21,
             "disk_iops": 0,
-            "memory": 6,
-            "min_count": 27,
-            "network": 6
+            "memory": 30,
+            "min_count": 21,
+            "network": 5
           },
-          "resource_bottleneck": "disk_capacity"
+          "resource_bottleneck": "cpu"
         },
         "cluster_type": "kafka",
-        "count": 27,
+        "count": 33,
         "deployment": "zonal",
-        "instance": "i4i.xlarge"
+        "instance": "i7ie.large"
       },
       {
-        "annual_cost": 32678.91,
+        "annual_cost": 28445.34,
         "cluster_params": {
-          "effective_disk_per_node_gib": 873,
+          "effective_disk_per_node_gib": 1164,
           "kafka.copies": 2,
           "required_nodes_by_type": {
-            "cluster_size": 27,
-            "cpu": 18,
-            "disk_capacity": 27,
+            "cluster_size": 33,
+            "cpu": 33,
+            "disk_capacity": 21,
             "disk_iops": 0,
-            "memory": 6,
-            "min_count": 27,
-            "network": 6
+            "memory": 30,
+            "min_count": 21,
+            "network": 5
           },
-          "resource_bottleneck": "disk_capacity"
+          "resource_bottleneck": "cpu"
         },
         "cluster_type": "kafka",
-        "count": 27,
+        "count": 33,
         "deployment": "zonal",
-        "instance": "i4i.xlarge"
+        "instance": "i7ie.large"
       },
       {
-        "annual_cost": 32678.91,
+        "annual_cost": 28445.34,
         "cluster_params": {
-          "effective_disk_per_node_gib": 873,
+          "effective_disk_per_node_gib": 1164,
           "kafka.copies": 2,
           "required_nodes_by_type": {
-            "cluster_size": 27,
-            "cpu": 18,
-            "disk_capacity": 27,
+            "cluster_size": 33,
+            "cpu": 33,
+            "disk_capacity": 21,
             "disk_iops": 0,
-            "memory": 6,
-            "min_count": 27,
-            "network": 6
+            "memory": 30,
+            "min_count": 21,
+            "network": 5
           },
-          "resource_bottleneck": "disk_capacity"
+          "resource_bottleneck": "cpu"
         },
         "cluster_type": "kafka",
-        "count": 27,
+        "count": 33,
         "deployment": "zonal",
-        "instance": "i4i.xlarge"
+        "instance": "i7ie.large"
       }
     ],
     "model": "org.netflix.kafka",
     "region": "us-east-1",
     "scenario": "kafka_500mib_throughput",
     "service_tier": 1,
-    "total_annual_cost": 98036.73
+    "total_annual_cost": 85336.02
   },
   {
     "annual_costs": {
@@ -950,11 +950,11 @@
   },
   {
     "annual_costs": {
-      "evcache.zonal-clusters": 31265.13
+      "evcache.zonal-clusters": 28550.73
     },
     "clusters": [
       {
-        "annual_cost": 10421.71,
+        "annual_cost": 9516.91,
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3,
@@ -972,10 +972,10 @@
         "cluster_type": "evcache",
         "count": 13,
         "deployment": "zonal",
-        "instance": "m7a.xlarge"
+        "instance": "m8i.xlarge"
       },
       {
-        "annual_cost": 10421.71,
+        "annual_cost": 9516.91,
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3,
@@ -993,10 +993,10 @@
         "cluster_type": "evcache",
         "count": 13,
         "deployment": "zonal",
-        "instance": "m7a.xlarge"
+        "instance": "m8i.xlarge"
       },
       {
-        "annual_cost": 10421.71,
+        "annual_cost": 9516.91,
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3,
@@ -1014,14 +1014,14 @@
         "cluster_type": "evcache",
         "count": 13,
         "deployment": "zonal",
-        "instance": "m7a.xlarge"
+        "instance": "m8i.xlarge"
       }
     ],
     "model": "org.netflix.evcache",
     "region": "us-east-1",
     "scenario": "evcache_small_no_replication",
     "service_tier": 1,
-    "total_annual_cost": 31265.13
+    "total_annual_cost": 28550.73
   },
   {
     "annual_costs": {
@@ -1086,7 +1086,7 @@
       "cassandra.net.intra.region": 222714.98,
       "cassandra.zonal-clusters": 44260.02,
       "evcache.zonal-clusters": 150306.39,
-      "nflx-java-app.regional-clusters": 108432.87
+      "nflx-java-app.regional-clusters": 99079.11
     },
     "clusters": [
       {
@@ -1243,21 +1243,21 @@
         "instance": "c5d.12xlarge"
       },
       {
-        "annual_cost": 108432.87,
+        "annual_cost": 99079.11,
         "attached_drives": [
           "gp2 : 20GB"
         ],
         "cluster_type": "dgwkv",
         "count": 39,
         "deployment": "regional",
-        "instance": "c7a.4xlarge"
+        "instance": "c8i.4xlarge"
       }
     ],
     "model": "org.netflix.key-value",
     "region": "us-east-1",
     "scenario": "kv_with_cache",
     "service_tier": 1,
-    "total_annual_cost": 618040.95
+    "total_annual_cost": 608687.19
   },
   {
     "annual_costs": {
