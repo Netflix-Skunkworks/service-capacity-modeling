@@ -551,6 +551,42 @@
       "c7i.xlarge": {
         "annual_cost": 599.33
       },
+      "c8a.12xlarge": {
+        "annual_cost": 8682.21
+      },
+      "c8a.16xlarge": {
+        "annual_cost": 11576.25
+      },
+      "c8a.24xlarge": {
+        "annual_cost": 17364.33
+      },
+      "c8a.2xlarge": {
+        "annual_cost": 1447.06
+      },
+      "c8a.48xlarge": {
+        "annual_cost": 34728.67
+      },
+      "c8a.4xlarge": {
+        "annual_cost": 2894.04
+      },
+      "c8a.8xlarge": {
+        "annual_cost": 5788.08
+      },
+      "c8a.large": {
+        "annual_cost": 361.79
+      },
+      "c8a.medium": {
+        "annual_cost": 180.89
+      },
+      "c8a.metal-24xl": {
+        "annual_cost": 17364.33
+      },
+      "c8a.metal-48xl": {
+        "annual_cost": 34728.67
+      },
+      "c8a.xlarge": {
+        "annual_cost": 723.49
+      },
       "c8g.12xlarge": {
         "annual_cost": 6413.67
       },
@@ -586,6 +622,309 @@
       },
       "c8g.xlarge": {
         "annual_cost": 534.33
+      },
+      "c8gb.12xlarge": {
+        "annual_cost": 7873.31
+      },
+      "c8gb.16xlarge": {
+        "annual_cost": 10497.81
+      },
+      "c8gb.24xlarge": {
+        "annual_cost": 15746.71
+      },
+      "c8gb.2xlarge": {
+        "annual_cost": 1312.25
+      },
+      "c8gb.48xlarge": {
+        "annual_cost": 31493.34
+      },
+      "c8gb.4xlarge": {
+        "annual_cost": 2624.41
+      },
+      "c8gb.8xlarge": {
+        "annual_cost": 5248.9
+      },
+      "c8gb.large": {
+        "annual_cost": 328.06
+      },
+      "c8gb.medium": {
+        "annual_cost": 163.99
+      },
+      "c8gb.metal-24xl": {
+        "annual_cost": 15746.71
+      },
+      "c8gb.metal-48xl": {
+        "annual_cost": 31493.34
+      },
+      "c8gb.xlarge": {
+        "annual_cost": 656.12
+      },
+      "c8gd.12xlarge": {
+        "annual_cost": 7491.64
+      },
+      "c8gd.16xlarge": {
+        "annual_cost": 9988.94
+      },
+      "c8gd.24xlarge": {
+        "annual_cost": 14983.37
+      },
+      "c8gd.2xlarge": {
+        "annual_cost": 1248.65
+      },
+      "c8gd.48xlarge": {
+        "annual_cost": 29966.73
+      },
+      "c8gd.4xlarge": {
+        "annual_cost": 2497.21
+      },
+      "c8gd.8xlarge": {
+        "annual_cost": 4994.43
+      },
+      "c8gd.large": {
+        "annual_cost": 312.12
+      },
+      "c8gd.medium": {
+        "annual_cost": 156.1
+      },
+      "c8gd.metal-24xl": {
+        "annual_cost": 14983.37
+      },
+      "c8gd.metal-48xl": {
+        "annual_cost": 29966.73
+      },
+      "c8gd.xlarge": {
+        "annual_cost": 624.33
+      },
+      "c8gn.12xlarge": {
+        "annual_cost": 7873.49
+      },
+      "c8gn.16xlarge": {
+        "annual_cost": 10497.98
+      },
+      "c8gn.24xlarge": {
+        "annual_cost": 15746.98
+      },
+      "c8gn.2xlarge": {
+        "annual_cost": 1312.25
+      },
+      "c8gn.48xlarge": {
+        "annual_cost": 31493.08
+      },
+      "c8gn.4xlarge": {
+        "annual_cost": 2624.5
+      },
+      "c8gn.8xlarge": {
+        "annual_cost": 5248.99
+      },
+      "c8gn.large": {
+        "annual_cost": 327.62
+      },
+      "c8gn.medium": {
+        "annual_cost": 163.81
+      },
+      "c8gn.metal-24xl": {
+        "annual_cost": 15746.98
+      },
+      "c8gn.metal-48xl": {
+        "annual_cost": 31493.08
+      },
+      "c8gn.xlarge": {
+        "annual_cost": 656.12
+      },
+      "c8i-flex.12xlarge": {
+        "annual_cost": 7171.64
+      },
+      "c8i-flex.16xlarge": {
+        "annual_cost": 9562.15
+      },
+      "c8i-flex.2xlarge": {
+        "annual_cost": 1195.3
+      },
+      "c8i-flex.4xlarge": {
+        "annual_cost": 2390.52
+      },
+      "c8i-flex.8xlarge": {
+        "annual_cost": 4781.12
+      },
+      "c8i-flex.large": {
+        "annual_cost": 298.8
+      },
+      "c8i-flex.xlarge": {
+        "annual_cost": 597.61
+      },
+      "c8i.12xlarge": {
+        "annual_cost": 7549.46
+      },
+      "c8i.16xlarge": {
+        "annual_cost": 10065.94
+      },
+      "c8i.24xlarge": {
+        "annual_cost": 15098.91
+      },
+      "c8i.2xlarge": {
+        "annual_cost": 1258.29
+      },
+      "c8i.32xlarge": {
+        "annual_cost": 20131.97
+      },
+      "c8i.48xlarge": {
+        "annual_cost": 30197.91
+      },
+      "c8i.4xlarge": {
+        "annual_cost": 2516.49
+      },
+      "c8i.8xlarge": {
+        "annual_cost": 5032.97
+      },
+      "c8i.96xlarge": {
+        "annual_cost": 60395.82
+      },
+      "c8i.large": {
+        "annual_cost": 314.57
+      },
+      "c8i.metal-48xl": {
+        "annual_cost": 30197.91
+      },
+      "c8i.metal-96xl": {
+        "annual_cost": 60395.82
+      },
+      "c8i.xlarge": {
+        "annual_cost": 629.14
+      },
+      "c8ib.12xlarge": {
+        "annual_cost": 9041.37
+      },
+      "c8ib.16xlarge": {
+        "annual_cost": 12055.16
+      },
+      "c8ib.24xlarge": {
+        "annual_cost": 18082.74
+      },
+      "c8ib.2xlarge": {
+        "annual_cost": 1506.9
+      },
+      "c8ib.32xlarge": {
+        "annual_cost": 24110.41
+      },
+      "c8ib.48xlarge": {
+        "annual_cost": 36165.57
+      },
+      "c8ib.4xlarge": {
+        "annual_cost": 3013.79
+      },
+      "c8ib.8xlarge": {
+        "annual_cost": 6027.58
+      },
+      "c8ib.96xlarge": {
+        "annual_cost": 72331.14
+      },
+      "c8ib.large": {
+        "annual_cost": 376.77
+      },
+      "c8ib.metal-48xl": {
+        "annual_cost": 36165.57
+      },
+      "c8ib.metal-96xl": {
+        "annual_cost": 72331.14
+      },
+      "c8ib.xlarge": {
+        "annual_cost": 753.45
+      },
+      "c8id.12xlarge": {
+        "annual_cost": 8478.1
+      },
+      "c8id.16xlarge": {
+        "annual_cost": 11304.17
+      },
+      "c8id.24xlarge": {
+        "annual_cost": 16956.29
+      },
+      "c8id.2xlarge": {
+        "annual_cost": 1412.99
+      },
+      "c8id.32xlarge": {
+        "annual_cost": 22608.33
+      },
+      "c8id.48xlarge": {
+        "annual_cost": 33912.59
+      },
+      "c8id.4xlarge": {
+        "annual_cost": 2826.06
+      },
+      "c8id.8xlarge": {
+        "annual_cost": 5652.13
+      },
+      "c8id.96xlarge": {
+        "annual_cost": 67825.09
+      },
+      "c8id.large": {
+        "annual_cost": 353.29
+      },
+      "c8id.metal-48xl": {
+        "annual_cost": 33912.59
+      },
+      "c8id.metal-96xl": {
+        "annual_cost": 67825.09
+      },
+      "c8id.xlarge": {
+        "annual_cost": 706.49
+      },
+      "c8in.12xlarge": {
+        "annual_cost": 9041.37
+      },
+      "c8in.16xlarge": {
+        "annual_cost": 12055.16
+      },
+      "c8in.24xlarge": {
+        "annual_cost": 18082.74
+      },
+      "c8in.2xlarge": {
+        "annual_cost": 1506.9
+      },
+      "c8in.32xlarge": {
+        "annual_cost": 24110.41
+      },
+      "c8in.48xlarge": {
+        "annual_cost": 36165.57
+      },
+      "c8in.4xlarge": {
+        "annual_cost": 3013.79
+      },
+      "c8in.8xlarge": {
+        "annual_cost": 6027.58
+      },
+      "c8in.96xlarge": {
+        "annual_cost": 72331.14
+      },
+      "c8in.large": {
+        "annual_cost": 376.77
+      },
+      "c8in.metal-48xl": {
+        "annual_cost": 36165.57
+      },
+      "c8in.metal-96xl": {
+        "annual_cost": 72331.14
+      },
+      "c8in.xlarge": {
+        "annual_cost": 753.45
+      },
+      "c8ine.12xlarge": {
+        "annual_cost": 11301.71
+      },
+      "c8ine.2xlarge": {
+        "annual_cost": 1883.66
+      },
+      "c8ine.4xlarge": {
+        "annual_cost": 3767.24
+      },
+      "c8ine.8xlarge": {
+        "annual_cost": 7534.48
+      },
+      "c8ine.large": {
+        "annual_cost": 470.94
+      },
+      "c8ine.xlarge": {
+        "annual_cost": 941.79
       },
       "d2.2xlarge": {
         "annual_cost": 3463.33
@@ -631,6 +970,15 @@
       },
       "dl1.24xlarge": {
         "annual_cost": 43178.0
+      },
+      "f2.12xlarge": {
+        "annual_cost": 13043.29
+      },
+      "f2.48xlarge": {
+        "annual_cost": 52173.16
+      },
+      "f2.6xlarge": {
+        "annual_cost": 6521.64
       },
       "g4ad.16xlarge": {
         "annual_cost": 13331.67
@@ -758,11 +1106,44 @@
       "g6e.xlarge": {
         "annual_cost": 6129.67
       },
+      "g6f.2xlarge": {
+        "annual_cost": 1662.3
+      },
+      "g6f.4xlarge": {
+        "annual_cost": 3324.68
+      },
+      "g6f.large": {
+        "annual_cost": 706.93
+      },
+      "g6f.xlarge": {
+        "annual_cost": 831.15
+      },
+      "g7e.12xlarge": {
+        "annual_cost": 27292.39
+      },
+      "g7e.24xlarge": {
+        "annual_cost": 54584.7
+      },
+      "g7e.2xlarge": {
+        "annual_cost": 11077.28
+      },
+      "g7e.48xlarge": {
+        "annual_cost": 109169.4
+      },
+      "g7e.4xlarge": {
+        "annual_cost": 13169.0
+      },
+      "g7e.8xlarge": {
+        "annual_cost": 17352.33
+      },
       "gr6.4xlarge": {
         "annual_cost": 5386.67
       },
       "gr6.8xlarge": {
         "annual_cost": 8561.33
+      },
+      "gr6f.4xlarge": {
+        "annual_cost": 3730.62
       },
       "h1.16xlarge": {
         "annual_cost": 13789.33
@@ -811,9 +1192,6 @@
       },
       "i3.large": {
         "annual_cost": 578.0
-      },
-      "i3.metal": {
-        "annual_cost": 18497.67
       },
       "i3.xlarge": {
         "annual_cost": 1156.0
@@ -889,6 +1267,138 @@
       },
       "i4i.xlarge": {
         "annual_cost": 1210.33
+      },
+      "i7i.12xlarge": {
+        "annual_cost": 15978.24
+      },
+      "i7i.16xlarge": {
+        "annual_cost": 21304.32
+      },
+      "i7i.24xlarge": {
+        "annual_cost": 31956.48
+      },
+      "i7i.2xlarge": {
+        "annual_cost": 2663.04
+      },
+      "i7i.48xlarge": {
+        "annual_cost": 63912.08
+      },
+      "i7i.4xlarge": {
+        "annual_cost": 5326.08
+      },
+      "i7i.8xlarge": {
+        "annual_cost": 10652.16
+      },
+      "i7i.large": {
+        "annual_cost": 665.76
+      },
+      "i7i.metal-24xl": {
+        "annual_cost": 31956.48
+      },
+      "i7i.metal-48xl": {
+        "annual_cost": 63912.08
+      },
+      "i7i.xlarge": {
+        "annual_cost": 1331.52
+      },
+      "i7ie.12xlarge": {
+        "annual_cost": 20693.75
+      },
+      "i7ie.18xlarge": {
+        "annual_cost": 31040.18
+      },
+      "i7ie.24xlarge": {
+        "annual_cost": 41387.5
+      },
+      "i7ie.2xlarge": {
+        "annual_cost": 3448.81
+      },
+      "i7ie.3xlarge": {
+        "annual_cost": 5173.66
+      },
+      "i7ie.48xlarge": {
+        "annual_cost": 82774.12
+      },
+      "i7ie.6xlarge": {
+        "annual_cost": 10346.44
+      },
+      "i7ie.large": {
+        "annual_cost": 861.98
+      },
+      "i7ie.metal-24xl": {
+        "annual_cost": 41387.5
+      },
+      "i7ie.metal-48xl": {
+        "annual_cost": 82774.12
+      },
+      "i7ie.xlarge": {
+        "annual_cost": 1724.84
+      },
+      "i8g.12xlarge": {
+        "annual_cost": 14517.95
+      },
+      "i8g.16xlarge": {
+        "annual_cost": 19357.32
+      },
+      "i8g.24xlarge": {
+        "annual_cost": 29035.9
+      },
+      "i8g.2xlarge": {
+        "annual_cost": 2419.51
+      },
+      "i8g.48xlarge": {
+        "annual_cost": 58071.88
+      },
+      "i8g.4xlarge": {
+        "annual_cost": 4839.02
+      },
+      "i8g.8xlarge": {
+        "annual_cost": 9678.92
+      },
+      "i8g.large": {
+        "annual_cost": 605.32
+      },
+      "i8g.metal-24xl": {
+        "annual_cost": 29035.9
+      },
+      "i8g.metal-48xl": {
+        "annual_cost": 58071.88
+      },
+      "i8g.xlarge": {
+        "annual_cost": 1209.76
+      },
+      "i8ge.12xlarge": {
+        "annual_cost": 18883.06
+      },
+      "i8ge.18xlarge": {
+        "annual_cost": 28324.58
+      },
+      "i8ge.24xlarge": {
+        "annual_cost": 37766.11
+      },
+      "i8ge.2xlarge": {
+        "annual_cost": 3147.47
+      },
+      "i8ge.3xlarge": {
+        "annual_cost": 4720.76
+      },
+      "i8ge.48xlarge": {
+        "annual_cost": 75531.35
+      },
+      "i8ge.6xlarge": {
+        "annual_cost": 9441.53
+      },
+      "i8ge.large": {
+        "annual_cost": 786.65
+      },
+      "i8ge.metal-24xl": {
+        "annual_cost": 37766.11
+      },
+      "i8ge.metal-48xl": {
+        "annual_cost": 75531.35
+      },
+      "i8ge.xlarge": {
+        "annual_cost": 1573.3
       },
       "im4gn.16xlarge": {
         "annual_cost": 20289.67
@@ -1529,6 +2039,69 @@
       "m7i.xlarge": {
         "annual_cost": 697.33
       },
+      "m8a.12xlarge": {
+        "annual_cost": 10103.08
+      },
+      "m8a.16xlarge": {
+        "annual_cost": 13470.78
+      },
+      "m8a.24xlarge": {
+        "annual_cost": 20206.17
+      },
+      "m8a.2xlarge": {
+        "annual_cost": 1683.85
+      },
+      "m8a.48xlarge": {
+        "annual_cost": 40412.42
+      },
+      "m8a.4xlarge": {
+        "annual_cost": 3367.69
+      },
+      "m8a.8xlarge": {
+        "annual_cost": 6735.39
+      },
+      "m8a.large": {
+        "annual_cost": 421.01
+      },
+      "m8a.medium": {
+        "annual_cost": 210.5
+      },
+      "m8a.metal-24xl": {
+        "annual_cost": 20206.17
+      },
+      "m8a.metal-48xl": {
+        "annual_cost": 40412.42
+      },
+      "m8a.xlarge": {
+        "annual_cost": 841.92
+      },
+      "m8azn.12xlarge": {
+        "annual_cost": 16320.76
+      },
+      "m8azn.24xlarge": {
+        "annual_cost": 32641.42
+      },
+      "m8azn.3xlarge": {
+        "annual_cost": 4080.15
+      },
+      "m8azn.6xlarge": {
+        "annual_cost": 8160.38
+      },
+      "m8azn.large": {
+        "annual_cost": 680.04
+      },
+      "m8azn.medium": {
+        "annual_cost": 339.98
+      },
+      "m8azn.metal-12xl": {
+        "annual_cost": 16320.76
+      },
+      "m8azn.metal-24xl": {
+        "annual_cost": 32641.42
+      },
+      "m8azn.xlarge": {
+        "annual_cost": 1360.08
+      },
       "m8g.12xlarge": {
         "annual_cost": 7450.33
       },
@@ -1565,6 +2138,363 @@
       "m8g.xlarge": {
         "annual_cost": 621.0
       },
+      "m8gb.12xlarge": {
+        "annual_cost": 10262.52
+      },
+      "m8gb.16xlarge": {
+        "annual_cost": 13683.3
+      },
+      "m8gb.24xlarge": {
+        "annual_cost": 20524.94
+      },
+      "m8gb.2xlarge": {
+        "annual_cost": 1710.39
+      },
+      "m8gb.48xlarge": {
+        "annual_cost": 41049.97
+      },
+      "m8gb.4xlarge": {
+        "annual_cost": 3420.87
+      },
+      "m8gb.8xlarge": {
+        "annual_cost": 6841.65
+      },
+      "m8gb.large": {
+        "annual_cost": 427.58
+      },
+      "m8gb.medium": {
+        "annual_cost": 213.83
+      },
+      "m8gb.metal-24xl": {
+        "annual_cost": 41049.97
+      },
+      "m8gb.metal-48xl": {
+        "annual_cost": 41049.97
+      },
+      "m8gb.xlarge": {
+        "annual_cost": 855.24
+      },
+      "m8gd.12xlarge": {
+        "annual_cost": 9116.09
+      },
+      "m8gd.16xlarge": {
+        "annual_cost": 12154.76
+      },
+      "m8gd.24xlarge": {
+        "annual_cost": 18232.19
+      },
+      "m8gd.2xlarge": {
+        "annual_cost": 1519.33
+      },
+      "m8gd.48xlarge": {
+        "annual_cost": 36464.29
+      },
+      "m8gd.4xlarge": {
+        "annual_cost": 3038.67
+      },
+      "m8gd.8xlarge": {
+        "annual_cost": 6077.43
+      },
+      "m8gd.large": {
+        "annual_cost": 379.83
+      },
+      "m8gd.medium": {
+        "annual_cost": 189.92
+      },
+      "m8gd.metal-24xl": {
+        "annual_cost": 18232.19
+      },
+      "m8gd.metal-48xl": {
+        "annual_cost": 36464.29
+      },
+      "m8gd.xlarge": {
+        "annual_cost": 759.67
+      },
+      "m8gn.12xlarge": {
+        "annual_cost": 10262.34
+      },
+      "m8gn.16xlarge": {
+        "annual_cost": 13683.12
+      },
+      "m8gn.24xlarge": {
+        "annual_cost": 20524.68
+      },
+      "m8gn.2xlarge": {
+        "annual_cost": 1710.83
+      },
+      "m8gn.48xlarge": {
+        "annual_cost": 41050.24
+      },
+      "m8gn.4xlarge": {
+        "annual_cost": 3420.78
+      },
+      "m8gn.8xlarge": {
+        "annual_cost": 6841.56
+      },
+      "m8gn.large": {
+        "annual_cost": 427.49
+      },
+      "m8gn.medium": {
+        "annual_cost": 213.74
+      },
+      "m8gn.metal-24xl": {
+        "annual_cost": 20524.68
+      },
+      "m8gn.metal-48xl": {
+        "annual_cost": 41050.24
+      },
+      "m8gn.xlarge": {
+        "annual_cost": 854.98
+      },
+      "m8i-flex.12xlarge": {
+        "annual_cost": 8346.7
+      },
+      "m8i-flex.16xlarge": {
+        "annual_cost": 11128.97
+      },
+      "m8i-flex.2xlarge": {
+        "annual_cost": 1391.09
+      },
+      "m8i-flex.4xlarge": {
+        "annual_cost": 2782.26
+      },
+      "m8i-flex.8xlarge": {
+        "annual_cost": 5564.44
+      },
+      "m8i-flex.large": {
+        "annual_cost": 347.77
+      },
+      "m8i-flex.xlarge": {
+        "annual_cost": 695.54
+      },
+      "m8i.12xlarge": {
+        "annual_cost": 8785.05
+      },
+      "m8i.16xlarge": {
+        "annual_cost": 11713.35
+      },
+      "m8i.24xlarge": {
+        "annual_cost": 17570.02
+      },
+      "m8i.2xlarge": {
+        "annual_cost": 1464.15
+      },
+      "m8i.32xlarge": {
+        "annual_cost": 23426.69
+      },
+      "m8i.48xlarge": {
+        "annual_cost": 35140.04
+      },
+      "m8i.4xlarge": {
+        "annual_cost": 2928.38
+      },
+      "m8i.8xlarge": {
+        "annual_cost": 5856.67
+      },
+      "m8i.96xlarge": {
+        "annual_cost": 70280.08
+      },
+      "m8i.large": {
+        "annual_cost": 366.08
+      },
+      "m8i.metal-48xl": {
+        "annual_cost": 35140.04
+      },
+      "m8i.metal-96xl": {
+        "annual_cost": 70280.08
+      },
+      "m8i.xlarge": {
+        "annual_cost": 732.07
+      },
+      "m8ib.12xlarge": {
+        "annual_cost": 11784.57
+      },
+      "m8ib.16xlarge": {
+        "annual_cost": 15712.81
+      },
+      "m8ib.24xlarge": {
+        "annual_cost": 23569.13
+      },
+      "m8ib.2xlarge": {
+        "annual_cost": 1964.08
+      },
+      "m8ib.32xlarge": {
+        "annual_cost": 31425.54
+      },
+      "m8ib.48xlarge": {
+        "annual_cost": 47138.35
+      },
+      "m8ib.4xlarge": {
+        "annual_cost": 3928.16
+      },
+      "m8ib.8xlarge": {
+        "annual_cost": 7856.41
+      },
+      "m8ib.96xlarge": {
+        "annual_cost": 94276.7
+      },
+      "m8ib.large": {
+        "annual_cost": 491.0
+      },
+      "m8ib.xlarge": {
+        "annual_cost": 982.08
+      },
+      "m8id.12xlarge": {
+        "annual_cost": 10317.62
+      },
+      "m8id.16xlarge": {
+        "annual_cost": 13756.88
+      },
+      "m8id.24xlarge": {
+        "annual_cost": 20635.23
+      },
+      "m8id.2xlarge": {
+        "annual_cost": 1719.59
+      },
+      "m8id.32xlarge": {
+        "annual_cost": 27513.67
+      },
+      "m8id.48xlarge": {
+        "annual_cost": 41270.55
+      },
+      "m8id.4xlarge": {
+        "annual_cost": 3439.18
+      },
+      "m8id.8xlarge": {
+        "annual_cost": 6878.44
+      },
+      "m8id.96xlarge": {
+        "annual_cost": 82541.1
+      },
+      "m8id.large": {
+        "annual_cost": 429.94
+      },
+      "m8id.metal-48xl": {
+        "annual_cost": 41270.55
+      },
+      "m8id.metal-96xl": {
+        "annual_cost": 82541.1
+      },
+      "m8id.xlarge": {
+        "annual_cost": 859.79
+      },
+      "m8idb.12xlarge": {
+        "annual_cost": 13584.48
+      },
+      "m8idb.16xlarge": {
+        "annual_cost": 18112.61
+      },
+      "m8idb.24xlarge": {
+        "annual_cost": 27168.96
+      },
+      "m8idb.2xlarge": {
+        "annual_cost": 2264.11
+      },
+      "m8idb.32xlarge": {
+        "annual_cost": 36225.23
+      },
+      "m8idb.48xlarge": {
+        "annual_cost": 54337.84
+      },
+      "m8idb.4xlarge": {
+        "annual_cost": 4528.13
+      },
+      "m8idb.8xlarge": {
+        "annual_cost": 9056.35
+      },
+      "m8idb.96xlarge": {
+        "annual_cost": 108675.77
+      },
+      "m8idb.large": {
+        "annual_cost": 565.98
+      },
+      "m8idb.xlarge": {
+        "annual_cost": 1132.05
+      },
+      "m8idn.12xlarge": {
+        "annual_cost": 13584.48
+      },
+      "m8idn.16xlarge": {
+        "annual_cost": 18112.61
+      },
+      "m8idn.24xlarge": {
+        "annual_cost": 27168.96
+      },
+      "m8idn.2xlarge": {
+        "annual_cost": 2264.11
+      },
+      "m8idn.32xlarge": {
+        "annual_cost": 36225.23
+      },
+      "m8idn.48xlarge": {
+        "annual_cost": 54337.84
+      },
+      "m8idn.4xlarge": {
+        "annual_cost": 4528.13
+      },
+      "m8idn.8xlarge": {
+        "annual_cost": 9056.35
+      },
+      "m8idn.96xlarge": {
+        "annual_cost": 108675.77
+      },
+      "m8idn.large": {
+        "annual_cost": 565.98
+      },
+      "m8idn.xlarge": {
+        "annual_cost": 1132.05
+      },
+      "m8in.12xlarge": {
+        "annual_cost": 11784.57
+      },
+      "m8in.16xlarge": {
+        "annual_cost": 15712.81
+      },
+      "m8in.24xlarge": {
+        "annual_cost": 23569.13
+      },
+      "m8in.2xlarge": {
+        "annual_cost": 1964.08
+      },
+      "m8in.32xlarge": {
+        "annual_cost": 31425.54
+      },
+      "m8in.48xlarge": {
+        "annual_cost": 47138.35
+      },
+      "m8in.4xlarge": {
+        "annual_cost": 3928.16
+      },
+      "m8in.8xlarge": {
+        "annual_cost": 7856.41
+      },
+      "m8in.96xlarge": {
+        "annual_cost": 94276.7
+      },
+      "m8in.large": {
+        "annual_cost": 491.0
+      },
+      "m8in.xlarge": {
+        "annual_cost": 982.08
+      },
+      "m8ine.12xlarge": {
+        "annual_cost": 14730.73
+      },
+      "m8ine.2xlarge": {
+        "annual_cost": 2455.17
+      },
+      "m8ine.4xlarge": {
+        "annual_cost": 4910.24
+      },
+      "m8ine.8xlarge": {
+        "annual_cost": 9820.49
+      },
+      "m8ine.large": {
+        "annual_cost": 613.81
+      },
+      "m8ine.xlarge": {
+        "annual_cost": 1227.54
+      },
       "p3dn.24xlarge": {
         "annual_cost": 79416.67
       },
@@ -1579,6 +2509,15 @@
       },
       "p5.4xlarge": {
         "annual_cost": 22661.0
+      },
+      "p5en.48xlarge": {
+        "annual_cost": 208481.87
+      },
+      "p6-b200.48xlarge": {
+        "annual_cost": 375267.27
+      },
+      "p6-b300.48xlarge": {
+        "annual_cost": 469084.16
       },
       "r3.2xlarge": {
         "annual_cost": 2043.33
@@ -2156,6 +3095,42 @@
       "r7iz.xlarge": {
         "annual_cost": 1170.0
       },
+      "r8a.12xlarge": {
+        "annual_cost": 13260.54
+      },
+      "r8a.16xlarge": {
+        "annual_cost": 17680.66
+      },
+      "r8a.24xlarge": {
+        "annual_cost": 26521.08
+      },
+      "r8a.2xlarge": {
+        "annual_cost": 2210.06
+      },
+      "r8a.48xlarge": {
+        "annual_cost": 53042.06
+      },
+      "r8a.4xlarge": {
+        "annual_cost": 4420.21
+      },
+      "r8a.8xlarge": {
+        "annual_cost": 8840.33
+      },
+      "r8a.large": {
+        "annual_cost": 552.49
+      },
+      "r8a.medium": {
+        "annual_cost": 276.29
+      },
+      "r8a.metal-24xl": {
+        "annual_cost": 26521.08
+      },
+      "r8a.metal-48xl": {
+        "annual_cost": 53042.06
+      },
+      "r8a.xlarge": {
+        "annual_cost": 1105.07
+      },
       "r8g.12xlarge": {
         "annual_cost": 9779.33
       },
@@ -2191,6 +3166,345 @@
       },
       "r8g.xlarge": {
         "annual_cost": 815.0
+      },
+      "r8gb.12xlarge": {
+        "annual_cost": 13497.67
+      },
+      "r8gb.16xlarge": {
+        "annual_cost": 17996.89
+      },
+      "r8gb.24xlarge": {
+        "annual_cost": 26995.34
+      },
+      "r8gb.2xlarge": {
+        "annual_cost": 2249.66
+      },
+      "r8gb.48xlarge": {
+        "annual_cost": 53990.77
+      },
+      "r8gb.4xlarge": {
+        "annual_cost": 4499.22
+      },
+      "r8gb.8xlarge": {
+        "annual_cost": 8998.45
+      },
+      "r8gb.large": {
+        "annual_cost": 562.39
+      },
+      "r8gb.medium": {
+        "annual_cost": 281.2
+      },
+      "r8gb.metal-24xl": {
+        "annual_cost": 53990.77
+      },
+      "r8gb.metal-48xl": {
+        "annual_cost": 53990.77
+      },
+      "r8gb.xlarge": {
+        "annual_cost": 1124.78
+      },
+      "r8gd.12xlarge": {
+        "annual_cost": 11621.1
+      },
+      "r8gd.16xlarge": {
+        "annual_cost": 15494.78
+      },
+      "r8gd.24xlarge": {
+        "annual_cost": 23242.12
+      },
+      "r8gd.2xlarge": {
+        "annual_cost": 1936.84
+      },
+      "r8gd.48xlarge": {
+        "annual_cost": 46484.24
+      },
+      "r8gd.4xlarge": {
+        "annual_cost": 3873.67
+      },
+      "r8gd.8xlarge": {
+        "annual_cost": 7747.34
+      },
+      "r8gd.large": {
+        "annual_cost": 484.25
+      },
+      "r8gd.medium": {
+        "annual_cost": 242.13
+      },
+      "r8gd.metal-24xl": {
+        "annual_cost": 23242.12
+      },
+      "r8gd.metal-48xl": {
+        "annual_cost": 46484.24
+      },
+      "r8gd.xlarge": {
+        "annual_cost": 968.42
+      },
+      "r8gn.12xlarge": {
+        "annual_cost": 13497.41
+      },
+      "r8gn.16xlarge": {
+        "annual_cost": 17996.54
+      },
+      "r8gn.24xlarge": {
+        "annual_cost": 26995.69
+      },
+      "r8gn.2xlarge": {
+        "annual_cost": 2249.57
+      },
+      "r8gn.48xlarge": {
+        "annual_cost": 53990.51
+      },
+      "r8gn.4xlarge": {
+        "annual_cost": 4499.14
+      },
+      "r8gn.8xlarge": {
+        "annual_cost": 8998.27
+      },
+      "r8gn.large": {
+        "annual_cost": 562.39
+      },
+      "r8gn.medium": {
+        "annual_cost": 281.2
+      },
+      "r8gn.metal-24xl": {
+        "annual_cost": 26995.69
+      },
+      "r8gn.metal-48xl": {
+        "annual_cost": 53990.51
+      },
+      "r8gn.xlarge": {
+        "annual_cost": 1124.78
+      },
+      "r8i-flex.12xlarge": {
+        "annual_cost": 10953.85
+      },
+      "r8i-flex.16xlarge": {
+        "annual_cost": 14605.2
+      },
+      "r8i-flex.2xlarge": {
+        "annual_cost": 1825.67
+      },
+      "r8i-flex.4xlarge": {
+        "annual_cost": 3651.26
+      },
+      "r8i-flex.8xlarge": {
+        "annual_cost": 7302.6
+      },
+      "r8i-flex.large": {
+        "annual_cost": 456.4
+      },
+      "r8i-flex.xlarge": {
+        "annual_cost": 912.79
+      },
+      "r8i.12xlarge": {
+        "annual_cost": 11530.7
+      },
+      "r8i.16xlarge": {
+        "annual_cost": 15374.33
+      },
+      "r8i.24xlarge": {
+        "annual_cost": 23061.49
+      },
+      "r8i.2xlarge": {
+        "annual_cost": 1921.77
+      },
+      "r8i.32xlarge": {
+        "annual_cost": 30748.65
+      },
+      "r8i.48xlarge": {
+        "annual_cost": 46122.98
+      },
+      "r8i.4xlarge": {
+        "annual_cost": 3843.54
+      },
+      "r8i.8xlarge": {
+        "annual_cost": 7687.16
+      },
+      "r8i.96xlarge": {
+        "annual_cost": 92245.95
+      },
+      "r8i.large": {
+        "annual_cost": 480.49
+      },
+      "r8i.metal-48xl": {
+        "annual_cost": 46122.98
+      },
+      "r8i.metal-96xl": {
+        "annual_cost": 92245.95
+      },
+      "r8i.xlarge": {
+        "annual_cost": 960.88
+      },
+      "r8ib.12xlarge": {
+        "annual_cost": 15499.59
+      },
+      "r8ib.16xlarge": {
+        "annual_cost": 20666.15
+      },
+      "r8ib.24xlarge": {
+        "annual_cost": 30999.19
+      },
+      "r8ib.2xlarge": {
+        "annual_cost": 2583.24
+      },
+      "r8ib.32xlarge": {
+        "annual_cost": 41332.22
+      },
+      "r8ib.48xlarge": {
+        "annual_cost": 61998.37
+      },
+      "r8ib.4xlarge": {
+        "annual_cost": 5166.56
+      },
+      "r8ib.8xlarge": {
+        "annual_cost": 10333.03
+      },
+      "r8ib.96xlarge": {
+        "annual_cost": 123996.75
+      },
+      "r8ib.large": {
+        "annual_cost": 645.79
+      },
+      "r8ib.xlarge": {
+        "annual_cost": 1291.66
+      },
+      "r8id.12xlarge": {
+        "annual_cost": 13152.0
+      },
+      "r8id.16xlarge": {
+        "annual_cost": 17535.94
+      },
+      "r8id.24xlarge": {
+        "annual_cost": 26304.0
+      },
+      "r8id.2xlarge": {
+        "annual_cost": 2192.01
+      },
+      "r8id.32xlarge": {
+        "annual_cost": 35071.97
+      },
+      "r8id.48xlarge": {
+        "annual_cost": 52607.92
+      },
+      "r8id.4xlarge": {
+        "annual_cost": 4384.03
+      },
+      "r8id.8xlarge": {
+        "annual_cost": 8767.97
+      },
+      "r8id.96xlarge": {
+        "annual_cost": 105215.83
+      },
+      "r8id.large": {
+        "annual_cost": 548.03
+      },
+      "r8id.metal-48xl": {
+        "annual_cost": 52607.92
+      },
+      "r8id.metal-96xl": {
+        "annual_cost": 105215.83
+      },
+      "r8id.xlarge": {
+        "annual_cost": 1095.96
+      },
+      "r8idb.12xlarge": {
+        "annual_cost": 17469.19
+      },
+      "r8idb.16xlarge": {
+        "annual_cost": 23292.23
+      },
+      "r8idb.24xlarge": {
+        "annual_cost": 34938.3
+      },
+      "r8idb.2xlarge": {
+        "annual_cost": 2911.56
+      },
+      "r8idb.32xlarge": {
+        "annual_cost": 46584.37
+      },
+      "r8idb.48xlarge": {
+        "annual_cost": 69876.59
+      },
+      "r8idb.4xlarge": {
+        "annual_cost": 5823.03
+      },
+      "r8idb.8xlarge": {
+        "annual_cost": 11646.07
+      },
+      "r8idb.96xlarge": {
+        "annual_cost": 139753.19
+      },
+      "r8idb.large": {
+        "annual_cost": 727.87
+      },
+      "r8idb.xlarge": {
+        "annual_cost": 1455.74
+      },
+      "r8idn.12xlarge": {
+        "annual_cost": 17469.19
+      },
+      "r8idn.16xlarge": {
+        "annual_cost": 23292.23
+      },
+      "r8idn.24xlarge": {
+        "annual_cost": 34938.3
+      },
+      "r8idn.2xlarge": {
+        "annual_cost": 2911.56
+      },
+      "r8idn.32xlarge": {
+        "annual_cost": 46584.37
+      },
+      "r8idn.48xlarge": {
+        "annual_cost": 69876.59
+      },
+      "r8idn.4xlarge": {
+        "annual_cost": 5823.03
+      },
+      "r8idn.8xlarge": {
+        "annual_cost": 11646.07
+      },
+      "r8idn.96xlarge": {
+        "annual_cost": 139753.19
+      },
+      "r8idn.large": {
+        "annual_cost": 727.87
+      },
+      "r8idn.xlarge": {
+        "annual_cost": 1455.74
+      },
+      "r8in.12xlarge": {
+        "annual_cost": 15499.59
+      },
+      "r8in.16xlarge": {
+        "annual_cost": 20666.15
+      },
+      "r8in.24xlarge": {
+        "annual_cost": 30999.19
+      },
+      "r8in.2xlarge": {
+        "annual_cost": 2583.24
+      },
+      "r8in.32xlarge": {
+        "annual_cost": 41332.22
+      },
+      "r8in.48xlarge": {
+        "annual_cost": 61998.37
+      },
+      "r8in.4xlarge": {
+        "annual_cost": 5166.56
+      },
+      "r8in.8xlarge": {
+        "annual_cost": 10333.03
+      },
+      "r8in.96xlarge": {
+        "annual_cost": 123996.75
+      },
+      "r8in.large": {
+        "annual_cost": 645.79
+      },
+      "r8in.xlarge": {
+        "annual_cost": 1291.66
       },
       "t1.micro": {
         "annual_cost": 72.33
@@ -2299,6 +3613,12 @@
       },
       "u7i-12tb.224xlarge": {
         "annual_cost": 308159.0
+      },
+      "u7i-6tb.112xlarge": {
+        "annual_cost": 153818.77
+      },
+      "u7i-8tb.112xlarge": {
+        "annual_cost": 205436.45
       },
       "u7in-16tb.224xlarge": {
         "annual_cost": 442117.0
@@ -2458,6 +3778,48 @@
       },
       "x8g.xlarge": {
         "annual_cost": 1018.0
+      },
+      "x8i.12xlarge": {
+        "annual_cost": 12844.17
+      },
+      "x8i.16xlarge": {
+        "annual_cost": 17125.54
+      },
+      "x8i.24xlarge": {
+        "annual_cost": 25688.35
+      },
+      "x8i.2xlarge": {
+        "annual_cost": 2140.68
+      },
+      "x8i.32xlarge": {
+        "annual_cost": 34251.16
+      },
+      "x8i.48xlarge": {
+        "annual_cost": 51376.7
+      },
+      "x8i.4xlarge": {
+        "annual_cost": 4281.36
+      },
+      "x8i.64xlarge": {
+        "annual_cost": 68502.32
+      },
+      "x8i.8xlarge": {
+        "annual_cost": 8562.81
+      },
+      "x8i.96xlarge": {
+        "annual_cost": 119210.11
+      },
+      "x8i.large": {
+        "annual_cost": 535.15
+      },
+      "x8i.metal-48xl": {
+        "annual_cost": 51376.7
+      },
+      "x8i.metal-96xl": {
+        "annual_cost": 119210.11
+      },
+      "x8i.xlarge": {
+        "annual_cost": 1070.38
       },
       "z1d.12xlarge": {
         "annual_cost": 14041.67

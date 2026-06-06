@@ -80,6 +80,75 @@ def fetch_ec2_pricing(pricing_client: Any) -> Dict[str, Dict[str, Union[float, s
     return instances
 
 
+# A 3yr Savings Plan offering, in seconds (3 * 365 days).
+THREE_YEAR_SECONDS = 94608000
+# Hours in a year, used to annualize the effective hourly Savings Plan rate.
+HOURS_PER_YEAR = 8760
+
+
+def _savings_plan_instance_type(result: Dict[str, Any]) -> Optional[str]:
+    """Pull the instance type out of an offering rate result.
+
+    Prefer an explicit ``instanceType`` property if present, otherwise parse it
+    out of the ``usageType`` (e.g. "USE1-BoxUsage:i7ie.xlarge" -> "i7ie.xlarge").
+    """
+    for prop in result.get("properties", []):
+        if prop.get("name") == "instanceType" and prop.get("value"):
+            return str(prop["value"])
+
+    usage_type = str(result.get("usageType", ""))
+    if ":" in usage_type:
+        return usage_type.split(":", 1)[1]
+    return None
+
+
+def fetch_ec2_savings_plan_pricing(sp_client: Any, region: str) -> Dict[str, float]:
+    """Fetch 3yr All Upfront EC2 Instance Savings Plan rates for a region.
+
+    Returns {instance_type: annual_cost}. The EC2 Instance Savings Plan is
+    family+region locked with the deepest discount, making it the closest analog
+    to the now-deprecated 3yr All Upfront standard Reserved Instance.
+    """
+    instances: Dict[str, float] = {}
+    next_token: Optional[str] = None
+    while True:
+        kwargs: Dict[str, Any] = {
+            "savingsPlanTypes": ["EC2Instance"],
+            "savingsPlanPaymentOptions": ["All Upfront"],
+            "serviceCodes": ["AmazonEC2"],
+            "filters": [
+                {"name": "region", "values": [region]},
+                {"name": "tenancy", "values": ["shared"]},
+                {"name": "productDescription", "values": ["Linux/UNIX"]},
+            ],
+            "maxResults": 100,
+        }
+        if next_token:
+            kwargs["nextToken"] = next_token
+
+        response = sp_client.describe_savings_plans_offering_rates(**kwargs)
+        for result in response.get("searchResults", []):
+            offering = result.get("savingsPlanOffering", {})
+            if offering.get("durationSeconds") != THREE_YEAR_SECONDS:
+                continue
+
+            instance_type = _savings_plan_instance_type(result)
+            if instance_type is None:
+                continue
+            # De-dupe defensively: keep the first 3yr match per instance type.
+            if instance_type in instances:
+                continue
+
+            annual_cost = round(float(result["rate"]) * HOURS_PER_YEAR, 2)
+            instances[instance_type] = annual_cost
+            print(f"{instance_type} (SP): {annual_cost}")
+
+        next_token = response.get("nextToken")
+        if not next_token:
+            break
+    return instances
+
+
 def fetch_rds_pricing(pricing_client: Any) -> Dict[str, Dict[str, Union[float, str]]]:
     paginator = pricing_client.get_paginator("get_products")
 
@@ -128,6 +197,19 @@ def fetch_pricing(region: str) -> None:
     pricing_client = boto3.client("pricing", region_name=region)
     ec2_instances = fetch_ec2_pricing(pricing_client)
     rds_instances = fetch_rds_pricing(pricing_client)
+
+    # AWS no longer sells standard Reserved Instances for newer families
+    # (e.g. i7ie), so their instance types have no RI price above. Fall back to
+    # the 3yr All Upfront EC2 Instance Savings Plan rate for any instance type
+    # the RI path missed.
+    sp_client = boto3.client("savingsplans", region_name=region)
+    sp_instances = fetch_ec2_savings_plan_pricing(sp_client, region)
+    filled = 0
+    for instance_type, annual_cost in sp_instances.items():
+        if instance_type not in ec2_instances:
+            ec2_instances[instance_type] = {"annual_cost": annual_cost}
+            filled += 1
+    print(f"\nFilled {filled} EC2 instance types from Savings Plan rates")
 
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ec2_output_file = os.path.join(
