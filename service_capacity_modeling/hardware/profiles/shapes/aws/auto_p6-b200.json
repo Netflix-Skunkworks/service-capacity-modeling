@@ -4,8 +4,8 @@
       "name": "p6-b200.48xlarge",
       "cpu": 192,
       "cpu_cores": 96,
-      "cpu_ghz": 2.4,
-      "cpu_ipc_scale": 1.0,
+      "cpu_ghz": 3.2,
+      "cpu_ipc_scale": 1.33,
       "ram_gib": 1953.12,
       "net_mbps": 1600000.0,
       "drive": {

@@ -12,12 +12,14 @@ from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import DriveType
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.common import normalize_cores_float
 from service_capacity_modeling.models.org.netflix.kafka import ClusterType
 
 # Property test configuration for Kafka model.
@@ -143,7 +145,8 @@ def test_kafka_high_throughput():
 
     lr = plan.least_regret[0]
     lr_zone_requirements = lr.requirements.zonal[0]
-    # This should be doable with ~136 cpu cores @3.1 = 182 cores,
+    lr_zone_cluster = lr.candidate_clusters.zonal[0]
+    # This should be doable with ~136 cpu cores @3.1 = 182 reference cores,
     # ~1TiB RAM, and 25Gbps networking
     # Note that network reserves 40% headroom for streaming.
     expected_cpu = (120, 200)
@@ -151,12 +154,20 @@ def test_kafka_high_throughput():
     expected_net = (20_000 * 1.4, 28_000 * 1.4)
     expected_disk = (30_000, 75_000)
 
-    assert expected_cpu[0] < lr_zone_requirements.cpu_cores.mid < expected_cpu[1]
+    # Assert on the provisioned compute normalized to the reference shape rather
+    # than the raw zonal cpu_cores requirement. The raw requirement is expressed
+    # in the winning instance's cores and shifts with the candidate set (e.g. as
+    # newly-priced families appear), so normalizing keeps this stable and
+    # instance-independent.
+    provisioned_reference_cores = normalize_cores_float(
+        lr_zone_cluster.count * lr_zone_cluster.instance.cpu,
+        target_shape=default_reference_shape,
+        reference_shape=lr_zone_cluster.instance,
+    )
+    assert expected_cpu[0] < provisioned_reference_cores < expected_cpu[1]
     assert expected_ram[0] < lr_zone_requirements.mem_gib.mid < expected_ram[1]
     assert expected_net[0] < lr_zone_requirements.network_mbps.mid < expected_net[1]
     assert expected_disk[0] < lr_zone_requirements.disk_gib.mid < expected_disk[1]
-
-    lr_zone_cluster = lr.candidate_clusters.zonal[0]
     # 17 r5.2xlarge is this much memory
     expected_memory = 17 * 62
     # subtract out the 8G heaps + system
