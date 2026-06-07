@@ -14,6 +14,7 @@ import botocore
 from pydantic import BaseModel
 
 from service_capacity_modeling.hardware import shapes
+from service_capacity_modeling.tools.instance_families import INSTANCE_TYPES
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import DriveType
 from service_capacity_modeling.interface import FixedInterval
@@ -100,9 +101,9 @@ aws_iops_per_gib: Dict[str, Tuple[float, float]] = {
     "i3en": (36.5, 27.9),
     "i4g": (67.0, 53.6),
     "i4i": (114.5, 63.0),
-    "i7i": (170.0, 93.5),
+    "i7i": (171.8, 94.5),
     "i7ie": (46.5, 37.2),
-    "i8g": (170.0, 93.5),
+    "i8g": (171.8, 94.5),
 }
 
 
@@ -213,12 +214,14 @@ def _drive(
     )
 
 
-def pull_family(  # pylint: disable=too-many-positional-arguments
+def pull_family(  # pylint: disable=too-many-positional-arguments,too-many-locals
     ec2_client: Any,
     family: str,
     cpu_perf: Optional[CPUPerformance] = None,
     io_perf: Optional[IOPerformance] = None,
     lifecycle: Optional[str] = None,
+    cpu_turbo_all_ghz: Optional[float] = None,
+    cpu_freq_from: str = "aws",
     debug: bool = False,
 ) -> Sequence[Instance]:
     # flake8: noqa: C901
@@ -308,11 +311,35 @@ def pull_family(  # pylint: disable=too-many-positional-arguments
         cpu_cores = data["VCpuInfo"]["DefaultCores"]
         cpu_ipc_scale_factor = deduce_cpu_ipc_scale(vcpu_count, cpu_cores, cpu_perf)
 
+        # AWS's SustainedClockSpeedInGhz is inconsistent across families (base for
+        # some, turbo for others), which makes cpu_ghz * cpu_ipc_scale misleading
+        # for families that report a low sustained clock (e.g. i7i). With
+        # --cpu-freq-from nflx, use the curated cpu_turbo_all_ghz instead; with
+        # aws (the default) use AWS's reported clock.
+        aws_ghz = data["ProcessorInfo"]["SustainedClockSpeedInGhz"]
+        cpu_ghz = aws_ghz
+        if cpu_freq_from == "nflx":
+            if cpu_turbo_all_ghz is not None:
+                cpu_ghz = cpu_turbo_all_ghz
+                print(
+                    f"[{data['InstanceType']}] --cpu-freq-from nflx: using "
+                    f"instance_families cpu_turbo_all_ghz {cpu_turbo_all_ghz} "
+                    f"instead of AWS clock {aws_ghz}",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"[{data['InstanceType']}] --cpu-freq-from nflx but no "
+                    f"cpu_turbo_all_ghz in instance_families.py; falling back to "
+                    f"AWS clock {aws_ghz}",
+                    file=sys.stderr,
+                )
+
         shape_kwargs: Dict[str, Any] = {
             "name": data["InstanceType"],
             "cpu": vcpu_count,
             "cpu_cores": cpu_cores,
-            "cpu_ghz": data["ProcessorInfo"]["SustainedClockSpeedInGhz"],
+            "cpu_ghz": cpu_ghz,
             "cpu_ipc_scale": cpu_ipc_scale_factor,
             "ram_gib": convert_mib_to_gib(data["MemoryInfo"]["SizeInMiB"]),
             "net_mbps": aggregate_network_mbps(data["NetworkInfo"]),
@@ -543,9 +570,58 @@ def deduce_cpu_perf(
     return CPUPerformance()
 
 
+def resolve_family_defaults(
+    family: str, args: Any
+) -> Tuple[
+    Optional[Tuple[float, float]], str, Optional[float], Optional[str], Optional[float]
+]:
+    """Resolve generation params for a family, with CLI flags taking precedence.
+
+    Running auto_shape.py directly (not via generate_missing.py) should still use
+    the curated per-family values in instance_families.INSTANCE_TYPES. Precedence
+    is: explicit CLI flag > instance_families entry > built-in default. The
+    cpu_ipc_scale is rounded to 2 decimals to match generate_missing.py.
+
+    Returns
+    (iops_per_gib, io_latency_curve, cpu_ipc_scale, lifecycle, cpu_turbo_all_ghz).
+    The turbo clock has no CLI flag; pull_family decides whether to use it.
+    """
+    cfg = INSTANCE_TYPES.get(family, {})
+
+    iops_per_gib = args.iops_per_gib
+    if iops_per_gib is None and cfg.get("iops_per_gib") is not None:
+        iops_per_gib = parse_iops_per_gib(cfg["iops_per_gib"])
+
+    io_latency_curve = args.io_latency_curve
+    if io_latency_curve is None:
+        io_latency_curve = cfg.get("io_latency_curve") or "ssd"
+
+    cpu_ipc_scale = args.cpu_ipc_scale
+    if cpu_ipc_scale is None and cfg.get("cpu_ipc_scale") is not None:
+        cpu_ipc_scale = round(float(cfg["cpu_ipc_scale"]), 2)
+
+    lifecycle = args.lifecycle
+    if lifecycle is None:
+        lifecycle = cfg.get("lifecycle")
+
+    cpu_turbo_all_ghz = cfg.get("cpu_turbo_all_ghz")
+
+    return iops_per_gib, io_latency_curve, cpu_ipc_scale, lifecycle, cpu_turbo_all_ghz
+
+
 def main(args: Any) -> int:
     for family in args.families:
         is_rds = family.startswith("db.")
+        # Look up curated per-family params (instance_families.INSTANCE_TYPES is
+        # keyed by the bare EC2 family, so strip the "db." prefix for RDS).
+        lookup_family = family[3:] if is_rds else family
+        (
+            iops_per_gib,
+            io_latency_curve,
+            cpu_ipc_scale,
+            lifecycle,
+            cpu_turbo_all_ghz,
+        ) = resolve_family_defaults(lookup_family, args)
         if is_rds:
             rds_family = family[3:]
             if not args.db_engines:
@@ -556,7 +632,7 @@ def main(args: Any) -> int:
                     file=sys.stderr,
                 )
                 return 1
-            if args.iops_per_gib or args.io_latency_curve != "ssd":
+            if args.iops_per_gib or args.io_latency_curve is not None:
                 print(
                     "WARNING: --iops-per-gib and --io-latency-curve are ignored for "
                     "RDS instances (db.* families) as they use managed storage.",
@@ -571,7 +647,7 @@ def main(args: Any) -> int:
                 )
             cpu_perf = deduce_cpu_perf(
                 family=rds_family,
-                ipc_scale_factor=args.cpu_ipc_scale,
+                ipc_scale_factor=cpu_ipc_scale,
             )
             rds_client = boto3.client("rds", region_name=args.region)
             family_shapes = pull_rds_family(
@@ -585,12 +661,12 @@ def main(args: Any) -> int:
         else:
             io_perf = deduce_io_perf(
                 family=family,
-                curve=args.io_latency_curve,
-                iops_per_gib=args.iops_per_gib,
+                curve=io_latency_curve,
+                iops_per_gib=iops_per_gib,
             )
             cpu_perf = deduce_cpu_perf(
                 family=family,
-                ipc_scale_factor=args.cpu_ipc_scale,
+                ipc_scale_factor=cpu_ipc_scale,
             )
             ec2_client = boto3.client("ec2", region_name=args.region)
             family_shapes = pull_family(
@@ -598,7 +674,9 @@ def main(args: Any) -> int:
                 family=family,
                 cpu_perf=cpu_perf,
                 io_perf=io_perf,
-                lifecycle=args.lifecycle,
+                lifecycle=lifecycle,
+                cpu_turbo_all_ghz=cpu_turbo_all_ghz,
+                cpu_freq_from=args.cpu_freq_from,
                 debug=args.debug,
             )
             output_filename = f"auto_{family}.json"
@@ -684,7 +762,13 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
-        "--io-latency-curve", default="ssd", choices=latency_curve_ms.keys()
+        "--io-latency-curve",
+        default=None,
+        choices=latency_curve_ms.keys(),
+        help=(
+            "IO latency curve to use. Defaults to the instance_families.py entry "
+            "for the family, else 'ssd'."
+        ),
     )
     parser.add_argument(
         "--cpu-ipc-scale",
@@ -723,6 +807,17 @@ if __name__ == "__main__":
             "Output file path to copy the result to. If not given only stdout will"
             "occur. If running from the repo use: "
             "service_capacity_modeling/hardware/profiles/shapes/aws/"
+        ),
+    )
+    parser.add_argument(
+        "--cpu-freq-from",
+        choices=["aws", "nflx"],
+        default="aws",
+        help=(
+            "Source for cpu_ghz. 'aws' (default) uses AWS's reported "
+            "SustainedClockSpeedInGhz. 'nflx' uses the curated cpu_turbo_all_ghz "
+            "from instance_families.py (falling back to the AWS value when a "
+            "family has none). Substitutions are logged to stderr."
         ),
     )
     parser.add_argument("--debug", action="store_true", help="Show verbose output")
