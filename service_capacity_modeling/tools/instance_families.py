@@ -260,7 +260,11 @@ INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
     "p6-b200": {
         "iops_per_gib": "155.4/77.7",
         "io_latency_curve": "6th-gen-ssd",
-        "cpu_ipc_scale": None,
+        # p6-b200 (Blackwell) hosts run 5th Gen Intel Xeon (Emerald Rapids); AWS
+        # reports a low sustained clock so use the curated turbo + IPC instead.
+        "cpu_ipc_scale": EMERALD_RAPIDS_IPC,
+        "cpu_turbo_single_ghz": 4.0,
+        "cpu_turbo_all_ghz": 3.2,
         "lifecycle": "alpha",
     },
     "r4": {
