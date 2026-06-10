@@ -83,7 +83,7 @@ INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
         "io_latency_curve": None,
         "cpu_ipc_scale": TURIN_IPC,
         "cpu_turbo_single_ghz": 4.5,
-        "cpu_turbo_all_ghz": 3.8,
+        "cpu_turbo_all_ghz": 4.0,
     },
     "c8i": {
         "iops_per_gib": None,
@@ -224,7 +224,7 @@ INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
         "io_latency_curve": None,
         "cpu_ipc_scale": TURIN_IPC,
         "cpu_turbo_single_ghz": 4.5,
-        "cpu_turbo_all_ghz": 3.8,
+        "cpu_turbo_all_ghz": 4.0,
     },
     "m8i": {
         "iops_per_gib": None,
@@ -347,7 +347,7 @@ INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
         "io_latency_curve": None,
         "cpu_ipc_scale": TURIN_IPC,
         "cpu_turbo_single_ghz": 4.5,
-        "cpu_turbo_all_ghz": 3.8,
+        "cpu_turbo_all_ghz": 4.0,
     },
     "r8i": {
         "iops_per_gib": None,
