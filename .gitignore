@@ -41,9 +41,6 @@ debian/*.debhelper
 # Notebooks
 notebooks/.ipynb_checkpoints/
 
-# Worktrees
-.worktrees/
-
 # Profiling
 prof
 

@@ -7,6 +7,8 @@ Model integration tests live in tests/netflix/test_<model>_explainability.py.
 import pytest
 
 from service_capacity_modeling.explainability import (
+    count_sample_excuses,
+    deduplicate_excuses,
     FamilyEdge,
     FamilyGraph,
     FamilyTrait,
@@ -15,8 +17,10 @@ from service_capacity_modeling.explainability import (
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import (
     Bottleneck,
+    ExcuseSummary,
     Excuse,
     ExcuseTag,
+    SampleRef,
 )
 from service_capacity_modeling.models.utils import compute_excuse_tags
 
@@ -58,6 +62,65 @@ class TestExcuseModel:
         data = excuse.model_dump()
         assert "bottleneck" not in data
         assert data["instance"] == "r6a.xlarge"
+
+    def test_deduplicate_preserves_distinct_bottlenecks_and_tags(self):
+        excuses = [
+            Excuse(
+                instance="r6a.xlarge",
+                drive="gp3",
+                reason="too small",
+                bottleneck=Bottleneck.cpu,
+                tags=[ExcuseTag.same_family],
+            ),
+            Excuse(
+                instance="r6a.xlarge",
+                drive="gp3",
+                reason="too small",
+                bottleneck=Bottleneck.memory,
+                tags=[ExcuseTag.same_family],
+            ),
+            Excuse(
+                instance="r6a.xlarge",
+                drive="gp3",
+                reason="too small",
+                bottleneck=Bottleneck.cpu,
+                tags=[ExcuseTag.size_up],
+            ),
+        ]
+        deduped = deduplicate_excuses(excuses)
+        assert len(deduped) == 3
+
+    def test_count_excuses_merges_same_identity_but_drops_conflicting_context(self):
+        excuses = [
+            Excuse(
+                instance="r6a.xlarge",
+                drive="gp3",
+                reason="too small",
+                bottleneck=Bottleneck.cpu,
+                tags=[ExcuseTag.same_family],
+                context={"needed_cores": 12},
+            ),
+            Excuse(
+                instance="r6a.xlarge",
+                drive="gp3",
+                reason="too small",
+                bottleneck=Bottleneck.cpu,
+                tags=[ExcuseTag.same_family],
+                context={"needed_cores": 16},
+            ),
+        ]
+        counted = count_sample_excuses(
+            [
+                (SampleRef(sample_id="s-1", sample_label="first"), excuses[0]),
+                (SampleRef(sample_id="s-2", sample_label="second"), excuses[1]),
+            ]
+        )
+        assert len(counted) == 1
+        assert isinstance(counted[0], ExcuseSummary)
+        assert counted[0].occurrence_count == 2
+        assert counted[0].sample_count == 2
+        assert counted[0].context == {}
+        assert len(counted[0].example_samples) == 2
 
 
 class TestFamilyTrait:

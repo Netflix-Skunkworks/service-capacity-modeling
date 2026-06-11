@@ -8,9 +8,10 @@ from service_capacity_modeling.models.org.netflix.time_series_config import (
 # Property test configuration for TimeSeries model.
 # See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
 PROPERTY_TEST_CONFIG = {
-    # "org.netflix.time-series": {
-    #     "extra_model_arguments": {},
-    # },
+    "org.netflix.time-series": {
+        # Cassandra child plans can make tier 0 smaller/cheaper than tier 2.
+        "skip_tests": ["test_all_models_tier_capacity_relationship"],
+    },
 }
 
 

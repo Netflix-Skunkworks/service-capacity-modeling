@@ -2,9 +2,10 @@
 
 **Experimental** — this API may change.
 
-This module contains the family graph (FamilyTrait, FamilyEdge, FamilyGraph)
-and ExplainedPlans — types used to explain *why* the planner rejected
-certain instance/drive combinations and what alternatives exist.
+This module contains the family graph (FamilyTrait, FamilyEdge, FamilyGraph),
+ExplainedPlans, and ExplainedUncertainPlans — types used to explain *why*
+the planner rejected certain instance/drive combinations and what
+alternatives exist.
 
 Core contract types (Bottleneck, Excuse) live in interface.py because they
 are part of the CapacityModel.capacity_plan() return type.
@@ -34,6 +35,17 @@ Consumer usage::
     # Serialize both for downstream consumers
     explained.model_dump_json()
     comparison.model_dump_json()
+
+    # Uncertain (stochastic) explained mode
+    explained_uncertain = planner.plan_explained(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=desires,
+        extra_model_arguments=extra,
+    )
+    explained_uncertain.plan          # UncertainCapacityPlan
+    explained_uncertain.excuses       # deduped across all simulations
+    explained_uncertain.family_graph  # hardware trade-off graph
 """
 
 from __future__ import annotations
@@ -48,14 +60,20 @@ from typing import Sequence
 from typing import Set
 from typing import Tuple
 
+from pydantic import Field
+
 from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import ExcuseSummary
 from service_capacity_modeling.interface import DriveType
 from service_capacity_modeling.interface import ExcludeUnsetModel
 from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import ExcuseTag
 from service_capacity_modeling.interface import Hardware
 from service_capacity_modeling.interface import Instance
+from service_capacity_modeling.interface import RegretPlanSummary
+from service_capacity_modeling.interface import UncertainCapacityPlan
+from service_capacity_modeling.interface import SampleRef
 
 
 class FamilyTrait(ExcludeUnsetModel):
@@ -295,16 +313,76 @@ STATELESS_SERVICE_FAMILIES: FrozenSet[str] = frozenset(
 )
 
 
+_ExcuseKey = Tuple[str, str, str, Optional[Bottleneck], Tuple[str, ...]]
+
+
+def _excuse_key(excuse: Excuse) -> _ExcuseKey:
+    return (
+        excuse.instance,
+        excuse.drive,
+        excuse.reason,
+        excuse.bottleneck,
+        tuple(sorted(tag.value for tag in excuse.tags)),
+    )
+
+
+def _clear_conflicting_context(current: Excuse, excuse: Excuse) -> None:
+    if current.context and excuse.context and current.context != excuse.context:
+        current.context = {}
+
+
 def deduplicate_excuses(excuses: Sequence[Excuse]) -> Sequence[Excuse]:
-    """Deduplicate excuses by (instance, drive, reason) across simulations."""
-    seen: Set[Tuple[str, str, str]] = set()
-    result: List[Excuse] = []
+    """Deduplicate excuses by (instance, drive, reason, bottleneck, tags).
+
+    The dedup key includes bottleneck and tags so excuses with the same
+    instance/drive/reason but different bottleneck or tag sets are preserved
+    as separate entries. When duplicate excuses have conflicting context
+    dicts, the context is cleared.
+    """
+    seen: Set[_ExcuseKey] = set()
+    result_by_key: Dict[_ExcuseKey, Excuse] = {}
+    ordered_keys: List[_ExcuseKey] = []
     for exc in excuses:
-        key = (exc.instance, exc.drive, exc.reason)
+        key = _excuse_key(exc)
         if key not in seen:
             seen.add(key)
-            result.append(exc)
-    return result
+            result_by_key[key] = exc.model_copy(deep=True)
+            ordered_keys.append(key)
+            continue
+        _clear_conflicting_context(result_by_key[key], exc)
+    return [result_by_key[key] for key in ordered_keys]
+
+
+def count_sample_excuses(
+    sample_excuses: Sequence[Tuple[SampleRef, Excuse]],
+) -> Sequence[ExcuseSummary]:
+    """Count excuses across samples and retain bounded example sample refs."""
+    keys_in_order: List[_ExcuseKey] = []
+    counted: Dict[_ExcuseKey, ExcuseSummary] = {}
+    samples_seen: Dict[_ExcuseKey, Set[str]] = {}
+    max_example_samples = 3
+
+    for sample, exc in sample_excuses:
+        key = _excuse_key(exc)
+        if key not in counted:
+            counted[key] = ExcuseSummary(
+                **exc.model_dump(),
+                occurrence_count=0,
+                sample_count=0,
+                example_samples=[],
+            )
+            samples_seen[key] = set()
+            keys_in_order.append(key)
+        current = counted[key]
+        current.occurrence_count += 1
+        if sample.sample_id not in samples_seen[key]:
+            samples_seen[key].add(sample.sample_id)
+            current.sample_count += 1
+            if len(current.example_samples) < max_example_samples:
+                current.example_samples = [*current.example_samples, sample]
+        _clear_conflicting_context(current, exc)
+
+    return [counted[key] for key in keys_in_order]
 
 
 class ExplainedPlans(ExcludeUnsetModel):
@@ -317,3 +395,18 @@ class ExplainedPlans(ExcludeUnsetModel):
     plans: Sequence[CapacityPlan]
     excuses: Sequence[Excuse] = []
     family_graph: FamilyGraph = FamilyGraph()
+
+
+class ExplainedUncertainPlans(ExcludeUnsetModel):
+    """Uncertain plans + excuses + family context.
+
+    Mirrors ExplainedPlans but wraps UncertainCapacityPlan instead
+    of deterministic plans. Returned by plan_explained().
+    """
+
+    plan: UncertainCapacityPlan
+    excuses: Sequence[Excuse] = Field(default_factory=list)
+    excuse_summary: Sequence[ExcuseSummary] = Field(default_factory=list)
+    family_graph: FamilyGraph = FamilyGraph()
+    least_regret_summaries: Sequence[RegretPlanSummary] = Field(default_factory=list)
+    considered_alternatives: Sequence[RegretPlanSummary] = Field(default_factory=list)
