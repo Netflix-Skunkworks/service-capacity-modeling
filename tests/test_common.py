@@ -44,6 +44,19 @@ def test_upsert_params_marks_cluster_params_set_for_exclude_unset_serialization(
     }
 
 
+def test_upsert_params_with_empty_params_leaves_default_cluster_params_unset():
+    cluster = RegionClusterCapacity(
+        cluster_type="test",
+        count=2,
+        instance=shapes.region("us-east-1").instances["m5.2xlarge"],
+    )
+
+    upsert_params(cluster, {})
+
+    assert not cluster.cluster_params
+    assert "cluster_params" not in cluster.model_dump(exclude_unset=True)
+
+
 def test_merge_plan():
     left_requirement = CapacityRequirement(
         requirement_type="test",
