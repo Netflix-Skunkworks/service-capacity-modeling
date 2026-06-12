@@ -55,7 +55,7 @@ EFFECTIVE_DISK_PER_NODE_GIB = "effective_disk_per_node_gib"
 
 def upsert_params(cluster: ClusterCapacity, params: Dict[str, Any]) -> None:
     """Update or set cluster parameters on any cluster type."""
-    cluster.cluster_params.update(params)
+    cluster.cluster_params = {**cluster.cluster_params, **params}
 
 
 def cluster_infra_cost(
