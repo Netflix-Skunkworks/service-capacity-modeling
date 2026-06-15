@@ -4,7 +4,10 @@ from typing import Dict
 from typing import Optional
 from typing import Tuple
 
+from pydantic import Field
+
 from .stateless_java import nflx_java_app_capacity_model
+from .stateless_java import NflxJavaAppArguments
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
@@ -19,6 +22,141 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models import CapacityModel
+
+
+# ===========================================================================
+# GraphKV read/write amplification model
+#
+# A single logical GraphKV operation fans out into many backend KV operations.
+# We split the inputs to that fan-out into two buckets:
+#
+#   1. Namespace inputs  (NflxGraphKVArguments below) -- supplied per namespace
+#      via extra_model_arguments. They describe the *shape of the graph*.
+#   2. Model assumptions (the MODULE CONSTANTS below) -- fleet-wide engine /
+#      workload constants we hold fixed and tune in one place.
+#
+# Caching (write-back EVCache) and time-travel (temporal index) are
+# intentionally excluded from this model.
+# ===========================================================================
+
+
+class NflxGraphKVArguments(NflxJavaAppArguments):
+    """Per-namespace inputs describing the graph shape.
+
+    These are the only values a namespace owner supplies; everything else in
+    the amplification calculation is a fixed model assumption (see the module
+    constants below).
+    """
+
+    edge_mapping_count: int = Field(
+        default=5,
+        alias="graphkv.edge-mapping-count",
+        description=(
+            "Number of registered edge-mappings (distinct "
+            "(from_type, edge_type, to_type) triples) in the namespace. Drives "
+            "READ amplification: a traversal issues one KV scan per edge-mapping "
+            "per hop. Does not change per-write cost."
+        ),
+    )
+    edge_mapping_property_count: int = Field(
+        default=1,
+        alias="graphkv.edge-mapping-property-count",
+        description=(
+            "Average number of properties stored on an edge. Drives WRITE "
+            "amplification: each property is a separate KV item, so an edge "
+            "write fans out to (2 link items + this many property items)."
+        ),
+    )
+    node_mapping_count: int = Field(
+        default=5,
+        alias="graphkv.node-mapping-count",
+        description=(
+            "Number of registered node-mappings (distinct node types) in the "
+            "namespace. Used only to estimate the node-vs-edge WRITE mix; it "
+            "does not change per-operation amplification on its own."
+        ),
+    )
+    node_mapping_property_count: int = Field(
+        default=2,
+        alias="graphkv.node-mapping-property-count",
+        description=(
+            "Average number of properties stored on a node. Drives WRITE "
+            "amplification: each property is a separate KV item, so a node "
+            "write fans out to (1 metadata item + this many property items)."
+        ),
+    )
+
+
+# --- Model assumptions (NOT namespace config) -----------------------------
+# Every edge is persisted twice: the forward link plus its inverse/reverse
+# link (bidirectional symmetry / inverse index). Edge properties are written
+# once, on the aligned direction only.
+EDGE_DIRECTION_COPIES = 2
+# A node write always stores one metadata item in addition to its properties.
+NODE_BASE_ITEMS = 1
+# Average out-degree a single edge-mapping contributes at a node, i.e. how many
+# neighbors of one edge-type a node has (formerly "average_node_fanout").
+AVG_FANOUT_PER_EDGE_MAPPING = 10
+# Directions scanned per hop: 1 for unidirectional, 2 if a namespace must scan
+# both OUT and IN. Held at 1 as the fleet default.
+DIRECTION_SCAN_FACTOR = 1
+# Property reads charged per visited neighbor. Properties are co-located under
+# the entity id, so one scan returns all of them (filter OR hydrate => 1).
+PROPERTY_READS_PER_NEIGHBOR = 1
+# Representative traversal depth in hops. Kept at 1 so the default estimate
+# stays bounded; the geometric fan-out below scales correctly if this is
+# raised to model multi-hop traversals.
+TRAVERSAL_DEPTH = 1
+
+
+def _write_amplification(args: NflxGraphKVArguments) -> float:
+    """Backend KV item-writes per logical write.
+
+      edge write -> EDGE_DIRECTION_COPIES link items + 1 item per edge property
+      node write -> NODE_BASE_ITEMS metadata item + 1 item per node property
+
+    Blended by the node-vs-edge write mix. We don't know the real mix, so we
+    proxy it with the registered mapping counts (more edge-mappings than
+    node-mappings => more edge-heavy writes).
+    """
+    edge_write_amp = EDGE_DIRECTION_COPIES + args.edge_mapping_property_count
+    node_write_amp = NODE_BASE_ITEMS + args.node_mapping_property_count
+
+    total_mappings = args.edge_mapping_count + args.node_mapping_count
+    edge_write_fraction = (
+        args.edge_mapping_count / total_mappings if total_mappings > 0 else 0.5
+    )
+    return (
+        edge_write_fraction * edge_write_amp
+        + (1 - edge_write_fraction) * node_write_amp
+    )
+
+
+def _read_amplification(args: NflxGraphKVArguments) -> float:
+    """Backend KV reads per logical traversal.
+
+    Per hop, per frontier node:
+      enumeration = edge_mappings_traversed * DIRECTION_SCAN_FACTOR
+                    (one scan per edge-mapping; each returns ~fanout neighbors --
+                    note this is ADDITIVE in edge-mappings, not multiplicative)
+      hydration   = neighbors * PROPERTY_READS_PER_NEIGHBOR
+
+    Summed geometrically over TRAVERSAL_DEPTH hops, since the frontier grows by
+    the per-node neighbor count each hop.
+    """
+    edge_mappings_traversed = args.edge_mapping_count
+    neighbors_per_hop = AVG_FANOUT_PER_EDGE_MAPPING * edge_mappings_traversed
+    enumeration_reads = edge_mappings_traversed * DIRECTION_SCAN_FACTOR
+    hydration_reads = neighbors_per_hop * PROPERTY_READS_PER_NEIGHBOR
+    read_amp_per_hop = enumeration_reads + hydration_reads
+
+    branch = neighbors_per_hop
+    if branch <= 1 or TRAVERSAL_DEPTH <= 1:
+        return read_amp_per_hop * TRAVERSAL_DEPTH
+    # Frontier at hop h is branch**h, so total reads =
+    # read_amp_per_hop * sum_{h=0}^{D-1} branch**h.
+    hop_multiplier = (float(branch) ** TRAVERSAL_DEPTH - 1) / (branch - 1)
+    return read_amp_per_hop * hop_multiplier
 
 
 class NflxGraphKVCapacityModel(CapacityModel):
@@ -50,7 +188,7 @@ class NflxGraphKVCapacityModel(CapacityModel):
 
     @staticmethod
     def extra_model_arguments_schema() -> Dict[str, Any]:
-        return nflx_java_app_capacity_model.extra_model_arguments_schema()
+        return NflxGraphKVArguments.model_json_schema()
 
     @staticmethod
     def compose_with(
@@ -61,19 +199,18 @@ class NflxGraphKVCapacityModel(CapacityModel):
         ) -> CapacityDesires:
             relaxed = user_desires.model_copy(deep=True)
 
-            # TODO: introduce a custom config file for graphkv
-            # forward edge, reverse edge, properties
-            avg_write_amplification = 3
-            average_node_fanout = 10
-            average_edge_mappings = 5
+            # Per-namespace graph shape drives how each logical read/write fans
+            # out into backend KV operations. See _read_amplification /
+            # _write_amplification and the model constants above.
+            args = NflxGraphKVArguments.model_validate(extra_model_arguments)
             relaxed.query_pattern.estimated_read_per_second = (
                 user_desires.query_pattern.estimated_read_per_second.scale(
-                    average_node_fanout * average_edge_mappings
+                    _read_amplification(args)
                 )
             )
             relaxed.query_pattern.estimated_write_per_second = (
                 user_desires.query_pattern.estimated_write_per_second.scale(
-                    avg_write_amplification
+                    _write_amplification(args)
                 )
             )
 
@@ -93,9 +230,13 @@ class NflxGraphKVCapacityModel(CapacityModel):
                 item_count = user_desires.data_shape.estimated_state_size_gib.scale(
                     1 / item_size_gib
                 )
-            # assume 512 B to track the id and metadata write_ts of each item
+            # item_count is the number of *logical* nodes/edges. Each one fans
+            # out into _write_amplification() backend KV items (2 links + one
+            # item per edge property; 1 metadata item + one per node property),
+            # and every item written is an item stored. Size each KV item at the
+            # ~512 B needed to track its id and metadata write_ts.
             relaxed.data_shape.estimated_state_size_gib = item_count.scale(
-                512 / 1024**3
+                _write_amplification(args) * 512 / 1024**3
             )
             return relaxed
 
