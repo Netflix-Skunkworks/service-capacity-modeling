@@ -678,3 +678,12 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
         assert replica_count >= 2
         assert partitions_per_node >= 1
         assert result.count >= 2
+
+        serialized = result.model_dump(exclude_unset=True)
+        assert (
+            serialized["cluster_params"]["read-only-kv.replica_count"] == replica_count
+        )
+        assert (
+            serialized["cluster_params"]["read-only-kv.partitions_per_node"]
+            == partitions_per_node
+        )

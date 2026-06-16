@@ -24,6 +24,37 @@ from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import sqrt_staffed_cores
+from service_capacity_modeling.models.common import upsert_params
+
+
+def test_upsert_params_marks_cluster_params_set_for_exclude_unset_serialization():
+    cluster = RegionClusterCapacity(
+        cluster_type="test",
+        count=2,
+        instance=shapes.region("us-east-1").instances["m5.2xlarge"],
+    )
+
+    upsert_params(cluster, {"existing": "value"})
+    upsert_params(cluster, {"new": 1})
+
+    assert cluster.cluster_params == {"existing": "value", "new": 1}
+    assert cluster.model_dump(exclude_unset=True)["cluster_params"] == {
+        "existing": "value",
+        "new": 1,
+    }
+
+
+def test_upsert_params_with_empty_params_leaves_default_cluster_params_unset():
+    cluster = RegionClusterCapacity(
+        cluster_type="test",
+        count=2,
+        instance=shapes.region("us-east-1").instances["m5.2xlarge"],
+    )
+
+    upsert_params(cluster, {})
+
+    assert not cluster.cluster_params
+    assert "cluster_params" not in cluster.model_dump(exclude_unset=True)
 
 
 def test_merge_plan():
