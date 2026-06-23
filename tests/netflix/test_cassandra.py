@@ -41,9 +41,13 @@ EXTRA_MODEL_ARGS = {"require_local_disks": False}
 # Property test configuration for Cassandra model.
 # See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
 PROPERTY_TEST_CONFIG = {
-    # "org.netflix.cassandra": {
-    #     "extra_model_arguments": {},
-    # },
+    "org.netflix.cassandra": {
+        # Cassandra critical tiers share the same default cluster-size policy.
+        # Non-critical tiers can pick a different local-disk shape with more raw
+        # capacity for the same workload, so the universal tier property should
+        # compare the critical tier boundary directly.
+        "tier_range": (0, 1),
+    },
 }
 
 small_but_high_qps = CapacityDesires(
@@ -395,8 +399,8 @@ class TestCassandraThroughput:
         )
         assert high_writes_result.attached_drives[0].size_gib >= 400
         total_storage = get_total_storage_gib(high_writes_result)
-        # Adaptive buffer (~2.3x for 100 TiB) provisions less than fixed 4x
-        assert 60_000 <= total_storage < 300_000
+        # EBS applies a hotter disk buffer on top of the adaptive storage buffer.
+        assert 30_000 <= total_storage < 100_000
 
         cluster_cost = cap_plan.candidate_clusters.annual_costs[
             "cassandra.zonal-clusters"
@@ -587,6 +591,7 @@ class TestCassandraCurrentCapacity:
                 **EXTRA_MODEL_ARGS,
                 "required_cluster_size": 8,
             },
+            instance_families=["r6id"],
         )
         assert cap_plan, "Expected at least one plan for preserve memory"
 

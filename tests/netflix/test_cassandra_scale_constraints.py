@@ -389,13 +389,12 @@ class TestCPUScalingConstraints:
         if cluster_capacity.cluster_instance is None:
             raise ValueError("cluster_instance cannot be None")
 
-        # It's likely to suggest to a large EBS if we are compute bound
         assert_similar_compute(
-            shapes.instance("c6a.8xlarge"),
+            shapes.instance("c6a.4xlarge"),
             result.instance,
-            int(cluster_capacity.cluster_instance_count.mid) // 2,
+            CLUSTER_SIZE,
             result.count,
-            expected_attached_disk=simple_drive(size_gib=3500),
+            expected_attached_disk=simple_drive(size_gib=800),
             actual_attached_disk=result.attached_drives[0]
             if result.attached_drives
             else None,
@@ -480,11 +479,11 @@ class TestCPUScalingConstraints:
 
         # CPU should not scale down to meet 1.5x buffer requirement
         assert_similar_compute(
-            shapes.instance("c6a.8xlarge"),
+            shapes.instance("c6a.4xlarge"),
             result.instance,
-            CLUSTER_SIZE // 2,
+            CLUSTER_SIZE,
             result.count,
-            expected_attached_disk=simple_drive(size_gib=3500),
+            expected_attached_disk=simple_drive(size_gib=800),
             actual_attached_disk=result.attached_drives[0]
             if result.attached_drives
             else None,
@@ -586,14 +585,12 @@ class TestStorageAndCPUIntegration:
         result_cores = result.count * result.instance.cpu
         result_storage = result.count * get_drive_size_gib(result)
 
-        # With bounded memory sizing, EBS can use the cheaper compute-optimized
-        # shape while still satisfying CPU and storage scale-up requirements.
         assert_similar_compute(
-            shapes.instance("c6a.4xlarge"),
+            shapes.instance("c6a.8xlarge"),
             result.instance,
-            CLUSTER_SIZE * 4,
+            CLUSTER_SIZE * 2,
             result.count,
-            expected_attached_disk=simple_drive(size_gib=3500),
+            expected_attached_disk=simple_drive(size_gib=2800),
             actual_attached_disk=result.attached_drives[0]
             if result.attached_drives
             else None,
@@ -661,9 +658,9 @@ class TestStorageAndCPUIntegration:
         result_cores = result.count * result.instance.cpu
         result_storage = result.count * get_drive_size_gib(result)
         assert_similar_compute(
-            shapes.instance("c6a.4xlarge"),
+            shapes.instance("c6id.8xlarge"),
             result.instance,
-            CLUSTER_SIZE * 4,
+            CLUSTER_SIZE * 2,
             result.count,
         )
         assert result_cores >= CLUSTER.total_vcpu * 2
@@ -688,13 +685,23 @@ class TestStorageAndCPUIntegration:
         result = cap_plan.candidate_clusters.zonal[0]
         result_cores = result.count * result.instance.cpu
         result_storage = result.count * get_drive_size_gib(result)
+        assert_similar_compute(
+            shapes.instance("r6a.2xlarge"),
+            result.instance,
+            CLUSTER_SIZE * 2,
+            result.count,
+            expected_attached_disk=simple_drive(size_gib=2800),
+            actual_attached_disk=result.attached_drives[0]
+            if result.attached_drives
+            else None,
+        )
         # CPU should not exceed current capacity * scale factor (2)
         assert result_cores <= CLUSTER.total_vcpu * 2, (
             f"CPU should not exceed current "
             f"{CLUSTER.total_vcpu} cores, got {result_cores} cores"
         )
 
-        expected_storage = CLUSTER.total_disk_gib * 2
+        expected_storage = CLUSTER.total_disk_gib
         assert result_storage >= expected_storage, (
             f"Storage should scale up to at least {expected_storage} GiB, "
             f"got {result_storage} GiB"

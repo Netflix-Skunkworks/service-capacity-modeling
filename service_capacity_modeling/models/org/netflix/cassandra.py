@@ -53,6 +53,7 @@ from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import DerivedBuffers
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
+from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
@@ -76,9 +77,24 @@ from service_capacity_modeling.stats import dist_for_interval
 logger = logging.getLogger(__name__)
 
 BACKGROUND_BUFFER = "background"
+EBS_HOTTER = "EBS_HOTTER"
 CRITICAL_TIERS: Set[int] = {0, 1}
 # cluster size aka nodes per ASG
 CRITICAL_TIER_MIN_CLUSTER_SIZE = 2
+EBS_HOTTER_BUFFER_RATIO = 0.5
+
+
+def _with_ebs_hotter_buffer(desires: CapacityDesires) -> CapacityDesires:
+    ebs_desires = desires.model_copy(deep=True)
+    ebs_hotter_buffer = Buffer(
+        ratio=EBS_HOTTER_BUFFER_RATIO,
+        components=[BufferComponent.disk],
+    )
+    ebs_desires.buffers.desired = {
+        **ebs_desires.buffers.desired,
+        EBS_HOTTER: ebs_hotter_buffer,
+    }
+    return ebs_desires
 
 
 @enum_docstrings
@@ -595,7 +611,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     required_cluster_size: Optional[int] = None,
     max_rps_to_disk: int = 500,
     max_local_data_per_node_gib: int = 1280,
-    max_attached_data_per_node_gib: int = 2048,
+    max_attached_data_per_node_gib: int = 1024,
     max_regional_size: int = 192,
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
@@ -697,9 +713,11 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         target_percentile=0.95,
     ).mid
 
+    is_ebs = instance.drive is None
+    capacity_desires = _with_ebs_hotter_buffer(desires) if is_ebs else desires
     requirement_estimate = _estimate_cassandra_requirement(
         instance=instance,
-        desires=desires,
+        desires=capacity_desires,
         disk_slo_working_set=disk_slo_working_set,
         reads_per_second=rps,
         max_rps_to_disk=max_rps_to_disk,
@@ -710,17 +728,15 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     )
     requirement = requirement_estimate.requirement
 
-    # Adjust the min count to adjust to prevent too much data on a single
-    needed_disk_gib = int(requirement.disk_gib.mid)
     disk_buffer_ratio = buffer_for_components(
-        buffers=desires.buffers, components=[BufferComponent.disk]
+        buffers=capacity_desires.buffers, components=[BufferComponent.disk]
     ).ratio
+    needed_disk_gib = math.ceil(requirement.disk_gib.mid)
 
     # For existing EBS clusters, raise disk caps to at least the observed
     # values so _get_min_count and compute_stateful_zone don't reject the
     # current topology or inflate node count.
     current_capacity = _get_current_capacity(desires)
-    is_ebs = instance.drive is None
     current_disk_utilization = (
         current_capacity.disk_utilization_gib if current_capacity is not None else None
     )
@@ -731,13 +747,20 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         and current_disk_utilization is not None
         and current_disk_utilization.mid > 0
     ):
+        assert current_capacity is not None
         observed_disk_per_node = int(current_disk_utilization.mid)
         max_attached_data_per_node_gib = max(
             max_attached_data_per_node_gib, observed_disk_per_node
         )
-        ebs_disk_floor = int(observed_disk_per_node * disk_buffer_ratio)
+        current_drive_size_gib = get_disk_size_gib(
+            current_capacity.cluster_drive, instance
+        )
+        ebs_disk_floor = max(
+            int(observed_disk_per_node * disk_buffer_ratio),
+            int(current_drive_size_gib),
+        )
 
-    disk_per_node_gib = get_effective_disk_per_node_gib(
+    effective_disk_per_node_gib = get_effective_disk_per_node_gib(
         instance,
         drive,
         disk_buffer_ratio,
@@ -755,7 +778,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         tier=desires.service_tier,
         required_cluster_size=required_cluster_size,
         needed_disk_gib=needed_disk_gib,
-        disk_per_node_gib=disk_per_node_gib,
+        disk_per_node_gib=effective_disk_per_node_gib,
         cluster_size_lambda=cluster_size_lambda,
     )
 
@@ -796,6 +819,9 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         required_write_buffer_gib=requirement_estimate.write_buffer_gib,
         max_node_disk_gib=max_node_disk,
     )
+    if ebs_disk_floor and cluster.attached_drives:
+        for attached_drive in cluster.attached_drives:
+            attached_drive.size_gib = max(attached_drive.size_gib, ebs_disk_floor)
 
     # Communicate to the actual provision that if we want reduced RF
     params = {
@@ -808,7 +834,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         "cassandra.compaction.min_threshold": (
             requirement_estimate.compaction_min_threshold
         ),
-        EFFECTIVE_DISK_PER_NODE_GIB: disk_per_node_gib,
+        EFFECTIVE_DISK_PER_NODE_GIB: effective_disk_per_node_gib,
         "cassandra.storage_buffer_ratio": round(disk_buffer_ratio, 2),
         "cassandra.compute_buffer_ratio": round(
             getattr(desires.buffers.desired.get("compute"), "ratio", 1.5),
@@ -886,7 +912,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 "zonal_count": cluster.count,
                 "max_zonal": max_zonal,
                 "needed_disk_gib": needed_disk_gib,
-                "disk_per_node_gib": disk_per_node_gib,
+                "disk_per_node_gib": effective_disk_per_node_gib,
             },
             bottleneck=Bottleneck.disk_capacity,
         )
@@ -1075,7 +1101,7 @@ class NflxCassandraArguments(BaseModel):
         description="Maximum data per node for local disk instances (GiB)",
     )
     max_attached_data_per_node_gib: int = Field(
-        default=2048,
+        default=1024,
         description="Maximum data per node for attached disk instances (GiB)",
     )
     max_write_buffer_percent: float = Field(
