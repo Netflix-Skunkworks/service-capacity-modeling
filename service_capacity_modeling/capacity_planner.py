@@ -51,6 +51,7 @@ from service_capacity_modeling.interface import UncertainCapacityPlan
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
+from service_capacity_modeling.models.common import AttachedDriveSizingError
 from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.org import netflix
@@ -784,6 +785,31 @@ class CapacityPlanner:
             family_graph=graph,
         )
 
+    @staticmethod
+    def _capacity_plan_or_attached_drive_excuse(
+        *,
+        model: CapacityModel,
+        instance: Instance,
+        drive: Drive,
+        context: RegionContext,
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
+    ) -> CapacityPlan | Excuse | None:
+        try:
+            return model.capacity_plan(
+                instance=instance,
+                drive=drive,
+                context=context,
+                desires=desires,
+                extra_model_arguments=extra_model_arguments,
+            )
+        except AttachedDriveSizingError as exc:
+            return Excuse(
+                instance=instance.name,
+                drive=drive.name,
+                reason=str(exc),
+            )
+
     def _plan_certain(  # pylint: disable=too-many-positional-arguments
         self,
         model_name: str,
@@ -808,7 +834,8 @@ class CapacityPlanner:
         for instance, drive, context in self.generate_scenarios(
             model, region, desires, num_regions, lifecycles, instance_families, drives
         ):
-            match model.capacity_plan(
+            match self._capacity_plan_or_attached_drive_excuse(
+                model=model,
                 instance=instance,
                 drive=drive,
                 context=context,

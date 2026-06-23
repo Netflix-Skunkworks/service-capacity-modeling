@@ -7,6 +7,7 @@ from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import List
+from typing import NamedTuple
 from typing import Optional
 from typing import Sequence
 from typing import Set
@@ -51,6 +52,11 @@ logger = logging.getLogger(__name__)
 SECONDS_IN_YEAR = 31556926
 
 EFFECTIVE_DISK_PER_NODE_GIB = "effective_disk_per_node_gib"
+_ATTACHED_DRIVE_MAX_ITERATIONS = 10
+
+
+class AttachedDriveSizingError(Exception):
+    """Attached drive sizing could not find a stable node count."""
 
 
 def upsert_params(cluster: ClusterCapacity, params: Dict[str, Any]) -> None:
@@ -667,6 +673,77 @@ def _local_disk_node_counts(
     return count_disk_capacity, count_disk_iops
 
 
+class _AttachedDriveSizing(NamedTuple):
+    count_disk_capacity: int
+    count_disk_iops: int
+    drive_size_gib: int
+    read_io: float
+    write_io: float
+
+
+def _attached_drive_sizing_for_count(
+    *,
+    drive: Drive,
+    needed_disk_gib: float,
+    node_count: int,
+    required_disk_ios: Callable[[float, int], Tuple[float, float]],
+    max_size_gib: int,
+) -> _AttachedDriveSizing:
+    space_gib = max(1, math.ceil(needed_disk_gib / node_count))
+    read_io, write_io = required_disk_ios(space_gib, node_count)
+    read_io, write_io = (
+        utils.next_n(read_io, n=200),
+        utils.next_n(write_io, n=200),
+    )
+    io_gib = cloud_gib_for_io(drive, read_io + write_io, space_gib)
+    drive_size_gib = utils.next_n(max(1, io_gib, space_gib), n=100)
+
+    count_disk_capacity = 0
+    if max_size_gib > 0:
+        count_disk_capacity = max(
+            math.ceil(needed_disk_gib / max_size_gib),
+            math.ceil(node_count * drive_size_gib / max_size_gib),
+        )
+        drive_size_gib = min(drive_size_gib, int(max_size_gib))
+
+    count_disk_iops = 0
+    if (read_io + write_io) > drive.max_io_per_s:
+        count_disk_iops = math.ceil(
+            node_count * ((read_io + write_io) / drive.max_io_per_s)
+        )
+
+    return _AttachedDriveSizing(
+        count_disk_capacity=count_disk_capacity,
+        count_disk_iops=count_disk_iops,
+        drive_size_gib=drive_size_gib,
+        read_io=read_io,
+        write_io=write_io,
+    )
+
+
+def _attached_drive_node_count(
+    *,
+    preliminary_resource_count: int,
+    sizing: _AttachedDriveSizing,
+    cluster_size: Callable[[int], int],
+    min_count: int,
+) -> int:
+    return int(
+        math.ceil(
+            max(
+                cluster_size(
+                    max(
+                        preliminary_resource_count,
+                        sizing.count_disk_capacity,
+                        sizing.count_disk_iops,
+                    )
+                ),
+                min_count,
+            )
+        )
+    )
+
+
 def _attached_drive_plan(
     *,
     drive: Drive,
@@ -679,62 +756,87 @@ def _attached_drive_plan(
     required_disk_ios: Callable[[float, int], Tuple[float, float]],
     max_node_disk_gib: Callable[[Drive], int],
 ) -> Tuple[int, int, List[Drive]]:
-    # Iterate: sizing the EBS volume can force the node count up (disk-cap or
-    # IOPS overflow), which in turn changes per-node size and IOPS, which can
-    # force the count up again. Each pass recomputes with the updated count;
-    # converges within a few iterations.
-    def _ios_for_count(node_count: int) -> Tuple[int, float, float]:
-        space_gib = max(1, math.ceil(needed_disk_gib / node_count))
-        read_io, write_io = required_disk_ios(space_gib, node_count)
-        read_io, write_io = (
-            utils.next_n(read_io, n=200),
-            utils.next_n(write_io, n=200),
-        )
-        return space_gib, read_io, write_io
-
     preliminary_resource_count = max(count_cpu, count_memory, count_network)
-    effective_count = max(cluster_size(preliminary_resource_count), min_count)
-    max_size = max_node_disk_gib(drive)
-    count_disk_capacity = 0
-    count_disk_iops = 0
-    ebs_gib = 0
-    read_io = 0.0
-    write_io = 0.0
+    initial_count = int(
+        math.ceil(max(cluster_size(preliminary_resource_count), min_count))
+    )
+    effective_count = initial_count
+    max_size_gib = max_node_disk_gib(drive)
+    sizing: _AttachedDriveSizing
+    growth_constraint: Optional[str] = None
 
-    for _ in range(10):
-        space_gib, read_io, write_io = _ios_for_count(effective_count)
-        io_gib = cloud_gib_for_io(drive, read_io + write_io, space_gib)
-        ebs_gib = utils.next_n(max(1, io_gib, space_gib), n=100)
-
-        iteration_disk_capacity = 0
-        if max_size > 0:
-            iteration_disk_capacity = max(
-                math.ceil(needed_disk_gib / max_size),
-                math.ceil(effective_count * ebs_gib / max_size),
-            )
-            ebs_gib = min(ebs_gib, int(max_size))
-        count_disk_capacity = max(count_disk_capacity, iteration_disk_capacity)
-
-        iteration_disk_iops = 0
-        if (read_io + write_io) > drive.max_io_per_s:
-            ratio = (read_io + write_io) / drive.max_io_per_s
-            iteration_disk_iops = math.ceil(effective_count * ratio)
-        count_disk_iops = max(count_disk_iops, iteration_disk_iops)
-
-        next_count = max(
-            cluster_size(
-                max(preliminary_resource_count, count_disk_capacity, count_disk_iops)
-            ),
-            min_count,
+    for _ in range(_ATTACHED_DRIVE_MAX_ITERATIONS):
+        sizing = _attached_drive_sizing_for_count(
+            drive=drive,
+            needed_disk_gib=needed_disk_gib,
+            node_count=effective_count,
+            required_disk_ios=required_disk_ios,
+            max_size_gib=max_size_gib,
+        )
+        next_count = _attached_drive_node_count(
+            preliminary_resource_count=preliminary_resource_count,
+            sizing=sizing,
+            cluster_size=cluster_size,
+            min_count=min_count,
         )
         if next_count <= effective_count:
             break
+        growth_constraint = (
+            "disk_iops"
+            if sizing.count_disk_iops >= sizing.count_disk_capacity
+            else "disk_capacity"
+        )
         effective_count = next_count
+    else:
+        raise AttachedDriveSizingError(
+            "Attached drive sizing did not converge after "
+            f"{_ATTACHED_DRIVE_MAX_ITERATIONS} iterations"
+        )
+
+    final_count = effective_count
+    final_sizing = sizing
+    checked_counts: Set[int] = set()
+    for raw_count in range(initial_count, effective_count + 1):
+        candidate_count = max(cluster_size(raw_count), min_count)
+        if candidate_count in checked_counts or candidate_count > effective_count:
+            continue
+        checked_counts.add(candidate_count)
+        candidate_sizing = _attached_drive_sizing_for_count(
+            drive=drive,
+            needed_disk_gib=needed_disk_gib,
+            node_count=candidate_count,
+            required_disk_ios=required_disk_ios,
+            max_size_gib=max_size_gib,
+        )
+        candidate_next_count = _attached_drive_node_count(
+            preliminary_resource_count=preliminary_resource_count,
+            sizing=candidate_sizing,
+            cluster_size=cluster_size,
+            min_count=min_count,
+        )
+        if candidate_next_count <= candidate_count:
+            final_count = candidate_count
+            final_sizing = candidate_sizing
+            break
+
+    count_disk_capacity = final_sizing.count_disk_capacity
+    count_disk_iops = final_sizing.count_disk_iops
+    reported_count = _attached_drive_node_count(
+        preliminary_resource_count=preliminary_resource_count,
+        sizing=final_sizing,
+        cluster_size=cluster_size,
+        min_count=min_count,
+    )
+    if final_count > initial_count and reported_count < final_count:
+        if growth_constraint == "disk_capacity":
+            count_disk_capacity = final_count
+        else:
+            count_disk_iops = final_count
 
     attached_drive = drive.model_copy()
-    attached_drive.size_gib = ebs_gib
-    attached_drive.read_io_per_s = int(round(read_io, 2))
-    attached_drive.write_io_per_s = int(round(write_io, 2))
+    attached_drive.size_gib = final_sizing.drive_size_gib
+    attached_drive.read_io_per_s = int(round(final_sizing.read_io, 2))
+    attached_drive.write_io_per_s = int(round(final_sizing.write_io, 2))
     return count_disk_capacity, count_disk_iops, [attached_drive]
 
 
