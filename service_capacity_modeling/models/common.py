@@ -587,7 +587,7 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
             read_write_ratio=read_write_ratio,
         )
     elif needed_disk_gib > 0:
-        count_disk_capacity, count_disk_iops, attached_drives = _attached_drive_plan(
+        attached_drive_plan = _attached_drive_plan(
             drive=drive,
             needed_disk_gib=needed_disk_gib,
             count_cpu=count_cpu,
@@ -598,6 +598,9 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
             required_disk_ios=required_disk_ios,
             max_node_disk_gib=max_node_disk_gib,
         )
+        count_disk_capacity = attached_drive_plan.count_disk_capacity
+        count_disk_iops = attached_drive_plan.count_disk_iops
+        attached_drives = attached_drive_plan.attached_drives
 
     # Combine: bottleneck -> cluster rounding -> min floor
     raw_count = max(
@@ -673,6 +676,12 @@ def _local_disk_node_counts(
     return count_disk_capacity, count_disk_iops
 
 
+class _AttachedDrivePlanResult(NamedTuple):
+    count_disk_capacity: int
+    count_disk_iops: int
+    attached_drives: List[Drive]
+
+
 def _attached_drive_plan(
     *,
     drive: Drive,
@@ -684,7 +693,7 @@ def _attached_drive_plan(
     min_count: int,
     required_disk_ios: Callable[[float, int], Tuple[float, float]],
     max_node_disk_gib: Callable[[Drive], int],
-) -> Tuple[int, int, List[Drive]]:
+) -> _AttachedDrivePlanResult:
     preliminary_resource_count = max(count_cpu, count_memory, count_network)
     min_count = int(math.ceil(min_count))
     initial_count = max(cluster_size(preliminary_resource_count), min_count)
@@ -804,7 +813,11 @@ def _attached_drive_plan(
     attached_drive.size_gib = final_sizing.drive_size_gib
     attached_drive.read_io_per_s = int(round(final_sizing.read_io, 2))
     attached_drive.write_io_per_s = int(round(final_sizing.write_io, 2))
-    return count_disk_capacity, count_disk_iops, [attached_drive]
+    return _AttachedDrivePlanResult(
+        count_disk_capacity=count_disk_capacity,
+        count_disk_iops=count_disk_iops,
+        attached_drives=[attached_drive],
+    )
 
 
 # ---------------------------------------------------------------------------
