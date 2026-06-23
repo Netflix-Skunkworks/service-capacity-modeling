@@ -21,21 +21,21 @@
               "cassandra.heap.table.percent": 0.2,
               "cassandra.heap.write.percent": 0.5,
               "cassandra.keyspace.rf": 3,
-              "cassandra.storage_buffer_ratio": 2.17,
-              "effective_disk_per_node_gib": 6600,
+              "cassandra.storage_buffer_ratio": 1.09,
+              "effective_disk_per_node_gib": 3300,
               "rank_penalties": {
                 "family_migration": 0.1
               },
               "required_nodes_by_type": {
                 "cluster_size": 64,
                 "cpu": 50,
-                "disk_capacity": 56,
+                "disk_capacity": 38,
                 "disk_iops": 0,
                 "memory": 5,
                 "min_count": 64,
                 "network": 3
               },
-              "resource_bottleneck": "disk_capacity"
+              "resource_bottleneck": "cpu"
             },
             "cluster_type": "cassandra",
             "count": 64,
@@ -54,21 +54,21 @@
               "cassandra.heap.table.percent": 0.2,
               "cassandra.heap.write.percent": 0.5,
               "cassandra.keyspace.rf": 3,
-              "cassandra.storage_buffer_ratio": 2.17,
-              "effective_disk_per_node_gib": 6600,
+              "cassandra.storage_buffer_ratio": 1.09,
+              "effective_disk_per_node_gib": 3300,
               "rank_penalties": {
                 "family_migration": 0.1
               },
               "required_nodes_by_type": {
                 "cluster_size": 64,
                 "cpu": 50,
-                "disk_capacity": 56,
+                "disk_capacity": 38,
                 "disk_iops": 0,
                 "memory": 5,
                 "min_count": 64,
                 "network": 3
               },
-              "resource_bottleneck": "disk_capacity"
+              "resource_bottleneck": "cpu"
             },
             "cluster_type": "cassandra",
             "count": 64,
@@ -87,21 +87,21 @@
               "cassandra.heap.table.percent": 0.2,
               "cassandra.heap.write.percent": 0.5,
               "cassandra.keyspace.rf": 3,
-              "cassandra.storage_buffer_ratio": 2.17,
-              "effective_disk_per_node_gib": 6600,
+              "cassandra.storage_buffer_ratio": 1.09,
+              "effective_disk_per_node_gib": 3300,
               "rank_penalties": {
                 "family_migration": 0.1
               },
               "required_nodes_by_type": {
                 "cluster_size": 64,
                 "cpu": 50,
-                "disk_capacity": 56,
+                "disk_capacity": 38,
                 "disk_iops": 0,
                 "memory": 5,
                 "min_count": 64,
                 "network": 3
               },
-              "resource_bottleneck": "disk_capacity"
+              "resource_bottleneck": "cpu"
             },
             "cluster_type": "cassandra",
             "count": 64,
@@ -109,7 +109,7 @@
             "instance": "m7a.2xlarge"
           }
         ],
-        "total_annual_cost": 6626497.2
+        "total_annual_cost": 6626496.93
       }
     ],
     "mean": [
@@ -133,21 +133,21 @@
               "cassandra.heap.table.percent": 0.2,
               "cassandra.heap.write.percent": 0.5,
               "cassandra.keyspace.rf": 3,
-              "cassandra.storage_buffer_ratio": 2.17,
-              "effective_disk_per_node_gib": 6600,
+              "cassandra.storage_buffer_ratio": 1.09,
+              "effective_disk_per_node_gib": 3300,
               "rank_penalties": {
                 "family_migration": 0.1
               },
               "required_nodes_by_type": {
                 "cluster_size": 64,
                 "cpu": 50,
-                "disk_capacity": 56,
+                "disk_capacity": 38,
                 "disk_iops": 0,
                 "memory": 2,
                 "min_count": 64,
                 "network": 3
               },
-              "resource_bottleneck": "disk_capacity"
+              "resource_bottleneck": "cpu"
             },
             "cluster_type": "cassandra",
             "count": 64,
@@ -166,21 +166,21 @@
               "cassandra.heap.table.percent": 0.2,
               "cassandra.heap.write.percent": 0.5,
               "cassandra.keyspace.rf": 3,
-              "cassandra.storage_buffer_ratio": 2.17,
-              "effective_disk_per_node_gib": 6600,
+              "cassandra.storage_buffer_ratio": 1.09,
+              "effective_disk_per_node_gib": 3300,
               "rank_penalties": {
                 "family_migration": 0.1
               },
               "required_nodes_by_type": {
                 "cluster_size": 64,
                 "cpu": 50,
-                "disk_capacity": 56,
+                "disk_capacity": 38,
                 "disk_iops": 0,
                 "memory": 2,
                 "min_count": 64,
                 "network": 3
               },
-              "resource_bottleneck": "disk_capacity"
+              "resource_bottleneck": "cpu"
             },
             "cluster_type": "cassandra",
             "count": 64,
@@ -199,21 +199,21 @@
               "cassandra.heap.table.percent": 0.2,
               "cassandra.heap.write.percent": 0.5,
               "cassandra.keyspace.rf": 3,
-              "cassandra.storage_buffer_ratio": 2.17,
-              "effective_disk_per_node_gib": 6600,
+              "cassandra.storage_buffer_ratio": 1.09,
+              "effective_disk_per_node_gib": 3300,
               "rank_penalties": {
                 "family_migration": 0.1
               },
               "required_nodes_by_type": {
                 "cluster_size": 64,
                 "cpu": 50,
-                "disk_capacity": 56,
+                "disk_capacity": 38,
                 "disk_iops": 0,
                 "memory": 2,
                 "min_count": 64,
                 "network": 3
               },
-              "resource_bottleneck": "disk_capacity"
+              "resource_bottleneck": "cpu"
             },
             "cluster_type": "cassandra",
             "count": 64,
@@ -243,15 +243,15 @@
               "cassandra.heap.table.percent": 0.2,
               "cassandra.heap.write.percent": 0.5,
               "cassandra.keyspace.rf": 3,
-              "cassandra.storage_buffer_ratio": 2.17,
-              "effective_disk_per_node_gib": 6600,
+              "cassandra.storage_buffer_ratio": 1.09,
+              "effective_disk_per_node_gib": 3300,
               "rank_penalties": {
                 "family_migration": 0.1
               },
               "required_nodes_by_type": {
                 "cluster_size": 64,
                 "cpu": 32,
-                "disk_capacity": 56,
+                "disk_capacity": 38,
                 "disk_iops": 0,
                 "memory": 2,
                 "min_count": 64,
@@ -276,15 +276,15 @@
               "cassandra.heap.table.percent": 0.2,
               "cassandra.heap.write.percent": 0.5,
               "cassandra.keyspace.rf": 3,
-              "cassandra.storage_buffer_ratio": 2.17,
-              "effective_disk_per_node_gib": 6600,
+              "cassandra.storage_buffer_ratio": 1.09,
+              "effective_disk_per_node_gib": 3300,
               "rank_penalties": {
                 "family_migration": 0.1
               },
               "required_nodes_by_type": {
                 "cluster_size": 64,
                 "cpu": 32,
-                "disk_capacity": 56,
+                "disk_capacity": 38,
                 "disk_iops": 0,
                 "memory": 2,
                 "min_count": 64,
@@ -309,15 +309,15 @@
               "cassandra.heap.table.percent": 0.2,
               "cassandra.heap.write.percent": 0.5,
               "cassandra.keyspace.rf": 3,
-              "cassandra.storage_buffer_ratio": 2.17,
-              "effective_disk_per_node_gib": 6600,
+              "cassandra.storage_buffer_ratio": 1.09,
+              "effective_disk_per_node_gib": 3300,
               "rank_penalties": {
                 "family_migration": 0.1
               },
               "required_nodes_by_type": {
                 "cluster_size": 64,
                 "cpu": 32,
-                "disk_capacity": 56,
+                "disk_capacity": 38,
                 "disk_iops": 0,
                 "memory": 2,
                 "min_count": 64,
@@ -358,21 +358,21 @@
                 "cassandra.heap.table.percent": 0.2,
                 "cassandra.heap.write.percent": 0.5,
                 "cassandra.keyspace.rf": 3,
-                "cassandra.storage_buffer_ratio": 2.17,
-                "effective_disk_per_node_gib": 6600,
+                "cassandra.storage_buffer_ratio": 1.09,
+                "effective_disk_per_node_gib": 3300,
                 "rank_penalties": {
                   "family_migration": 0.1
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
                   "cpu": 50,
-                  "disk_capacity": 56,
+                  "disk_capacity": 38,
                   "disk_iops": 0,
                   "memory": 2,
                   "min_count": 64,
                   "network": 3
                 },
-                "resource_bottleneck": "disk_capacity"
+                "resource_bottleneck": "cpu"
               },
               "cluster_type": "cassandra",
               "count": 64,
@@ -391,21 +391,21 @@
                 "cassandra.heap.table.percent": 0.2,
                 "cassandra.heap.write.percent": 0.5,
                 "cassandra.keyspace.rf": 3,
-                "cassandra.storage_buffer_ratio": 2.17,
-                "effective_disk_per_node_gib": 6600,
+                "cassandra.storage_buffer_ratio": 1.09,
+                "effective_disk_per_node_gib": 3300,
                 "rank_penalties": {
                   "family_migration": 0.1
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
                   "cpu": 50,
-                  "disk_capacity": 56,
+                  "disk_capacity": 38,
                   "disk_iops": 0,
                   "memory": 2,
                   "min_count": 64,
                   "network": 3
                 },
-                "resource_bottleneck": "disk_capacity"
+                "resource_bottleneck": "cpu"
               },
               "cluster_type": "cassandra",
               "count": 64,
@@ -424,21 +424,21 @@
                 "cassandra.heap.table.percent": 0.2,
                 "cassandra.heap.write.percent": 0.5,
                 "cassandra.keyspace.rf": 3,
-                "cassandra.storage_buffer_ratio": 2.17,
-                "effective_disk_per_node_gib": 6600,
+                "cassandra.storage_buffer_ratio": 1.09,
+                "effective_disk_per_node_gib": 3300,
                 "rank_penalties": {
                   "family_migration": 0.1
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
                   "cpu": 50,
-                  "disk_capacity": 56,
+                  "disk_capacity": 38,
                   "disk_iops": 0,
                   "memory": 2,
                   "min_count": 64,
                   "network": 3
                 },
-                "resource_bottleneck": "disk_capacity"
+                "resource_bottleneck": "cpu"
               },
               "cluster_type": "cassandra",
               "count": 64,
@@ -446,7 +446,7 @@
               "instance": "m7a.2xlarge"
             }
           ],
-          "total_annual_cost": 3901398.6
+          "total_annual_cost": 3901398.76
         },
         {
           "annual_costs": {
@@ -468,15 +468,15 @@
                 "cassandra.heap.table.percent": 0.2,
                 "cassandra.heap.write.percent": 0.5,
                 "cassandra.keyspace.rf": 3,
-                "cassandra.storage_buffer_ratio": 2.17,
-                "effective_disk_per_node_gib": 6600,
+                "cassandra.storage_buffer_ratio": 1.09,
+                "effective_disk_per_node_gib": 3300,
                 "rank_penalties": {
                   "family_migration": 0.1
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
                   "cpu": 32,
-                  "disk_capacity": 56,
+                  "disk_capacity": 38,
                   "disk_iops": 0,
                   "memory": 2,
                   "min_count": 64,
@@ -501,15 +501,15 @@
                 "cassandra.heap.table.percent": 0.2,
                 "cassandra.heap.write.percent": 0.5,
                 "cassandra.keyspace.rf": 3,
-                "cassandra.storage_buffer_ratio": 2.17,
-                "effective_disk_per_node_gib": 6600,
+                "cassandra.storage_buffer_ratio": 1.09,
+                "effective_disk_per_node_gib": 3300,
                 "rank_penalties": {
                   "family_migration": 0.1
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
                   "cpu": 32,
-                  "disk_capacity": 56,
+                  "disk_capacity": 38,
                   "disk_iops": 0,
                   "memory": 2,
                   "min_count": 64,
@@ -534,15 +534,15 @@
                 "cassandra.heap.table.percent": 0.2,
                 "cassandra.heap.write.percent": 0.5,
                 "cassandra.keyspace.rf": 3,
-                "cassandra.storage_buffer_ratio": 2.17,
-                "effective_disk_per_node_gib": 6600,
+                "cassandra.storage_buffer_ratio": 1.09,
+                "effective_disk_per_node_gib": 3300,
                 "rank_penalties": {
                   "family_migration": 0.1
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
                   "cpu": 32,
-                  "disk_capacity": 56,
+                  "disk_capacity": 38,
                   "disk_iops": 0,
                   "memory": 2,
                   "min_count": 64,
@@ -556,7 +556,7 @@
               "instance": "c6a.4xlarge"
             }
           ],
-          "total_annual_cost": 3987925.32
+          "total_annual_cost": 3987925.48
         }
       ],
       "50": [
@@ -580,21 +580,21 @@
                 "cassandra.heap.table.percent": 0.2,
                 "cassandra.heap.write.percent": 0.5,
                 "cassandra.keyspace.rf": 3,
-                "cassandra.storage_buffer_ratio": 2.17,
-                "effective_disk_per_node_gib": 6600,
+                "cassandra.storage_buffer_ratio": 1.09,
+                "effective_disk_per_node_gib": 3300,
                 "rank_penalties": {
                   "family_migration": 0.1
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
                   "cpu": 50,
-                  "disk_capacity": 56,
+                  "disk_capacity": 38,
                   "disk_iops": 0,
                   "memory": 6,
                   "min_count": 64,
                   "network": 3
                 },
-                "resource_bottleneck": "disk_capacity"
+                "resource_bottleneck": "cpu"
               },
               "cluster_type": "cassandra",
               "count": 64,
@@ -613,21 +613,21 @@
                 "cassandra.heap.table.percent": 0.2,
                 "cassandra.heap.write.percent": 0.5,
                 "cassandra.keyspace.rf": 3,
-                "cassandra.storage_buffer_ratio": 2.17,
-                "effective_disk_per_node_gib": 6600,
+                "cassandra.storage_buffer_ratio": 1.09,
+                "effective_disk_per_node_gib": 3300,
                 "rank_penalties": {
                   "family_migration": 0.1
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
                   "cpu": 50,
-                  "disk_capacity": 56,
+                  "disk_capacity": 38,
                   "disk_iops": 0,
                   "memory": 6,
                   "min_count": 64,
                   "network": 3
                 },
-                "resource_bottleneck": "disk_capacity"
+                "resource_bottleneck": "cpu"
               },
               "cluster_type": "cassandra",
               "count": 64,
@@ -646,21 +646,21 @@
                 "cassandra.heap.table.percent": 0.2,
                 "cassandra.heap.write.percent": 0.5,
                 "cassandra.keyspace.rf": 3,
-                "cassandra.storage_buffer_ratio": 2.17,
-                "effective_disk_per_node_gib": 6600,
+                "cassandra.storage_buffer_ratio": 1.09,
+                "effective_disk_per_node_gib": 3300,
                 "rank_penalties": {
                   "family_migration": 0.1
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
                   "cpu": 50,
-                  "disk_capacity": 56,
+                  "disk_capacity": 38,
                   "disk_iops": 0,
                   "memory": 6,
                   "min_count": 64,
                   "network": 3
                 },
-                "resource_bottleneck": "disk_capacity"
+                "resource_bottleneck": "cpu"
               },
               "cluster_type": "cassandra",
               "count": 64,
@@ -668,7 +668,7 @@
               "instance": "m7a.2xlarge"
             }
           ],
-          "total_annual_cost": 5686393.69
+          "total_annual_cost": 5686393.7
         },
         {
           "annual_costs": {
@@ -690,15 +690,15 @@
                 "cassandra.heap.table.percent": 0.2,
                 "cassandra.heap.write.percent": 0.5,
                 "cassandra.keyspace.rf": 3,
-                "cassandra.storage_buffer_ratio": 2.17,
-                "effective_disk_per_node_gib": 6600,
+                "cassandra.storage_buffer_ratio": 1.09,
+                "effective_disk_per_node_gib": 3300,
                 "rank_penalties": {
                   "family_migration": 0.1
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
                   "cpu": 32,
-                  "disk_capacity": 56,
+                  "disk_capacity": 38,
                   "disk_iops": 0,
                   "memory": 6,
                   "min_count": 64,
@@ -723,15 +723,15 @@
                 "cassandra.heap.table.percent": 0.2,
                 "cassandra.heap.write.percent": 0.5,
                 "cassandra.keyspace.rf": 3,
-                "cassandra.storage_buffer_ratio": 2.17,
-                "effective_disk_per_node_gib": 6600,
+                "cassandra.storage_buffer_ratio": 1.09,
+                "effective_disk_per_node_gib": 3300,
                 "rank_penalties": {
                   "family_migration": 0.1
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
                   "cpu": 32,
-                  "disk_capacity": 56,
+                  "disk_capacity": 38,
                   "disk_iops": 0,
                   "memory": 6,
                   "min_count": 64,
@@ -756,15 +756,15 @@
                 "cassandra.heap.table.percent": 0.2,
                 "cassandra.heap.write.percent": 0.5,
                 "cassandra.keyspace.rf": 3,
-                "cassandra.storage_buffer_ratio": 2.17,
-                "effective_disk_per_node_gib": 6600,
+                "cassandra.storage_buffer_ratio": 1.09,
+                "effective_disk_per_node_gib": 3300,
                 "rank_penalties": {
                   "family_migration": 0.1
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
                   "cpu": 32,
-                  "disk_capacity": 56,
+                  "disk_capacity": 38,
                   "disk_iops": 0,
                   "memory": 6,
                   "min_count": 64,
@@ -778,7 +778,7 @@
               "instance": "c6a.4xlarge"
             }
           ],
-          "total_annual_cost": 5772920.41
+          "total_annual_cost": 5772920.42
         }
       ],
       "95": []

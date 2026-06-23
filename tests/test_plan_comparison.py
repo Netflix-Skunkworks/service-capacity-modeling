@@ -462,6 +462,53 @@ class TestComparePlans:
             ResourceType.network_mbps,
         }
 
+    @pytest.mark.parametrize(
+        "drive_size,effective_disk,expected_disk",
+        [
+            (100, 2500.0, 1_000.0),
+            (3000, 2500.0, 25_000.0),
+        ],
+    )
+    def test_attached_drive_disk_comparison_uses_lower_effective_size(
+        self, drive_size, effective_disk, expected_disk
+    ):
+        """Attached-drive comparison caps physical drive size by effective disk."""
+        baseline = _wrap_cluster(
+            ZoneClusterCapacity(
+                cluster_type="test",
+                count=30,
+                instance=_create_instance(
+                    cpu=16,
+                    ram_gib=64.0,
+                    net_mbps=10000.0,
+                    drive=Drive(name="local", size_gib=1000),
+                ),
+            )
+        )
+        comparison = _wrap_cluster(
+            ZoneClusterCapacity(
+                cluster_type="test",
+                count=10,
+                instance=_create_instance(
+                    cpu=16,
+                    ram_gib=64.0,
+                    net_mbps=10000.0,
+                    drive=None,
+                ),
+                attached_drives=[Drive(name="attached-ssd", size_gib=drive_size)],
+                cluster_params={EFFECTIVE_DISK_PER_NODE_GIB: effective_disk},
+            )
+        )
+
+        result = compare_plans(
+            baseline,
+            comparison,
+            tolerances=ResourceTolerances(default=ignore_resource()),
+        )
+
+        assert result.disk.baseline_value == pytest.approx(30_000.0)
+        assert result.disk.comparison_value == pytest.approx(expected_disk)
+
     def test_per_resource_tolerances(self):
         baseline = _create_plan(cpu_cores=100, mem_gib=200)
         comparison = _create_plan(cpu_cores=85, mem_gib=170)

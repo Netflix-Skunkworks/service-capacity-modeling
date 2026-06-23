@@ -70,6 +70,7 @@ Checking the result::
 """
 
 from functools import lru_cache
+from typing import cast
 
 from pydantic import computed_field
 from pydantic import ConfigDict
@@ -519,21 +520,28 @@ def _find_matching_cluster(
     return None
 
 
+def _comparable_disk_per_node_gib(cluster: ClusterCapacity) -> float:
+    cluster_drive = cluster.attached_drives[0] if cluster.attached_drives else None
+    provisioned_disk = get_disk_size_gib(cluster_drive, cluster.instance)
+    effective_disk = cast(
+        float | None, cluster.cluster_params.get(EFFECTIVE_DISK_PER_NODE_GIB)
+    )
+
+    if cluster_drive is not None and effective_disk is not None:
+        return min(provisioned_disk, effective_disk)
+    if effective_disk is not None:
+        return effective_disk
+    return provisioned_disk
+
+
 def _single_cluster_resources(cluster: ClusterCapacity) -> dict[ResourceType, float]:
     """Extract resource totals from a single cluster."""
-    cluster_drive = cluster.attached_drives[0] if cluster.attached_drives else None
-    effective_disk = cluster.cluster_params.get(EFFECTIVE_DISK_PER_NODE_GIB)
-    if effective_disk is not None:
-        disk = effective_disk * cluster.count
-    else:
-        disk = get_disk_size_gib(cluster_drive, cluster.instance) * cluster.count
-
     return {
         ResourceType.cpu: to_reference_cores(
             cluster.instance.cpu * cluster.count, cluster.instance
         ),
         ResourceType.mem_gib: cluster.instance.ram_gib * cluster.count,
-        ResourceType.disk_gib: disk,
+        ResourceType.disk_gib: _comparable_disk_per_node_gib(cluster) * cluster.count,
         ResourceType.network_mbps: cluster.instance.net_mbps * cluster.count,
     }
 
