@@ -171,6 +171,35 @@ def test_attached_drive_capacity_reports_final_recomputed_count():
     assert attached_drive.read_io_per_s == 200
 
 
+def test_attached_drive_final_count_source_uses_last_rejected_candidate():
+    cluster = compute_stateful_zone(
+        instance=M5_4XL,
+        drive=Drive(
+            name="tiny-ebs",
+            size_gib=0,
+            max_scale_size_gib=150,
+            max_scale_io_per_s=250,
+        ),
+        needed_cores=4,
+        needed_disk_gib=212,
+        needed_memory_gib=10,
+        needed_network_mbps=100,
+        required_disk_ios=lambda size, _count: ((size * size) / 100, 0.0),
+        max_node_disk_gib=lambda d: int(d.max_size_gib),
+    )
+
+    attached_drive = cluster.attached_drives[0]
+    assert cluster.node_count_context is not None
+    counts = {
+        k.value: v for k, v in cluster.node_count_context.required_nodes_by_type.items()
+    }
+    assert counts["disk_capacity"] == 3
+    assert counts["disk_iops"] == 0
+    assert cluster.count == 3
+    assert attached_drive.size_gib == 100
+    assert attached_drive.read_io_per_s == 200
+
+
 def test_gp2_attached_drive_recomputes_per_node_size_after_count_increase():
     cluster = compute_stateful_zone(
         instance=M5_4XL,

@@ -673,77 +673,6 @@ def _local_disk_node_counts(
     return count_disk_capacity, count_disk_iops
 
 
-class _AttachedDriveSizing(NamedTuple):
-    count_disk_capacity: int
-    count_disk_iops: int
-    drive_size_gib: int
-    read_io: float
-    write_io: float
-
-
-def _attached_drive_sizing_for_count(
-    *,
-    drive: Drive,
-    needed_disk_gib: float,
-    node_count: int,
-    required_disk_ios: Callable[[float, int], Tuple[float, float]],
-    max_size_gib: int,
-) -> _AttachedDriveSizing:
-    space_gib = max(1, math.ceil(needed_disk_gib / node_count))
-    read_io, write_io = required_disk_ios(space_gib, node_count)
-    read_io, write_io = (
-        utils.next_n(read_io, n=200),
-        utils.next_n(write_io, n=200),
-    )
-    io_gib = cloud_gib_for_io(drive, read_io + write_io, space_gib)
-    drive_size_gib = utils.next_n(max(1, io_gib, space_gib), n=100)
-
-    count_disk_capacity = 0
-    if max_size_gib > 0:
-        count_disk_capacity = max(
-            math.ceil(needed_disk_gib / max_size_gib),
-            math.ceil(node_count * drive_size_gib / max_size_gib),
-        )
-        drive_size_gib = min(drive_size_gib, int(max_size_gib))
-
-    count_disk_iops = 0
-    if (read_io + write_io) > drive.max_io_per_s:
-        count_disk_iops = math.ceil(
-            node_count * ((read_io + write_io) / drive.max_io_per_s)
-        )
-
-    return _AttachedDriveSizing(
-        count_disk_capacity=count_disk_capacity,
-        count_disk_iops=count_disk_iops,
-        drive_size_gib=drive_size_gib,
-        read_io=read_io,
-        write_io=write_io,
-    )
-
-
-def _attached_drive_node_count(
-    *,
-    preliminary_resource_count: int,
-    sizing: _AttachedDriveSizing,
-    cluster_size: Callable[[int], int],
-    min_count: int,
-) -> int:
-    return int(
-        math.ceil(
-            max(
-                cluster_size(
-                    max(
-                        preliminary_resource_count,
-                        sizing.count_disk_capacity,
-                        sizing.count_disk_iops,
-                    )
-                ),
-                min_count,
-            )
-        )
-    )
-
-
 def _attached_drive_plan(
     *,
     drive: Drive,
@@ -757,36 +686,83 @@ def _attached_drive_plan(
     max_node_disk_gib: Callable[[Drive], int],
 ) -> Tuple[int, int, List[Drive]]:
     preliminary_resource_count = max(count_cpu, count_memory, count_network)
-    initial_count = int(
-        math.ceil(max(cluster_size(preliminary_resource_count), min_count))
-    )
-    effective_count = initial_count
+    min_count = int(math.ceil(min_count))
+    initial_count = max(cluster_size(preliminary_resource_count), min_count)
     max_size_gib = max_node_disk_gib(drive)
-    sizing: _AttachedDriveSizing
-    growth_constraint: Optional[str] = None
+
+    class AttachedDriveSizing(NamedTuple):
+        count_disk_capacity: int
+        count_disk_iops: int
+        drive_size_gib: int
+        read_io: float
+        write_io: float
+        next_count: int
+
+    def sizing_for_count(node_count: int) -> AttachedDriveSizing:
+        space_gib = max(1, math.ceil(needed_disk_gib / node_count))
+        read_io, write_io = required_disk_ios(space_gib, node_count)
+        read_io, write_io = (
+            utils.next_n(read_io, n=200),
+            utils.next_n(write_io, n=200),
+        )
+        io_gib = cloud_gib_for_io(drive, read_io + write_io, space_gib)
+        drive_size_gib = utils.next_n(max(1, io_gib, space_gib), n=100)
+
+        count_disk_capacity = 0
+        if max_size_gib > 0:
+            count_disk_capacity = max(
+                math.ceil(needed_disk_gib / max_size_gib),
+                math.ceil(node_count * drive_size_gib / max_size_gib),
+            )
+            drive_size_gib = min(drive_size_gib, int(max_size_gib))
+
+        count_disk_iops = 0
+        if (read_io + write_io) > drive.max_io_per_s:
+            count_disk_iops = math.ceil(
+                node_count * ((read_io + write_io) / drive.max_io_per_s)
+            )
+
+        next_count = int(
+            math.ceil(
+                max(
+                    cluster_size(
+                        max(
+                            preliminary_resource_count,
+                            count_disk_capacity,
+                            count_disk_iops,
+                        )
+                    ),
+                    min_count,
+                )
+            )
+        )
+        return AttachedDriveSizing(
+            count_disk_capacity=count_disk_capacity,
+            count_disk_iops=count_disk_iops,
+            drive_size_gib=drive_size_gib,
+            read_io=read_io,
+            write_io=write_io,
+            next_count=next_count,
+        )
+
+    effective_count = initial_count
+    final_count = effective_count
+    final_sizing: AttachedDriveSizing
+    final_count_source: Optional[str] = None
 
     for _ in range(_ATTACHED_DRIVE_MAX_ITERATIONS):
-        sizing = _attached_drive_sizing_for_count(
-            drive=drive,
-            needed_disk_gib=needed_disk_gib,
-            node_count=effective_count,
-            required_disk_ios=required_disk_ios,
-            max_size_gib=max_size_gib,
-        )
-        next_count = _attached_drive_node_count(
-            preliminary_resource_count=preliminary_resource_count,
-            sizing=sizing,
-            cluster_size=cluster_size,
-            min_count=min_count,
-        )
-        if next_count <= effective_count:
+        sizing = sizing_for_count(effective_count)
+        final_count = effective_count
+        final_sizing = sizing
+
+        if sizing.next_count <= effective_count:
             break
-        growth_constraint = (
+        final_count_source = (
             "disk_iops"
             if sizing.count_disk_iops >= sizing.count_disk_capacity
             else "disk_capacity"
         )
-        effective_count = next_count
+        effective_count = sizing.next_count
     else:
         raise AttachedDriveSizingError(
             "Attached drive sizing unexpectedly did not converge after "
@@ -795,42 +771,31 @@ def _attached_drive_plan(
             "instance and drive scenario."
         )
 
-    final_count = effective_count
-    final_sizing = sizing
-    checked_counts: Set[int] = set()
-    for raw_count in range(initial_count, effective_count + 1):
-        candidate_count = max(cluster_size(raw_count), min_count)
-        if candidate_count in checked_counts or candidate_count > effective_count:
-            continue
-        checked_counts.add(candidate_count)
-        candidate_sizing = _attached_drive_sizing_for_count(
-            drive=drive,
-            needed_disk_gib=needed_disk_gib,
-            node_count=candidate_count,
-            required_disk_ios=required_disk_ios,
-            max_size_gib=max_size_gib,
-        )
-        candidate_next_count = _attached_drive_node_count(
-            preliminary_resource_count=preliminary_resource_count,
-            sizing=candidate_sizing,
-            cluster_size=cluster_size,
-            min_count=min_count,
-        )
-        if candidate_next_count <= candidate_count:
+    candidate_counts = sorted(
+        count
+        for count in {
+            int(math.ceil(max(cluster_size(raw_count), min_count)))
+            for raw_count in range(initial_count, effective_count + 1)
+        }
+        if count <= effective_count
+    )
+    for candidate_count in candidate_counts:
+        candidate_sizing = sizing_for_count(candidate_count)
+        if candidate_sizing.next_count <= candidate_count:
             final_count = candidate_count
             final_sizing = candidate_sizing
             break
+        final_count_source = (
+            "disk_iops"
+            if candidate_sizing.count_disk_iops >= candidate_sizing.count_disk_capacity
+            else "disk_capacity"
+        )
 
     count_disk_capacity = final_sizing.count_disk_capacity
     count_disk_iops = final_sizing.count_disk_iops
-    reported_count = _attached_drive_node_count(
-        preliminary_resource_count=preliminary_resource_count,
-        sizing=final_sizing,
-        cluster_size=cluster_size,
-        min_count=min_count,
-    )
+    reported_count = final_sizing.next_count
     if final_count > initial_count and reported_count < final_count:
-        if growth_constraint == "disk_capacity":
+        if final_count_source == "disk_capacity":
             count_disk_capacity = final_count
         else:
             count_disk_iops = final_count
