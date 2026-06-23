@@ -56,7 +56,7 @@ _ATTACHED_DRIVE_MAX_ITERATIONS = 10
 
 
 class AttachedDriveSizingError(Exception):
-    """Attached drive sizing could not find a stable node count."""
+    """Attached drive sizing hit an unexpected non-converging count loop."""
 
 
 def upsert_params(cluster: ClusterCapacity, params: Dict[str, Any]) -> None:
@@ -789,8 +789,10 @@ def _attached_drive_plan(
         effective_count = next_count
     else:
         raise AttachedDriveSizingError(
-            "Attached drive sizing did not converge after "
-            f"{_ATTACHED_DRIVE_MAX_ITERATIONS} iterations"
+            "Attached drive sizing unexpectedly did not converge after "
+            f"{_ATTACHED_DRIVE_MAX_ITERATIONS} iterations. This indicates a "
+            "non-monotonic or otherwise invalid sizing relationship for this "
+            "instance and drive scenario."
         )
 
     final_count = effective_count
