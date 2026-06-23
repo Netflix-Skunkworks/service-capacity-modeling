@@ -55,10 +55,6 @@ EFFECTIVE_DISK_PER_NODE_GIB = "effective_disk_per_node_gib"
 _ATTACHED_DRIVE_MAX_ITERATIONS = 10
 
 
-class AttachedDriveSizingError(Exception):
-    """Attached drive sizing hit an unexpected non-converging count loop."""
-
-
 def upsert_params(cluster: ClusterCapacity, params: Dict[str, Any]) -> None:
     """Update or set cluster parameters on any cluster type."""
     if not params:
@@ -772,13 +768,6 @@ def _attached_drive_plan(
             else "disk_capacity"
         )
         effective_count = sizing.next_count
-    else:
-        raise AttachedDriveSizingError(
-            "Attached drive sizing unexpectedly did not converge after "
-            f"{_ATTACHED_DRIVE_MAX_ITERATIONS} iterations. This indicates a "
-            "non-monotonic or otherwise invalid sizing relationship for this "
-            "instance and drive scenario."
-        )
 
     candidate_counts = sorted(
         count

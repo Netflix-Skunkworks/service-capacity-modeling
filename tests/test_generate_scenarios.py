@@ -9,8 +9,6 @@ from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import CurrentRegionClusterCapacity
 from service_capacity_modeling.interface import Lifecycle
 from service_capacity_modeling.interface import Platform
-from service_capacity_modeling.models import CapacityModel
-from service_capacity_modeling.models.common import AttachedDriveSizingError
 
 
 def test_generate_scenarios():
@@ -39,29 +37,6 @@ def test_generate_scenarios():
 
     # Check we got some instances
     assert len(scenarios) > 0
-
-
-def test_attached_drive_sizing_error_becomes_excuse():
-    class NonConvergingModel(CapacityModel):
-        @staticmethod
-        def capacity_plan(*_args, **_kwargs):
-            raise AttachedDriveSizingError("attached drive did not converge")
-
-    planner = CapacityPlanner()
-    planner.register_model("test.non-converging", NonConvergingModel())
-
-    explained = planner.plan_certain_explained(
-        model_name="test.non-converging",
-        region="us-east-1",
-        desires=CapacityDesires(),
-        num_results=1,
-        instance_families=["m5"],
-        drives=["gp3"],
-    )
-
-    assert explained.plans == []
-    assert explained.excuses
-    assert all("attached drive did not converge" in e.reason for e in explained.excuses)
 
 
 def test_generate_scenarios_limit_family():

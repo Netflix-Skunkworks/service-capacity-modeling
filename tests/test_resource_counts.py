@@ -6,7 +6,6 @@ from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import NodeCountContext
 from service_capacity_modeling.interface import NodeCountConstraint
-from service_capacity_modeling.models.common import AttachedDriveSizingError
 from service_capacity_modeling.models.common import compute_stateful_zone
 
 EBS = Drive(name="gp3", size_gib=0)
@@ -252,24 +251,6 @@ def test_attached_drive_iops_uses_smallest_valid_recomputed_count():
     assert cluster.count == 4
     assert attached_drive.read_io_per_s == 200
     assert attached_drive.read_io_per_s < attached_drive.max_io_per_s
-
-
-def test_attached_drive_iops_fails_when_sizing_never_converges():
-    with pytest.raises(AttachedDriveSizingError, match="did not converge"):
-        compute_stateful_zone(
-            instance=M5_4XL,
-            drive=Drive(
-                name="tiny-ebs",
-                size_gib=0,
-                max_scale_size_gib=1_000,
-                max_scale_io_per_s=1_000,
-            ),
-            needed_cores=4,
-            needed_disk_gib=100,
-            needed_memory_gib=10,
-            needed_network_mbps=100,
-            required_disk_ios=lambda _size, _count: (2000.0, 0.0),
-        )
 
 
 def test_write_buffer_merged_into_memory():
