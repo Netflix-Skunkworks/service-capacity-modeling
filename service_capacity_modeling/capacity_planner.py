@@ -785,32 +785,7 @@ class CapacityPlanner:
             family_graph=graph,
         )
 
-    @staticmethod
-    def _capacity_plan_or_attached_drive_excuse(
-        *,
-        model: CapacityModel,
-        instance: Instance,
-        drive: Drive,
-        context: RegionContext,
-        desires: CapacityDesires,
-        extra_model_arguments: Dict[str, Any],
-    ) -> CapacityPlan | Excuse | None:
-        try:
-            return model.capacity_plan(
-                instance=instance,
-                drive=drive,
-                context=context,
-                desires=desires,
-                extra_model_arguments=extra_model_arguments,
-            )
-        except AttachedDriveSizingError as exc:
-            return Excuse(
-                instance=instance.name,
-                drive=drive.name,
-                reason=str(exc),
-            )
-
-    def _plan_certain(  # pylint: disable=too-many-positional-arguments
+    def _plan_certain(  # pylint: disable=too-many-positional-arguments,too-many-locals
         self,
         model_name: str,
         region: str,
@@ -834,14 +809,22 @@ class CapacityPlanner:
         for instance, drive, context in self.generate_scenarios(
             model, region, desires, num_regions, lifecycles, instance_families, drives
         ):
-            match self._capacity_plan_or_attached_drive_excuse(
-                model=model,
-                instance=instance,
-                drive=drive,
-                context=context,
-                desires=desires,
-                extra_model_arguments=extra_model_arguments,
-            ):
+            try:
+                scenario_result = model.capacity_plan(
+                    instance=instance,
+                    drive=drive,
+                    context=context,
+                    desires=desires,
+                    extra_model_arguments=extra_model_arguments,
+                )
+            except AttachedDriveSizingError as exc:
+                scenario_result = Excuse(
+                    instance=instance.name,
+                    drive=drive.name,
+                    reason=str(exc),
+                )
+
+            match scenario_result:
                 case CapacityPlan() as plan:
                     if (
                         pref_families is not None
