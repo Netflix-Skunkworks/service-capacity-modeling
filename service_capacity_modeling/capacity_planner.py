@@ -56,6 +56,7 @@ from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.org import netflix
 from service_capacity_modeling.models.utils import compute_excuse_tags
 from service_capacity_modeling.models.utils import current_instance_name
+from service_capacity_modeling.models.utils import resolve_instance_family_allowlist
 from service_capacity_modeling.models.utils import reduce_by_family
 from service_capacity_modeling.stats import dist_for_interval
 from service_capacity_modeling.stats import interval_percentile
@@ -352,62 +353,6 @@ def _allow_instance(
     return True
 
 
-def _normalize_instance_families(
-    instance_families: Optional[Sequence[str]],
-) -> Optional[Sequence[str]]:
-    return instance_families if instance_families else None
-
-
-def _ordered_union_instance_families(
-    *instance_family_filters: Optional[Sequence[str]],
-) -> Optional[Sequence[str]]:
-    instance_families = []
-    seen = set()
-    for instance_family_filter in instance_family_filters:
-        for instance_family in instance_family_filter or ():
-            if instance_family in seen:
-                continue
-            instance_families.append(instance_family)
-            seen.add(instance_family)
-    return instance_families or None
-
-
-def _instance_families_for_model(
-    model_name: str,
-    instance_families: Optional[Sequence[str]],
-    instance_families_by_model: Optional[Dict[str, Optional[Sequence[str]]]],
-) -> Optional[Sequence[str]]:
-    """Return the effective instance allowlist for one composed model layer.
-
-    The planner has two instance-family inputs:
-
-    - ``instance_families`` is the existing request-wide filter. It applies to
-      every model layer.
-    - ``instance_families_by_model`` is keyed by capacity model name. A missing
-      key, ``None``, or an empty sequence adds no model-specific candidates.
-      A non-empty entry is unioned with the request-wide filter for that model.
-
-    Returns:
-        ``None`` when no explicit instance filter applies. Otherwise an
-        ordered, de-duplicated allowlist of instance names or families that is
-        safe to pass to ``_plan_certain``. Request-wide entries keep their
-        order, followed by any model-scoped entries not already present.
-    """
-    global_instance_families = _normalize_instance_families(instance_families)
-    if (
-        instance_families_by_model is None
-        or model_name not in instance_families_by_model
-    ):
-        return global_instance_families
-
-    model_instance_families = _normalize_instance_families(
-        instance_families_by_model[model_name]
-    )
-    return _ordered_union_instance_families(
-        global_instance_families, model_instance_families
-    )
-
-
 def _allow_drive(
     drive: Drive,
     allowed_names: Sequence[str],
@@ -683,7 +628,7 @@ class CapacityPlanner:
             for percentile_sub_model, percentile_sub_desire in model_percentile_desires[
                 index
             ].items():
-                percentile_sub_instance_families = _instance_families_for_model(
+                percentile_sub_instance_families = resolve_instance_family_allowlist(
                     percentile_sub_model,
                     instance_families,
                     instance_families_by_model,
@@ -726,7 +671,7 @@ class CapacityPlanner:
     ) -> Sequence[CapacityPlan]:
         mean_plans = []
         for mean_sub_model, mean_sub_desire in model_mean_desires.items():
-            mean_sub_instance_families = _instance_families_for_model(
+            mean_sub_instance_families = resolve_instance_family_allowlist(
                 mean_sub_model,
                 instance_families,
                 instance_families_by_model,
@@ -821,7 +766,7 @@ class CapacityPlanner:
             desires=desires,
             extra_model_arguments=extra_model_arguments,
         ):
-            sub_instance_families = _instance_families_for_model(
+            sub_instance_families = resolve_instance_family_allowlist(
                 sub_model,
                 instance_families,
                 instance_families_by_model,
@@ -1218,7 +1163,7 @@ class CapacityPlanner:
             desires=desires,
             extra_model_arguments=extra_model_arguments,
         ):
-            sub_instance_families = _instance_families_for_model(
+            sub_instance_families = resolve_instance_family_allowlist(
                 sub_model,
                 instance_families,
                 instance_families_by_model,

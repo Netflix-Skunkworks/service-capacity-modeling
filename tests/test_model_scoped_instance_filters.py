@@ -4,7 +4,6 @@ from typing import Sequence
 
 from service_capacity_modeling import capacity_planner
 from service_capacity_modeling.capacity_planner import _CertainResult
-from service_capacity_modeling.capacity_planner import _instance_families_for_model
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import CapacityDesires
@@ -14,6 +13,7 @@ from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.models.utils import resolve_instance_family_allowlist
 
 
 def _kv_desires() -> CapacityDesires:
@@ -111,26 +111,26 @@ def test_model_scoped_instance_filters_union_with_global_filters(monkeypatch):
     }
 
 
-def test_instance_families_for_model_contract():
+def test_resolve_instance_family_allowlist_combines_request_and_model_filters():
     assert (
-        _instance_families_for_model(
+        resolve_instance_family_allowlist(
             "org.netflix.cassandra",
             None,
             None,
         )
         is None
     )
-    assert _instance_families_for_model(
+    assert resolve_instance_family_allowlist(
         "org.netflix.cassandra",
         ["m6id"],
         {"org.netflix.cassandra": None},
     ) == ["m6id"]
-    assert _instance_families_for_model(
+    assert resolve_instance_family_allowlist(
         "org.netflix.cassandra",
         ["m6id", "i4i"],
         {"org.netflix.cassandra": ["i4i", "i7i"]},
     ) == ["m6id", "i4i", "i7i"]
-    assert _instance_families_for_model(
+    assert resolve_instance_family_allowlist(
         "org.netflix.cassandra",
         ["m6id"],
         {"org.netflix.cassandra": ["i4i"]},
