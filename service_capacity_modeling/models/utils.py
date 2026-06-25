@@ -3,6 +3,7 @@ from typing import Dict
 from typing import Iterable
 from typing import List
 from typing import Optional
+from typing import Sequence
 from typing import Tuple
 
 from service_capacity_modeling.interface import CapacityDesires
@@ -98,6 +99,38 @@ def reduce_by_family(
             regional_families[regional_type] = regional_count + 1
 
     return result
+
+
+def resolve_instance_family_allowlist(
+    model_name: str,
+    instance_families: Optional[Sequence[str]],
+    instance_families_by_model: Optional[Dict[str, Optional[Sequence[str]]]],
+) -> Optional[Sequence[str]]:
+    """Resolve the instance-family allowlist for one model in a composed plan.
+
+    ``instance_families`` is the request-wide filter. It applies to every model.
+    ``instance_families_by_model`` is an additive per-model filter. When both
+    inputs contain values for ``model_name``, the effective filter is their
+    ordered union.
+
+    Returns:
+        ``None`` when neither input provides candidates. Otherwise, a
+        de-duplicated allowlist with request-wide candidates first, followed by
+        new per-model candidates.
+    """
+    model_instance_families = (
+        instance_families_by_model.get(model_name)
+        if instance_families_by_model is not None
+        else None
+    )
+    return (
+        list(
+            dict.fromkeys(
+                [*(instance_families or ()), *(model_instance_families or ())]
+            )
+        )
+        or None
+    )
 
 
 # https://stackoverflow.com/questions/14267555/find-the-smallest-power-of-2-greater-than-or-equal-to-n-in-python

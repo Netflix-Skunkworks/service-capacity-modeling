@@ -56,6 +56,7 @@ from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.org import netflix
 from service_capacity_modeling.models.utils import compute_excuse_tags
 from service_capacity_modeling.models.utils import current_instance_name
+from service_capacity_modeling.models.utils import resolve_instance_family_allowlist
 from service_capacity_modeling.models.utils import reduce_by_family
 from service_capacity_modeling.stats import dist_for_interval
 from service_capacity_modeling.stats import interval_percentile
@@ -549,6 +550,7 @@ class CapacityPlanner:
         num_results: Optional[int] = None,
         num_regions: int = 3,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
+        instance_families_by_model: Optional[Dict[str, Optional[Sequence[str]]]] = None,
     ) -> Tuple[Sequence[CapacityPlan], Dict[int, Sequence[CapacityPlan]]]:
         if model_name not in self._models:
             raise ValueError(
@@ -585,6 +587,7 @@ class CapacityPlanner:
             drives,
             extra_model_arguments,
             instance_families,
+            instance_families_by_model,
             lifecycles,
             num_regions,
             num_results,
@@ -595,6 +598,7 @@ class CapacityPlanner:
             drives,
             extra_model_arguments,
             instance_families,
+            instance_families_by_model,
             lifecycles,
             num_regions,
             num_results,
@@ -610,6 +614,7 @@ class CapacityPlanner:
         drives: Optional[Sequence[str]],
         extra_model_arguments: Dict[str, Any],
         instance_families: Optional[Sequence[str]],
+        instance_families_by_model: Optional[Dict[str, Optional[Sequence[str]]]],
         lifecycles: Sequence[Lifecycle],
         num_regions: int,
         num_results: Optional[int],
@@ -619,10 +624,16 @@ class CapacityPlanner:
     ) -> Dict[int, Sequence[CapacityPlan]]:
         percentile_plans = {}
         for index, percentile in enumerate(sorted_percentiles):
-            percentile_plan = []
+            percentile_plan: List[Sequence[CapacityPlan]] = []
             for percentile_sub_model, percentile_sub_desire in model_percentile_desires[
                 index
             ].items():
+                percentile_sub_instance_families = resolve_instance_family_allowlist(
+                    percentile_sub_model,
+                    instance_families,
+                    instance_families_by_model,
+                )
+
                 percentile_sub_result = self._plan_certain(
                     model_name=percentile_sub_model,
                     region=region,
@@ -631,7 +642,7 @@ class CapacityPlanner:
                     num_regions=num_regions,
                     extra_model_arguments=extra_model_arguments,
                     lifecycles=lifecycles,
-                    instance_families=instance_families,
+                    instance_families=percentile_sub_instance_families,
                     drives=drives,
                 )
                 if percentile_sub_result.plans:
@@ -651,6 +662,7 @@ class CapacityPlanner:
         drives: Optional[Sequence[str]],
         extra_model_arguments: Dict[str, Any],
         instance_families: Optional[Sequence[str]],
+        instance_families_by_model: Optional[Dict[str, Optional[Sequence[str]]]],
         lifecycles: Sequence[Lifecycle],
         num_regions: int,
         num_results: Optional[int],
@@ -659,6 +671,12 @@ class CapacityPlanner:
     ) -> Sequence[CapacityPlan]:
         mean_plans = []
         for mean_sub_model, mean_sub_desire in model_mean_desires.items():
+            mean_sub_instance_families = resolve_instance_family_allowlist(
+                mean_sub_model,
+                instance_families,
+                instance_families_by_model,
+            )
+
             mean_sub_result = self._plan_certain(
                 model_name=mean_sub_model,
                 region=region,
@@ -667,7 +685,7 @@ class CapacityPlanner:
                 num_regions=num_regions,
                 extra_model_arguments=extra_model_arguments,
                 lifecycles=lifecycles,
-                instance_families=instance_families,
+                instance_families=mean_sub_instance_families,
                 drives=drives,
             )
             if mean_sub_result.plans:
@@ -691,6 +709,7 @@ class CapacityPlanner:
         extra_model_arguments: Optional[Dict[str, Any]] = None,
         max_results_per_family: int = 1,
         planner_arguments: Optional[PlannerArguments] = None,
+        instance_families_by_model: Optional[Dict[str, Optional[Sequence[str]]]] = None,
     ) -> Sequence[CapacityPlan]:
         return self.plan_certain_explained(
             model_name=model_name,
@@ -698,6 +717,7 @@ class CapacityPlanner:
             desires=desires,
             lifecycles=lifecycles,
             instance_families=instance_families,
+            instance_families_by_model=instance_families_by_model,
             drives=drives,
             num_results=num_results,
             num_regions=num_regions,
@@ -719,6 +739,7 @@ class CapacityPlanner:
         extra_model_arguments: Optional[Dict[str, Any]] = None,
         max_results_per_family: int = 1,
         planner_arguments: Optional[PlannerArguments] = None,
+        instance_families_by_model: Optional[Dict[str, Optional[Sequence[str]]]] = None,
     ) -> ExplainedPlans:
         """Like plan_certain() but returns excuses and family graph too."""
         if model_name not in self._models:
@@ -745,6 +766,12 @@ class CapacityPlanner:
             desires=desires,
             extra_model_arguments=extra_model_arguments,
         ):
+            sub_instance_families = resolve_instance_family_allowlist(
+                sub_model,
+                instance_families,
+                instance_families_by_model,
+            )
+
             sub_result = self._plan_certain(
                 model_name=sub_model,
                 region=region,
@@ -753,7 +780,7 @@ class CapacityPlanner:
                 num_regions=num_regions,
                 extra_model_arguments=extra_model_arguments,
                 lifecycles=lifecycles,
-                instance_families=instance_families,
+                instance_families=sub_instance_families,
                 drives=drives,
                 planner_arguments=pargs,
             )
@@ -1102,6 +1129,7 @@ class CapacityPlanner:
         explain: bool = False,
         max_results_per_family: int = 1,
         planner_arguments: Optional[PlannerArguments] = None,
+        instance_families_by_model: Optional[Dict[str, Optional[Sequence[str]]]] = None,
     ) -> UncertainCapacityPlan:
         extra_model_arguments = extra_model_arguments or {}
         pargs = planner_arguments or PlannerArguments(
@@ -1135,6 +1163,12 @@ class CapacityPlanner:
             desires=desires,
             extra_model_arguments=extra_model_arguments,
         ):
+            sub_instance_families = resolve_instance_family_allowlist(
+                sub_model,
+                instance_families,
+                instance_families_by_model,
+            )
+
             desires_by_model[sub_model] = sub_desires
             model_plans: List[Tuple[CapacityDesires, Sequence[CapacityPlan]]] = []
             model_excuses: List[Excuse] = []
@@ -1147,7 +1181,7 @@ class CapacityPlanner:
                     num_regions=num_regions,
                     extra_model_arguments=extra_model_arguments,
                     lifecycles=lifecycles,
-                    instance_families=instance_families,
+                    instance_families=sub_instance_families,
                     drives=drives,
                     planner_arguments=pargs,
                 )
@@ -1212,6 +1246,7 @@ class CapacityPlanner:
             extra_model_arguments=extra_model_arguments,
             num_regions=num_regions,
             instance_families=instance_families,
+            instance_families_by_model=instance_families_by_model,
         )
 
         result = UncertainCapacityPlan(
