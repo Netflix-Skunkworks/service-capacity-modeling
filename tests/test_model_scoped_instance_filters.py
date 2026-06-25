@@ -3,8 +3,8 @@ from typing import Any
 from typing import Sequence
 
 from service_capacity_modeling import capacity_planner
-from service_capacity_modeling.capacity_planner import _NO_MATCHING_INSTANCE_FAMILIES
 from service_capacity_modeling.capacity_planner import _CertainResult
+from service_capacity_modeling.capacity_planner import _instance_families_for_model
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import CapacityDesires
@@ -92,7 +92,7 @@ def test_plan_certain_forwards_model_scoped_instance_filters(monkeypatch):
     }
 
 
-def test_model_scoped_instance_filters_narrow_global_filters(monkeypatch):
+def test_model_scoped_instance_filters_union_with_global_filters(monkeypatch):
     calls = _record_plan_certain_calls(monkeypatch)
 
     planner.plan_certain_explained(
@@ -107,11 +107,37 @@ def test_model_scoped_instance_filters_narrow_global_filters(monkeypatch):
     assert _filters_by_model(calls) == {
         "org.netflix.key-value": ["m6id", "i4i"],
         "org.netflix.evcache": ["m6id", "i4i"],
-        "org.netflix.cassandra": ["i4i"],
+        "org.netflix.cassandra": ["m6id", "i4i", "i7i"],
     }
 
 
-def test_disjoint_model_scoped_and_global_filters_match_no_instances(monkeypatch):
+def test_instance_families_for_model_contract():
+    assert (
+        _instance_families_for_model(
+            "org.netflix.cassandra",
+            None,
+            None,
+        )
+        is None
+    )
+    assert _instance_families_for_model(
+        "org.netflix.cassandra",
+        ["m6id"],
+        {"org.netflix.cassandra": None},
+    ) == ["m6id"]
+    assert _instance_families_for_model(
+        "org.netflix.cassandra",
+        ["m6id", "i4i"],
+        {"org.netflix.cassandra": ["i4i", "i7i"]},
+    ) == ["m6id", "i4i", "i7i"]
+    assert _instance_families_for_model(
+        "org.netflix.cassandra",
+        ["m6id"],
+        {"org.netflix.cassandra": ["i4i"]},
+    ) == ["m6id", "i4i"]
+
+
+def test_model_scoped_instance_filters_add_to_disjoint_global_filters(monkeypatch):
     calls = _record_plan_certain_calls(monkeypatch)
 
     planner.plan_certain_explained(
@@ -126,7 +152,7 @@ def test_disjoint_model_scoped_and_global_filters_match_no_instances(monkeypatch
     assert _filters_by_model(calls) == {
         "org.netflix.key-value": ["m6id"],
         "org.netflix.evcache": ["m6id"],
-        "org.netflix.cassandra": _NO_MATCHING_INSTANCE_FAMILIES,
+        "org.netflix.cassandra": ["m6id", "i4i"],
     }
 
 
