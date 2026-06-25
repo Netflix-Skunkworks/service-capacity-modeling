@@ -101,15 +101,15 @@ def reduce_by_family(
     return result
 
 
-def resolve_instance_family_allowlist(
+def resolve_instance_filter_allowlist(
     model_name: str,
     instance_families: Optional[Sequence[str]],
-    instance_families_by_model: Optional[Dict[str, Optional[Sequence[str]]]],
+    instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]],
 ) -> Optional[Sequence[str]]:
-    """Resolve the instance-family allowlist for one model in a composed plan.
+    """Resolve instance filters for one model in a composed plan.
 
     ``instance_families`` is the request-wide filter. It applies to every model.
-    ``instance_families_by_model`` is an additive per-model filter. When both
+    ``instance_filters_by_model`` is an additive per-model filter. When both
     inputs contain values for ``model_name``, the effective filter is their
     ordered union.
 
@@ -118,16 +118,14 @@ def resolve_instance_family_allowlist(
         de-duplicated allowlist with request-wide candidates first, followed by
         new per-model candidates.
     """
-    model_instance_families = (
-        instance_families_by_model.get(model_name)
-        if instance_families_by_model is not None
+    model_instance_filters = (
+        instance_filters_by_model.get(model_name)
+        if instance_filters_by_model is not None
         else None
     )
     return (
         list(
-            dict.fromkeys(
-                [*(instance_families or ()), *(model_instance_families or ())]
-            )
+            dict.fromkeys([*(instance_families or ()), *(model_instance_filters or ())])
         )
         or None
     )

@@ -13,7 +13,7 @@ from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import QueryPattern
-from service_capacity_modeling.models.utils import resolve_instance_family_allowlist
+from service_capacity_modeling.models.utils import resolve_instance_filter_allowlist
 
 
 def _kv_desires() -> CapacityDesires:
@@ -64,7 +64,7 @@ def test_plan_certain_explained_uses_model_scoped_instance_filters(monkeypatch):
         region="us-east-1",
         desires=_kv_desires(),
         extra_model_arguments={"kv_force_evcache": True},
-        instance_families_by_model={"org.netflix.cassandra": ["i4i"]},
+        instance_filters_by_model={"org.netflix.cassandra": ["i4i"]},
     )
 
     assert _filters_by_model(calls) == {
@@ -82,7 +82,7 @@ def test_plan_certain_forwards_model_scoped_instance_filters(monkeypatch):
         region="us-east-1",
         desires=_kv_desires(),
         extra_model_arguments={"kv_force_evcache": True},
-        instance_families_by_model={"org.netflix.cassandra": ["i4i"]},
+        instance_filters_by_model={"org.netflix.cassandra": ["i4i"]},
     )
 
     assert _filters_by_model(calls) == {
@@ -101,7 +101,7 @@ def test_model_scoped_instance_filters_union_with_global_filters(monkeypatch):
         desires=_kv_desires(),
         extra_model_arguments={"kv_force_evcache": True},
         instance_families=["m6id", "i4i"],
-        instance_families_by_model={"org.netflix.cassandra": ["i4i", "i7i"]},
+        instance_filters_by_model={"org.netflix.cassandra": ["i4i", "i7i"]},
     )
 
     assert _filters_by_model(calls) == {
@@ -111,26 +111,26 @@ def test_model_scoped_instance_filters_union_with_global_filters(monkeypatch):
     }
 
 
-def test_resolve_instance_family_allowlist_combines_request_and_model_filters():
+def test_resolve_instance_filter_allowlist_combines_request_and_model_filters():
     assert (
-        resolve_instance_family_allowlist(
+        resolve_instance_filter_allowlist(
             "org.netflix.cassandra",
             None,
             None,
         )
         is None
     )
-    assert resolve_instance_family_allowlist(
+    assert resolve_instance_filter_allowlist(
         "org.netflix.cassandra",
         ["m6id"],
         {"org.netflix.cassandra": None},
     ) == ["m6id"]
-    assert resolve_instance_family_allowlist(
+    assert resolve_instance_filter_allowlist(
         "org.netflix.cassandra",
         ["m6id", "i4i"],
         {"org.netflix.cassandra": ["i4i", "i7i"]},
     ) == ["m6id", "i4i", "i7i"]
-    assert resolve_instance_family_allowlist(
+    assert resolve_instance_filter_allowlist(
         "org.netflix.cassandra",
         ["m6id"],
         {"org.netflix.cassandra": ["i4i"]},
@@ -146,7 +146,7 @@ def test_model_scoped_instance_filters_add_to_disjoint_global_filters(monkeypatc
         desires=_kv_desires(),
         extra_model_arguments={"kv_force_evcache": True},
         instance_families=["m6id"],
-        instance_families_by_model={"org.netflix.cassandra": ["i4i"]},
+        instance_filters_by_model={"org.netflix.cassandra": ["i4i"]},
     )
 
     assert _filters_by_model(calls) == {
@@ -165,7 +165,7 @@ def test_plan_percentiles_uses_model_scoped_instance_filters(monkeypatch):
         region="us-east-1",
         desires=_kv_desires(),
         extra_model_arguments={"kv_force_evcache": True},
-        instance_families_by_model={"org.netflix.cassandra": ["i4i"]},
+        instance_filters_by_model={"org.netflix.cassandra": ["i4i"]},
     )
 
     assert {
@@ -188,7 +188,7 @@ def test_uncertain_plan_uses_model_scoped_instance_filters(monkeypatch):
     monkeypatch.setattr(capacity_planner, "_regret", lambda **kwargs: [])
     monkeypatch.setattr(planner, "_plan_percentiles", fake_plan_percentiles)
 
-    instance_families_by_model = {"org.netflix.cassandra": ["i4i"]}
+    instance_filters_by_model = {"org.netflix.cassandra": ["i4i"]}
 
     planner.plan(
         model_name="org.netflix.key-value",
@@ -196,7 +196,7 @@ def test_uncertain_plan_uses_model_scoped_instance_filters(monkeypatch):
         desires=_kv_desires(),
         simulations=1,
         extra_model_arguments={"kv_force_evcache": True},
-        instance_families_by_model=instance_families_by_model,
+        instance_filters_by_model=instance_filters_by_model,
     )
 
     assert _filters_by_model(calls) == {
@@ -204,6 +204,4 @@ def test_uncertain_plan_uses_model_scoped_instance_filters(monkeypatch):
         "org.netflix.evcache": None,
         "org.netflix.cassandra": ["i4i"],
     }
-    assert (
-        percentile_calls[0]["instance_families_by_model"] is instance_families_by_model
-    )
+    assert percentile_calls[0]["instance_filters_by_model"] is instance_filters_by_model
