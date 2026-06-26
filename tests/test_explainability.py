@@ -7,16 +7,21 @@ Model integration tests live in tests/netflix/test_<model>_explainability.py.
 import pytest
 
 from service_capacity_modeling.explainability import (
+    count_sample_excuses,
+    deduplicate_excuses,
     FamilyEdge,
     FamilyGraph,
     FamilyTrait,
+    SampledExcuse,
     STATEFUL_DATASTORE_FAMILIES,
 )
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import (
     Bottleneck,
+    ExcuseSummary,
     Excuse,
     ExcuseTag,
+    SampleRef,
 )
 from service_capacity_modeling.models.utils import compute_excuse_tags
 
@@ -58,6 +63,118 @@ class TestExcuseModel:
         data = excuse.model_dump()
         assert "bottleneck" not in data
         assert data["instance"] == "r6a.xlarge"
+
+    def test_deduplicate_preserves_distinct_bottlenecks_and_tags(self):
+        excuses = [
+            Excuse(
+                instance="r6a.xlarge",
+                drive="gp3",
+                reason="too small",
+                bottleneck=Bottleneck.cpu,
+                tags=[ExcuseTag.same_family],
+            ),
+            Excuse(
+                instance="r6a.xlarge",
+                drive="gp3",
+                reason="too small",
+                bottleneck=Bottleneck.memory,
+                tags=[ExcuseTag.same_family],
+            ),
+            Excuse(
+                instance="r6a.xlarge",
+                drive="gp3",
+                reason="too small",
+                bottleneck=Bottleneck.cpu,
+                tags=[ExcuseTag.size_up],
+            ),
+        ]
+        deduped = deduplicate_excuses(excuses)
+        assert len(deduped) == 3
+
+    def test_count_excuses_merges_same_identity_but_drops_conflicting_context(self):
+        excuses = [
+            Excuse(
+                instance="r6a.xlarge",
+                drive="gp3",
+                reason="too small",
+                bottleneck=Bottleneck.cpu,
+                tags=[ExcuseTag.same_family],
+                context={"needed_cores": 12},
+            ),
+            Excuse(
+                instance="r6a.xlarge",
+                drive="gp3",
+                reason="too small",
+                bottleneck=Bottleneck.cpu,
+                tags=[ExcuseTag.same_family],
+                context={"needed_cores": 16},
+            ),
+            Excuse(
+                instance="r6a.xlarge",
+                drive="gp3",
+                reason="too small",
+                bottleneck=Bottleneck.cpu,
+                tags=[ExcuseTag.same_family],
+            ),
+        ]
+        counted = count_sample_excuses(
+            [
+                SampledExcuse(
+                    source_model="model-a",
+                    model_sample=SampleRef(sample_id="model-1", sample_label="first"),
+                    excuse=excuses[0],
+                ),
+                SampledExcuse(
+                    source_model="model-a",
+                    model_sample=SampleRef(sample_id="model-2", sample_label="second"),
+                    excuse=excuses[1],
+                ),
+                SampledExcuse(
+                    source_model="model-a",
+                    model_sample=SampleRef(sample_id="model-3", sample_label="third"),
+                    excuse=excuses[2],
+                ),
+            ]
+        )
+        assert len(counted) == 1
+        assert isinstance(counted[0], ExcuseSummary)
+        assert counted[0].source_model == "model-a"
+        assert counted[0].occurrence_count == 3
+        assert counted[0].sample_count == 3
+        assert counted[0].context == {}
+        assert [sample.sample_id for sample in counted[0].example_samples] == [
+            "model-1",
+            "model-2",
+            "model-3",
+        ]
+
+    def test_count_excuses_keeps_source_models_separate(self):
+        excuse = Excuse(
+            instance="r6a.xlarge",
+            drive="gp3",
+            reason="too small",
+            bottleneck=Bottleneck.cpu,
+        )
+        counted = count_sample_excuses(
+            [
+                SampledExcuse(
+                    source_model="model-a",
+                    model_sample=SampleRef(sample_id="model-a-1", sample_label="a"),
+                    excuse=excuse,
+                ),
+                SampledExcuse(
+                    source_model="model-b",
+                    model_sample=SampleRef(sample_id="model-b-1", sample_label="b"),
+                    excuse=excuse,
+                ),
+            ]
+        )
+
+        assert [summary.source_model for summary in counted] == ["model-a", "model-b"]
+        assert [summary.example_samples[0].sample_id for summary in counted] == [
+            "model-a-1",
+            "model-b-1",
+        ]
 
 
 class TestFamilyTrait:

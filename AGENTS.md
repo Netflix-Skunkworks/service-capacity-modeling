@@ -6,6 +6,54 @@
 - Keep feature, capture, snapshot, and test changes in separate PR layers when possible.
 - Reviewers should be able to explain each branch in one sentence.
 
+## Python Style Bias
+
+- Prefer dense, local Python over one-use abstractions. If a helper is only
+  called once and mainly names a small loop, a formatted error string, or a
+  straightforward model constructor, keep the code inline at the call site.
+- Extract a function when it is reused, creates a real planner/model boundary,
+  isolates expensive or subtle behavior, or turns a deeply nested block into a
+  readable operation. Do not extract only to make code look more layered.
+- Prefer the existing accumulator style: initialize `dict` and `list` values
+  near the loop, mutate them directly, and return the assembled object at the
+  end. Avoid building small private classes unless they hold state across
+  multiple methods or are part of a public return contract.
+- Prefer explicit loops when they make planner flow obvious. Use
+  comprehensions for compact filtering, projection, and `zip`/`merge_plan`
+  composition when the surrounding code already does so.
+- Keep comments for domain constraints and surprising behavior. Do not add
+  comments that only restate the loop or assignment.
+
+Existing style examples to follow narrowly:
+
+- `service_capacity_modeling/capacity_planner.py::_group_plans_by_percentile`
+  is a good example of keeping planner orchestration local: for each
+  percentile, it plans each sub-model, collects non-empty plans, and merges the
+  composed results where the data is assembled. Follow that visible
+  loop/collect/merge shape. Do not copy its weaker parts as precedent: avoid
+  loose `Any` typing, vague singular names for list values, and implicit empty
+  behavior when the new code needs a clearer failure mode.
+- `service_capacity_modeling/capacity_planner.py::plan_certain_explained`
+  accumulates `all_plans` and `all_excuses` in one pass, then builds the final
+  merged plans and family graph without extra one-use wrappers.
+- `service_capacity_modeling/models/common.py::cluster_infra_cost` keeps simple
+  filtering and cost accumulation local instead of introducing helper
+  functions for each branch.
+
+## Internal Tracking
+
+- Do not put Jira issue keys, Jira links, or internal ticket references in
+  `AGENTS.md`, `CLAUDE.md`, PR descriptions, or other repo guidance. Track that
+  context in Jira and local beads instead.
+
+Avoid patterns like:
+
+- `_format_error_for_one_call_site()` when the f-string is readable inline.
+- `_iter_foo()` when the caller immediately converts it to `list()` and the
+  loop is only used once.
+- `_build_bar()` when the function just passes fields into one model
+  constructor and does not hide meaningful domain behavior.
+
 ## Stack Shape
 
 - Keep stacked branches linear.
