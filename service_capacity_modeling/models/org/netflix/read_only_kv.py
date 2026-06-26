@@ -124,7 +124,7 @@ class NflxReadOnlyKVArguments(BaseModel):
 # doesn't work well for large datasets (which is all of OODM use cases). The working
 # set calculation assumes a relationship between drive latency and SLO that doesn't
 # hold for large datasets where the working set is a small fraction of total data.
-# For now, we rely on the 64 GiB minimum RAM filter on instances and don't use
+# For now, we rely on the 30 GiB minimum RAM filter on instances and don't use
 # memory as a sizing constraint. Future work: implement a better memory estimation
 # that considers actual access patterns and cache hit rates for large datasets.
 
@@ -162,7 +162,7 @@ def _estimate_read_only_kv_requirement(
     )
 
     # Memory: not used as sizing constraint (see TODO at top of file)
-    # Instances are filtered to require 64+ GiB RAM
+    # Instances are filtered to require 30+ GiB RAM
 
     # Network calculation (read-only, so only outbound read traffic)
     needed_network_mbps = simple_network_mbps(desires)
@@ -286,9 +286,9 @@ def _estimate_read_only_kv_cluster(
     """
 
     # Validate instance constraints
-    # Minimum 64 GiB RAM: ensures sufficient memory for RocksDB block cache
-    # and working set without needing memory as a sizing constraint
-    if instance.cpu < 2 or instance.ram_gib < 64:
+    # Minimum 30 GiB RAM: allows 32 GiB-class shapes in the hardware catalog
+    # while keeping enough memory for RocksDB block cache and working set.
+    if instance.cpu < 2 or instance.ram_gib < 30:
         return None
 
     # Only support instances with local disks
