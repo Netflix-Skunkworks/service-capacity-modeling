@@ -10,13 +10,30 @@ Note: Algorithm-specific tests live in test_partition_aware_algorithm.py.
 These tests focus on model integration and E2E behavior.
 """
 
+from decimal import Decimal
+
+import pytest
+
 from service_capacity_modeling.capacity_planner import planner
+from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.interface import RegionClusterCapacity
+from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.models import RANK_PENALTIES
+from service_capacity_modeling.models.org.netflix.read_only_kv import (
+    _compute_penalties,
+)
+from service_capacity_modeling.models.org.netflix.read_only_kv import (
+    NflxReadOnlyKVCapacityModel,
+)
 from tests.util import get_total_storage_gib
 from tests.util import has_local_storage
 
@@ -160,6 +177,46 @@ class TestReadOnlyKVBasicCapacityPlanning:
         assert total_network >= 640, (
             f"Expected >= 640 Mbps network for throughput workload, got {total_network}"
         )
+
+
+class TestReadOnlyKVLargeInstanceRegret:
+    """Test Cassandra-style large-instance regret for ReadOnlyKV."""
+
+    def test_large_instance_penalty_starts_after_4xlarge(self):
+        assert not _compute_penalties(shapes.instance("m6id.4xlarge"), 0.2)
+        assert _compute_penalties(shapes.instance("m6id.8xlarge"), 0.2) == {
+            "large_instance": 0.2
+        }
+        penalties = _compute_penalties(shapes.instance("m6id.16xlarge"), 0.2)
+        assert penalties["large_instance"] == pytest.approx(0.6)
+
+    def test_large_instance_penalty_can_be_disabled(self):
+        assert not _compute_penalties(shapes.instance("m6id.16xlarge"), 0)
+
+    def test_large_instance_regret_uses_regional_compute_cost(self):
+        instance = shapes.instance("m6id.8xlarge")
+        cluster = RegionClusterCapacity(
+            cluster_type="read-only-kv",
+            count=2,
+            instance=instance,
+            cluster_params={RANK_PENALTIES: {"large_instance": 0.2}},
+        )
+        proposed_plan = CapacityPlan(
+            requirements=Requirements(),
+            candidate_clusters=Clusters(
+                annual_costs={"read-only-kv": Decimal(str(cluster.annual_cost))},
+                regional=[cluster],
+            ),
+        )
+        optimal_plan = proposed_plan.model_copy(deep=True)
+
+        regrets = NflxReadOnlyKVCapacityModel.regret(
+            regret_params=CapacityRegretParameters(),
+            optimal_plan=optimal_plan,
+            proposed_plan=proposed_plan,
+        )
+
+        assert regrets["large_instance"] == 0.2 * cluster.annual_cost
 
 
 class TestReadOnlyKVStorageTypes:

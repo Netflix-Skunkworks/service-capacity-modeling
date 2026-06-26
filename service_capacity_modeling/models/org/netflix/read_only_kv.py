@@ -29,6 +29,7 @@ from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
@@ -38,6 +39,7 @@ from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
+from service_capacity_modeling.interface import normalized_aws_size
 from service_capacity_modeling.interface import Platform
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionClusterCapacity
@@ -46,6 +48,7 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
+from service_capacity_modeling.models import RANK_PENALTIES
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
@@ -59,6 +62,19 @@ from service_capacity_modeling.models.org.netflix.partition_aware_algorithm impo
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _compute_penalties(
+    instance: Instance,
+    large_instance_regret: float,
+) -> Dict[str, float]:
+    penalties: Dict[str, float] = {}
+
+    instance_size = float(normalized_aws_size(instance.name))
+    if large_instance_regret > 0 and instance_size > 4:
+        penalties["large_instance"] = large_instance_regret * (instance_size - 4) / 4
+
+    return penalties
 
 
 class NflxReadOnlyKVArguments(BaseModel):
@@ -95,6 +111,12 @@ class NflxReadOnlyKVArguments(BaseModel):
         description="Reserved memory for OS, bloom filters, index blocks, "
         "and other processes (GiB).",
         ge=0,
+    )
+    large_instance_regret: float = Field(
+        default=0.2,
+        description="Graduated cost penalty for instance sizes above 4xlarge. "
+        "Adds penalty * max(0, (normalized_size - 4) / 4) * cost to the "
+        "effective sort cost. Set to 0 to disable.",
     )
 
 
@@ -233,6 +255,13 @@ def _compute_read_only_kv_regional_cluster(
     }
     upsert_params(cluster, params)
 
+    penalties = _compute_penalties(
+        instance=instance,
+        large_instance_regret=args.large_instance_regret,
+    )
+    if penalties:
+        upsert_params(cluster, {RANK_PENALTIES: penalties})
+
     return cluster
 
 
@@ -304,10 +333,14 @@ def _estimate_read_only_kv_cluster(
         regional=[cluster],
         services=[],
     )
+    penalty_ratio = sum(
+        cluster.cluster_params.get(RANK_PENALTIES, {}).values(),
+    )
 
     return CapacityPlan(
         requirements=Requirements(regional=[requirement]),
         candidate_clusters=clusters,
+        rank=clusters.total_annual_cost * (1 + penalty_ratio),
     )
 
 
@@ -323,6 +356,27 @@ class NflxReadOnlyKVCapacityModel(CapacityModel, CostAwareModel):
 
     service_name = "read-only-kv"
     cluster_type = "read-only-kv"
+
+    @staticmethod
+    def regret(
+        regret_params: CapacityRegretParameters,
+        optimal_plan: CapacityPlan,
+        proposed_plan: CapacityPlan,
+    ) -> Dict[str, float]:
+        regrets = CapacityModel.regret(regret_params, optimal_plan, proposed_plan)
+
+        if proposed_plan.candidate_clusters.regional:
+            params = proposed_plan.candidate_clusters.regional[0].cluster_params
+            penalties = params.get(RANK_PENALTIES, {})
+            if "large_instance" in penalties:
+                compute_cost = float(
+                    sum(
+                        c.annual_cost for c in proposed_plan.candidate_clusters.regional
+                    )
+                )
+                regrets["large_instance"] = penalties["large_instance"] * compute_cost
+
+        return regrets
 
     @staticmethod
     def service_costs(
