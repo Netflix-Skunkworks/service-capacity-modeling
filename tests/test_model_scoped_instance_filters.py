@@ -2,7 +2,6 @@
 from typing import Any
 from typing import Sequence
 
-from service_capacity_modeling import capacity_planner
 from service_capacity_modeling.capacity_planner import _CertainResult
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import AccessConsistency
@@ -185,7 +184,6 @@ def test_uncertain_plan_uses_model_scoped_instance_filters(monkeypatch):
         percentile_calls.append(kwargs)
         return [], {}
 
-    monkeypatch.setattr(capacity_planner, "_regret", lambda **kwargs: [])
     monkeypatch.setattr(planner, "_plan_percentiles", fake_plan_percentiles)
 
     instance_filters_by_model = {"org.netflix.cassandra": ["i4i"]}

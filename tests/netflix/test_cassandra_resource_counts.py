@@ -44,7 +44,12 @@ def test_cluster_size_excuse_has_resource_bottleneck_details():
         extra_model_arguments={"required_cluster_size": 2, "require_local_disks": True},
         num_results=5,
     )
-    excuses = [e for e in explained.excuses if "resource bottleneck:" in e.reason]
+    excuses = [
+        e
+        for es in explained.excuses_by_model.values()
+        for e in es
+        if "resource bottleneck:" in e.reason
+    ]
     assert excuses, "Expected cluster_size excuses with count bottleneck details"
     for e in excuses:
         counts = e.context["required_nodes_by_type"]

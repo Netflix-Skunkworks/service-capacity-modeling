@@ -1,6 +1,7 @@
 import numpy as np
 
 from service_capacity_modeling.capacity_planner import model_desires
+from service_capacity_modeling.capacity_planner import model_samples
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
@@ -157,3 +158,75 @@ def test_model_desires():
         samples.add((rps.mid, wps.mid, rl.mid))
 
     assert len(samples) == 10
+
+
+def test_model_samples_are_stable_across_reruns():
+    sample_run_1 = list(model_samples(desires, 5))
+    sample_run_2 = list(model_samples(desires, 5))
+
+    assert [sample.sample_id for sample, _ in sample_run_1] == [
+        sample.sample_id for sample, _ in sample_run_2
+    ]
+    assert [sample.sample_label for sample, _ in sample_run_1] == [
+        sample.sample_label for sample, _ in sample_run_2
+    ]
+
+
+def test_model_samples_are_unique_when_samples_are_identical():
+    certain_desires = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(1_000),
+            estimated_write_per_second=certain_int(500),
+            estimated_mean_read_latency_ms=certain_float(1),
+            estimated_mean_write_latency_ms=certain_float(1),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=certain_int(100),
+        ),
+    )
+    samples = [sample for sample, _ in model_samples(certain_desires, 5)]
+
+    assert len({sample.sample_id for sample in samples}) == len(samples)
+
+
+def test_model_samples_change_when_sampled_desires_change():
+    sample_a = next(
+        model_samples(
+            CapacityDesires(
+                service_tier=1,
+                query_pattern=QueryPattern(
+                    estimated_read_per_second=certain_int(1_000),
+                    estimated_write_per_second=certain_int(500),
+                    estimated_mean_read_latency_ms=certain_float(1),
+                    estimated_mean_write_latency_ms=certain_float(1),
+                ),
+                data_shape=DataShape(
+                    estimated_state_size_gib=certain_int(100),
+                ),
+            ),
+            1,
+        )
+    )[0]
+    sample_b = next(
+        model_samples(
+            CapacityDesires(
+                service_tier=1,
+                query_pattern=QueryPattern(
+                    estimated_read_per_second=certain_int(2_000),
+                    estimated_write_per_second=certain_int(500),
+                    estimated_mean_read_latency_ms=certain_float(1),
+                    estimated_mean_write_latency_ms=certain_float(1),
+                ),
+                data_shape=DataShape(
+                    estimated_state_size_gib=certain_int(100),
+                ),
+            ),
+            1,
+        )
+    )[0]
+
+    assert sample_a.sample_id != sample_b.sample_id
+    assert "reads=" in sample_a.sample_label
+    assert "writes=" in sample_a.sample_label
+    assert "state=" in sample_a.sample_label
