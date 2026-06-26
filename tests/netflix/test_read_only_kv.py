@@ -10,13 +10,34 @@ Note: Algorithm-specific tests live in test_partition_aware_algorithm.py.
 These tests focus on model integration and E2E behavior.
 """
 
+from decimal import Decimal
+
+import pytest
+
+from service_capacity_modeling.capacity_planner import PlannerArguments
 from service_capacity_modeling.capacity_planner import planner
+from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.interface import RegionClusterCapacity
+from service_capacity_modeling.interface import Requirements
+from service_capacity_modeling.models import RANK_PENALTIES
+from service_capacity_modeling.models.org.netflix.read_only_kv import (
+    _compute_penalties,
+)
+from service_capacity_modeling.models.org.netflix.read_only_kv import (
+    NflxReadOnlyKVCapacityModel,
+)
 from tests.util import get_total_storage_gib
 from tests.util import has_local_storage
 
@@ -140,8 +161,8 @@ class TestReadOnlyKVBasicCapacityPlanning:
 
         # Memory should be sufficient for RocksDB block cache
         total_memory = result.count * result.instance.ram_gib
-        # Instance minimum is 64GB, so minimum cluster memory is 64GB * 2 nodes = 128GB
-        assert total_memory >= 128, f"Expected >= 128 GiB memory, got {total_memory}"
+        # Instance minimum is 32GB, so minimum cluster memory is 32GB * 2 nodes = 64GB
+        assert total_memory >= 64, f"Expected >= 64 GiB memory, got {total_memory}"
 
     def test_throughput_workload(self):
         """Test ReadOnlyKV with throughput-oriented workload (scans)."""
@@ -160,6 +181,108 @@ class TestReadOnlyKVBasicCapacityPlanning:
         assert total_network >= 640, (
             f"Expected >= 640 Mbps network for throughput workload, got {total_network}"
         )
+
+
+class TestReadOnlyKVLargeInstanceRegret:
+    """Test Cassandra-style large-instance regret for ReadOnlyKV."""
+
+    @pytest.mark.parametrize(
+        "read_qps,large_instance_regret,expected_instance,expected_nodes",
+        [
+            (12_500, 0, "m6id.8xlarge", 2),
+            (12_500, 0.2, "m6id.4xlarge", 4),
+            (25_000, 0, "m6id.12xlarge", 2),
+            (25_000, 0.2, "m6id.4xlarge", 6),
+            (50_000, 0, "m6id.4xlarge", 11),
+            (50_000, 0.2, "m6id.4xlarge", 11),
+        ],
+    )
+    def test_m6id_baseline_shows_large_instance_regret_effect(
+        self,
+        read_qps,
+        large_instance_regret,
+        expected_instance,
+        expected_nodes,
+    ):
+        baseline_desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                access_pattern=AccessPattern.latency,
+                estimated_read_per_second=certain_int(read_qps),
+                estimated_write_per_second=certain_int(0),
+                estimated_mean_read_latency_ms=certain_float(2.0),
+                estimated_mean_write_latency_ms=certain_float(0),
+                estimated_mean_read_size_bytes=certain_int(2048),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_float(581_680_552_071 / 1024**3),
+            ),
+            buffers=Buffers(
+                desired={
+                    "compute": Buffer(
+                        ratio=2.5,
+                        components=[BufferComponent.compute],
+                    ),
+                },
+            ),
+        )
+
+        cap_plan = planner.plan_certain(
+            model_name="org.netflix.read-only-kv",
+            region="us-east-1",
+            desires=baseline_desires,
+            extra_model_arguments={
+                "total_num_partitions": 32,
+                "large_instance_regret": large_instance_regret,
+            },
+            instance_families=["m6id"],
+            planner_arguments=PlannerArguments(max_results_per_family=20),
+        )[0]
+
+        result = cap_plan.candidate_clusters.regional[0]
+        params = result.cluster_params
+
+        assert result.instance.name == expected_instance
+        assert result.count == expected_nodes
+        assert params["read-only-kv.total_num_partitions"] == 32
+        assert params["read-only-kv.replica_count"] == expected_nodes
+        assert params["read-only-kv.partitions_per_node"] > 0
+
+    def test_large_instance_penalty_starts_after_4xlarge(self):
+        assert not _compute_penalties(shapes.instance("m6id.4xlarge"), 0.2)
+        assert _compute_penalties(shapes.instance("m6id.8xlarge"), 0.2) == {
+            "large_instance": 0.2
+        }
+        penalties = _compute_penalties(shapes.instance("m6id.16xlarge"), 0.2)
+        assert penalties["large_instance"] == pytest.approx(0.6)
+
+    def test_large_instance_penalty_can_be_disabled(self):
+        assert not _compute_penalties(shapes.instance("m6id.16xlarge"), 0)
+
+    def test_large_instance_regret_uses_regional_compute_cost(self):
+        instance = shapes.instance("m6id.8xlarge")
+        cluster = RegionClusterCapacity(
+            cluster_type="read-only-kv",
+            count=2,
+            instance=instance,
+            cluster_params={RANK_PENALTIES: {"large_instance": 0.2}},
+        )
+        proposed_plan = CapacityPlan(
+            requirements=Requirements(),
+            candidate_clusters=Clusters(
+                annual_costs={"read-only-kv": Decimal(str(cluster.annual_cost))},
+                regional=[cluster],
+            ),
+        )
+        optimal_plan = proposed_plan.model_copy(deep=True)
+
+        regrets = NflxReadOnlyKVCapacityModel.regret(
+            regret_params=CapacityRegretParameters(),
+            optimal_plan=optimal_plan,
+            proposed_plan=proposed_plan,
+        )
+
+        assert regrets["large_instance"] == 0.2 * cluster.annual_cost
 
 
 class TestReadOnlyKVStorageTypes:
@@ -466,7 +589,7 @@ class TestReadOnlyKVMultiplePlans:
             )
 
     def test_plans_scale_with_data_size(self):
-        """Verify larger datasets result in more total storage."""
+        """Verify larger datasets require more partition placement capacity."""
         small_plans = planner.plan_certain(
             model_name="org.netflix.read-only-kv",
             region="us-east-1",
@@ -496,13 +619,14 @@ class TestReadOnlyKVMultiplePlans:
         assert "read-only-kv.partitions_per_node" in large_result.cluster_params
         assert "read-only-kv.replica_count" in large_result.cluster_params
 
-        # Large dataset should have more total storage
         small_storage = get_total_storage_gib(small_result)
         large_storage = get_total_storage_gib(large_result)
+        assert small_storage >= 50
+        assert large_storage >= 1000
 
-        assert large_storage >= small_storage, (
-            f"Large dataset ({large_storage} GiB) should have >= "
-            f"small dataset ({small_storage} GiB) storage"
+        assert (
+            large_result.cluster_params["read-only-kv.nodes_for_one_copy"]
+            > small_result.cluster_params["read-only-kv.nodes_for_one_copy"]
         )
 
 

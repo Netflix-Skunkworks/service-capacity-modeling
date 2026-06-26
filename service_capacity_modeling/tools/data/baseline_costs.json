@@ -1261,15 +1261,15 @@
   },
   {
     "annual_costs": {
-      "read-only-kv.regional-clusters": 449867.0
+      "read-only-kv.regional-clusters": 149967.0
     },
     "clusters": [
       {
-        "annual_cost": 449867.0,
+        "annual_cost": 149967.0,
         "cluster_params": {
-          "effective_disk_per_node_gib": 2355.2,
+          "effective_disk_per_node_gib": 2328,
           "read-only-kv.min_replica_count": 4,
-          "read-only-kv.nodes_for_cpu": 5,
+          "read-only-kv.nodes_for_cpu": 15,
           "read-only-kv.nodes_for_one_copy": 25,
           "read-only-kv.partitions_per_node": 21,
           "read-only-kv.replica_count": 4,
@@ -1278,69 +1278,69 @@
         "cluster_type": "read-only-kv",
         "count": 100,
         "deployment": "regional",
-        "instance": "i3en.3xlarge"
+        "instance": "i3en.xlarge"
       }
     ],
     "model": "org.netflix.read-only-kv",
     "region": "us-east-1",
     "scenario": "read_only_kv_large",
     "service_tier": 1,
-    "total_annual_cost": 449867.0
+    "total_annual_cost": 149967.0
   },
   {
     "annual_costs": {
-      "read-only-kv.regional-clusters": 14525.01
+      "read-only-kv.regional-clusters": 14523.96
     },
     "clusters": [
       {
-        "annual_cost": 14525.01,
+        "annual_cost": 14523.96,
         "cluster_params": {
-          "effective_disk_per_node_gib": 2355.2,
+          "effective_disk_per_node_gib": 873,
           "read-only-kv.min_replica_count": 3,
-          "read-only-kv.nodes_for_cpu": 3,
-          "read-only-kv.nodes_for_one_copy": 1,
-          "read-only-kv.partitions_per_node": 11,
-          "read-only-kv.replica_count": 3,
+          "read-only-kv.nodes_for_cpu": 12,
+          "read-only-kv.nodes_for_one_copy": 2,
+          "read-only-kv.partitions_per_node": 4,
+          "read-only-kv.replica_count": 6,
           "read-only-kv.total_num_partitions": 8
         },
         "cluster_type": "read-only-kv",
-        "count": 3,
+        "count": 12,
         "deployment": "regional",
-        "instance": "i4i.4xlarge"
+        "instance": "i4i.xlarge"
       }
     ],
     "model": "org.netflix.read-only-kv",
     "region": "us-east-1",
     "scenario": "read_only_kv_medium",
     "service_tier": 1,
-    "total_annual_cost": 14525.01
+    "total_annual_cost": 14523.96
   },
   {
     "annual_costs": {
-      "read-only-kv.regional-clusters": 15177.32
+      "read-only-kv.regional-clusters": 7816.65
     },
     "clusters": [
       {
-        "annual_cost": 15177.32,
+        "annual_cost": 7816.65,
         "cluster_params": {
-          "effective_disk_per_node_gib": 559,
+          "effective_disk_per_node_gib": 441,
           "read-only-kv.min_replica_count": 4,
-          "read-only-kv.nodes_for_cpu": 4,
+          "read-only-kv.nodes_for_cpu": 5,
           "read-only-kv.nodes_for_one_copy": 1,
-          "read-only-kv.partitions_per_node": 129,
-          "read-only-kv.replica_count": 4,
+          "read-only-kv.partitions_per_node": 102,
+          "read-only-kv.replica_count": 5,
           "read-only-kv.total_num_partitions": 16
         },
         "cluster_type": "read-only-kv",
-        "count": 4,
+        "count": 5,
         "deployment": "regional",
-        "instance": "r5d.4xlarge"
+        "instance": "m6id.2xlarge"
       }
     ],
     "model": "org.netflix.read-only-kv",
     "region": "us-east-1",
     "scenario": "read_only_kv_small",
     "service_tier": 1,
-    "total_annual_cost": 15177.32
+    "total_annual_cost": 7816.65
   }
 ]
