@@ -439,6 +439,7 @@ def network_services(
     # other than us as well.
     num_zones = max(copies_per_region - 1, 0)
     num_regions = max(context.num_regions - 1, 0)
+    total_regions = max(context.num_regions, 1)
 
     # have bytes and / second
     size = desires.query_pattern.estimated_mean_write_size_bytes.mid
@@ -451,10 +452,14 @@ def network_services(
     # inter region. This is the number of regions minus 1
     inter_txfer = context.services.get("net.inter.region", None)
     if inter_txfer:
+        # Return each region's share so summing N regional plans gives the
+        # fleet total: inter = base * (N - 1) / N, intra = base * zones.
         result.append(
             ServiceCapacity(
                 service_type=f"{service_type}.net.inter.region",
-                annual_cost=(inter_txfer.annual_cost_gib(txfer_gib) * num_regions),
+                annual_cost=(
+                    inter_txfer.annual_cost_gib(txfer_gib) * num_regions / total_regions
+                ),
                 service_params={"txfer_gib": txfer_gib, "num_regions": num_regions},
             )
         )
@@ -469,6 +474,7 @@ def network_services(
                     intra_txfer.annual_cost_gib(txfer_gib)
                     * num_zones
                     * context.num_regions
+                    / total_regions
                 ),
                 service_params={
                     "txfer_gib": txfer_gib,
