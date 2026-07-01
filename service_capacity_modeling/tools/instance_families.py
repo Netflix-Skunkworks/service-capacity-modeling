@@ -225,6 +225,15 @@ INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
         "cpu_turbo_single_ghz": 3.9,
         "cpu_turbo_all_ghz": 3.9,
     },
+    # m8id = m8i + local NVMe: same Granite Rapids CPU (GRANITE_RAPIDS_IPC, 3.9
+    # GHz), plus the 8th-gen-ssd ephemeral io-latency curve measured via fio.
+    "m8id": {
+        "iops_per_gib": None,
+        "io_latency_curve": "8th-gen-ssd",
+        "cpu_ipc_scale": GRANITE_RAPIDS_IPC,
+        "cpu_turbo_single_ghz": 3.9,
+        "cpu_turbo_all_ghz": 3.9,
+    },
     # "mac2-m2pro": {
     #     'iops_per_gib': None,
     #     'io_latency_curve': 'ssd',
