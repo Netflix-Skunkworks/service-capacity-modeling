@@ -78,10 +78,43 @@ logger = logging.getLogger(__name__)
 
 BACKGROUND_BUFFER = "background"
 EBS_HOTTER = "EBS_HOTTER"
+CASSANDRA_DISK_UTILIZATION_LIMIT = "CASSANDRA_DISK_UTILIZATION_LIMIT"
 CRITICAL_TIERS: Set[int] = {0, 1}
 # cluster size aka nodes per ASG
 CRITICAL_TIER_MIN_CLUSTER_SIZE = 2
 EBS_HOTTER_BUFFER_RATIO = 0.5
+CASSANDRA_MAX_DISK_UTILIZATION = 0.55
+
+
+def _with_disk_utilization_buffer(
+    desires: CapacityDesires,
+    max_disk_utilization: float,
+) -> CapacityDesires:
+    """Add only the disk buffer needed to keep Cassandra below the utilization cap.
+
+    The default target leaves margin below the previous cap. Callers may make
+    this stricter but not looser.
+    """
+    capped_desires = desires.model_copy(deep=True)
+    target_disk_buffer_ratio = 1 / max_disk_utilization
+    existing_disk_buffer = buffer_for_components(
+        buffers=desires.buffers,
+        components=[BufferComponent.disk],
+    )
+    disk_utilization_ratio = (
+        target_disk_buffer_ratio
+        if not existing_disk_buffer.sources
+        else max(1.0, target_disk_buffer_ratio / existing_disk_buffer.ratio)
+    )
+    disk_utilization_buffer = Buffer(
+        ratio=disk_utilization_ratio,
+        components=[BufferComponent.disk],
+    )
+    capped_desires.buffers.desired = {
+        **capped_desires.buffers.desired,
+        CASSANDRA_DISK_UTILIZATION_LIMIT: disk_utilization_buffer,
+    }
+    return capped_desires
 
 
 def _with_ebs_hotter_buffer(desires: CapacityDesires) -> CapacityDesires:
@@ -621,6 +654,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     different_family_regret: float = 0.10,
     max_page_cache_gib: float = DEFAULT_MAX_PAGE_CACHE_GIB,
     backup_retention_days: Optional[float] = None,
+    max_disk_utilization: float = CASSANDRA_MAX_DISK_UTILIZATION,
 ) -> Union[CapacityPlan, Excuse, None]:
     drive_name = drive.name
 
@@ -715,6 +749,10 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
 
     is_ebs = instance.drive is None
     capacity_desires = _with_ebs_hotter_buffer(desires) if is_ebs else desires
+    capacity_desires = _with_disk_utilization_buffer(
+        capacity_desires,
+        max_disk_utilization,
+    )
     requirement_estimate = _estimate_cassandra_requirement(
         instance=instance,
         desires=capacity_desires,
@@ -1191,6 +1229,14 @@ class NflxCassandraArguments(BaseModel):
         "recommend a smaller attached volume when requirements shrink. Defaults "
         "false to preserve the current EBS per-node disk floor.",
     )
+    max_disk_utilization: float = Field(
+        default=CASSANDRA_MAX_DISK_UTILIZATION,
+        gt=0,
+        le=CASSANDRA_MAX_DISK_UTILIZATION,
+        description="Maximum planned disk utilization for provisioned Cassandra "
+        f"clusters. Defaults to {CASSANDRA_MAX_DISK_UTILIZATION:.0%}. "
+        "This can only be made stricter per workload.",
+    )
 
     @model_validator(mode="after")
     def _check_storage_buffer_bounds(self) -> "NflxCassandraArguments":
@@ -1414,6 +1460,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             different_family_regret=args.different_family_regret,
             max_page_cache_gib=args.max_page_cache_gib,
             backup_retention_days=args.backup_retention_days,
+            max_disk_utilization=args.max_disk_utilization,
         )
 
         return result
