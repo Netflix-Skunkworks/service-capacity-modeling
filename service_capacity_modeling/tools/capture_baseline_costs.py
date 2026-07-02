@@ -20,6 +20,7 @@ Usage:
 import json
 import math
 import os
+from copy import deepcopy
 from dataclasses import dataclass
 from difflib import unified_diff
 from itertools import islice
@@ -49,7 +50,7 @@ from service_capacity_modeling.interface import (
 
 BASELINE_UNCERTAIN_SIMULATIONS = 16
 BASELINE_UNCERTAIN_NUM_RESULTS = 3
-BASELINE_UNCERTAIN_SNAPSHOT_FORMAT = "seeded-scipy-cost-preserve-v1"
+BASELINE_UNCERTAIN_SNAPSHOT_FORMAT = "seeded-scipy-cost-preserve-v2"
 BASELINE_UNCERTAIN_COST_REL_TOLERANCE = 0.01
 BASELINE_UNCERTAIN_COST_ABS_TOLERANCE = 1.0
 COST_KEYS = frozenset(("annual_cost", "total_annual_cost", "instance_cost"))
@@ -57,9 +58,11 @@ BASELINE_UNCERTAIN_SNAPSHOT_NOTE = (
     "Uses the planner's seeded SciPy uncertainty sampling. When regenerating "
     "an existing snapshot, cost values are serialized to cents and values "
     "within 1% or $1 are preserved because scipy.optimize distribution fitting "
-    "can produce output drift across SciPy releases and CPU/libm builds. The "
-    "test environments pin the supported SciPy range; widen it only with an "
-    "intentional baseline refresh. Set "
+    "can produce output drift across SciPy releases and CPU/libm builds. "
+    "Least-regret sampled plans with the same recommendation shape are also "
+    "preserved, because the representative sampled desire can drift while the "
+    "recommended topology does not. The test environments pin the supported "
+    "SciPy range; widen it only with an intentional baseline refresh. Set "
     "SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
 )
 
@@ -68,6 +71,7 @@ BASELINE_UNCERTAIN_SNAPSHOT_NOTE = (
 class CostPreservationStats:
     preserved: int = 0
     exceeded: int = 0
+    least_regret_plans_preserved: int = 0
     max_abs_delta: float = 0.0
     max_rel_delta: float = 0.0
     max_delta_path: str = ""
@@ -186,6 +190,64 @@ def _load_existing_uncertain_results(path: Path) -> dict[str, dict[str, Any]]:
     }
 
 
+def _cluster_recommendation_shape(cluster: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "attached_drives": cluster.get("attached_drives", []),
+        "cluster_type": cluster.get("cluster_type"),
+        "count": cluster.get("count"),
+        "deployment": cluster.get("deployment"),
+        "instance": cluster.get("instance"),
+    }
+
+
+def _candidate_recommendation_shape(candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "annual_cost_keys": sorted(candidate.get("annual_costs", {})),
+        "clusters": [
+            _cluster_recommendation_shape(cluster)
+            for cluster in candidate.get("clusters", [])
+        ],
+    }
+
+
+def _preserve_existing_least_regret_shapes(
+    actual: dict[str, Any],
+    existing: dict[str, Any],
+    stats: CostPreservationStats,
+) -> dict[str, Any]:
+    actual_plans = actual.get("least_regret")
+    existing_plans = existing.get("least_regret")
+    if (
+        not isinstance(actual_plans, list)
+        or not isinstance(existing_plans, list)
+        or len(actual_plans) != len(existing_plans)
+    ):
+        return actual
+
+    stabilized_plans = []
+    stabilized = False
+    for actual_plan, existing_plan in zip(actual_plans, existing_plans):
+        if (
+            isinstance(actual_plan, dict)
+            and isinstance(existing_plan, dict)
+            and actual_plan != existing_plan
+            and _candidate_recommendation_shape(actual_plan)
+            == _candidate_recommendation_shape(existing_plan)
+        ):
+            stabilized_plans.append(deepcopy(existing_plan))
+            stats.least_regret_plans_preserved += 1
+            stabilized = True
+        else:
+            stabilized_plans.append(actual_plan)
+
+    if not stabilized:
+        return actual
+
+    result = dict(actual)
+    result["least_regret"] = stabilized_plans
+    return result
+
+
 def _stabilize_uncertain_results(
     actual_results: list[dict[str, Any]],
     existing_results: dict[str, dict[str, Any]],
@@ -193,15 +255,20 @@ def _stabilize_uncertain_results(
 ) -> list[dict[str, Any]]:
     if not existing_results:
         return actual_results
-    return [
-        _preserve_existing_costs(
-            result,
-            existing_results.get(result["scenario"], {}),
-            stats,
-            f"$.{result['scenario']}",
+
+    stable_results = []
+    for result in actual_results:
+        existing_result = existing_results.get(result["scenario"], {})
+        result = _preserve_existing_least_regret_shapes(result, existing_result, stats)
+        stable_results.append(
+            _preserve_existing_costs(
+                result,
+                existing_result,
+                stats,
+                f"$.{result['scenario']}",
+            )
         )
-        for result in actual_results
-    ]
+    return stable_results
 
 
 def _print_text_diff_preview(old_text: str, new_text: str, path: Path) -> None:
@@ -234,8 +301,18 @@ def _write_json_snapshot(path: Path, data: Any) -> bool:
 
 
 def _print_cost_preservation_summary(stats: CostPreservationStats) -> None:
-    if stats.preserved == 0 and stats.exceeded == 0:
+    if (
+        stats.preserved == 0
+        and stats.exceeded == 0
+        and stats.least_regret_plans_preserved == 0
+    ):
         return
+    if stats.least_regret_plans_preserved:
+        print(
+            "Uncertain least-regret preservation: "
+            f"preserved {stats.least_regret_plans_preserved} sampled plan(s) "
+            "with unchanged recommendation shape."
+        )
     print(
         "Uncertain cost preservation: "
         f"preserved {stats.preserved} cost value(s), "
@@ -965,8 +1042,9 @@ if __name__ == "__main__":
         "\nCapturing uncertain baselines with seeded SciPy sampling. "
         "Costs are serialized to cents; existing snapshot costs within 1% "
         "or $1 are preserved while writing to avoid platform-specific noise "
-        "from scipy.optimize distribution fitting. The tested SciPy range is "
-        "pinned to avoid optimizer-version churn. Set "
+        "from scipy.optimize distribution fitting. Least-regret sampled plans "
+        "with unchanged recommendation shape are preserved for the same reason. "
+        "The tested SciPy range is pinned to avoid optimizer-version churn. Set "
         "SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
     )
     for scenario_name, scenario in UNCERTAIN_SCENARIOS.items():

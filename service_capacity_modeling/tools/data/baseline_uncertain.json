@@ -3,9 +3,9 @@
     "least_regret": [
       {
         "annual_costs": {
-          "cassandra.backup.s3-standard": 405481.92,
-          "cassandra.net.inter.region": 1190853.66,
-          "cassandra.net.intra.region": 3572560.98,
+          "cassandra.backup.s3-standard": 267749.54,
+          "cassandra.net.inter.region": 215816.12,
+          "cassandra.net.intra.region": 647448.35,
           "cassandra.zonal-clusters": 1457600.64
         },
         "clusters": [
@@ -31,7 +31,7 @@
                 "cpu": 50,
                 "disk_capacity": 63,
                 "disk_iops": 0,
-                "memory": 5,
+                "memory": 3,
                 "min_count": 64,
                 "network": 3
               },
@@ -64,7 +64,7 @@
                 "cpu": 50,
                 "disk_capacity": 63,
                 "disk_iops": 0,
-                "memory": 5,
+                "memory": 3,
                 "min_count": 64,
                 "network": 3
               },
@@ -97,7 +97,7 @@
                 "cpu": 50,
                 "disk_capacity": 63,
                 "disk_iops": 0,
-                "memory": 5,
+                "memory": 3,
                 "min_count": 64,
                 "network": 3
               },
@@ -109,15 +109,15 @@
             "instance": "m7a.2xlarge"
           }
         ],
-        "total_annual_cost": 6626496.93
+        "total_annual_cost": 2588614.65
       }
     ],
     "mean": [
       {
         "annual_costs": {
           "cassandra.backup.s3-standard": 353277.07,
-          "cassandra.net.inter.region": 1009641.23,
-          "cassandra.net.intra.region": 3028923.68,
+          "cassandra.net.inter.region": 336547.08,
+          "cassandra.net.intra.region": 1009641.23,
           "cassandra.zonal-clusters": 1478336.64
         },
         "clusters": [
@@ -221,13 +221,13 @@
             "instance": "m7a.2xlarge"
           }
         ],
-        "total_annual_cost": 5870178.62
+        "total_annual_cost": 3177802.01
       },
       {
         "annual_costs": {
           "cassandra.backup.s3-standard": 353277.07,
-          "cassandra.net.inter.region": 1009641.23,
-          "cassandra.net.intra.region": 3028923.68,
+          "cassandra.net.inter.region": 336547.08,
+          "cassandra.net.intra.region": 1009641.23,
           "cassandra.zonal-clusters": 1564863.36
         },
         "clusters": [
@@ -331,7 +331,7 @@
             "instance": "c6a.4xlarge"
           }
         ],
-        "total_annual_cost": 5956705.34
+        "total_annual_cost": 3264328.73
       }
     ],
     "model": "org.netflix.cassandra",
@@ -341,8 +341,8 @@
         {
           "annual_costs": {
             "cassandra.backup.s3-standard": 233074.96,
-            "cassandra.net.inter.region": 564776.75,
-            "cassandra.net.intra.region": 1694330.25,
+            "cassandra.net.inter.region": 188258.93,
+            "cassandra.net.intra.region": 564776.79,
             "cassandra.zonal-clusters": 1409216.64
           },
           "clusters": [
@@ -446,13 +446,13 @@
               "instance": "m7a.2xlarge"
             }
           ],
-          "total_annual_cost": 3901398.76
+          "total_annual_cost": 2395327.33
         },
         {
           "annual_costs": {
             "cassandra.backup.s3-standard": 233074.96,
-            "cassandra.net.inter.region": 564776.75,
-            "cassandra.net.intra.region": 1694330.25,
+            "cassandra.net.inter.region": 188258.93,
+            "cassandra.net.intra.region": 564776.79,
             "cassandra.zonal-clusters": 1495743.36
           },
           "clusters": [
@@ -556,15 +556,15 @@
               "instance": "c6a.4xlarge"
             }
           ],
-          "total_annual_cost": 3987925.48
+          "total_annual_cost": 2481854.05
         }
       ],
       "50": [
         {
           "annual_costs": {
             "cassandra.backup.s3-standard": 342869.56,
-            "cassandra.net.inter.region": 968024.87,
-            "cassandra.net.intra.region": 2904074.62,
+            "cassandra.net.inter.region": 322674.96,
+            "cassandra.net.intra.region": 968024.88,
             "cassandra.zonal-clusters": 1471424.64
           },
           "clusters": [
@@ -668,13 +668,13 @@
               "instance": "m7a.2xlarge"
             }
           ],
-          "total_annual_cost": 5686393.7
+          "total_annual_cost": 3104994.03
         },
         {
           "annual_costs": {
             "cassandra.backup.s3-standard": 342869.56,
-            "cassandra.net.inter.region": 968024.87,
-            "cassandra.net.intra.region": 2904074.62,
+            "cassandra.net.inter.region": 322674.96,
+            "cassandra.net.intra.region": 968024.88,
             "cassandra.zonal-clusters": 1557951.36
           },
           "clusters": [
@@ -778,7 +778,7 @@
               "instance": "c6a.4xlarge"
             }
           ],
-          "total_annual_cost": 5772920.42
+          "total_annual_cost": 3191520.75
         }
       ],
       "95": []
@@ -787,8 +787,8 @@
     "scenario": "cassandra_timeseries_ebs",
     "service_tier": 1,
     "simulations": 16,
-    "snapshot_format": "seeded-scipy-cost-preserve-v1",
-    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values are serialized to cents and values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce output drift across SciPy releases and CPU/libm builds. The test environments pin the supported SciPy range; widen it only with an intentional baseline refresh. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
+    "snapshot_format": "seeded-scipy-cost-preserve-v2",
+    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values are serialized to cents and values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce output drift across SciPy releases and CPU/libm builds. Least-regret sampled plans with the same recommendation shape are also preserved, because the representative sampled desire can drift while the recommended topology does not. The test environments pin the supported SciPy range; widen it only with an intentional baseline refresh. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
   },
   {
     "least_regret": [
@@ -1519,16 +1519,16 @@
     "scenario": "kafka_100mib_throughput",
     "service_tier": 1,
     "simulations": 16,
-    "snapshot_format": "seeded-scipy-cost-preserve-v1",
-    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values are serialized to cents and values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce output drift across SciPy releases and CPU/libm builds. The test environments pin the supported SciPy range; widen it only with an intentional baseline refresh. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
+    "snapshot_format": "seeded-scipy-cost-preserve-v2",
+    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values are serialized to cents and values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce output drift across SciPy releases and CPU/libm builds. Least-regret sampled plans with the same recommendation shape are also preserved, because the representative sampled desire can drift while the recommended topology does not. The test environments pin the supported SciPy range; widen it only with an intentional baseline refresh. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
   },
   {
     "least_regret": [
       {
         "annual_costs": {
           "cassandra.backup.s3-standard": 19184.43,
-          "cassandra.net.inter.region": 78646.78,
-          "cassandra.net.intra.region": 235940.33,
+          "cassandra.net.inter.region": 26215.59,
+          "cassandra.net.intra.region": 78646.78,
           "cassandra.zonal-clusters": 44260.02,
           "evcache.zonal-clusters": 150306.39,
           "nflx-java-app.regional-clusters": 99079.11
@@ -1698,13 +1698,13 @@
             "instance": "c8i.4xlarge"
           }
         ],
-        "total_annual_cost": 627417.06
+        "total_annual_cost": 417692.32
       },
       {
         "annual_costs": {
           "cassandra.backup.s3-standard": 16085.22,
-          "cassandra.net.inter.region": 65774.1,
-          "cassandra.net.intra.region": 197322.3,
+          "cassandra.net.inter.region": 21924.7,
+          "cassandra.net.intra.region": 65774.1,
           "cassandra.zonal-clusters": 30828.0,
           "evcache.zonal-clusters": 150306.39,
           "nflx-java-app.regional-clusters": 103865.49
@@ -1865,15 +1865,15 @@
             "instance": "c8i.2xlarge"
           }
         ],
-        "total_annual_cost": 564181.49
+        "total_annual_cost": 388783.9
       }
     ],
     "mean": [
       {
         "annual_costs": {
           "cassandra.backup.s3-standard": 18088.37,
-          "cassandra.net.inter.region": 74238.33,
-          "cassandra.net.intra.region": 222714.98,
+          "cassandra.net.inter.region": 24746.11,
+          "cassandra.net.intra.region": 74238.33,
           "cassandra.zonal-clusters": 44260.02,
           "evcache.zonal-clusters": 150306.39,
           "nflx-java-app.regional-clusters": 99079.11
@@ -2043,13 +2043,13 @@
             "instance": "c8i.4xlarge"
           }
         ],
-        "total_annual_cost": 608687.19
+        "total_annual_cost": 410718.32
       },
       {
         "annual_costs": {
           "cassandra.backup.s3-standard": 18088.37,
-          "cassandra.net.inter.region": 74238.33,
-          "cassandra.net.intra.region": 222714.98,
+          "cassandra.net.inter.region": 24746.11,
+          "cassandra.net.intra.region": 74238.33,
           "cassandra.zonal-clusters": 46243.98,
           "evcache.zonal-clusters": 169647.54,
           "nflx-java-app.regional-clusters": 108432.87
@@ -2219,7 +2219,7 @@
             "instance": "c7a.4xlarge"
           }
         ],
-        "total_annual_cost": 641288.19
+        "total_annual_cost": 441397.19
       }
     ],
     "model": "org.netflix.key-value",
@@ -2229,8 +2229,8 @@
         {
           "annual_costs": {
             "cassandra.backup.s3-standard": 14567.11,
-            "cassandra.net.inter.region": 59425.93,
-            "cassandra.net.intra.region": 178277.78,
+            "cassandra.net.inter.region": 19808.64,
+            "cassandra.net.intra.region": 59425.93,
             "cassandra.zonal-clusters": 30828.0,
             "evcache.zonal-clusters": 150306.39,
             "nflx-java-app.regional-clusters": 96171.75
@@ -2391,13 +2391,13 @@
               "instance": "c8i.2xlarge"
             }
           ],
-          "total_annual_cost": 529576.96
+          "total_annual_cost": 371107.82
         },
         {
           "annual_costs": {
             "cassandra.backup.s3-standard": 14567.11,
-            "cassandra.net.inter.region": 59425.93,
-            "cassandra.net.intra.region": 178277.78,
+            "cassandra.net.inter.region": 19808.64,
+            "cassandra.net.intra.region": 59425.93,
             "cassandra.zonal-clusters": 37518.0,
             "evcache.zonal-clusters": 169647.54,
             "nflx-java-app.regional-clusters": 104049.0
@@ -2558,15 +2558,15 @@
               "instance": "c6a.2xlarge"
             }
           ],
-          "total_annual_cost": 564586.36
+          "total_annual_cost": 405016.22
         }
       ],
       "50": [
         {
           "annual_costs": {
             "cassandra.backup.s3-standard": 17479.02,
-            "cassandra.net.inter.region": 71710.81,
-            "cassandra.net.intra.region": 215132.44,
+            "cassandra.net.inter.region": 23903.6,
+            "cassandra.net.intra.region": 71710.81,
             "cassandra.zonal-clusters": 30828.0,
             "evcache.zonal-clusters": 150306.39,
             "nflx-java-app.regional-clusters": 99079.11
@@ -2727,13 +2727,13 @@
               "instance": "c8i.4xlarge"
             }
           ],
-          "total_annual_cost": 584535.77
+          "total_annual_cost": 393306.94
         },
         {
           "annual_costs": {
             "cassandra.backup.s3-standard": 17479.02,
-            "cassandra.net.inter.region": 71710.81,
-            "cassandra.net.intra.region": 215132.44,
+            "cassandra.net.inter.region": 23903.6,
+            "cassandra.net.intra.region": 71710.81,
             "cassandra.zonal-clusters": 37518.0,
             "evcache.zonal-clusters": 169647.54,
             "nflx-java-app.regional-clusters": 108432.87
@@ -2894,15 +2894,15 @@
               "instance": "c7a.4xlarge"
             }
           ],
-          "total_annual_cost": 621842.81
+          "total_annual_cost": 428691.85
         }
       ],
       "95": [
         {
           "annual_costs": {
             "cassandra.backup.s3-standard": 23503.93,
-            "cassandra.net.inter.region": 96809.6,
-            "cassandra.net.intra.region": 290428.79,
+            "cassandra.net.inter.region": 32269.87,
+            "cassandra.net.intra.region": 96809.6,
             "cassandra.zonal-clusters": 44260.02,
             "evcache.zonal-clusters": 150306.39,
             "nflx-java-app.regional-clusters": 106196.37
@@ -3072,13 +3072,13 @@
               "instance": "c8i.8xlarge"
             }
           ],
-          "total_annual_cost": 711505.1
+          "total_annual_cost": 453346.17
         },
         {
           "annual_costs": {
             "cassandra.backup.s3-standard": 23503.93,
-            "cassandra.net.inter.region": 96809.6,
-            "cassandra.net.intra.region": 290428.79,
+            "cassandra.net.inter.region": 32269.87,
+            "cassandra.net.intra.region": 96809.6,
             "cassandra.zonal-clusters": 46243.98,
             "evcache.zonal-clusters": 169647.54,
             "nflx-java-app.regional-clusters": 116661.0
@@ -3248,7 +3248,7 @@
               "instance": "c7a.8xlarge"
             }
           ],
-          "total_annual_cost": 743294.84
+          "total_annual_cost": 484744.98
         }
       ]
     },
@@ -3256,7 +3256,7 @@
     "scenario": "kv_with_cache",
     "service_tier": 1,
     "simulations": 16,
-    "snapshot_format": "seeded-scipy-cost-preserve-v1",
-    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values are serialized to cents and values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce output drift across SciPy releases and CPU/libm builds. The test environments pin the supported SciPy range; widen it only with an intentional baseline refresh. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
+    "snapshot_format": "seeded-scipy-cost-preserve-v2",
+    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values are serialized to cents and values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce output drift across SciPy releases and CPU/libm builds. Least-regret sampled plans with the same recommendation shape are also preserved, because the representative sampled desire can drift while the recommended topology does not. The test environments pin the supported SciPy range; widen it only with an intentional baseline refresh. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
   }
 ]
