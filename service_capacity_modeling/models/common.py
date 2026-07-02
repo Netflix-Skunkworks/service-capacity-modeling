@@ -434,9 +434,15 @@ def network_services(
     desires: CapacityDesires,
     copies_per_region: int,
 ) -> List[ServiceCapacity]:
+    """Estimate one region's share of write replication transfer costs.
+
+    Cross-zone transfer is charged for each replica beyond the local zone.
+    Cross-region transfer is divided by the number of modeled regions so adding
+    the same regional plan for every region yields the fleetwide transfer cost.
+    """
     result = []
-    # Network transfer is for every other zone and then for every region
-    # other than us as well.
+    # Network transfer is for every other zone and every other region, but
+    # service costs on the returned plan are scoped to the modeled region.
     num_zones = max(copies_per_region - 1, 0)
     inter_region_count = max(context.num_regions - 1, 0)
     region_count = max(context.num_regions, 1)
@@ -448,13 +454,10 @@ def network_services(
 
     txfer_gib = (wps * size / (1024 * 1024 * 1024)) * (SECONDS_IN_YEAR)
 
-    # For each cross region replication we have to pay to move bytes
-    # inter region. This is the number of regions minus 1
+    # Cross-region replication pays to move writes to each remote region.
     inter_txfer = context.services.get("net.inter.region", None)
     if inter_txfer:
-        # Return each region's share so summing N regional plans gives the
-        # fleet total: inter = base * inter_region_count / region_count,
-        # intra = base * zones.
+        # Return this region's share: base * remote regions / total regions.
         result.append(
             ServiceCapacity(
                 service_type=f"{service_type}.net.inter.region",
@@ -470,7 +473,7 @@ def network_services(
             )
         )
 
-    # Same zone is free, but we pay for replication from our zone to others
+    # Same-zone transfer is free; cross-zone transfer pays for each remote copy.
     intra_txfer = context.services.get("net.intra.region", None)
     if intra_txfer:
         result.append(
