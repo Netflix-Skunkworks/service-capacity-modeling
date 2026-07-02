@@ -787,8 +787,8 @@
     "scenario": "cassandra_timeseries_ebs",
     "service_tier": 1,
     "simulations": 16,
-    "snapshot_format": "seeded-scipy-cost-preserve-v1",
-    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values are serialized to cents and values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce output drift across SciPy releases and CPU/libm builds. The test environments pin the supported SciPy range; widen it only with an intentional baseline refresh. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
+    "snapshot_format": "seeded-scipy-cost-preserve-v2",
+    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values are serialized to cents and values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce output drift across SciPy releases and CPU/libm builds. Least-regret sampled plans with the same recommendation shape are also preserved, because the representative sampled desire can drift while the recommended topology does not. The test environments pin the supported SciPy range; widen it only with an intentional baseline refresh. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
   },
   {
     "least_regret": [
@@ -1519,8 +1519,8 @@
     "scenario": "kafka_100mib_throughput",
     "service_tier": 1,
     "simulations": 16,
-    "snapshot_format": "seeded-scipy-cost-preserve-v1",
-    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values are serialized to cents and values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce output drift across SciPy releases and CPU/libm builds. The test environments pin the supported SciPy range; widen it only with an intentional baseline refresh. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
+    "snapshot_format": "seeded-scipy-cost-preserve-v2",
+    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values are serialized to cents and values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce output drift across SciPy releases and CPU/libm builds. Least-regret sampled plans with the same recommendation shape are also preserved, because the representative sampled desire can drift while the recommended topology does not. The test environments pin the supported SciPy range; widen it only with an intentional baseline refresh. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
   },
   {
     "least_regret": [
@@ -3256,7 +3256,7 @@
     "scenario": "kv_with_cache",
     "service_tier": 1,
     "simulations": 16,
-    "snapshot_format": "seeded-scipy-cost-preserve-v1",
-    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values are serialized to cents and values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce output drift across SciPy releases and CPU/libm builds. The test environments pin the supported SciPy range; widen it only with an intentional baseline refresh. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
+    "snapshot_format": "seeded-scipy-cost-preserve-v2",
+    "snapshot_note": "Uses the planner's seeded SciPy uncertainty sampling. When regenerating an existing snapshot, cost values are serialized to cents and values within 1% or $1 are preserved because scipy.optimize distribution fitting can produce output drift across SciPy releases and CPU/libm builds. Least-regret sampled plans with the same recommendation shape are also preserved, because the representative sampled desire can drift while the recommended topology does not. The test environments pin the supported SciPy range; widen it only with an intentional baseline refresh. Set SCM_BASELINE_PRESERVE_COSTS=0 for a fresh rewrite."
   }
 ]
