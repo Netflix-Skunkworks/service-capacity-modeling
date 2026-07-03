@@ -655,23 +655,25 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     max_page_cache_gib: float = DEFAULT_MAX_PAGE_CACHE_GIB,
     backup_retention_days: Optional[float] = None,
     max_disk_utilization: float = CASSANDRA_MAX_DISK_UTILIZATION,
+    min_instance_ram_gib_exclusive: float = 16.0,
 ) -> Union[CapacityPlan, Excuse, None]:
     drive_name = drive.name
 
     # Netflix Cassandra doesn't like to deploy on really small instances
-    if instance.cpu < 2 or instance.ram_gib <= 16:
+    if instance.cpu < 2 or instance.ram_gib <= min_instance_ram_gib_exclusive:
         return Excuse(
             instance=instance.name,
             drive=drive_name,
             reason=(
                 f"Instance too small: {instance.cpu} vCPUs "
-                f"(min 2), {instance.ram_gib:.0f} GiB RAM (requires > 16 GiB)"
+                f"(min 2), {instance.ram_gib:.2f} GiB RAM "
+                f"(requires > {min_instance_ram_gib_exclusive:g} GiB)"
             ),
             context={
                 "cpu": instance.cpu,
                 "ram_gib": instance.ram_gib,
                 "min_cpu": 2,
-                "min_ram_gib_exclusive": 16,
+                "min_ram_gib_exclusive": min_instance_ram_gib_exclusive,
             },
             bottleneck=Bottleneck.cpu if instance.cpu < 2 else Bottleneck.memory,
         )
@@ -1185,6 +1187,11 @@ class NflxCassandraArguments(BaseModel):
         "Default 14.0 (derived from LCS production clusters). Lower for TWCS or "
         "aggressive TTL workloads where SSTables expire before retention matters.",
     )
+    min_instance_ram_gib_exclusive: float = Field(
+        default=16.0,
+        description="Exclusive minimum instance RAM (GiB) for Cassandra candidates. "
+        "Candidates with ram_gib <= this value are rejected.",
+    )
     adaptive_storage_buffer: bool = Field(
         default=True,
         description="Use a data-size-adaptive storage buffer instead of the fixed 4x. "
@@ -1461,6 +1468,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_page_cache_gib=args.max_page_cache_gib,
             backup_retention_days=args.backup_retention_days,
             max_disk_utilization=args.max_disk_utilization,
+            min_instance_ram_gib_exclusive=args.min_instance_ram_gib_exclusive,
         )
 
         return result

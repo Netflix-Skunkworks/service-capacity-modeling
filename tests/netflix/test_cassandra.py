@@ -15,11 +15,13 @@ from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import fixed_float
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models.org.netflix.cassandra import (
     _default_cluster_size_mode,
     _get_cluster_size_lambda,
@@ -886,6 +888,49 @@ class TestCassandraExtraModelArguments:
 
         args = NflxCassandraArguments.from_extra_model_arguments({})
         assert args.max_page_cache_gib == 28.0
+
+    def test_min_instance_ram_gib_exclusive_default(self):
+        from service_capacity_modeling.models.org.netflix.cassandra import (
+            NflxCassandraArguments,
+        )
+
+        args = NflxCassandraArguments.from_extra_model_arguments({})
+        assert args.min_instance_ram_gib_exclusive == 16.0
+
+    def test_default_min_instance_ram_rejects_m6id_xlarge(self):
+        hardware = shapes.region("us-east-1")
+        result = NflxCassandraCapacityModel.capacity_plan(
+            instance=hardware.instances["m6id.xlarge"],
+            drive=hardware.drives["gp3"],
+            context=RegionContext(
+                zones_in_region=hardware.zones_in_region,
+                services=hardware.services,
+            ),
+            desires=small_but_high_qps,
+            extra_model_arguments={},
+        )
+
+        assert isinstance(result, Excuse)
+        assert result.context["ram_gib"] == 15.26
+        assert result.context["min_ram_gib_exclusive"] == 16.0
+        assert "requires > 16 GiB" in result.reason
+
+    def test_min_instance_ram_override_allows_m6id_xlarge(self):
+        hardware = shapes.region("us-east-1")
+        result = NflxCassandraCapacityModel.capacity_plan(
+            instance=hardware.instances["m6id.xlarge"],
+            drive=hardware.drives["gp3"],
+            context=RegionContext(
+                zones_in_region=hardware.zones_in_region,
+                services=hardware.services,
+            ),
+            desires=small_but_high_qps,
+            extra_model_arguments={"min_instance_ram_gib_exclusive": 15.0},
+        )
+
+        assert not isinstance(result, Excuse)
+        assert result is not None
+        assert result.candidate_clusters.zonal[0].instance.name == "m6id.xlarge"
 
     def test_cluster_size_mode_extra_argument(self):
         from service_capacity_modeling.models.org.netflix.cassandra import (
