@@ -1239,10 +1239,11 @@ class NflxCassandraArguments(BaseModel):
     max_disk_utilization: float = Field(
         default=CASSANDRA_MAX_DISK_UTILIZATION,
         gt=0,
-        le=CASSANDRA_MAX_DISK_UTILIZATION,
+        le=1.0,
         description="Maximum planned disk utilization for provisioned Cassandra "
         f"clusters. Defaults to {CASSANDRA_MAX_DISK_UTILIZATION:.0%}. "
-        "This can only be made stricter per workload.",
+        "Lower values are more conservative; higher values allow denser current "
+        "shape planning.",
     )
 
     @model_validator(mode="after")
