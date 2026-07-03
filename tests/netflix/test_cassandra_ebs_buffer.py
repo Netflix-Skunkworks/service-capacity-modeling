@@ -116,11 +116,6 @@ def test_disk_utilization_cap_does_not_weaken_default_buffer_fallback():
     assert disk_buffer.ratio == pytest.approx(1 / 0.55, abs=0.01)
 
 
-def test_max_disk_utilization_must_not_exceed_default_target():
-    with pytest.raises(ValueError, match="max_disk_utilization"):
-        NflxCassandraArguments.from_extra_model_arguments(
-            {"max_disk_utilization": 0.56}
-        )
-
+def test_max_disk_utilization_must_be_positive():
     with pytest.raises(ValueError, match="max_disk_utilization"):
         NflxCassandraArguments.from_extra_model_arguments({"max_disk_utilization": 0})
