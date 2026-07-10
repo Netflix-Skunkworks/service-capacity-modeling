@@ -251,6 +251,58 @@ Use one of the test environments for IDE development, e.g. `tox -e py310` and th
 ### Running CLIs
 Use the `dev` virtual environment via `tox -e dev`. Then execute CLIs via that env.
 
+## AWS instance shape lifecycle
+
+### Lifecycle states
+
+Each hardware `Instance` (and `Drive`) shape carries a `lifecycle` field (see
+`Lifecycle` in `service_capacity_modeling/interface.py`) describing how much to
+trust its parameters and whether the capacity planner should recommend it by
+default:
+
+| Lifecycle | Semantic | Used by default? | Opt-in |
+| --- | --- | --- | --- |
+| `alpha` | Hardware parameters (e.g. `cpu_ipc_scale`) are not yet benchmarked and should be treated as provisional, such as a family that was just announced or is still in preview. | No | Pass a `lifecycles=` sequence including `Lifecycle.alpha` to the planner call, or request the family/instance name explicitly (name-based selection bypasses the lifecycle filter entirely). |
+| `beta` | Parameters are reasonably trusted but the family hasn't accumulated much production track record yet. | Yes | N/A — already in the default set. |
+| `stable` | Well-understood, production-proven hardware. Shapes with no explicit `lifecycle` are treated as `stable`. | Yes | N/A — already in the default set. |
+| `deprecated` | Still usable but no longer preferred; typically means AWS or Netflix has signaled a replacement exists. | No | Pass a `lifecycles=` sequence including `Lifecycle.deprecated`, or request the family/instance name explicitly. |
+| `end-of-life` | No longer available/supported. | No | Pass a `lifecycles=` sequence including `Lifecycle.end_of_life`, or request the family/instance name explicitly. |
+
+
+### Adding a new instance family
+
+1. **Register the family** in
+   `service_capacity_modeling/tools/instance_families.py`, adding an entry to
+   `INSTANCE_TYPES` keyed by family name (e.g. `"m8a"`). Always set `lifecycle`
+   to `"alpha"` if the parameters above are still
+   provisional (see [Lifecycle states](#lifecycle-states)). Once it's benchmarked,
+   promote the lifecycle to `"beta"` to make it available by default.
+2. **Generate the shape JSON** by running:
+   ```
+   python -m service_capacity_modeling/tools/generate_missing --execute
+   ```
+   This requires live AWS credentials. This queries AWS and writes `auto_<family>.json`.
+   A single family can also be regenerated directly via `auto_shape.py` with explicit flags.
+3. **Commit and push** to the main branch.
+4. **Pricing** is fetched separately via `fetch_pricing.py` (AWS Pricing API)
+   and written under `hardware/profiles/pricing/aws/`, matched to shapes by
+   filename prefix.
+
+### Validation tools
+
+- **pytest — `tests/test_hardware_shapes.py`**: runs on every `pytest`/`tox`
+  invocation (not part of pre-commit). Checks cross-family invariants over all
+  loaded shapes — consistent vCPU counts for the same size across generations,
+  performance (`cpu_ghz * cpu_ipc_scale`) increasing from one generation to
+  the next, RAM/vCPU ratio consistency within a family, and network bandwidth
+  scaling non-decreasingly with instance size.
+
+- **Pre-commit `capture-baseline` hook**:
+  (`tox -e capture-baseline`) re-runs capacity-planning scenarios and
+  diffs the resulting cost/recommendation output against the checked-in
+  baseline, to catch unintended shifts in planner behavior caused by the new
+  or changed shape.
+
 ## Release
 Any successful `main` build will trigger a release to PyPI, defaulting to a patch bump based on the setupmeta
 [distance algorithm](https://github.com/codrsquad/setupmeta/blob/main/docs/versioning.rst#distance). If
