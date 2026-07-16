@@ -59,8 +59,10 @@ def test_java_app_large_footprint():
     java_result = java_cap_plan.candidate_clusters.regional[0]
     cores = java_result.count * java_result.instance.cpu
 
-    assert 40 < normalize_cores(cores, java_result.instance) < 100
-    assert 15_000 < java_result.annual_cost < 20_000
+    # Turin (c8a, IPC 1.98 x 4.5GHz) meets demand with fewer, faster cores,
+    # so the normalized-core and cost bands land lower than pre-Turin.
+    assert 15 < normalize_cores(cores, java_result.instance) < 100
+    assert 10_000 < java_result.annual_cost < 20_000
 
 
 def test_java_app_small_but_high_qps():
@@ -73,15 +75,16 @@ def test_java_app_small_but_high_qps():
 
     cores = java_result.count * java_result.instance.cpu
     assert_similar_compute(
-        expected_shape=shape("m6i.xlarge"),
-        expected_count=43,
+        expected_shape=shape("c8a.2xlarge"),
+        expected_count=9,
         actual_shape=java_result.instance,
         actual_count=java_result.count,
         # Don't care about memory
         allowed_variance=PlanVariance(cost=Approximation(abs=15_000)),
     )
-    assert 40 < normalize_cores(cores, java_result.instance) < 100
-    assert 15_000 < java_result.annual_cost < 40_000
+    # Turin (c8a) now wins; fewer, faster cores -> lower normalized-core/cost bands.
+    assert 15 < normalize_cores(cores, java_result.instance) < 100
+    assert 10_000 < java_result.annual_cost < 40_000
 
 
 def test_uncertain_java_app():
@@ -111,7 +114,8 @@ def test_uncertain_java_app():
     java_result = java_least_regret.candidate_clusters.regional[0]
 
     cores = java_result.count * java_result.instance.cpu
-    assert 30 <= normalize_cores(cores, target_shape=java_result.instance) <= 80
+    # Turin (c8a) -> fewer, faster cores satisfy the same demand.
+    assert 12 <= normalize_cores(cores, target_shape=java_result.instance) <= 80
 
     # KeyValue regional clusters should match
     kv_cap_plan = planner.plan(
@@ -196,7 +200,8 @@ def test_java_heap_high_traffic_and_ram():
             target_shape=default_reference_shape,
             reference_shape=java_result.instance,
         )
-        <= 210
+        # Turin's faster cores map to MORE slow-reference-equivalent cores (210 -> 260).
+        <= 260
     )
     # 32 KiB payloads * 30k/second is around 1 GiB per second
     # which should require a decent chunk of heap memory
