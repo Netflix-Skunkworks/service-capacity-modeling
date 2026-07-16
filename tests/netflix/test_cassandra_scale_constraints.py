@@ -443,18 +443,22 @@ class TestCPUScalingConstraints:
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
 
-        result_cores = result.count * result.instance.cpu
-
-        # CPU should scale up by 1.5x: 64 cores → 96 cores
-        expected_cpu_cores = CLUSTER.total_vcpu * 1.5
-        assert result_cores >= expected_cpu_cores, (
-            f"CPU should scale up to at least {expected_cpu_cores} cores, "
-            f"got {result_cores} cores"
+        # Scale-up must expand *effective* compute by ~1.5x. Post-Turin the
+        # planner can meet that with fewer, faster cores (c8a), so the raw core
+        # count can stay flat while effective IPC/s grows. Assert on effective
+        # compute (total_ipc_per_second) rather than raw core count.
+        current_ipc = total_ipc_per_second(CLUSTER.instance, CLUSTER.cluster_size)
+        result_ipc = total_ipc_per_second(result.instance, result.count)
+        assert result_ipc >= current_ipc * 1.5, (
+            f"CPU should scale up to at least {current_ipc * 1.5:.0f} effective "
+            f"IPC/s, got {result_ipc:.0f}"
         )
+        # Post-Turin the scaled-up cluster lands on c8a.4xlarge x4 (was
+        # c6a.4xlarge x8): same effective compute, ~30% cheaper.
         assert_similar_compute(
-            shapes.instance("c6a.4xlarge"),
+            shapes.instance("c8a.4xlarge"),
             result.instance,
-            CLUSTER_SIZE * 2,
+            4,
             result.count,
         )
 

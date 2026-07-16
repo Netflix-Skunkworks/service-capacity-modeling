@@ -123,12 +123,16 @@ class TestCassandraCapacityPlanning:
             extra_model_arguments={**EXTRA_MODEL_ARGS, "copies_per_region": 2},
         )[0]
         high_writes_result = cap_plan.candidate_clusters.zonal[0]
-        assert high_writes_result.instance.family.startswith("c")
+        # Balanced (compute/general-purpose) family should win, not memory-heavy
+        # r/i (~7.6 GiB/vCPU). Turin m8a beats pre-Turin c7a, and beats c8a here
+        # because this workload is RAM-bound and c8a is too RAM-light.
+        inst = high_writes_result.instance
+        assert inst.ram_gib / inst.cpu <= 4.5
 
         # Storage should be sufficient for the data (300 GiB with buffer)
         assert_minimum_storage_gib(high_writes_result, 400)
         assert_similar_compute(
-            shapes.instance("c7a.4xlarge"),
+            shapes.instance("m8a.2xlarge"),
             high_writes_result.instance,
             expected_count=8,
             actual_count=high_writes_result.count,

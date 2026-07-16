@@ -130,7 +130,9 @@ def test_evcache_inmemory_medium_latency_reads_cpu():
             * candidate.candidate_clusters.zonal[0].instance.cpu_ghz
         )
 
-        assert total_cpu_power > 150
+        # Turin (r8a, 4.5GHz) delivers the needed CPU at a lower raw
+        # count*cpu*ghz than pre-Turin; threshold lowered from 150.
+        assert total_cpu_power > 100
 
 
 def test_evcache_inmemory_high_latency_reads_cpu():
