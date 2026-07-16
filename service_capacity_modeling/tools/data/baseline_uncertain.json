@@ -1531,7 +1531,7 @@
           "cassandra.net.intra.region": 78646.78,
           "cassandra.zonal-clusters": 44260.02,
           "evcache.zonal-clusters": 150306.39,
-          "nflx-java-app.regional-clusters": 99079.11
+          "nflx-java-app.regional-clusters": 69601.5
         },
         "clusters": [
           {
@@ -1688,17 +1688,17 @@
             "instance": "c5d.12xlarge"
           },
           {
-            "annual_cost": 99079.11,
+            "annual_cost": 69601.5,
             "attached_drives": [
               "gp2 : 20GB"
             ],
             "cluster_type": "dgwkv",
-            "count": 39,
+            "count": 6,
             "deployment": "regional",
-            "instance": "c8i.4xlarge"
+            "instance": "c8a.16xlarge"
           }
         ],
-        "total_annual_cost": 417692.32
+        "total_annual_cost": 388214.71
       },
       {
         "annual_costs": {
@@ -1707,7 +1707,7 @@
           "cassandra.net.intra.region": 65774.1,
           "cassandra.zonal-clusters": 30828.0,
           "evcache.zonal-clusters": 150306.39,
-          "nflx-java-app.regional-clusters": 103865.49
+          "nflx-java-app.regional-clusters": 69601.5
         },
         "clusters": [
           {
@@ -1855,17 +1855,17 @@
             "instance": "c6id.4xlarge"
           },
           {
-            "annual_cost": 103865.49,
+            "annual_cost": 69601.5,
             "attached_drives": [
               "gp2 : 20GB"
             ],
             "cluster_type": "dgwkv",
-            "count": 81,
+            "count": 6,
             "deployment": "regional",
-            "instance": "c8i.2xlarge"
+            "instance": "c8a.16xlarge"
           }
         ],
-        "total_annual_cost": 388783.9
+        "total_annual_cost": 354519.91
       }
     ],
     "mean": [
@@ -1876,7 +1876,7 @@
           "cassandra.net.intra.region": 74238.33,
           "cassandra.zonal-clusters": 44260.02,
           "evcache.zonal-clusters": 150306.39,
-          "nflx-java-app.regional-clusters": 99079.11
+          "nflx-java-app.regional-clusters": 69601.5
         },
         "clusters": [
           {
@@ -2033,17 +2033,17 @@
             "instance": "c5d.12xlarge"
           },
           {
-            "annual_cost": 99079.11,
+            "annual_cost": 69601.5,
             "attached_drives": [
               "gp2 : 20GB"
             ],
             "cluster_type": "dgwkv",
-            "count": 39,
+            "count": 6,
             "deployment": "regional",
-            "instance": "c8i.4xlarge"
+            "instance": "c8a.16xlarge"
           }
         ],
-        "total_annual_cost": 410718.32
+        "total_annual_cost": 381240.71
       },
       {
         "annual_costs": {
@@ -2052,7 +2052,7 @@
           "cassandra.net.intra.region": 74238.33,
           "cassandra.zonal-clusters": 46243.98,
           "evcache.zonal-clusters": 169647.54,
-          "nflx-java-app.regional-clusters": 108432.87
+          "nflx-java-app.regional-clusters": 80968.68
         },
         "clusters": [
           {
@@ -2209,17 +2209,17 @@
             "instance": "c6id.12xlarge"
           },
           {
-            "annual_cost": 108432.87,
+            "annual_cost": 80968.68,
             "attached_drives": [
               "gp2 : 20GB"
             ],
             "cluster_type": "dgwkv",
-            "count": 39,
+            "count": 6,
             "deployment": "regional",
-            "instance": "c7a.4xlarge"
+            "instance": "m8a.16xlarge"
           }
         ],
-        "total_annual_cost": 441397.19
+        "total_annual_cost": 413933.0
       }
     ],
     "model": "org.netflix.key-value",
@@ -2233,7 +2233,7 @@
             "cassandra.net.intra.region": 59425.93,
             "cassandra.zonal-clusters": 30828.0,
             "evcache.zonal-clusters": 150306.39,
-            "nflx-java-app.regional-clusters": 96171.75
+            "nflx-java-app.regional-clusters": 69601.5
           },
           "clusters": [
             {
@@ -2381,17 +2381,17 @@
               "instance": "c6id.4xlarge"
             },
             {
-              "annual_cost": 96171.75,
+              "annual_cost": 69601.5,
               "attached_drives": [
                 "gp2 : 20GB"
               ],
               "cluster_type": "dgwkv",
-              "count": 75,
+              "count": 6,
               "deployment": "regional",
-              "instance": "c8i.2xlarge"
+              "instance": "c8a.16xlarge"
             }
           ],
-          "total_annual_cost": 371107.82
+          "total_annual_cost": 344537.57
         },
         {
           "annual_costs": {
@@ -2400,7 +2400,7 @@
             "cassandra.net.intra.region": 59425.93,
             "cassandra.zonal-clusters": 37518.0,
             "evcache.zonal-clusters": 169647.54,
-            "nflx-java-app.regional-clusters": 104049.0
+            "nflx-java-app.regional-clusters": 80530.56
           },
           "clusters": [
             {
@@ -2548,17 +2548,17 @@
               "instance": "m6id.8xlarge"
             },
             {
-              "annual_cost": 104049.0,
+              "annual_cost": 80530.56,
               "attached_drives": [
                 "gp2 : 20GB"
               ],
               "cluster_type": "dgwkv",
-              "count": 99,
+              "count": 93,
               "deployment": "regional",
-              "instance": "c6a.2xlarge"
+              "instance": "m8a.xlarge"
             }
           ],
-          "total_annual_cost": 405016.22
+          "total_annual_cost": 381497.78
         }
       ],
       "50": [
@@ -2569,7 +2569,7 @@
             "cassandra.net.intra.region": 71710.81,
             "cassandra.zonal-clusters": 30828.0,
             "evcache.zonal-clusters": 150306.39,
-            "nflx-java-app.regional-clusters": 99079.11
+            "nflx-java-app.regional-clusters": 69601.5
           },
           "clusters": [
             {
@@ -2717,17 +2717,17 @@
               "instance": "c6id.4xlarge"
             },
             {
-              "annual_cost": 99079.11,
+              "annual_cost": 69601.5,
               "attached_drives": [
                 "gp2 : 20GB"
               ],
               "cluster_type": "dgwkv",
-              "count": 39,
+              "count": 6,
               "deployment": "regional",
-              "instance": "c8i.4xlarge"
+              "instance": "c8a.16xlarge"
             }
           ],
-          "total_annual_cost": 393306.94
+          "total_annual_cost": 363829.33
         },
         {
           "annual_costs": {
@@ -2736,7 +2736,7 @@
             "cassandra.net.intra.region": 71710.81,
             "cassandra.zonal-clusters": 37518.0,
             "evcache.zonal-clusters": 169647.54,
-            "nflx-java-app.regional-clusters": 108432.87
+            "nflx-java-app.regional-clusters": 80968.68
           },
           "clusters": [
             {
@@ -2884,17 +2884,17 @@
               "instance": "m6id.8xlarge"
             },
             {
-              "annual_cost": 108432.87,
+              "annual_cost": 80968.68,
               "attached_drives": [
                 "gp2 : 20GB"
               ],
               "cluster_type": "dgwkv",
-              "count": 39,
+              "count": 6,
               "deployment": "regional",
-              "instance": "c7a.4xlarge"
+              "instance": "m8a.16xlarge"
             }
           ],
-          "total_annual_cost": 428691.85
+          "total_annual_cost": 401227.66
         }
       ],
       "95": [
@@ -2905,7 +2905,7 @@
             "cassandra.net.intra.region": 96809.6,
             "cassandra.zonal-clusters": 44260.02,
             "evcache.zonal-clusters": 150306.39,
-            "nflx-java-app.regional-clusters": 106196.37
+            "nflx-java-app.regional-clusters": 75024.06
           },
           "clusters": [
             {
@@ -3062,17 +3062,17 @@
               "instance": "c5d.12xlarge"
             },
             {
-              "annual_cost": 106196.37,
+              "annual_cost": 75024.06,
               "attached_drives": [
                 "gp2 : 20GB"
               ],
               "cluster_type": "dgwkv",
-              "count": 21,
+              "count": 51,
               "deployment": "regional",
-              "instance": "c8i.8xlarge"
+              "instance": "c8a.2xlarge"
             }
           ],
-          "total_annual_cost": 453346.17
+          "total_annual_cost": 422173.86
         },
         {
           "annual_costs": {
@@ -3081,7 +3081,7 @@
             "cassandra.net.intra.region": 96809.6,
             "cassandra.zonal-clusters": 46243.98,
             "evcache.zonal-clusters": 169647.54,
-            "nflx-java-app.regional-clusters": 116661.0
+            "nflx-java-app.regional-clusters": 87100.35
           },
           "clusters": [
             {
@@ -3238,17 +3238,17 @@
               "instance": "c6id.12xlarge"
             },
             {
-              "annual_cost": 116661.0,
+              "annual_cost": 87100.35,
               "attached_drives": [
                 "gp2 : 20GB"
               ],
               "cluster_type": "dgwkv",
-              "count": 21,
+              "count": 51,
               "deployment": "regional",
-              "instance": "c7a.8xlarge"
+              "instance": "m8a.2xlarge"
             }
           ],
-          "total_annual_cost": 484744.98
+          "total_annual_cost": 455575.26
         }
       ]
     },
