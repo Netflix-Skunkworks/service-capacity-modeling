@@ -694,7 +694,7 @@ class ExplainedPlans(ExcludeUnsetModel):
 
 
 class ExplainedUncertainPlans(ExcludeUnsetModel):
-    """Uncertain plans + sub-model excuses + family context.
+    """Uncertain plans, aggregate sub-model excuses, and regret summaries.
 
     Mirrors ExplainedPlans but wraps UncertainCapacityPlan instead
     of deterministic plans. Returned by plan_explained().
