@@ -1,4 +1,5 @@
 # pylint: disable=protected-access
+import inspect
 from typing import Any
 from typing import Sequence
 
@@ -53,6 +54,27 @@ def _filters_by_model(
     calls: list[dict[str, Any]],
 ) -> dict[str, Sequence[str] | None]:
     return {call["model_name"]: call["instance_families"] for call in calls}
+
+
+def test_model_filter_preserves_existing_positional_parameters():
+    assert list(inspect.signature(planner.plan_certain).parameters)[5:] == [
+        "drives",
+        "num_results",
+        "num_regions",
+        "extra_model_arguments",
+        "max_results_per_family",
+        "planner_arguments",
+        "instance_filters_by_model",
+    ]
+    assert list(inspect.signature(planner.plan).parameters)[9:] == [
+        "drives",
+        "regret_params",
+        "extra_model_arguments",
+        "explain",
+        "max_results_per_family",
+        "planner_arguments",
+        "instance_filters_by_model",
+    ]
 
 
 def test_plan_certain_explained_uses_model_scoped_instance_filters(monkeypatch):

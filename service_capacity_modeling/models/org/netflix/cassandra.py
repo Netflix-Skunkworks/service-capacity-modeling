@@ -1367,7 +1367,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         cost_desires = desires.model_copy(deep=True)
         if args.cost_write_per_second is not None:
             cost_desires.query_pattern.estimated_write_per_second = certain_float(
-                args.cost_write_per_second
+                args.cost_write_per_second / max(context.num_regions, 1)
             )
         if args.cost_state_size_gib is not None:
             cost_desires.data_shape.estimated_state_size_gib = certain_float(
@@ -1424,14 +1424,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
                 # full serialized mutations (cell metadata, timestamps, bloom
                 # filter contributions), not just raw app payload.
                 wps = cost_desires.query_pattern.estimated_write_per_second.mid
-                write_region_count = (
-                    max(context.num_regions, 1)
-                    if args.cost_write_per_second is not None
-                    else 1
-                )
-                daily_write_gib = (wps * wire_write_size * 86400) / (
-                    (1024**3) * write_region_count
-                )
+                daily_write_gib = (wps * wire_write_size * 86400) / (1024**3)
                 retention_days = (
                     args.backup_retention_days or _DEFAULT_BACKUP_RETENTION_DAYS
                 )
