@@ -434,11 +434,18 @@ def network_services(
     desires: CapacityDesires,
     copies_per_region: int,
 ) -> List[ServiceCapacity]:
+    """Estimate one region's share of write replication transfer costs.
+
+    Cross-zone transfer is charged for each replica beyond the local zone.
+    Cross-region transfer is divided by the number of modeled regions so adding
+    the same regional plan for every region yields the fleetwide transfer cost.
+    """
     result = []
-    # Network transfer is for every other zone and then for every region
-    # other than us as well.
+    # Network transfer is for every other zone and every other region, but
+    # service costs on the returned plan are scoped to the modeled region.
     num_zones = max(copies_per_region - 1, 0)
-    num_regions = max(context.num_regions - 1, 0)
+    inter_region_count = max(context.num_regions - 1, 0)
+    region_count = max(context.num_regions, 1)
 
     # have bytes and / second
     size = desires.query_pattern.estimated_mean_write_size_bytes.mid
@@ -447,19 +454,26 @@ def network_services(
 
     txfer_gib = (wps * size / (1024 * 1024 * 1024)) * (SECONDS_IN_YEAR)
 
-    # For each cross region replication we have to pay to move bytes
-    # inter region. This is the number of regions minus 1
+    # Cross-region replication pays to move writes to each remote region.
     inter_txfer = context.services.get("net.inter.region", None)
     if inter_txfer:
+        # Return this region's share: base * remote regions / total regions.
         result.append(
             ServiceCapacity(
                 service_type=f"{service_type}.net.inter.region",
-                annual_cost=(inter_txfer.annual_cost_gib(txfer_gib) * num_regions),
-                service_params={"txfer_gib": txfer_gib, "num_regions": num_regions},
+                annual_cost=(
+                    inter_txfer.annual_cost_gib(txfer_gib)
+                    * inter_region_count
+                    / region_count
+                ),
+                service_params={
+                    "txfer_gib": txfer_gib,
+                    "num_regions": inter_region_count,
+                },
             )
         )
 
-    # Same zone is free, but we pay for replication from our zone to others
+    # Same-zone transfer is free; cross-zone transfer pays for each remote copy.
     intra_txfer = context.services.get("net.intra.region", None)
     if intra_txfer:
         result.append(
@@ -469,6 +483,7 @@ def network_services(
                     intra_txfer.annual_cost_gib(txfer_gib)
                     * num_zones
                     * context.num_regions
+                    / region_count
                 ),
                 service_params={
                     "txfer_gib": txfer_gib,

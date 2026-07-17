@@ -19,9 +19,11 @@ _BASELINE_HELP = (
     "Uncertain snapshots exercise seeded SciPy sampling. The capture tool "
     "preserves existing cost values when regenerated values are within 1% or "
     "$1 because scipy.optimize distribution fitting can produce drift across "
-    "SciPy releases and CPU/libm builds. CI pins the tested SciPy range; widen "
-    "it only with an intentional baseline refresh. Structural changes or "
-    "meaningful cost movement should be reviewed, then refreshed with: "
+    "SciPy releases and CPU/libm builds. It also preserves same-shape "
+    "least-regret sampled plans because their representative sampled desire can "
+    "drift by platform. CI pins the tested SciPy range; widen it only with an "
+    "intentional baseline refresh. Structural changes or meaningful cost "
+    "movement should be reviewed, then refreshed with: "
     "tox -e capture-baseline\n"
     "To auto-update on commit: pre-commit install"
 )
@@ -178,7 +180,7 @@ class TestUncertainBaselineDrift:
             )
 
 
-def test_keeps_same_shape_least_regret_sample_drift() -> None:
+def test_stabilizes_same_shape_least_regret_sample_drift() -> None:
     baseline = {
         "scenario": "sample",
         "least_regret": [
@@ -221,5 +223,48 @@ def test_keeps_same_shape_least_regret_sample_drift() -> None:
 
     stabilized = _stabilize_uncertain_results([actual], {"sample": baseline}, stats)[0]
 
+    assert stabilized["least_regret"] == baseline["least_regret"]
+    assert stats.least_regret_plans_preserved == 1
+
+
+def test_keeps_changed_least_regret_shape() -> None:
+    baseline = {
+        "scenario": "sample",
+        "least_regret": [
+            {
+                "annual_costs": {"service": 100.0},
+                "clusters": [
+                    {
+                        "cluster_type": "cassandra",
+                        "count": 64,
+                        "deployment": "zonal",
+                        "instance": "m7a.2xlarge",
+                    }
+                ],
+                "total_annual_cost": 100.0,
+            }
+        ],
+    }
+    actual = {
+        "scenario": "sample",
+        "least_regret": [
+            {
+                "annual_costs": {"service": 100.0},
+                "clusters": [
+                    {
+                        "cluster_type": "cassandra",
+                        "count": 32,
+                        "deployment": "zonal",
+                        "instance": "m7a.2xlarge",
+                    }
+                ],
+                "total_annual_cost": 100.0,
+            }
+        ],
+    }
+    stats = CostPreservationStats()
+
+    stabilized = _stabilize_uncertain_results([actual], {"sample": baseline}, stats)[0]
+
     assert stabilized["least_regret"] == actual["least_regret"]
-    assert stats.exceeded == 3
+    assert stats.least_regret_plans_preserved == 0
