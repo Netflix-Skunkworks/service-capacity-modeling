@@ -1190,17 +1190,17 @@ class NflxCassandraArguments(BaseModel):
     cost_write_per_second: Optional[float] = Field(
         default=None,
         ge=0,
-        description="Fleet-wide average writes per second used only for network "
-        "and backup service costs. Each regional planning call accounts for "
-        "one num_regions share. Capacity planning continues to use the query "
-        "pattern.",
+        description="Fleet-wide average writes per second for bottom-up network "
+        "and backup pricing. Each regional cost extraction accounts for one "
+        "num_regions share. Recommendation planning continues to use the query "
+        "pattern for topology and service costs.",
     )
     cost_state_size_gib: Optional[float] = Field(
         default=None,
         ge=0,
-        description="Average per-region logical state size in GiB used only for "
-        "the existing per-zone backup snapshot cost. Capacity planning continues "
-        "to use the data shape.",
+        description="Average per-region logical state size in GiB used only by "
+        "bottom-up pricing for the existing per-zone backup snapshot. "
+        "Recommendation planning continues to use the data shape.",
     )
     min_instance_ram_gib_exclusive: float = Field(
         default=16.0,
