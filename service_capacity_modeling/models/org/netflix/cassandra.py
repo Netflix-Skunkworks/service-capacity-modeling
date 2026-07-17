@@ -1187,6 +1187,18 @@ class NflxCassandraArguments(BaseModel):
         "Default 14.0 (derived from LCS production clusters). Lower for TWCS or "
         "aggressive TTL workloads where SSTables expire before retention matters.",
     )
+    cost_write_per_second: Optional[float] = Field(
+        default=None,
+        ge=0,
+        description="Average writes per second used only for network and backup "
+        "service costs. Capacity planning continues to use the query pattern.",
+    )
+    cost_state_size_gib: Optional[float] = Field(
+        default=None,
+        ge=0,
+        description="Average logical state size in GiB used only for backup service "
+        "cost. Capacity planning continues to use the data shape.",
+    )
     min_instance_ram_gib_exclusive: float = Field(
         default=16.0,
         description="Exclusive minimum instance RAM (GiB) for Cassandra candidates. "
@@ -1349,12 +1361,19 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         wire_write_size = _cassandra_wire_write_size(current_write_size)
         write_size_defaulted = _is_write_size_defaulted(desires)
 
-        # Adjust desires to use wire write size for network cost calculation.
-        # We copy desires rather than modifying the shared function in common.py,
-        # since the overhead is Cassandra-specific (other models use
-        # network_services() with their own wire formats).
-        adjusted_desires = desires.model_copy(deep=True)
-        adjusted_desires.query_pattern.estimated_mean_write_size_bytes = certain_int(
+        # Service costs can use average observed usage while capacity planning
+        # continues to use peak desires. The overrides are intentionally scoped
+        # to this private copy.
+        cost_desires = desires.model_copy(deep=True)
+        if args.cost_write_per_second is not None:
+            cost_desires.query_pattern.estimated_write_per_second = certain_float(
+                args.cost_write_per_second
+            )
+        if args.cost_state_size_gib is not None:
+            cost_desires.data_shape.estimated_state_size_gib = certain_float(
+                args.cost_state_size_gib
+            )
+        cost_desires.query_pattern.estimated_mean_write_size_bytes = certain_int(
             wire_write_size
         )
 
@@ -1367,9 +1386,14 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         # defaulted, and how confident the model is in each cost component.
         # For now, service_params carries the flag per-service.
         net_services = network_services(
-            service_type, context, adjusted_desires, copies_per_region
+            service_type, context, cost_desires, copies_per_region
         )
         for svc in net_services:
+            if (
+                args.cost_write_per_second is not None
+                and svc.service_type == f"{service_type}.net.intra.region"
+            ):
+                svc.annual_cost /= max(context.num_regions, 1)
             svc.service_params["write_size_defaulted"] = write_size_defaulted
         services.extend(net_services)
 
@@ -1377,19 +1401,37 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             blob = context.services.get("blob.standard", None)
             if blob:
                 # Snapshot component: data-at-rest per zone
-                backup_disk_gib = max(
-                    1,
-                    _get_disk_from_desires(desires, copies_per_region)
-                    // context.zones_in_region,
-                )
+                if args.cost_state_size_gib is None:
+                    backup_disk_gib = max(
+                        1,
+                        _get_disk_from_desires(cost_desires, copies_per_region)
+                        // context.zones_in_region,
+                    )
+                else:
+                    backup_disk_gib = max(
+                        1,
+                        math.ceil(
+                            args.cost_state_size_gib
+                            * copies_per_region
+                            / context.zones_in_region
+                            / cost_desires.data_shape.estimated_compression_ratio.mid
+                        ),
+                    )
 
                 # Write-throughput component: backup storage is dominated by
                 # continuous SSTable uploads, not just the data-at-rest snapshot.
                 # Uses overhead-adjusted wire size because SSTables include
                 # full serialized mutations (cell metadata, timestamps, bloom
                 # filter contributions), not just raw app payload.
-                wps = desires.query_pattern.estimated_write_per_second.mid
-                daily_write_gib = (wps * wire_write_size * 86400) / (1024**3)
+                wps = cost_desires.query_pattern.estimated_write_per_second.mid
+                write_region_count = (
+                    max(context.num_regions, 1)
+                    if args.cost_write_per_second is not None
+                    else 1
+                )
+                daily_write_gib = (wps * wire_write_size * 86400) / (
+                    (1024**3) * write_region_count
+                )
                 retention_days = (
                     args.backup_retention_days or _DEFAULT_BACKUP_RETENTION_DAYS
                 )
