@@ -77,8 +77,7 @@ class PlannerArguments(ExcludeUnsetModel):
 
     Controls how the planner selects and ranks plans, independent of any
     particular model's estimation logic. Pass via ``planner_arguments=`` on
-    ``plan_certain``, ``plan_certain_explained``, ``plan``, and
-    ``plan_explained``.
+    ``plan_certain``, ``plan_certain_explained``, and ``plan``.
     """
 
     max_results_per_family: int = Field(
@@ -1210,7 +1209,7 @@ class CapacityPlanner:
         planner_arguments: Optional[PlannerArguments] = None,
         instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]] = None,
     ) -> ExplainedUncertainPlans:
-        """Like plan() with aggregate excuses, family context, and regret summaries."""
+        """Like plan() but returns excuses and family graph too."""
         uncertain_result = self._plan_uncertain(
             model_name=model_name,
             region=region,
