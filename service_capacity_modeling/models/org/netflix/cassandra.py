@@ -92,8 +92,8 @@ def _with_disk_utilization_buffer(
 ) -> CapacityDesires:
     """Add only the disk buffer needed to keep Cassandra below the utilization cap.
 
-    Lower utilization limits add more headroom; higher limits allow denser
-    planning than the default.
+    The default target leaves margin below the previous cap. Callers may make
+    this stricter but not looser.
     """
     capped_desires = desires.model_copy(deep=True)
     target_disk_buffer_ratio = 1 / max_disk_utilization
