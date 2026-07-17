@@ -92,8 +92,8 @@ def _with_disk_utilization_buffer(
 ) -> CapacityDesires:
     """Add only the disk buffer needed to keep Cassandra below the utilization cap.
 
-    The default target leaves margin below the previous cap. Callers may make
-    this stricter but not looser.
+    Lower utilization limits add more headroom; higher limits allow denser
+    planning than the default.
     """
     capped_desires = desires.model_copy(deep=True)
     target_disk_buffer_ratio = 1 / max_disk_utilization
@@ -1190,14 +1190,17 @@ class NflxCassandraArguments(BaseModel):
     cost_write_per_second: Optional[float] = Field(
         default=None,
         ge=0,
-        description="Average writes per second used only for network and backup "
-        "service costs. Capacity planning continues to use the query pattern.",
+        description="Fleet-wide average writes per second used only for network "
+        "and backup service costs. Each regional planning call accounts for "
+        "one num_regions share. Capacity planning continues to use the query "
+        "pattern.",
     )
     cost_state_size_gib: Optional[float] = Field(
         default=None,
         ge=0,
-        description="Average logical state size in GiB used only for backup service "
-        "cost. Capacity planning continues to use the data shape.",
+        description="Average per-region logical state size in GiB used only for "
+        "the existing per-zone backup snapshot cost. Capacity planning continues "
+        "to use the data shape.",
     )
     min_instance_ram_gib_exclusive: float = Field(
         default=16.0,
