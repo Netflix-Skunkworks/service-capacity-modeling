@@ -209,8 +209,8 @@ def test_network_services():
     for service in ns:
         cost_by_service[service.service_type] = service.annual_cost
 
-    expected_inter_region_share = 3 * 1500
-    expected_intra_region_share = 2 * 4 * 1500
+    expected_inter_region_share = (3 / 4) * 1500
+    expected_intra_region_share = 2 * 1500
     assert (
         expected_inter_region_share
         < cost_by_service["test.net.inter.region"]

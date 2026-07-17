@@ -739,13 +739,13 @@ class CapacityPlanner:
         desires: CapacityDesires,
         lifecycles: Optional[Sequence[Lifecycle]] = None,
         instance_families: Optional[Sequence[str]] = None,
+        instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]] = None,
         drives: Optional[Sequence[str]] = None,
         num_results: Optional[int] = None,
         num_regions: int = 3,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
         max_results_per_family: int = 1,
         planner_arguments: Optional[PlannerArguments] = None,
-        instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]] = None,
     ) -> Sequence[CapacityPlan]:
         return self.plan_certain_explained(
             model_name=model_name,
@@ -770,13 +770,13 @@ class CapacityPlanner:
         desires: CapacityDesires,
         lifecycles: Optional[Sequence[Lifecycle]] = None,
         instance_families: Optional[Sequence[str]] = None,
+        instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]] = None,
         drives: Optional[Sequence[str]] = None,
         num_results: Optional[int] = None,
         num_regions: int = 3,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
         max_results_per_family: int = 1,
         planner_arguments: Optional[PlannerArguments] = None,
-        instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]] = None,
     ) -> ExplainedPlans:
         """Like plan_certain() but returns excuses and family graph too."""
         if model_name not in self._models:
@@ -1166,13 +1166,12 @@ class CapacityPlanner:
         num_regions: int = 3,
         lifecycles: Optional[Sequence[Lifecycle]] = None,
         instance_families: Optional[Sequence[str]] = None,
+        instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]] = None,
         drives: Optional[Sequence[str]] = None,
         regret_params: Optional[CapacityRegretParameters] = None,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
-        explain: bool = False,
         max_results_per_family: int = 1,
         planner_arguments: Optional[PlannerArguments] = None,
-        instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]] = None,
     ) -> UncertainCapacityPlan:
         return self._plan_uncertain(
             model_name=model_name,
@@ -1187,7 +1186,6 @@ class CapacityPlanner:
             drives=drives,
             regret_params=regret_params,
             extra_model_arguments=extra_model_arguments,
-            explain=explain,
             max_results_per_family=max_results_per_family,
             planner_arguments=planner_arguments,
             instance_filters_by_model=instance_filters_by_model,
@@ -1226,7 +1224,6 @@ class CapacityPlanner:
             drives=drives,
             regret_params=regret_params,
             extra_model_arguments=extra_model_arguments,
-            explain=True,
             max_results_per_family=max_results_per_family,
             planner_arguments=planner_arguments,
             instance_filters_by_model=instance_filters_by_model,
@@ -1276,7 +1273,6 @@ class CapacityPlanner:
         drives: Optional[Sequence[str]] = None,
         regret_params: Optional[CapacityRegretParameters] = None,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
-        explain: bool = False,
         max_results_per_family: int = 1,
         planner_arguments: Optional[PlannerArguments] = None,
         instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]] = None,
@@ -1315,7 +1311,6 @@ class CapacityPlanner:
             extra_model_arguments=extra_model_arguments,
             planner_arguments=pargs,
             instance_filters_by_model=instance_filters_by_model,
-            explain=explain,
         )
         regret_details_by_model = sample_data.regret_details_by_model
 
@@ -1360,23 +1355,20 @@ class CapacityPlanner:
                     )
                     for model in regret_details_by_model
                 },
+                regret_clusters_by_model={
+                    model: [
+                        (candidate.plan, candidate.desires, candidate.total_regret)
+                        for candidate in details
+                    ]
+                    for model, details in regret_details_by_model.items()
+                },
+                excuses_by_model={
+                    model: deduplicate_excuses(excuses)
+                    for model, excuses in sample_data.excuses_by_model.items()
+                    if excuses
+                },
             ),
         )
-
-        if explain:
-            uncertain_plan.explanation.regret_clusters_by_model = {
-                model: [
-                    (candidate.plan, candidate.desires, candidate.total_regret)
-                    for candidate in details
-                ]
-                for model, details in regret_details_by_model.items()
-            }
-            uncertain_plan.explanation.excuses_by_model = {
-                model: deduplicate_excuses(excuses)
-                for model, excuses in sample_data.excuses_by_model.items()
-                if excuses
-            }
-            uncertain_plan.explanation.context["regret"] = least_regret
 
         return _UncertainResult(
             plan=uncertain_plan,
@@ -1399,7 +1391,6 @@ class CapacityPlanner:
         extra_model_arguments: Dict[str, Any],
         planner_arguments: PlannerArguments,
         instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]],
-        explain: bool,
     ) -> _UncertainSampleData:
         base_desires_by_model = dict(
             self._sub_models(
@@ -1429,6 +1420,7 @@ class CapacityPlanner:
                 model_desires(sub_desires, simulations)
             ):
                 base_sample = base_samples[index]
+                model_sample = _sample_ref_for_desires(sim_desires, index)
                 sim_result = self._plan_certain(
                     model_name=sub_model,
                     region=region,
@@ -1441,19 +1433,15 @@ class CapacityPlanner:
                     drives=drives,
                     planner_arguments=planner_arguments,
                 )
-                if explain:
-                    model_sample = _sample_ref_for_desires(sim_desires, index)
-                    excuses_by_model.setdefault(sub_model, []).extend(
-                        sim_result.excuses
+                excuses_by_model.setdefault(sub_model, []).extend(sim_result.excuses)
+                all_sample_excuses.extend(
+                    SampledExcuse(
+                        source_model=sub_model,
+                        model_sample=model_sample,
+                        excuse=excuse,
                     )
-                    all_sample_excuses.extend(
-                        SampledExcuse(
-                            source_model=sub_model,
-                            model_sample=model_sample,
-                            excuse=excuse,
-                        )
-                        for excuse in sim_result.excuses
-                    )
+                    for excuse in sim_result.excuses
+                )
                 if sim_result.plans:
                     sample_plans_by_model.setdefault(sub_model, []).append(
                         SampledPlan(

@@ -76,14 +76,12 @@ def test_compositional():
         region="us-east-1",
         desires=uncertain_mid,
         num_results=4,
-        explain=True,
     )
     composed_result = planner.plan(
         model_name="org.netflix.key-value",
         region="us-east-1",
         desires=uncertain_mid,
         num_results=4,
-        explain=True,
     )
 
     # Strictest test: Cassandra regret clusters must be EXACTLY identical
@@ -231,9 +229,6 @@ def test_plan_explained_preserves_plan_output():
     assert explained.plan.requirements == plain.requirements
     assert explained.plan.mean == plain.mean
     assert explained.plan.percentiles == plain.percentiles
-    assert plain.explanation.regret_clusters_by_model == {}
-    assert plain.explanation.excuses_by_model == {}
-    assert explained.plan.explanation.regret_clusters_by_model
 
 
 def test_composed_certain_explained_keeps_excuses_by_model():

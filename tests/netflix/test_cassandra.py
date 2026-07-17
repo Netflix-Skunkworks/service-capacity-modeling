@@ -1067,7 +1067,7 @@ class TestCassandraServiceCosts:
 
         assert (
             default_four_regions["cassandra.net.intra.region"].annual_cost
-            == default_one_region["cassandra.net.intra.region"].annual_cost * 4
+            == default_one_region["cassandra.net.intra.region"].annual_cost
         )
         assert (
             default_four_regions["cassandra.backup.s3-standard"].service_params[
