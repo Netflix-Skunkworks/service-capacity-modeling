@@ -1185,9 +1185,10 @@ class NflxCassandraArguments(BaseModel):
         default=None,
         ge=0,
         description="Effective backup retention in days for write-throughput backup "
-        "cost. Zero disables backup cost. Default 14.0 (derived from LCS production "
-        "clusters). Lower for TWCS or aggressive TTL workloads where SSTables expire "
-        "before retention matters.",
+        "cost. None uses the 14.0-day default derived from LCS production clusters; "
+        "zero disables backup cost; a positive value sets the effective regional "
+        "retention. Use a lower positive value for TWCS or aggressive TTL workloads "
+        "where SSTables expire before retention matters.",
     )
     min_instance_ram_gib_exclusive: float = Field(
         default=16.0,
@@ -1338,7 +1339,14 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> List[ServiceCapacity]:
-        # C* service costs: network + backup
+        """Estimate Cassandra network and backup costs for one regional plan.
+
+        Cassandra treats the query pattern's write rate as a fleetwide total for
+        service costing. Each regional plan returns its additive share of network
+        and backup write-throughput costs so summing all regions recovers the
+        fleetwide cost. The schema-backed ``backup_retention_days`` argument owns
+        backup inclusion and retention; it does not affect network costs.
+        """
         args = NflxCassandraArguments.from_extra_model_arguments(extra_model_arguments)
         copies_per_region: int = _target_rf(
             desires, extra_model_arguments.get("copies_per_region")
