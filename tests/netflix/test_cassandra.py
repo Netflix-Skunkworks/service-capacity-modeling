@@ -1030,8 +1030,7 @@ class TestCassandraServiceCosts:
             service.service_type: service for service in self._services(num_regions=1)
         }
         four_regions = {
-            service.service_type: service
-            for service in self._services(num_regions=4)
+            service.service_type: service for service in self._services(num_regions=4)
         }
 
         assert four_regions["cassandra.net.intra.region"].annual_cost == pytest.approx(
@@ -1062,9 +1061,7 @@ class TestCassandraServiceCosts:
 
         assert "cassandra.backup.s3-standard" in enabled
         assert (
-            seven_days["cassandra.backup.s3-standard"].service_params[
-                "retention_days"
-            ]
+            seven_days["cassandra.backup.s3-standard"].service_params["retention_days"]
             == 7
         )
         assert "cassandra.backup.s3-standard" not in disabled
