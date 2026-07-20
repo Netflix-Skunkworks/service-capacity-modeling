@@ -1002,7 +1002,6 @@ class TestCassandraServiceCosts:
     def _services(
         *,
         num_regions=4,
-        fleetwide=False,
         primary_backup_enabled=True,
     ):
         hardware = shapes.region("us-east-1")
@@ -1022,35 +1021,30 @@ class TestCassandraServiceCosts:
             ),
             desires,
             {
-                "cost_inputs_are_fleetwide": fleetwide,
                 "primary_backup_enabled": primary_backup_enabled,
             },
         )
 
-    def test_fleetwide_inputs_return_one_regional_cost_share(self):
-        regional = {
-            service.service_type: service for service in self._services(num_regions=4)
+    def test_service_costs_return_one_regional_share(self):
+        one_region = {
+            service.service_type: service for service in self._services(num_regions=1)
         }
-        fleetwide = {
+        four_regions = {
             service.service_type: service
-            for service in self._services(num_regions=4, fleetwide=True)
+            for service in self._services(num_regions=4)
         }
 
-        assert (
-            fleetwide["cassandra.net.inter.region"].annual_cost
-            == regional["cassandra.net.inter.region"].annual_cost
-        )
-        assert fleetwide["cassandra.net.intra.region"].annual_cost == pytest.approx(
-            regional["cassandra.net.intra.region"].annual_cost / 4
+        assert four_regions["cassandra.net.intra.region"].annual_cost == pytest.approx(
+            one_region["cassandra.net.intra.region"].annual_cost / 4
         )
         assert (
-            fleetwide["cassandra.backup.s3-standard"].service_params["snapshot_gib"]
-            == regional["cassandra.backup.s3-standard"].service_params["snapshot_gib"]
+            four_regions["cassandra.backup.s3-standard"].service_params["snapshot_gib"]
+            == one_region["cassandra.backup.s3-standard"].service_params["snapshot_gib"]
         )
-        assert fleetwide["cassandra.backup.s3-standard"].service_params[
+        assert four_regions["cassandra.backup.s3-standard"].service_params[
             "daily_write_gib"
         ] == pytest.approx(
-            regional["cassandra.backup.s3-standard"].service_params["daily_write_gib"]
+            one_region["cassandra.backup.s3-standard"].service_params["daily_write_gib"]
             / 4,
             abs=0.1,
         )

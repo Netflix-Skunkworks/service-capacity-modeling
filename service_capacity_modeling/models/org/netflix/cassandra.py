@@ -1187,12 +1187,6 @@ class NflxCassandraArguments(BaseModel):
         "Default 14.0 (derived from LCS production clusters). Lower for TWCS or "
         "aggressive TTL workloads where SSTables expire before retention matters.",
     )
-    cost_inputs_are_fleetwide: bool = Field(
-        default=False,
-        description="Whether query-pattern traffic represents a fleet-wide total. "
-        "When true, regional plans return one region's share of intra-region "
-        "network and write-throughput backup costs.",
-    )
     primary_backup_enabled: bool = Field(
         default=True,
         description="Whether the regional cluster produces primary S3 backups. "
@@ -1381,10 +1375,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             service_type, context, adjusted_desires, copies_per_region
         )
         for svc in net_services:
-            if (
-                args.cost_inputs_are_fleetwide
-                and svc.service_type == f"{service_type}.net.intra.region"
-            ):
+            if svc.service_type == f"{service_type}.net.intra.region":
                 svc.annual_cost /= max(context.num_regions, 1)
             svc.service_params["write_size_defaulted"] = write_size_defaulted
         services.extend(net_services)
@@ -1408,9 +1399,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
                 # full serialized mutations (cell metadata, timestamps, bloom
                 # filter contributions), not just raw app payload.
                 wps = desires.query_pattern.estimated_write_per_second.mid
-                write_region_count = (
-                    max(context.num_regions, 1) if args.cost_inputs_are_fleetwide else 1
-                )
+                write_region_count = max(context.num_regions, 1)
                 daily_write_gib = (wps * wire_write_size * 86400) / (
                     (1024**3) * write_region_count
                 )
