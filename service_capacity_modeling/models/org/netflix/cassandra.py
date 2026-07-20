@@ -1183,14 +1183,11 @@ class NflxCassandraArguments(BaseModel):
     )
     backup_retention_days: Optional[float] = Field(
         default=None,
-        description="Effective backup retention in days for write-throughput backup cost. "
-        "Default 14.0 (derived from LCS production clusters). Lower for TWCS or "
-        "aggressive TTL workloads where SSTables expire before retention matters.",
-    )
-    primary_backup_enabled: bool = Field(
-        default=True,
-        description="Whether the regional cluster produces primary S3 backups. "
-        "Set false only from observed deployment configuration.",
+        ge=0,
+        description="Effective backup retention in days for write-throughput backup "
+        "cost. Zero disables backup cost. Default 14.0 (derived from LCS production "
+        "clusters). Lower for TWCS or aggressive TTL workloads where SSTables expire "
+        "before retention matters.",
     )
     min_instance_ram_gib_exclusive: float = Field(
         default=16.0,
@@ -1381,7 +1378,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         services.extend(net_services)
 
         if (
-            args.primary_backup_enabled
+            args.backup_retention_days != 0
             and desires.data_shape.durability_slo_order.mid >= 1000
         ):
             blob = context.services.get("blob.standard", None)
@@ -1404,7 +1401,9 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
                     (1024**3) * write_region_count
                 )
                 retention_days = (
-                    args.backup_retention_days or _DEFAULT_BACKUP_RETENTION_DAYS
+                    _DEFAULT_BACKUP_RETENTION_DAYS
+                    if args.backup_retention_days is None
+                    else args.backup_retention_days
                 )
 
                 # Total = state snapshot + retained write volume
