@@ -998,7 +998,12 @@ class TestCassandraExtraModelArguments:
 
 class TestCassandraServiceCosts:
     @staticmethod
-    def _services(extra_model_arguments=None, num_regions=4):
+    def _services(
+        *,
+        num_regions=4,
+        fleetwide=False,
+        primary_backup_enabled=True,
+    ):
         hardware = shapes.region("us-east-1")
         desires = CapacityDesires(
             query_pattern=QueryPattern(
@@ -1015,100 +1020,48 @@ class TestCassandraServiceCosts:
                 services=hardware.services,
             ),
             desires,
-            extra_model_arguments or {},
+            {
+                "cost_inputs_are_fleetwide": fleetwide,
+                "primary_backup_enabled": primary_backup_enabled,
+            },
         )
 
-    def test_average_usage_overrides_only_service_cost_inputs(self):
-        peak = {
-            service.service_type: service
-            for service in self._services(
-                {"cost_write_per_second": 100, "cost_state_size_gib": 300}
-            )
-        }
-        average = {
-            service.service_type: service
-            for service in self._services(
-                {"cost_write_per_second": 10, "cost_state_size_gib": 30}
-            )
-        }
-
-        assert average["cassandra.net.inter.region"].annual_cost == pytest.approx(
-            peak["cassandra.net.inter.region"].annual_cost / 10
-        )
-        assert average["cassandra.net.intra.region"].annual_cost == pytest.approx(
-            peak["cassandra.net.intra.region"].annual_cost / 10
-        )
-        assert (
-            average["cassandra.backup.s3-standard"].service_params["snapshot_gib"] == 30
-        )
-        assert average["cassandra.backup.s3-standard"].service_params[
-            "daily_write_gib"
-        ] == pytest.approx(
-            peak["cassandra.backup.s3-standard"].service_params["daily_write_gib"] / 10,
-            abs=0.1,
-        )
-
-    def test_average_service_usage_is_regional_without_changing_default(self):
-        default_one_region = {
-            service.service_type: service for service in self._services(num_regions=1)
-        }
-        default_four_regions = {
+    def test_fleetwide_inputs_return_one_regional_cost_share(self):
+        regional = {
             service.service_type: service for service in self._services(num_regions=4)
         }
-        one_region = {
+        fleetwide = {
             service.service_type: service
-            for service in self._services({"cost_write_per_second": 100}, num_regions=1)
-        }
-        four_regions = {
-            service.service_type: service
-            for service in self._services({"cost_write_per_second": 100}, num_regions=4)
+            for service in self._services(num_regions=4, fleetwide=True)
         }
 
         assert (
-            default_four_regions["cassandra.net.intra.region"].annual_cost
-            == default_one_region["cassandra.net.intra.region"].annual_cost
+            fleetwide["cassandra.net.inter.region"].annual_cost
+            == regional["cassandra.net.inter.region"].annual_cost
+        )
+        assert fleetwide["cassandra.net.intra.region"].annual_cost == pytest.approx(
+            regional["cassandra.net.intra.region"].annual_cost / 4
         )
         assert (
-            default_four_regions["cassandra.backup.s3-standard"].service_params[
-                "daily_write_gib"
-            ]
-            == default_one_region["cassandra.backup.s3-standard"].service_params[
-                "daily_write_gib"
-            ]
+            fleetwide["cassandra.backup.s3-standard"].service_params["snapshot_gib"]
+            == regional["cassandra.backup.s3-standard"].service_params["snapshot_gib"]
         )
-        assert four_regions["cassandra.net.intra.region"].annual_cost == pytest.approx(
-            one_region["cassandra.net.intra.region"].annual_cost / 4
-        )
-        assert four_regions["cassandra.backup.s3-standard"].service_params[
+        assert fleetwide["cassandra.backup.s3-standard"].service_params[
             "daily_write_gib"
         ] == pytest.approx(
-            one_region["cassandra.backup.s3-standard"].service_params["daily_write_gib"]
+            regional["cassandra.backup.s3-standard"].service_params["daily_write_gib"]
             / 4,
             abs=0.1,
         )
 
-    def test_average_usage_does_not_change_capacity_topology(self):
-        def plan(extra_model_arguments):
-            return planner.plan_certain(
-                model_name="org.netflix.cassandra",
-                region="us-east-1",
-                desires=small_but_high_qps,
-                extra_model_arguments={**EXTRA_MODEL_ARGS, **extra_model_arguments},
-                num_results=1,
-            )[0]
+    def test_disabled_primary_backup_has_no_backup_service_cost(self):
+        enabled = {service.service_type: service for service in self._services()}
+        disabled = {
+            service.service_type: service
+            for service in self._services(primary_backup_enabled=False)
+        }
 
-        default = plan({})
-        average = plan({"cost_write_per_second": 0, "cost_state_size_gib": 0})
-
-        assert average.candidate_clusters.zonal == default.candidate_clusters.zonal
-
-    @pytest.mark.parametrize(
-        "argument", ["cost_write_per_second", "cost_state_size_gib"]
-    )
-    def test_service_cost_usage_must_be_nonnegative(self, argument):
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
-        )
-
-        with pytest.raises(ValueError, match=argument):
-            NflxCassandraArguments.from_extra_model_arguments({argument: -1})
+        assert "cassandra.backup.s3-standard" in enabled
+        assert "cassandra.backup.s3-standard" not in disabled
+        assert "cassandra.net.inter.region" in disabled
+        assert "cassandra.net.intra.region" in disabled
