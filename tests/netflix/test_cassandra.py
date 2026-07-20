@@ -1002,7 +1002,7 @@ class TestCassandraServiceCosts:
     def _services(
         *,
         num_regions=4,
-        primary_backup_enabled=True,
+        backup_retention_days=None,
     ):
         hardware = shapes.region("us-east-1")
         desires = CapacityDesires(
@@ -1021,7 +1021,7 @@ class TestCassandraServiceCosts:
             ),
             desires,
             {
-                "primary_backup_enabled": primary_backup_enabled,
+                "backup_retention_days": backup_retention_days,
             },
         )
 
@@ -1049,14 +1049,24 @@ class TestCassandraServiceCosts:
             abs=0.1,
         )
 
-    def test_disabled_primary_backup_has_no_backup_service_cost(self):
+    def test_backup_retention_controls_backup_service_cost(self):
         enabled = {service.service_type: service for service in self._services()}
+        seven_days = {
+            service.service_type: service
+            for service in self._services(backup_retention_days=7)
+        }
         disabled = {
             service.service_type: service
-            for service in self._services(primary_backup_enabled=False)
+            for service in self._services(backup_retention_days=0)
         }
 
         assert "cassandra.backup.s3-standard" in enabled
+        assert (
+            seven_days["cassandra.backup.s3-standard"].service_params[
+                "retention_days"
+            ]
+            == 7
+        )
         assert "cassandra.backup.s3-standard" not in disabled
         assert "cassandra.net.inter.region" in disabled
         assert "cassandra.net.intra.region" in disabled
