@@ -1,3 +1,5 @@
+# pylint: disable=too-many-lines
+
 import pytest
 
 from service_capacity_modeling.capacity_planner import planner
@@ -993,3 +995,75 @@ class TestCassandraExtraModelArguments:
                 "description": CassandraClusterSizeMode.unrestricted.__doc__,
             },
         ]
+
+
+class TestCassandraServiceCosts:
+    @staticmethod
+    def _services(
+        *,
+        num_regions=4,
+        backup_retention_days=None,
+    ):
+        hardware = shapes.region("us-east-1")
+        desires = CapacityDesires(
+            query_pattern=QueryPattern(
+                estimated_write_per_second=certain_float(100),
+                estimated_mean_write_size_bytes=certain_int(512),
+            ),
+            data_shape=DataShape(estimated_state_size_gib=certain_float(300)),
+        )
+        return NflxCassandraCapacityModel.service_costs(
+            "cassandra",
+            RegionContext(
+                zones_in_region=hardware.zones_in_region,
+                num_regions=num_regions,
+                services=hardware.services,
+            ),
+            desires,
+            {
+                "backup_retention_days": backup_retention_days,
+            },
+        )
+
+    def test_service_costs_return_one_regional_share(self):
+        one_region = {
+            service.service_type: service for service in self._services(num_regions=1)
+        }
+        four_regions = {
+            service.service_type: service for service in self._services(num_regions=4)
+        }
+
+        assert four_regions["cassandra.net.intra.region"].annual_cost == pytest.approx(
+            one_region["cassandra.net.intra.region"].annual_cost / 4
+        )
+        assert (
+            four_regions["cassandra.backup.s3-standard"].service_params["snapshot_gib"]
+            == one_region["cassandra.backup.s3-standard"].service_params["snapshot_gib"]
+        )
+        assert four_regions["cassandra.backup.s3-standard"].service_params[
+            "daily_write_gib"
+        ] == pytest.approx(
+            one_region["cassandra.backup.s3-standard"].service_params["daily_write_gib"]
+            / 4,
+            abs=0.1,
+        )
+
+    def test_backup_retention_controls_backup_service_cost(self):
+        enabled = {service.service_type: service for service in self._services()}
+        seven_days = {
+            service.service_type: service
+            for service in self._services(backup_retention_days=7)
+        }
+        disabled = {
+            service.service_type: service
+            for service in self._services(backup_retention_days=0)
+        }
+
+        assert "cassandra.backup.s3-standard" in enabled
+        assert (
+            seven_days["cassandra.backup.s3-standard"].service_params["retention_days"]
+            == 7
+        )
+        assert "cassandra.backup.s3-standard" not in disabled
+        assert "cassandra.net.inter.region" in disabled
+        assert "cassandra.net.intra.region" in disabled

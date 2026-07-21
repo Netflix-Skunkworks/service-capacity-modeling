@@ -1183,9 +1183,12 @@ class NflxCassandraArguments(BaseModel):
     )
     backup_retention_days: Optional[float] = Field(
         default=None,
-        description="Effective backup retention in days for write-throughput backup cost. "
-        "Default 14.0 (derived from LCS production clusters). Lower for TWCS or "
-        "aggressive TTL workloads where SSTables expire before retention matters.",
+        ge=0,
+        description="Effective backup retention in days for write-throughput backup "
+        "cost. None uses the 14.0-day default derived from LCS production clusters; "
+        "zero disables backup cost; a positive value sets the effective regional "
+        "retention. Use a lower positive value for TWCS or aggressive TTL workloads "
+        "where SSTables expire before retention matters.",
     )
     min_instance_ram_gib_exclusive: float = Field(
         default=16.0,
@@ -1336,7 +1339,14 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> List[ServiceCapacity]:
-        # C* service costs: network + backup
+        """Estimate Cassandra network and backup costs for one regional plan.
+
+        Cassandra treats the query pattern's write rate as a fleetwide total for
+        service costing. Each regional plan returns its additive share of network
+        and backup write-throughput costs so summing all regions recovers the
+        fleetwide cost. The schema-backed ``backup_retention_days`` argument owns
+        backup inclusion and retention; it does not affect network costs.
+        """
         args = NflxCassandraArguments.from_extra_model_arguments(extra_model_arguments)
         copies_per_region: int = _target_rf(
             desires, extra_model_arguments.get("copies_per_region")
@@ -1370,10 +1380,15 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             service_type, context, adjusted_desires, copies_per_region
         )
         for svc in net_services:
+            if svc.service_type == f"{service_type}.net.intra.region":
+                svc.annual_cost /= max(context.num_regions, 1)
             svc.service_params["write_size_defaulted"] = write_size_defaulted
         services.extend(net_services)
 
-        if desires.data_shape.durability_slo_order.mid >= 1000:
+        if (
+            args.backup_retention_days != 0
+            and desires.data_shape.durability_slo_order.mid >= 1000
+        ):
             blob = context.services.get("blob.standard", None)
             if blob:
                 # Snapshot component: data-at-rest per zone
@@ -1389,9 +1404,14 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
                 # full serialized mutations (cell metadata, timestamps, bloom
                 # filter contributions), not just raw app payload.
                 wps = desires.query_pattern.estimated_write_per_second.mid
-                daily_write_gib = (wps * wire_write_size * 86400) / (1024**3)
+                write_region_count = max(context.num_regions, 1)
+                daily_write_gib = (wps * wire_write_size * 86400) / (
+                    (1024**3) * write_region_count
+                )
                 retention_days = (
-                    args.backup_retention_days or _DEFAULT_BACKUP_RETENTION_DAYS
+                    _DEFAULT_BACKUP_RETENTION_DAYS
+                    if args.backup_retention_days is None
+                    else args.backup_retention_days
                 )
 
                 # Total = state snapshot + retained write volume
