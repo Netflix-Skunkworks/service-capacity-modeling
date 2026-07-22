@@ -4,7 +4,16 @@ from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import (
     CapacityDesires,
 )
+from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import BufferIntent
+from service_capacity_modeling.interface import Buffers
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import CurrentClusters
+from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import DriveType
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.org.netflix.evcache import (
@@ -639,3 +648,135 @@ def test_evcache_spread_invariants(desires):
         else:
             # Well-spread clusters should not have under_spread penalty
             assert "under_spread" not in penalties
+
+
+def _disk_heavy_evcache_desires(
+    current_instance: str = "i3en.2xlarge",
+) -> CapacityDesires:
+    """A large, disk-bound EVCache cluster already running on `current_instance`
+    (default i3en.2xlarge). Exercises the family-migration penalty when scaling
+    up an existing cluster."""
+    nodes = 100
+    current = CurrentZoneClusterCapacity(
+        cluster_instance_name=current_instance,
+        cluster_instance_count=Interval(
+            low=nodes, mid=nodes, high=nodes, confidence=1.0
+        ),
+        cluster_drive=Drive(
+            name="ephem", drive_type=DriveType.local_ssd, size_gib=4657
+        ),
+        cpu_utilization=certain_float(15.0),
+        memory_utilization_gib=certain_float(48.0),
+        network_utilization_mbps=certain_float(200.0),
+        disk_utilization_gib=certain_float(3000.0),
+    )
+    buffers = Buffers(
+        derived={
+            "scale_compute": Buffer(
+                intent=BufferIntent.scale,
+                ratio=1.3,
+                components=[BufferComponent.compute],
+            ),
+            "preserve_storage": Buffer(
+                intent=BufferIntent.preserve,
+                components=[BufferComponent.storage],
+            ),
+        }
+    )
+    return CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=Interval(
+                low=200000, mid=400000, high=480000, confidence=0.98
+            ),
+            estimated_write_per_second=Interval(
+                low=20000, mid=40000, high=48000, confidence=0.98
+            ),
+            estimated_mean_read_size_bytes=Interval(
+                low=1000, mid=40000, high=100000, confidence=0.98
+            ),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(
+                low=280000, mid=300000, high=320000, confidence=0.98
+            ),
+            estimated_state_item_count=Interval(
+                low=8_000_000_000,
+                mid=8_000_000_000,
+                high=8_000_000_000,
+                confidence=0.98,
+            ),
+        ),
+        current_clusters=CurrentClusters(zonal=[current]),
+        buffers=buffers,
+    )
+
+
+def test_evcache_different_family_regret():
+    from service_capacity_modeling.models import RANK_PENALTIES
+
+    desires = _disk_heavy_evcache_desires()
+
+    # Default (0.0): no family-migration penalty is applied anywhere, so
+    # behavior is unchanged from before the feature.
+    plan_default = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=desires,
+        num_results=6,
+    )
+    for p in plan_default:
+        penalties = p.candidate_clusters.zonal[0].cluster_params.get(RANK_PENALTIES, {})
+        assert "family_migration" not in penalties
+
+    # Opted in: the incumbent family (i3en) is preferred (ranked first) but
+    # alternatives are NOT excluded -- this is a soft bias, so a scale-up never
+    # fails for lack of same-family candidates.
+    plan_on = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=desires,
+        num_results=6,
+        extra_model_arguments={"different_family_regret": 0.10},
+    )
+    families_on = [p.candidate_clusters.zonal[0].instance.family for p in plan_on]
+    assert families_on[0] == "i3en", f"incumbent should rank first, got {families_on}"
+    assert len(set(families_on)) > 1, (
+        f"alternatives should remain available, got {families_on}"
+    )
+
+    # The incumbent carries no migration penalty; a different family carries the
+    # penalty, which inflates its rank above the (honest) total_annual_cost.
+    for p in plan_on:
+        family = p.candidate_clusters.zonal[0].instance.family
+        penalties = p.candidate_clusters.zonal[0].cluster_params.get(RANK_PENALTIES, {})
+        if family == "i3en":
+            assert "family_migration" not in penalties
+        else:
+            assert penalties.get("family_migration", 0) > 0
+            assert p.rank > p.candidate_clusters.total_annual_cost
+
+
+def test_evcache_different_family_regret_flips_selection():
+    # A cluster already on i7ie: without a penalty the cheaper i3en family wins
+    # the top slot ...
+    desires = _disk_heavy_evcache_desires(current_instance="i7ie.2xlarge")
+    no_penalty = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=desires,
+        num_results=6,
+    )
+    assert no_penalty[0].candidate_clusters.zonal[0].instance.family == "i3en"
+
+    # ... but a large enough migration penalty flips the top pick back to the
+    # incumbent family (i7ie). This proves the penalty actually changes the
+    # selected plan, not merely annotates it.
+    with_penalty = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=desires,
+        num_results=6,
+        extra_model_arguments={"different_family_regret": 0.5},
+    )
+    assert with_penalty[0].candidate_clusters.zonal[0].instance.family == "i7ie"
