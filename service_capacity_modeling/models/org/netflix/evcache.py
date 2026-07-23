@@ -215,6 +215,49 @@ def _estimate_evcache_requirement(
     )
 
 
+def _compute_evcache_penalties(
+    instance: Instance,
+    desires: CapacityDesires,
+    cluster_count: int,
+    compute_cost: float,
+    different_family_regret: float,
+) -> Dict[str, float]:
+    """Named rank penalties (in dollars) for an EVCache plan.
+
+    Penalties inflate plan.rank without touching total_annual_cost:
+        rank = total_annual_cost + sum(penalties.values())
+
+    - under_spread: discourages small / under-spread clusters.
+    - family_migration: biases scale-up toward the instance family the cluster
+      already runs; a different family must be meaningfully cheaper (on compute)
+      to out-rank the incumbent. Soft, so a different family still wins when it
+      is genuinely much cheaper or when the current family cannot satisfy the
+      requirement -- avoiding empty results. Only applies when a current cluster
+      is provided.
+    """
+    penalties: Dict[str, float] = {}
+
+    spread_cost = calculate_spread_cost(cluster_count)
+    if spread_cost > 0:
+        penalties["under_spread"] = spread_cost
+
+    current = (
+        desires.current_clusters.zonal[0]
+        if desires.current_clusters and desires.current_clusters.zonal
+        else None
+    )
+    if different_family_regret > 0 and current is not None:
+        current_family = (
+            current.cluster_instance.family
+            if current.cluster_instance is not None
+            else current.cluster_instance_name.rsplit(".", 1)[0]
+        )
+        if instance.family != current_family:
+            penalties["family_migration"] = different_family_regret * compute_cost
+
+    return penalties
+
+
 # pylint: disable=too-many-locals
 def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many-positional-arguments
     instance: Instance,
@@ -354,12 +397,6 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     }
     upsert_params(cluster, params)
 
-    # Penalize under-spread clusters via rank (deterministic sort) and regret
-    # (stochastic robustness). Additive dollar formula applied to plan.rank
-    # instead of annual_costs — keeping total_annual_cost honest. Combined with
-    # the family-migration penalty into RANK_PENALTIES below.
-    spread_cost = calculate_spread_cost(cluster.count)
-
     # evcache clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as
     #   * Security group limits. Since you must have < 500 rules if you're
@@ -403,35 +440,20 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     )
     compute_cost = float(sum(compute_costs.values()))
 
-    # Bias scale-up toward the currently running instance family: a different
-    # family must be meaningfully cheaper (on compute) to out-rank the
-    # incumbent. Applied to plan.rank (and RANK_PENALTIES) so total_annual_cost
-    # stays honest. Unlike a hard exclude this never drops the candidate, so a
-    # different family still wins when it is genuinely much cheaper or when the
-    # current family cannot satisfy the requirement — which avoids failing the
-    # plan with empty results. Penalties are stored as dollar amounts (like
-    # under_spread), not as coefficients. Upserted before Clusters() is built so
-    # the params live on the cluster object the plan carries.
-    current_zonal = (
-        desires.current_clusters.zonal[0]
-        if desires.current_clusters and desires.current_clusters.zonal
-        else None
+    # Rank penalties (under-spread + family-migration) bias plan.rank without
+    # touching total_annual_cost. Family-migration is a soft bias toward the
+    # currently running instance family: unlike a hard exclude it never drops
+    # the candidate, so a different family still wins when it is meaningfully
+    # cheaper or when the current family cannot satisfy the requirement. Upserted
+    # before Clusters() is built so the params live on the cluster object the
+    # plan carries; stored as dollar amounts (like under_spread).
+    penalties = _compute_evcache_penalties(
+        instance=instance,
+        desires=desires,
+        cluster_count=cluster.count,
+        compute_cost=compute_cost,
+        different_family_regret=different_family_regret,
     )
-    family_migration_cost = 0.0
-    if different_family_regret > 0 and current_zonal is not None:
-        current_family = (
-            current_zonal.cluster_instance.family
-            if current_zonal.cluster_instance is not None
-            else current_zonal.cluster_instance_name.rsplit(".", 1)[0]
-        )
-        if instance.family != current_family:
-            family_migration_cost = different_family_regret * compute_cost
-
-    penalties: Dict[str, float] = {}
-    if spread_cost > 0:
-        penalties["under_spread"] = spread_cost
-    if family_migration_cost > 0:
-        penalties["family_migration"] = family_migration_cost
     if penalties:
         upsert_params(cluster, {RANK_PENALTIES: penalties})
 
@@ -445,7 +467,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         services=services,
     )
 
-    plan_rank = clusters.total_annual_cost + spread_cost + family_migration_cost
+    plan_rank = clusters.total_annual_cost + sum(penalties.values())
 
     return CapacityPlan(
         requirements=Requirements(
