@@ -2,6 +2,8 @@
 Tests for Netflix key-value model.
 """
 
+from typing import Dict
+
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
@@ -83,3 +85,71 @@ def test_large_app_memory_reserve_survives_simulation():
     )
 
     assert plan.least_regret
+
+
+# 200 GiB / 5000 rps sits near Cassandra's memory bound, so a leaked 24 GiB
+# reserve visibly changes the shape it picks. A disk-bound namespace would
+# hide the difference.
+MEMORY_SENSITIVE_KV = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=Interval(
+            low=500, mid=5000, high=50_000, confidence=0.98
+        ),
+        estimated_write_per_second=Interval(
+            low=250, mid=2500, high=25_000, confidence=0.98
+        ),
+    ),
+    data_shape=DataShape(
+        estimated_state_size_gib=Interval(low=20, mid=200, high=2000, confidence=0.98),
+    ),
+)
+
+
+def _clusters(app_mem_gib: float) -> Dict[str, str]:
+    desires = MEMORY_SENSITIVE_KV.model_copy(deep=True)
+    desires.data_shape.reserved_instance_app_mem_gib = app_mem_gib
+    plan = planner.plan_certain(
+        model_name="org.netflix.key-value", region="us-east-1", desires=desires
+    )[0]
+    clusters = list(plan.candidate_clusters.zonal) + list(
+        plan.candidate_clusters.regional
+    )
+    return {c.cluster_type: f"{c.instance.name}x{c.count}" for c in clusters}
+
+
+def test_app_memory_reserve_stays_on_the_kv_tier():
+    """The dgwkv app's reserve is not Cassandra's reserve.
+
+    reserved_instance_app_mem_gib is memory per instance of the tier it was
+    written for. Callers set it for the KV Java app, which runs on its own
+    shapes, so raising it must move the dgwkv tier and leave Cassandra alone.
+    """
+    lean = _clusters(4)
+    heavy = _clusters(24)
+
+    assert heavy["cassandra"] == lean["cassandra"]
+    assert heavy["dgwkv"] != lean["dgwkv"]
+
+
+def test_evcache_also_gets_its_own_app_memory_reserve():
+    """EVCache runs on its own shapes too, so the KV reserve stops at KV."""
+    cached = LARGE_APP_RESERVE_KV.model_copy(deep=True)
+    cached.query_pattern.access_consistency.same_region.target_consistency = (
+        AccessConsistency.eventual
+    )
+    cached.query_pattern.estimated_read_per_second = Interval(
+        low=30_000, mid=300_000, high=3_000_000, confidence=0.98
+    )
+
+    plan = planner.plan_certain(
+        model_name="org.netflix.key-value", region="us-east-1", desires=cached
+    )[0]
+    evcache = [c for c in plan.candidate_clusters.zonal if c.cluster_type == "evcache"]
+    assert evcache, "Expected this workload to attach EVCache"
+
+    # EVCache reserves 1 GiB for its own app, so it is free to use small
+    # shapes. A node cannot be holding back 24 GiB of dgwkv heap and still
+    # fit on a box with less RAM than that.
+    for cluster in evcache:
+        assert cluster.instance.ram_gib < 24
