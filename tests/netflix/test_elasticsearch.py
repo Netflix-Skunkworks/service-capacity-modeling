@@ -292,3 +292,52 @@ def zonal_summary(zlr):
         zlr_cost,
         zlr_drive_gib,
     )
+
+
+def test_es_data_nodes_have_ram_left_after_reserves():
+    """Data nodes must have RAM left once sidecars and the heap are carved out.
+
+    Elasticsearch reserves ``base_mem + max(32, ram / 2)`` per node, which
+    overruns shapes at or below ~34 GiB. Those used to yield a negative memory
+    node count that max() discarded, silently dropping the memory constraint
+    and letting an undersized shape win on cost.
+    """
+    desires = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=Interval(
+                low=1000, mid=10_000, high=100_000, confidence=0.98
+            ),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(
+                low=100, mid=1000, high=4000, confidence=0.98
+            ),
+        ),
+    )
+
+    plans = planner.plan_certain(
+        model_name="org.netflix.elasticsearch",
+        region="us-east-1",
+        desires=desires,
+    )
+    assert plans, "Expected plans on shapes large enough for the reserves"
+
+    base_mem = (
+        desires.data_shape.reserved_instance_app_mem_gib
+        + desires.data_shape.reserved_instance_system_mem_gib
+    )
+    data_clusters = [
+        cluster
+        for plan in plans
+        for cluster in plan.candidate_clusters.zonal
+        if cluster.cluster_type == "elasticsearch-data"
+    ]
+    assert data_clusters
+
+    for cluster in data_clusters:
+        ram_gib = cluster.instance.ram_gib
+        reserved = base_mem + max(32, ram_gib / 2)
+        assert ram_gib > reserved, (
+            f"{cluster.instance.name} reserves {reserved} GiB of {ram_gib} GiB"
+        )

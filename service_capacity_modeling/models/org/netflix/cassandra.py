@@ -678,6 +678,33 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             bottleneck=Bottleneck.cpu if instance.cpu < 2 else Bottleneck.memory,
         )
 
+    # The 16 GiB floor above is workload independent, but the reserved app and
+    # system memory is not. Once the JVM heap and those reserves are carved out
+    # there has to be RAM left for page cache, otherwise Cassandra has nowhere
+    # to keep its working set and this shape cannot run the workload at all.
+    base_mem = base_memory_gib(desires)
+    node_memory = MemoryLayout.for_ram(
+        ram_gib=instance.ram_gib,
+        base_reserves_gib=base_mem,
+        max_page_cache_gib=max_page_cache_gib,
+    )
+    if node_memory.page_cache_capacity_gib <= 0:
+        return Excuse(
+            instance=instance.name,
+            drive=drive_name,
+            reason=(
+                f"No page cache left: {instance.ram_gib:.0f} GiB RAM - "
+                f"{node_memory.heap_gib:.0f} GiB heap - {base_mem:.0f} GiB "
+                f"reserved app and system memory"
+            ),
+            context={
+                "ram_gib": instance.ram_gib,
+                "heap_gib": node_memory.heap_gib,
+                "base_reserves_gib": base_mem,
+            },
+            bottleneck=Bottleneck.memory,
+        )
+
     # if we're not allowed to use gp2, skip EBS only types
     if instance.drive is None and require_local_disks:
         return Excuse(
@@ -821,8 +848,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         disk_per_node_gib=effective_disk_per_node_gib,
         cluster_size_lambda=cluster_size_lambda,
     )
-
-    base_mem = base_memory_gib(desires)
 
     @lru_cache(maxsize=None)
     def memory_layout(ram_gib: float) -> MemoryLayout:

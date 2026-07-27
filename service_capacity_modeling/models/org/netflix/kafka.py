@@ -327,10 +327,30 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     )
 
     # Account for sidecars and base system memory
-    base_mem = (
+    # Kafka currently uses 8GiB fixed, might want to change to min(30, x // 2)
+    reserved_mem_gib = (
         desires.data_shape.reserved_instance_app_mem_gib
         + desires.data_shape.reserved_instance_system_mem_gib
+        + 8
     )
+
+    # The min_instance_memory_gib floor above ignores the workload's reserved
+    # memory. If the reserves swallow the whole instance there is nothing left
+    # to hold partitions, so no node count works and the shape has to go.
+    if instance.ram_gib <= reserved_mem_gib:
+        return Excuse(
+            instance=instance.name,
+            drive=drive.name,
+            reason=(
+                f"Reserved memory ({reserved_mem_gib:.0f} GiB) leaves no RAM "
+                f"for Kafka on a {instance.ram_gib:.0f} GiB shape"
+            ),
+            context={
+                "ram_gib": instance.ram_gib,
+                "reserved_gib": reserved_mem_gib,
+            },
+            bottleneck=Bottleneck.memory,
+        )
 
     # Kafka clusters in prod (tier 0+1) need at least 2 nodes per zone
     min_count_for_tier = 1
@@ -392,9 +412,7 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
         ),
         cluster_size=lambda x: x,
         min_count=max(min_count_for_tier, min_count_for_data, required_zone_size or 1),
-        # Sidecars and Variable OS Memory
-        # Kafka currently uses 8GiB fixed, might want to change to min(30, x // 2)
-        reserve_memory=lambda instance_mem_gib: base_mem + 8,
+        reserve_memory=lambda _instance_mem_gib: reserved_mem_gib,
     )
 
     # Communicate to the actual provision that if we want reduced RF
