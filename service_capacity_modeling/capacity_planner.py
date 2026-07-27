@@ -1488,10 +1488,16 @@ class CapacityPlanner:
             )
 
             # We might have to compose this model with others depending on
-            # the user requirement
+            # the user requirement. What crosses that boundary is the composing
+            # model's call -- see CapacityModel.desires_for_composed_model,
+            # which by default drops reservations describing this model's own
+            # instances. It runs before the per-child transform so a transform
+            # that sets something deliberately still wins.
+            child_desires = self._models[sub_model].desires_for_composed_model(desires)
+
             queue.extend(
                 [
-                    (modify_child_desires(desires), child_model)
+                    (modify_child_desires(child_desires), child_model)
                     for child_model, modify_child_desires in self._models[
                         sub_model
                     ].compose_with(desires, extra_model_arguments)
