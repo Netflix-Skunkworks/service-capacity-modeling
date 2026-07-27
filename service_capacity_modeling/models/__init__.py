@@ -331,6 +331,29 @@ class CapacityModel:
         return True
 
     @staticmethod
+    def desires_for_composed_model(desires: CapacityDesires) -> CapacityDesires:
+        """Adjust desires before they cross into a model composed with this one.
+
+        The planner applies this to every model named by compose_with, before
+        that model's own transform runs, so a transform that sets something
+        deliberately still wins.
+
+        The default drops reserved_instance_app_mem_gib. That field is memory
+        per instance of the tier it was written for, and a composed model runs
+        on its own shapes -- a KeyValue request reserving 24 GiB for the dgwkv
+        Java app should not make Cassandra hold back 24 GiB per node for an app
+        that is not on the box. Unsetting it (rather than picking a number)
+        lets the composed model's own default_desires supply the reserve.
+
+        Override to keep it, or to add boundary rules of your own.
+        """
+        data_shape = desires.data_shape.model_dump(exclude_unset=True)
+        data_shape.pop("reserved_instance_app_mem_gib", None)
+        return desires.model_copy(
+            deep=True, update={"data_shape": DataShape(**data_shape)}
+        )
+
+    @staticmethod
     def compose_with(
         user_desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],

@@ -46,20 +46,6 @@ class NflxKeyValueArguments(NflxJavaAppArguments):
     )
 
 
-def _without_app_memory_reserve(desires: CapacityDesires) -> CapacityDesires:
-    """Drop the KV app's memory reserve so the datastore uses its own.
-
-    ``reserved_instance_app_mem_gib`` is per instance of the tier it was
-    written for. Callers set it for the dgwkv Java app, which runs on its own
-    shapes, so carrying it into Cassandra or EVCache reserves memory those
-    nodes never use. Unsetting it (rather than picking a number here) lets
-    each datastore's ``default_desires`` supply its own reserve.
-    """
-    data_shape = desires.data_shape.model_dump(exclude_unset=True)
-    data_shape.pop("reserved_instance_app_mem_gib", None)
-    return desires.model_copy(deep=True, update={"data_shape": DataShape(**data_shape)})
-
-
 class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
     service_name = "key-value"
     cluster_type = "dgwkv"
@@ -133,7 +119,7 @@ class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
             def _modify_cassandra_desires(
                 desires: CapacityDesires,
             ) -> CapacityDesires:
-                relaxed = _without_app_memory_reserve(desires)
+                relaxed = desires.model_copy(deep=True)
 
                 # This is an initial best guess. Parameterizing in case we want to
                 # configure it in the future.
@@ -151,7 +137,7 @@ class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
             def _modify_evcache_desires(
                 desires: CapacityDesires,
             ) -> CapacityDesires:
-                relaxed = _without_app_memory_reserve(desires)
+                relaxed = desires.model_copy(deep=True)
                 access_consistency = relaxed.query_pattern.access_consistency
                 access_consistency.same_region.target_consistency = (
                     AccessConsistency.best_effort
@@ -163,7 +149,7 @@ class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
                 ("org.netflix.evcache", _modify_evcache_desires),
             )
         else:
-            return (("org.netflix.cassandra", _without_app_memory_reserve),)
+            return (("org.netflix.cassandra", lambda x: x),)
 
     @staticmethod
     def default_desires(
