@@ -460,6 +460,13 @@ class NflxElasticsearchCapacityModel(CapacityModel):
         return None
 
     @staticmethod
+    def plans_own_cluster() -> bool:
+        # This model owns no instances; it splits Elasticsearch into its data,
+        # master and search node roles. The caller's desires describe those
+        # nodes, so per-instance reservations belong to them.
+        return False
+
+    @staticmethod
     def description() -> str:
         return "Netflix Streaming Elasticsearch Model"
 

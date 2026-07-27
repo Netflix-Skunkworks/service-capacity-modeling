@@ -331,6 +331,22 @@ class CapacityModel:
         return True
 
     @staticmethod
+    def plans_own_cluster() -> bool:
+        """Whether this model sizes instances of its own.
+
+        Most models do: they plan their tier and compose_with other services
+        that run on separate shapes. A few plan nothing themselves and only
+        split one service into node roles (Elasticsearch into data, master
+        and search nodes), so the caller's desires describe the composed
+        models rather than a tier of this model's own.
+
+        The planner uses this to decide whether per-instance reservations
+        such as reserved_instance_app_mem_gib belong to this model or to the
+        models it composes with.
+        """
+        return True
+
+    @staticmethod
     def compose_with(
         user_desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
