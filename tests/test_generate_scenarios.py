@@ -20,6 +20,8 @@ def test_generate_scenarios():
     model.allowed_platforms.return_value = {Platform.amd64}
     model.allowed_cloud_drives.return_value = {}
     model.run_hardware_simulation.return_value = True
+    # No existing cluster: the planner asks which labels this model answers to.
+    model.current_cluster_types.return_value = ()
 
     region = "us-east-1"
     desires = CapacityDesires()
@@ -48,6 +50,8 @@ def test_generate_scenarios_limit_family():
     model.allowed_platforms.return_value = {Platform.amd64}
     model.allowed_cloud_drives.return_value = {}
     model.run_hardware_simulation.return_value = True
+    # No existing cluster: the planner asks which labels this model answers to.
+    model.current_cluster_types.return_value = ()
 
     region = "us-east-1"
     desires = CapacityDesires()
@@ -79,6 +83,8 @@ def test_generate_scenarios_desire_resources():
     model.allowed_platforms.return_value = {Platform.amd64}
     model.allowed_cloud_drives.return_value = {}
     model.run_hardware_simulation.return_value = True
+    # No existing cluster: the planner asks which labels this model answers to.
+    model.current_cluster_types.return_value = ()
 
     region = "us-east-1"
     num_regions = 3
@@ -118,6 +124,8 @@ def test_generate_scenarios_current_resources():
     model.allowed_platforms.return_value = {Platform.amd64}
     model.allowed_cloud_drives.return_value = {}
     model.run_hardware_simulation.return_value = True
+    # No existing cluster: the planner asks which labels this model answers to.
+    model.current_cluster_types.return_value = ()
 
     region = "us-east-1"
     num_regions = 3

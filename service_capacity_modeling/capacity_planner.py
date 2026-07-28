@@ -1101,7 +1101,7 @@ class CapacityPlanner:
         )
 
         current_capacity = current_cluster_capacity(
-            desires, getattr(model, "cluster_type", "")
+            desires, *model.current_cluster_types()
         )
         # Return early if we dont have current_capacity set.
         if current_capacity is None or current_capacity.cluster_instance is None:

@@ -199,6 +199,16 @@ class CapacityModel:
     of its own -- an aggregator that only composes with others.
     """
 
+    @classmethod
+    def current_cluster_types(cls) -> Tuple[str, ...]:
+        """Labels a caller might use for a cluster this model already runs.
+
+        Defaults to ``cluster_type``. Override when a model produces more than
+        one kind of cluster -- Postgres is a facade over Aurora and RDS, so an
+        existing cluster of its may carry either of their labels.
+        """
+        return (cls.cluster_type,) if cls.cluster_type else ()
+
     def __init__(self) -> None:
         pass
 

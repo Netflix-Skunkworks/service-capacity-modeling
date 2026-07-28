@@ -581,7 +581,9 @@ def _get_current_cluster_size(desires: CapacityDesires) -> int:
 
 
 def _get_current_capacity(desires: CapacityDesires) -> Optional[CurrentClusterCapacity]:
-    return current_cluster_capacity(desires, NflxCassandraCapacityModel.cluster_type)
+    return current_cluster_capacity(
+        desires, *NflxCassandraCapacityModel.current_cluster_types()
+    )
 
 
 def _get_cluster_size_lambda(

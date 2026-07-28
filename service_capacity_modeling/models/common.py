@@ -1227,7 +1227,7 @@ class RequirementFromCurrentCapacity(BaseModel):
 
 
 def current_cluster_capacity(
-    desires: CapacityDesires, cluster_type: str
+    desires: CapacityDesires, *cluster_types: str
 ) -> Optional[CurrentClusterCapacity]:
     """The caller's existing cluster for this model, if they described one.
 
@@ -1236,6 +1236,10 @@ def current_cluster_capacity(
     both zonal. Taking whichever entry came first meant a model could size
     itself against another tier's topology, so match on ``cluster_type`` --
     the field exists for exactly this and nothing was reading it.
+
+    Takes several labels because a model can produce more than one kind of
+    cluster: Postgres is a facade that plans either an Aurora or an RDS
+    cluster, so a caller's existing one may carry either label.
 
     Entries written before the field was populated carry no ``cluster_type``.
     When none of them does, fall back to the first entry so those callers
@@ -1246,9 +1250,10 @@ def current_cluster_capacity(
     if clusters is None:
         return None
 
+    wanted = {t for t in cluster_types if t}
     candidates: List[CurrentClusterCapacity] = [*clusters.zonal, *clusters.regional]
     for candidate in candidates:
-        if candidate.cluster_type == cluster_type:
+        if candidate.cluster_type in wanted:
             return candidate
 
     # An unlabelled entry means nobody said whose it is, not that it belongs to

@@ -117,7 +117,7 @@ def calculate_vitals_for_capacity_planner(
     # Cassandra is zonal too, so a composed KeyValue request lists both here
     # and taking the first entry could size EVCache off Cassandra's cluster.
     current_capacity = current_cluster_capacity(
-        desires, NflxEVCacheCapacityModel.cluster_type
+        desires, *NflxEVCacheCapacityModel.current_cluster_types()
     )
     if not current_capacity:
         return needed_cores, needed_network_mbps, needed_memory_gib, needed_disk_gib

@@ -13,6 +13,12 @@ from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.common import current_cluster_capacity
+from service_capacity_modeling.models.org.netflix.elasticsearch import (
+    nflx_elasticsearch_capacity_model,
+)
+from service_capacity_modeling.models.org.netflix.postgres import (
+    nflx_postgres_capacity_model,
+)
 
 
 def _zonal(name: str, cluster_type=None, count: int = 3):
@@ -101,6 +107,41 @@ def test_zonal_is_preferred_over_regional_for_the_legacy_fallback():
 
     picked = current_cluster_capacity(desires, "cassandra")
     assert picked.cluster_instance_name == "i4i.2xlarge"
+
+
+def test_a_facade_model_answers_to_each_backend_label():
+    """Postgres plans an Aurora cluster, so its existing one carries that label.
+
+    A single cluster_type cannot express that, which is why the selector takes
+    several and the model declares them.
+    """
+    assert set(nflx_postgres_capacity_model.current_cluster_types()) == {
+        "aurora-cluster",
+        "rds-cluster",
+    }
+
+    for label in ("aurora-cluster", "rds-cluster"):
+        desires = _desires(regional=[_regional("db.r6g.xlarge", cluster_type=label)])
+        picked = current_cluster_capacity(
+            desires, *nflx_postgres_capacity_model.current_cluster_types()
+        )
+        assert picked is not None, f"{label} should match Postgres"
+        assert picked.cluster_instance_name == "db.r6g.xlarge"
+
+
+def test_a_model_declaring_no_label_matches_nothing_by_name():
+    """An aggregator owns no clusters, so it has no label to match on.
+
+    It still gets the unlabelled fallback, which is what callers had before
+    cluster_type was read at all.
+    """
+    assert not nflx_elasticsearch_capacity_model.current_cluster_types()
+
+    labelled = _desires(zonal=[_zonal("i4i.2xlarge", cluster_type="cassandra")])
+    assert current_cluster_capacity(labelled) is None
+
+    unlabelled = _desires(zonal=[_zonal("i4i.2xlarge")])
+    assert current_cluster_capacity(unlabelled) is not None
 
 
 def test_no_current_clusters_at_all():

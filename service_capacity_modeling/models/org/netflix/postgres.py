@@ -22,6 +22,12 @@ from service_capacity_modeling.models import CapacityModel
 
 
 class NflxPostgresCapacityModel(CapacityModel):
+    @classmethod
+    def current_cluster_types(cls) -> Tuple[str, ...]:
+        # This model stamps no label of its own -- it delegates to Aurora, so a
+        # Postgres cluster the caller already runs carries a backend's label.
+        return ("aurora-cluster", "rds-cluster")
+
     @staticmethod
     def capacity_plan(
         instance: Instance,
