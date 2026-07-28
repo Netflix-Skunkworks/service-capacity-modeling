@@ -39,6 +39,7 @@ from service_capacity_modeling.explainability import STATEFUL_DATASTORE_FAMILIES
 from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
+from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import normalized_aws_size
 from service_capacity_modeling.interface import Interval
@@ -51,6 +52,7 @@ from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models import RANK_PENALTIES
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import current_cluster_capacity
 from service_capacity_modeling.models.common import DerivedBuffers
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_disk_size_gib
@@ -239,13 +241,27 @@ def _write_buffer_gib_zone(
     return float(write_buffer_gib) / zones_per_region
 
 
+def _cassandra_reference_shape(desires: CapacityDesires) -> Instance:
+    """The shape Cassandra's core counts are normalized against.
+
+    CapacityDesires.reference_shape reads current_clusters.zonal[0], which in
+    a composed request can be another tier's cluster -- EVCache is zonal too.
+    Normalize against Cassandra's own current shape, or the default when the
+    caller did not describe one.
+    """
+    current_capacity = _get_current_capacity(desires)
+    if current_capacity is not None and current_capacity.cluster_instance is not None:
+        return current_capacity.cluster_instance
+    return default_reference_shape
+
+
 def _get_cores_from_desires(desires: CapacityDesires, instance: Instance) -> int:
     cpu_buffer = buffer_for_components(
         buffers=desires.buffers, components=[BACKGROUND_BUFFER]
     )
 
     # We have no existing utilization to go from
-    reference_shape = desires.reference_shape
+    reference_shape = _cassandra_reference_shape(desires)
     # Keep half of the cores free for background work (compaction, backup, repair).
     needed_cores = math.ceil(sqrt_staffed_cores(desires) * cpu_buffer.ratio)
 
@@ -417,13 +433,13 @@ def _estimate_cassandra_requirement(
     disk_buffer = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     )
-    reference_shape = desires.reference_shape
+    reference_shape = _cassandra_reference_shape(desires)
     current_capacity = _get_current_capacity(desires)
 
     # If the cluster is already provisioned
     if current_capacity and desires.current_clusters is not None:
         capacity_requirement = zonal_requirements_from_current(
-            desires.current_clusters,
+            current_capacity,
             desires.buffers,
             instance,
             reference_shape,
@@ -565,13 +581,7 @@ def _get_current_cluster_size(desires: CapacityDesires) -> int:
 
 
 def _get_current_capacity(desires: CapacityDesires) -> Optional[CurrentClusterCapacity]:
-    if desires.current_clusters is None:
-        return None
-    if desires.current_clusters.zonal:
-        return desires.current_clusters.zonal[0]
-    if desires.current_clusters.regional:
-        return desires.current_clusters.regional[0]
-    return None
+    return current_cluster_capacity(desires, NflxCassandraCapacityModel.cluster_type)
 
 
 def _get_cluster_size_lambda(
@@ -1083,11 +1093,8 @@ def _estimate_zonal_data_gib(user_desires: CapacityDesires, rf: int) -> float:
     Prefers actual current_clusters data; falls back to estimated_state_size_gib
     divided by compression ratio (matching the on-disk units of the first path).
     """
-    if (
-        user_desires.current_clusters is not None
-        and user_desires.current_clusters.zonal
-    ):
-        cc = user_desires.current_clusters.zonal[0]
+    cc = _get_current_capacity(user_desires)
+    if cc is not None:
         if (
             cc.disk_utilization_gib is not None
             and cc.disk_utilization_gib.mid > 0
