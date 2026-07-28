@@ -11,6 +11,7 @@ from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.org.netflix.elasticsearch import (
+    ES_MAX_HEAP_GIB,
     NflxElasticsearchArguments,
 )
 from tests.util import assert_similar_compute
@@ -298,10 +299,11 @@ def zonal_summary(zlr):
 def test_es_data_nodes_have_ram_left_after_reserves():
     """Data nodes must have RAM left once sidecars and the heap are carved out.
 
-    Elasticsearch reserves ``base_mem + max(32, ram / 2)`` per node, which
-    overruns shapes at or below ~34 GiB. Those used to yield a negative memory
-    node count that max() discarded, silently dropping the memory constraint
-    and letting an undersized shape win on cost.
+    Elasticsearch reserves ``base_mem + min(ES_MAX_HEAP_GIB, ram / 2)`` per
+    node. A shape can only be chosen if something is left over for shards and
+    page cache -- a negative remainder used to yield a negative memory node
+    count that max() discarded, silently dropping the memory constraint and
+    letting an undersized shape win on cost.
     """
     desires = CapacityDesires(
         service_tier=1,
@@ -338,10 +340,12 @@ def test_es_data_nodes_have_ram_left_after_reserves():
 
     for cluster in data_clusters:
         ram_gib = cluster.instance.ram_gib
-        reserved = base_mem + max(32, ram_gib / 2)
+        reserved = base_mem + min(ES_MAX_HEAP_GIB, ram_gib / 2)
         assert ram_gib > reserved, (
             f"{cluster.instance.name} reserves {reserved} GiB of {ram_gib} GiB"
         )
+        # Heap is capped so the JVM keeps compressed object pointers.
+        assert min(ES_MAX_HEAP_GIB, ram_gib / 2) <= ES_MAX_HEAP_GIB
 
 
 def test_es_rejections_explain_themselves():

@@ -48,6 +48,17 @@ from service_capacity_modeling.stats import dist_for_interval
 
 logger = logging.getLogger(__name__)
 
+# The JVM uses compressed object pointers below a ~32 GiB heap. Cassandra caps
+# its own heap the same way (DEFAULT_MAX_HEAP_GIB in cassandra_memory).
+#
+# Note this is compared against Instance.ram_gib, which for many families is
+# stored ~4.6% below the advertised figure (an AWS-advertised 32 GiB instance is
+# 30.52 here: 32768 MiB read as MB and converted to GiB). So on a 64 GiB shape
+# the cap yields a 30.52 GiB heap rather than 32 -- under the boundary, which is
+# the safe side. Correcting ram_gib would move sizing for every model and is a
+# separate change.
+ES_MAX_HEAP_GIB = 32
+
 
 def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
     if user_copies is not None:
@@ -251,15 +262,18 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
                 bottleneck=Bottleneck.cpu if instance.cpu < 2 else Bottleneck.memory,
             )
 
-        # Sidecars/System takes away memory from Elasticsearch
-        # which uses half of available system max of 32 for compressed oops
+        # Sidecars and the OS take memory away from Elasticsearch, and so does
+        # the JVM heap: it is not page cache and shards cannot use it. Heap is
+        # half of RAM, capped at 32 GiB so the JVM keeps compressed object
+        # pointers -- above that boundary references widen and the larger heap
+        # buys less than it costs.
         base_mem = (
             desires.data_shape.reserved_instance_app_mem_gib
             + desires.data_shape.reserved_instance_system_mem_gib
         )
 
         def reserve_memory(instance_mem_gib: float) -> float:
-            return base_mem + max(32, instance_mem_gib / 2)
+            return base_mem + min(ES_MAX_HEAP_GIB, instance_mem_gib / 2)
 
         # The 24 GiB floor above ignores the workload's reserved memory. If the
         # reserves swallow the whole instance there is nothing left to hold
