@@ -508,12 +508,7 @@ def _resolve_cluster_instances(desires: CapacityDesires) -> None:
 def _configure_child_desires(
     desires: CapacityDesires, config: ChildDesiresConfig
 ) -> CapacityDesires:
-    """Apply a parent's composition policy before its child transform.
-
-    Unsetting a field rather than assigning a replacement lets the child
-    model's ``default_desires`` provide its own value. The edge transform runs
-    afterward and can still set an intentional child-specific override.
-    """
+    """Apply ``ChildDesiresConfig`` before the child edge transform."""
     if config.inherit_app_memory_reservation:
         return desires
 
@@ -527,12 +522,7 @@ def _with_current_clusters_for_model(
     model: CapacityModel,
     current_clusters: Optional[CurrentClusters],
 ) -> CapacityDesires:
-    """Give a model only the current clusters whose type it owns.
-
-    Untyped current clusters predate composed-model routing. Prefer exact
-    typed matches; when a model has no typed match, retain untyped rows as its
-    legacy fallback so partial adoption does not erase current-capacity data.
-    """
+    """Route current clusters according to ``model.current_cluster_types()``."""
     if current_clusters is None:
         return desires
 

@@ -846,9 +846,9 @@ class CurrentClusterCapacity(ExcludeUnsetModel):
     cluster_instance: Optional[Instance] = None
     cluster_drive: Optional[Drive] = None
     cluster_instance_count: Interval
-    # Optional: if not set, extract_baseline_plan
-    # Required metadata for identifying which model
-    # this capacity belongs to
+    # Identifies the model that owns this capacity during composed planning and
+    # baseline extraction. Optional for legacy rows during composed planning;
+    # required by extract_baseline_plan.
     cluster_type: Optional[str] = None
     # The distribution cpu utilization in the cluster.
     cpu_utilization: Interval = certain_float(0.0)

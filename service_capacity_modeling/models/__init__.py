@@ -62,7 +62,15 @@ __common_regrets__ = frozenset(("spend", "disk", "mem"))
 
 
 class ChildDesiresConfig(BaseModel):
-    """Controls which parent desires cross one composition edge."""
+    """Controls which desires cross one parent-to-child composition edge.
+
+    Caller-supplied workload desires and transforms from ancestor models pass
+    to the child. Parent model defaults do not. By default, the planner unsets
+    the parent's per-instance application memory reservation before running the
+    edge transform, allowing the child model's default to apply. A parent can
+    opt a child into inheriting that reservation instead, and an edge transform
+    can supply an explicit child reservation after the reset.
+    """
 
     inherit_app_memory_reservation: bool = False
     """Pass the parent's per-instance app memory reservation to the child."""
@@ -342,13 +350,7 @@ class CapacityModel:
 
     @staticmethod
     def child_desires_config(child_model: str) -> ChildDesiresConfig:
-        """Configure desires inherited by one composed child model.
-
-        Workload desires and accumulated transforms pass to children by
-        default. Per-instance application memory does not: each child uses
-        its own model default unless this parent opts into inheritance or its
-        edge transform supplies an explicit value.
-        """
+        """Return the desire inheritance policy for one composed child model."""
         _ = child_model
         return ChildDesiresConfig()
 
@@ -358,7 +360,10 @@ class CapacityModel:
 
         Cost-aware models already declare a single ``cluster_type`` for cost
         attribution. Other models can either declare the same class attribute
-        or override this method when they own multiple cluster types.
+        or override this method when they own multiple cluster types. During
+        composition, the planner passes matching typed rows to their owner. A
+        model with no typed match receives untyped legacy rows as a fallback;
+        a model that declares no cluster types receives all rows.
         """
         cluster_type = getattr(cls, "cluster_type", None)
         return (cluster_type,) if cluster_type else ()

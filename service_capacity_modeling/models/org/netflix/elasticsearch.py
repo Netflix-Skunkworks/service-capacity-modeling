@@ -570,15 +570,15 @@ class NflxElasticsearchCapacityModel(CapacityModel):
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
         def _modify_data_desires(desires: CapacityDesires) -> CapacityDesires:
-            # data node's model use the full desires
+            # Data nodes use the full Elasticsearch workload desires.
             return desires
 
         def _modify_master_desires(desires: CapacityDesires) -> CapacityDesires:
-            # master node's model doesn't use anything from the desires
+            # Master nodes inherit the Elasticsearch app memory reservation.
             return desires
 
         def _modify_search_desires(desires: CapacityDesires) -> CapacityDesires:
-            # search node's model doesn't use anything from the desires
+            # Search nodes inherit the Elasticsearch app memory reservation.
             return desires
 
         return (

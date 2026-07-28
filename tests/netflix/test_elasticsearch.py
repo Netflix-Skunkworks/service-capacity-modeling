@@ -369,12 +369,17 @@ def test_es_rejections_explain_themselves():
         model_name="org.netflix.elasticsearch", region="us-east-1", desires=desires
     )
     assert explained.plans, "Expected Elasticsearch to still produce plans"
-    assert explained.excuses, "Expected rejected shapes to be explained"
+    excuses = [
+        excuse
+        for model_excuses in explained.excuses_by_model.values()
+        for excuse in model_excuses
+    ]
+    assert excuses, "Expected rejected shapes to be explained"
 
-    for excuse in explained.excuses:
+    for excuse in excuses:
         assert excuse.reason
         assert excuse.bottleneck is not None
 
-    bottlenecks = {e.bottleneck for e in explained.excuses}
+    bottlenecks = {e.bottleneck for e in excuses}
     assert Bottleneck.drive_type in bottlenecks  # EBS-only shapes
     assert Bottleneck.memory in bottlenecks  # too small, or reserves overrun

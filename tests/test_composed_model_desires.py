@@ -3,12 +3,15 @@
 import pytest
 
 from service_capacity_modeling.capacity_planner import planner
+from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import CurrentRegionClusterCapacity
 from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.org.netflix.elasticsearch import (
@@ -278,3 +281,37 @@ def test_multilevel_composition_preserves_ancestor_transforms():
         cassandra.estimated_write_per_second.mid
         == key_value.estimated_write_per_second.mid
     )
+
+
+def test_composition_only_resets_parent_app_memory():
+    desires = _desires(24)
+    desires.data_shape.reserved_instance_system_mem_gib = 7
+    desires.query_pattern.estimated_read_parallelism = certain_int(13)
+    desires.query_pattern.estimated_write_parallelism = certain_int(17)
+    desires.query_pattern.read_latency_slo_ms = FixedInterval(
+        low=2, mid=8, high=20, confidence=0.98
+    )
+    desires.query_pattern.write_latency_slo_ms = FixedInterval(
+        low=3, mid=9, high=24, confidence=0.98
+    )
+    desires.buffers = Buffers(default=Buffer(ratio=1.75, components=["cpu"]))
+
+    by_model = _submodels(
+        "org.netflix.graphkv",
+        desires,
+        extra_model_arguments={"kv_force_evcache": True},
+    )
+
+    for model_name in (
+        "org.netflix.graphkv",
+        "org.netflix.key-value",
+        "org.netflix.cassandra",
+        "org.netflix.evcache",
+    ):
+        child = by_model[model_name]
+        assert child.data_shape.reserved_instance_system_mem_gib == 7
+        assert child.query_pattern.estimated_read_parallelism.mid == 13
+        assert child.query_pattern.estimated_write_parallelism.mid == 17
+        assert child.query_pattern.read_latency_slo_ms.mid == 8
+        assert child.query_pattern.write_latency_slo_ms.mid == 9
+        assert child.buffers.default.ratio == 1.75

@@ -381,7 +381,10 @@ def test_shape_without_page_cache_is_excused():
     assert explained.plans, "Larger shapes should still produce plans"
 
     excused = {
-        e.instance for e in explained.excuses if "No page cache left" in e.reason
+        excuse.instance
+        for model_excuses in explained.excuses_by_model.values()
+        for excuse in model_excuses
+        if "No page cache left" in excuse.reason
     }
     assert "i4i.xlarge" in excused
 
