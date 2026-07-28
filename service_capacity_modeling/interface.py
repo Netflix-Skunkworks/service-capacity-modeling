@@ -1524,6 +1524,13 @@ class RegretPlanSummary(ExcludeUnsetModel):
 
 
 class PlanExplanation(ExcludeUnsetModel):
+    """Inputs and regret details for an uncertain capacity plan.
+
+    ``desires_by_model`` contains each model's resolved base desires after
+    composition transforms and model defaults. These desires are the inputs to
+    uncertainty sampling.
+    """
+
     regret_params: CapacityRegretParameters
     regret_clusters_by_model: Dict[
         str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]
