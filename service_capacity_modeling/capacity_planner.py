@@ -529,10 +529,9 @@ def _with_current_clusters_for_model(
 ) -> CapacityDesires:
     """Give a model only the current clusters whose type it owns.
 
-    Untyped current clusters predate composed-model routing. Preserve an
-    entirely untyped input for backward compatibility; once any cluster is
-    typed, untyped and sibling clusters are excluded from model-specific
-    sizing.
+    Untyped current clusters predate composed-model routing. Prefer exact
+    typed matches; when a model has no typed match, retain untyped rows as its
+    legacy fallback so partial adoption does not erase current-capacity data.
     """
     if current_clusters is None:
         return desires
@@ -543,16 +542,31 @@ def _with_current_clusters_for_model(
     if not cluster_types or not has_typed_clusters:
         selected = current_clusters
     else:
+        matching_zonal = [
+            cluster
+            for cluster in current_clusters.zonal
+            if cluster.cluster_type in cluster_types
+        ]
+        matching_regional = [
+            cluster
+            for cluster in current_clusters.regional
+            if cluster.cluster_type in cluster_types
+        ]
+        has_typed_match = bool(matching_zonal or matching_regional)
         selected = CurrentClusters(
-            zonal=[
+            zonal=matching_zonal
+            if has_typed_match
+            else [
                 cluster
                 for cluster in current_clusters.zonal
-                if cluster.cluster_type in cluster_types
+                if cluster.cluster_type is None
             ],
-            regional=[
+            regional=matching_regional
+            if has_typed_match
+            else [
                 cluster
                 for cluster in current_clusters.regional
-                if cluster.cluster_type in cluster_types
+                if cluster.cluster_type is None
             ],
             services=current_clusters.services,
         )

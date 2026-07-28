@@ -197,6 +197,19 @@ def test_composed_models_receive_only_their_current_cluster_type():
     assert _current_types(by_model["org.netflix.evcache"]) == {"evcache"}
 
 
+def test_untyped_current_cluster_is_fallback_during_partial_adoption():
+    desires = _desires(24)
+    desires.current_clusters = CurrentClusters(
+        zonal=[_current_zonal()],
+        regional=[_current_regional("dgwkv")],
+    )
+
+    by_model = _submodels("org.netflix.key-value", desires)
+
+    assert _current_types(by_model["org.netflix.key-value"]) == {"dgwkv"}
+    assert _current_types(by_model["org.netflix.cassandra"]) == {None}
+
+
 def test_composite_plan_accepts_typed_regional_and_zonal_current_clusters():
     desires = _desires(24)
     desires.current_clusters = CurrentClusters(
