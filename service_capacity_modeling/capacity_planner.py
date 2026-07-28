@@ -62,6 +62,7 @@ from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import ChildDesiresConfig
 from service_capacity_modeling.models import CostAwareModel
+from service_capacity_modeling.models.common import current_cluster_capacity
 from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.org import netflix
@@ -1082,7 +1083,9 @@ class CapacityPlanner:
         )
 
     # Calculates the minimum cpu, memory, and network requirements based on desires.
-    def _per_instance_requirements(self, desires: CapacityDesires) -> Tuple[int, float]:
+    def _per_instance_requirements(
+        self, model: CapacityModel, desires: CapacityDesires
+    ) -> Tuple[int, float]:
         # Applications often set fixed reservations of heap or OS memory
         per_instance_mem = (
             desires.data_shape.reserved_instance_app_mem_gib
@@ -1097,12 +1100,9 @@ class CapacityPlanner:
             )
         )
 
-        current_capacity: Optional[CurrentClusterCapacity] = None
-        if desires.current_clusters is not None:
-            if desires.current_clusters.zonal:
-                current_capacity = desires.current_clusters.zonal[0]
-            elif desires.current_clusters.regional:
-                current_capacity = desires.current_clusters.regional[0]
+        current_capacity = current_cluster_capacity(
+            desires, getattr(model, "cluster_type", "")
+        )
         # Return early if we dont have current_capacity set.
         if current_capacity is None or current_capacity.cluster_instance is None:
             return (per_instance_cores, per_instance_mem)
@@ -1146,7 +1146,7 @@ class CapacityPlanner:
         (
             per_instance_cores,
             per_instance_mem,
-        ) = self._per_instance_requirements(desires)
+        ) = self._per_instance_requirements(model, desires)
 
         if model.run_hardware_simulation():
             for instance in hardware.instances.values():
