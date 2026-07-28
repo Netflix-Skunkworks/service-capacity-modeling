@@ -168,6 +168,17 @@ def test_elasticsearch_role_models_keep_the_caller_app_memory_reserve():
         assert by_model[model_name].data_shape.reserved_instance_app_mem_gib == 64
 
 
+def test_composed_datastores_use_their_own_app_memory_defaults():
+    by_model = _submodels(
+        "org.netflix.key-value",
+        _desires(24),
+        extra_model_arguments={"kv_force_evcache": True},
+    )
+
+    assert by_model["org.netflix.cassandra"].data_shape.reserved_instance_app_mem_gib == 4
+    assert by_model["org.netflix.evcache"].data_shape.reserved_instance_app_mem_gib == 1
+
+
 def test_composed_models_receive_only_their_current_cluster_type():
     desires = _desires(24)
     desires.current_clusters = CurrentClusters(
