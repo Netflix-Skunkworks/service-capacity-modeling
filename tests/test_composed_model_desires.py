@@ -4,6 +4,10 @@ import pytest
 
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import certain_int
+from service_capacity_modeling.interface import CurrentClusters
+from service_capacity_modeling.interface import CurrentRegionClusterCapacity
+from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
@@ -108,3 +112,110 @@ def test_aggregators_pass_the_reserve_to_their_node_roles():
     heavy = _clusters_by_type("org.netflix.elasticsearch", 64)
 
     assert heavy["elasticsearch-data"] != lean["elasticsearch-data"]
+
+
+def _current_zonal(cluster_type=None):
+    return CurrentZoneClusterCapacity(
+        cluster_instance_name="m5.xlarge",
+        cluster_instance_count=certain_int(3),
+        cluster_type=cluster_type,
+        cpu_utilization=certain_int(50),
+        memory_utilization_gib=certain_int(8),
+        network_utilization_mbps=certain_int(100),
+        disk_utilization_gib=certain_int(100),
+    )
+
+
+def _current_regional(cluster_type=None):
+    return CurrentRegionClusterCapacity(
+        cluster_instance_name="m5.xlarge",
+        cluster_instance_count=certain_int(3),
+        cluster_type=cluster_type,
+        cpu_utilization=certain_int(50),
+        memory_utilization_gib=certain_int(8),
+        network_utilization_mbps=certain_int(100),
+        disk_utilization_gib=certain_int(100),
+    )
+
+
+def _current_types(desires):
+    current = desires.current_clusters
+    assert current is not None
+    return {cluster.cluster_type for cluster in (*current.zonal, *current.regional)}
+
+
+def _submodels(model_name, desires, extra_model_arguments=None):
+    return dict(
+        planner._sub_models(  # pylint: disable=protected-access
+            model_name,
+            desires,
+            extra_model_arguments=extra_model_arguments or {},
+        )
+    )
+
+
+def test_composed_models_receive_only_their_current_cluster_type():
+    desires = _desires(24)
+    desires.current_clusters = CurrentClusters(
+        zonal=[_current_zonal("evcache"), _current_zonal("cassandra")],
+        regional=[_current_regional("dgwkv")],
+    )
+
+    by_model = _submodels(
+        "org.netflix.key-value",
+        desires,
+        extra_model_arguments={"kv_force_evcache": True},
+    )
+
+    assert _current_types(by_model["org.netflix.key-value"]) == {"dgwkv"}
+    assert _current_types(by_model["org.netflix.cassandra"]) == {"cassandra"}
+    assert _current_types(by_model["org.netflix.evcache"]) == {"evcache"}
+
+
+def test_composite_plan_accepts_typed_regional_and_zonal_current_clusters():
+    desires = _desires(24)
+    desires.current_clusters = CurrentClusters(
+        zonal=[_current_zonal("cassandra")],
+        regional=[_current_regional("dgwkv")],
+    )
+
+    plans = planner.plan_certain(
+        model_name="org.netflix.key-value",
+        region="us-east-1",
+        desires=desires,
+        num_results=1,
+    )
+
+    assert plans
+
+
+def test_role_split_models_filter_current_clusters_by_role():
+    desires = _desires(1)
+    desires.current_clusters = CurrentClusters(
+        zonal=[
+            _current_zonal("elasticsearch-data"),
+            _current_zonal("elasticsearch-master"),
+            _current_zonal("elasticsearch-search"),
+        ]
+    )
+
+    by_model = _submodels("org.netflix.elasticsearch", desires)
+
+    assert _current_types(by_model["org.netflix.elasticsearch.node"]) == {
+        "elasticsearch-data"
+    }
+    assert _current_types(by_model["org.netflix.elasticsearch.master"]) == {
+        "elasticsearch-master"
+    }
+    assert _current_types(by_model["org.netflix.elasticsearch.search"]) == {
+        "elasticsearch-search"
+    }
+
+
+def test_untyped_current_cluster_remains_available_to_direct_model():
+    desires = _desires(4)
+    desires.current_clusters = CurrentClusters(zonal=[_current_zonal()])
+
+    by_model = _submodels("org.netflix.cassandra", desires)
+
+    assert _current_types(by_model["org.netflix.cassandra"]) == {None}

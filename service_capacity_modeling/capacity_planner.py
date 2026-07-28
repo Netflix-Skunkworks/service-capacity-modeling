@@ -26,6 +26,7 @@ from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import CurrentClusterCapacity
+from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import ExcludeUnsetModel
@@ -516,6 +517,44 @@ def _without_app_memory_reserve(desires: CapacityDesires) -> CapacityDesires:
     data_shape = desires.data_shape.model_dump(exclude_unset=True)
     data_shape.pop("reserved_instance_app_mem_gib", None)
     return desires.model_copy(deep=True, update={"data_shape": DataShape(**data_shape)})
+
+
+def _with_current_clusters_for_model(
+    desires: CapacityDesires,
+    model: CapacityModel,
+    current_clusters: Optional[CurrentClusters],
+) -> CapacityDesires:
+    """Give a model only the current clusters whose type it owns.
+
+    Untyped current clusters predate composed-model routing. Preserve an
+    entirely untyped input for backward compatibility; once any cluster is
+    typed, untyped and sibling clusters are excluded from model-specific
+    sizing.
+    """
+    if current_clusters is None:
+        return desires
+
+    cluster_types = model.current_cluster_types()
+    all_clusters = (*current_clusters.zonal, *current_clusters.regional)
+    has_typed_clusters = any(cluster.cluster_type for cluster in all_clusters)
+    if not cluster_types or not has_typed_clusters:
+        selected = current_clusters
+    else:
+        selected = CurrentClusters(
+            zonal=[
+                cluster
+                for cluster in current_clusters.zonal
+                if cluster.cluster_type in cluster_types
+            ],
+            regional=[
+                cluster
+                for cluster in current_clusters.regional
+                if cluster.cluster_type in cluster_types
+            ],
+            services=current_clusters.services,
+        )
+
+    return desires.model_copy(deep=True, update={"current_clusters": selected})
 
 
 class CapacityPlanner:
@@ -1488,6 +1527,7 @@ class CapacityPlanner:
     ) -> Generator[Tuple[str, CapacityDesires], None, None]:
         queue: List[Tuple[CapacityDesires, str]] = [(desires, model_name)]
         models_used = []
+        current_clusters = desires.current_clusters
 
         while queue:
             parent_desires, sub_model = queue.pop()
@@ -1496,9 +1536,14 @@ class CapacityPlanner:
                 continue
             models_used.append(sub_model)
 
-            sub_desires = parent_desires.merge_with(
+            model_desires = _with_current_clusters_for_model(
+                parent_desires,
+                self._models[sub_model],
+                current_clusters,
+            )
+            sub_desires = model_desires.merge_with(
                 self._models[sub_model].default_desires(
-                    parent_desires, extra_model_arguments
+                    model_desires, extra_model_arguments
                 )
             )
 

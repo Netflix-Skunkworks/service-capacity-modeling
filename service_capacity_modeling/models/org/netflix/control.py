@@ -23,6 +23,8 @@ from service_capacity_modeling.interface import certain_int
 
 
 class NflxControlCapacityModel(CapacityModel):
+    cluster_type = "dgwcontrol"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,

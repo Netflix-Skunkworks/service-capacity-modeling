@@ -22,6 +22,10 @@ from service_capacity_modeling.models import CapacityModel
 
 
 class NflxPostgresCapacityModel(CapacityModel):
+    @classmethod
+    def current_cluster_types(cls) -> Tuple[str, ...]:
+        return ("aurora-cluster", "rds-cluster")
+
     @staticmethod
     def capacity_plan(
         instance: Instance,

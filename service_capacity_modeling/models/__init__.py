@@ -346,6 +346,17 @@ class CapacityModel:
         """
         return True
 
+    @classmethod
+    def current_cluster_types(cls) -> Tuple[str, ...]:
+        """Cluster types from ``current_clusters`` that belong to this model.
+
+        Cost-aware models already declare a single ``cluster_type`` for cost
+        attribution. Other models can either declare the same class attribute
+        or override this method when they own multiple cluster types.
+        """
+        cluster_type = getattr(cls, "cluster_type", None)
+        return (cluster_type,) if cluster_type else ()
+
     @staticmethod
     def compose_with(
         user_desires: CapacityDesires,

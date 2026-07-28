@@ -22,6 +22,8 @@ from service_capacity_modeling.models import CapacityModel
 
 
 class NflxWALCapacityModel(CapacityModel):
+    cluster_type = "dgwwal"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,
