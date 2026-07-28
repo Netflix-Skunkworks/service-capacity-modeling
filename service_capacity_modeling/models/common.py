@@ -1227,6 +1227,41 @@ class RequirementFromCurrentCapacity(BaseModel):
         )
 
 
+def current_cluster_capacity(
+    desires: CapacityDesires, cluster_type: str
+) -> Optional[CurrentClusterCapacity]:
+    """The caller's existing cluster for this model, if they described one.
+
+    A composed request carries a current cluster per tier: a KeyValue plan
+    describes dgwkv, Cassandra and EVCache, and Cassandra and EVCache are
+    both zonal. Taking whichever entry came first meant a model could size
+    itself against another tier's topology, so match on ``cluster_type`` --
+    the field exists for exactly this and nothing was reading it.
+
+    Entries written before the field was populated carry no ``cluster_type``.
+    When none of them does, fall back to the first entry so those callers
+    keep working. When some are labelled but none is ours, the caller told us
+    about other tiers and not this one, so there is no current cluster.
+    """
+    clusters = desires.current_clusters
+    if clusters is None:
+        return None
+
+    candidates: List[CurrentClusterCapacity] = [*clusters.zonal, *clusters.regional]
+    for candidate in candidates:
+        if candidate.cluster_type == cluster_type:
+            return candidate
+
+    # An unlabelled entry means nobody said whose it is, not that it belongs to
+    # someone else, so it is still the best guess available -- which is what
+    # callers got before cluster_type was read at all. Only entries labelled as
+    # another tier are ruled out, which is the contamination worth stopping.
+    for candidate in candidates:
+        if not candidate.cluster_type:
+            return candidate
+    return None
+
+
 def zonal_requirements_from_current(
     current_cluster: CurrentClusters,
     buffers: Buffers,
