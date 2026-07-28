@@ -3,12 +3,20 @@
 import pytest
 
 from service_capacity_modeling.capacity_planner import planner
+from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import CapacityDesires
+from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.org.netflix.elasticsearch import (
     nflx_elasticsearch_capacity_model,
+)
+from service_capacity_modeling.models.org.netflix.graphkv import (
+    _read_amplification,
+    _write_amplification,
+    NflxGraphKVArguments,
 )
 from service_capacity_modeling.models.org.netflix.key_value import (
     nflx_key_value_capacity_model,
@@ -118,15 +126,42 @@ def test_transforms_compose_through_more_than_one_level():
 
     logical = by_model["org.netflix.graphkv"].query_pattern
     backend = by_model["org.netflix.cassandra"].query_pattern
+    args = NflxGraphKVArguments.model_validate({})
 
-    assert backend.estimated_read_per_second.mid > (
-        logical.estimated_read_per_second.mid * 10
+    # Exact factors, not lower bounds: applying the amplification twice would
+    # satisfy "much bigger than logical" just as well.
+    assert backend.estimated_read_per_second.mid == pytest.approx(
+        logical.estimated_read_per_second.mid * _read_amplification(args)
     )
-    assert backend.estimated_write_per_second.mid > (
-        logical.estimated_write_per_second.mid
+    assert backend.estimated_write_per_second.mid == pytest.approx(
+        logical.estimated_write_per_second.mid * _write_amplification(args)
     )
-    assert by_model["org.netflix.cassandra"].data_shape.estimated_state_size_gib.mid > (
-        by_model["org.netflix.graphkv"].data_shape.estimated_state_size_gib.mid
+
+
+def test_amplified_traffic_can_change_which_tiers_are_composed():
+    """compose_with is a decision, so feeding it amplified traffic moves more
+    than sizing.
+
+    KeyValue attaches EVCache above an rps threshold. Handed GraphKV's
+    amplified figures it now crosses that threshold, so the plan grows a whole
+    cache tier. This is the largest observable effect of composing down the
+    chain and is easy to miss, because the default consistency keeps EVCache
+    off and hides it.
+    """
+    desires = _desires(4)
+    desires.query_pattern.access_consistency = GlobalConsistency(
+        same_region=Consistency(target_consistency=AccessConsistency.eventual)
+    )
+
+    composed = [
+        model
+        for model, _ in planner._sub_models(  # pylint: disable=protected-access
+            "org.netflix.graphkv", desires, extra_model_arguments={}
+        )
+    ]
+
+    assert "org.netflix.evcache" in composed, (
+        f"expected amplified rps to attach EVCache, got {composed}"
     )
 
 
