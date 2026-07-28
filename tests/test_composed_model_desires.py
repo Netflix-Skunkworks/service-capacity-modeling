@@ -219,3 +219,22 @@ def test_untyped_current_cluster_remains_available_to_direct_model():
     by_model = _submodels("org.netflix.cassandra", desires)
 
     assert _current_types(by_model["org.netflix.cassandra"]) == {None}
+
+
+def test_multilevel_composition_preserves_ancestor_transforms():
+    desires = _desires(4)
+
+    by_model = _submodels("org.netflix.graphkv", desires)
+
+    key_value = by_model["org.netflix.key-value"].query_pattern
+    cassandra = by_model["org.netflix.cassandra"].query_pattern
+    assert key_value.estimated_read_per_second.mid == 55 * 5000
+    assert key_value.estimated_write_per_second.mid == 3 * 2500
+    assert (
+        cassandra.estimated_read_per_second.mid
+        == key_value.estimated_read_per_second.mid
+    )
+    assert (
+        cassandra.estimated_write_per_second.mid
+        == key_value.estimated_write_per_second.mid
+    )

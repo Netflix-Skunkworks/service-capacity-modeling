@@ -365,8 +365,9 @@ class CapacityModel:
         """Return additional model names to compose with this one
 
         The second element of the tuple is a capacity desire transform that
-        takes the original user desire and modifies it for the composed
-        model.
+        takes the user desires, including transforms from ancestor models, and
+        modifies them for the composed model. Model-specific defaults do not
+        cross this boundary; each child supplies its own defaults later.
 
         (("model1", lambda x: x),
          ("model2", lambda x: transform(x)))

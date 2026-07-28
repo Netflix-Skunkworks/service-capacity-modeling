@@ -1556,16 +1556,16 @@ class CapacityPlanner:
             # exception: the caller was describing the composed models all
             # along. Strip before the modifier runs so a model that
             # deliberately sets a child's reservation still wins.
-            child_desires = desires
+            child_desires = parent_desires
             if self._models[sub_model].plans_own_cluster():
-                child_desires = _without_app_memory_reserve(desires)
+                child_desires = _without_app_memory_reserve(parent_desires)
 
             queue.extend(
                 [
                     (modify_child_desires(child_desires), child_model)
                     for child_model, modify_child_desires in self._models[
                         sub_model
-                    ].compose_with(desires, extra_model_arguments)
+                    ].compose_with(parent_desires, extra_model_arguments)
                 ]
             )
 
