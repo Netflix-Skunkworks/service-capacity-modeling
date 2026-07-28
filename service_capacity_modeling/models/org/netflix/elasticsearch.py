@@ -194,6 +194,11 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
     ) -> CapacityDesires:
         desires = CapacityModel.default_desires(user_desires, extra_model_arguments)
         desires.buffers = NflxElasticsearchDataCapacityModel.default_buffers()
+        # Elasticsearch has a 1 GiB sidecar. That figure was only stated on the
+        # aggregator model, which owns no instances, so the nodes that actually
+        # reserve the memory fell through to the DataShape default of 2. State
+        # it here, where the instances are.
+        desires.data_shape.reserved_instance_app_mem_gib = 1
         return desires
 
     @staticmethod

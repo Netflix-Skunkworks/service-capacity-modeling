@@ -62,6 +62,11 @@ def test_app_memory_reserve_does_not_reach_composed_models(model_name):
     lean = _clusters_by_type(model_name, 4)
     heavy = _clusters_by_type(model_name, 24)
 
+    assert set(lean) == set(heavy), (
+        f"{model_name}: the parent's app reserve changed which tiers exist, "
+        f"not just their size: {sorted(lean)} vs {sorted(heavy)}"
+    )
+
     datastore_types = set(lean) - {"dgwkv", "dgwts", "dgwgraphkv", "dgwentity"}
     assert datastore_types, f"{model_name} composed no datastore"
 
