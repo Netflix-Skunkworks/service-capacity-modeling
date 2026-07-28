@@ -151,7 +151,7 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
             low=curr_network.high, mid=curr_network.high, high=curr_network.high
         )
         capacity_requirement = zonal_requirements_from_current(
-            current_cluster=normalize_midpoint_desires.current_clusters,
+            current_capacity=normalize_midpoint_desires.current_clusters.zonal[0],
             buffers=desires.buffers,
             instance=instance,
             reference_shape=current_zonal_capacity.cluster_instance,

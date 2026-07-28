@@ -30,7 +30,6 @@ from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import CurrentClusterCapacity
-from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Instance
@@ -1258,14 +1257,19 @@ def current_cluster_capacity(
 
 
 def zonal_requirements_from_current(
-    current_cluster: CurrentClusters,
+    current_capacity: Optional[CurrentClusterCapacity],
     buffers: Buffers,
     instance: Instance,
     reference_shape: Instance,
 ) -> CapacityRequirement:
-    if current_cluster is not None and current_cluster.zonal[0] is not None:
-        current_capacity: CurrentClusterCapacity = current_cluster.zonal[0]
+    """Size against a cluster the caller already runs.
 
+    Takes the model's own current cluster rather than the whole
+    CurrentClusters list -- picking one out of that list is the caller's job
+    (see current_cluster_capacity), because in a composed request the list
+    holds a cluster per tier.
+    """
+    if current_capacity is not None:
         # Adjust the CPUs (vCPU + cores) based on generation / instance type
         requirement = RequirementFromCurrentCapacity(
             current_capacity=current_capacity,
