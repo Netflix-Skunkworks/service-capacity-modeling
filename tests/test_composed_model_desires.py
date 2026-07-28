@@ -175,7 +175,9 @@ def test_composed_datastores_use_their_own_app_memory_defaults():
         extra_model_arguments={"kv_force_evcache": True},
     )
 
-    assert by_model["org.netflix.cassandra"].data_shape.reserved_instance_app_mem_gib == 4
+    assert (
+        by_model["org.netflix.cassandra"].data_shape.reserved_instance_app_mem_gib == 4
+    )
     assert by_model["org.netflix.evcache"].data_shape.reserved_instance_app_mem_gib == 1
 
 
