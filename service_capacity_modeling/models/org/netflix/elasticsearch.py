@@ -5,6 +5,7 @@ from typing import Callable
 from typing import Dict
 from typing import Optional
 from typing import Tuple
+from typing import Union
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -14,6 +15,7 @@ from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
+from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRequirement
@@ -22,6 +24,7 @@ from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
@@ -203,7 +206,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         context: RegionContext,
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
-    ) -> Optional[CapacityPlan]:
+    ) -> Union[CapacityPlan, Excuse, None]:
         copies_per_region: int = _target_rf(
             desires, extra_model_arguments.get("copies_per_region", None)
         )
@@ -224,7 +227,21 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
 
         # Netflix Elasticsearch doesn't like to deploy on really small instances
         if instance.cpu < 2 or instance.ram_gib < 24:
-            return None
+            return Excuse(
+                instance=instance.name,
+                drive=drive.name,
+                reason=(
+                    f"Instance too small: {instance.cpu} vCPUs (min 2), "
+                    f"{instance.ram_gib:.0f} GiB RAM (min 24 GiB)"
+                ),
+                context={
+                    "cpu": instance.cpu,
+                    "ram_gib": instance.ram_gib,
+                    "min_cpu": 2,
+                    "min_ram_gib": 24,
+                },
+                bottleneck=Bottleneck.cpu if instance.cpu < 2 else Bottleneck.memory,
+            )
 
         # Sidecars/System takes away memory from Elasticsearch
         # which uses half of available system max of 32 for compressed oops
@@ -239,12 +256,32 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         # The 24 GiB floor above ignores the workload's reserved memory. If the
         # reserves swallow the whole instance there is nothing left to hold
         # shards, so no node count works and the shape has to go.
-        if usable_memory_gib(instance, reserve_memory) <= 0:
-            return None
+        usable_gib = usable_memory_gib(instance, reserve_memory)
+        if usable_gib <= 0:
+            return Excuse(
+                instance=instance.name,
+                drive=drive.name,
+                reason=(
+                    f"Reserved memory ({reserve_memory(instance.ram_gib):.0f} GiB) "
+                    f"leaves no RAM for shards on a {instance.ram_gib:.0f} GiB shape"
+                ),
+                context={
+                    "ram_gib": instance.ram_gib,
+                    "reserved_gib": reserve_memory(instance.ram_gib),
+                    "usable_gib": usable_gib,
+                },
+                bottleneck=Bottleneck.memory,
+            )
 
         # Right now Elasticsearch doesn't deploy to cloud drives
         if instance.drive is None:
-            return None
+            return Excuse(
+                instance=instance.name,
+                drive=drive.name,
+                reason=f"Requires local disks but {instance.name} is EBS-only",
+                context={"has_local_drive": False},
+                bottleneck=Bottleneck.drive_type,
+            )
 
         zones_in_region = context.zones_in_region
 
@@ -338,8 +375,23 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         #    smaller clusters so your restarts don't take months.
         #  * NxN network issues. Sometimes smaller clusters of bigger nodes
         #    are better for network propagation
-        if data_cluster.count > (max_regional_size // zones_in_region):
-            return None
+        max_zonal_size = max_regional_size // zones_in_region
+        if data_cluster.count > max_zonal_size:
+            return Excuse(
+                instance=instance.name,
+                drive=drive.name,
+                reason=(
+                    f"Needs {data_cluster.count} nodes per zone, over the "
+                    f"{max_zonal_size} allowed by max_regional_size "
+                    f"({max_regional_size})"
+                ),
+                context={
+                    "count": data_cluster.count,
+                    "max_zonal_size": max_zonal_size,
+                    "max_regional_size": max_regional_size,
+                },
+                bottleneck=Bottleneck.cluster_size,
+            )
 
         ec2_costs = {
             "elasticsearch-data.zonal-clusters": zones_in_region
@@ -368,12 +420,26 @@ class NflxElasticsearchMasterCapacityModel(CapacityModel):
         context: RegionContext,
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
-    ) -> Optional[CapacityPlan]:
+    ) -> Union[CapacityPlan, Excuse, None]:
         # Only accept running on instances with a lot of RAM and a few CPUs
-        if instance.ram_gib <= 24:
-            return None
-        if instance.cpu <= 2:
-            return None
+        if instance.ram_gib <= 24 or instance.cpu <= 2:
+            return Excuse(
+                instance=instance.name,
+                drive=drive.name,
+                reason=(
+                    f"Instance too small: {instance.cpu} vCPUs (requires > 2), "
+                    f"{instance.ram_gib:.0f} GiB RAM (requires > 24 GiB)"
+                ),
+                context={
+                    "cpu": instance.cpu,
+                    "ram_gib": instance.ram_gib,
+                    "min_cpu_exclusive": 2,
+                    "min_ram_gib_exclusive": 24,
+                },
+                bottleneck=(
+                    Bottleneck.memory if instance.ram_gib <= 24 else Bottleneck.cpu
+                ),
+            )
 
         zones_in_region = context.zones_in_region
         requirement = CapacityRequirement(
@@ -413,12 +479,26 @@ class NflxElasticsearchSearchCapacityModel(CapacityModel):
         context: RegionContext,
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
-    ) -> Optional[CapacityPlan]:
+    ) -> Union[CapacityPlan, Excuse, None]:
         # Only accept running on instances with a lot of RAM and a few CPUs
-        if instance.ram_gib <= 24:
-            return None
-        if instance.cpu <= 2:
-            return None
+        if instance.ram_gib <= 24 or instance.cpu <= 2:
+            return Excuse(
+                instance=instance.name,
+                drive=drive.name,
+                reason=(
+                    f"Instance too small: {instance.cpu} vCPUs (requires > 2), "
+                    f"{instance.ram_gib:.0f} GiB RAM (requires > 24 GiB)"
+                ),
+                context={
+                    "cpu": instance.cpu,
+                    "ram_gib": instance.ram_gib,
+                    "min_cpu_exclusive": 2,
+                    "min_ram_gib_exclusive": 24,
+                },
+                bottleneck=(
+                    Bottleneck.memory if instance.ram_gib <= 24 else Bottleneck.cpu
+                ),
+            )
 
         zones_in_region = context.zones_in_region
         requirement = CapacityRequirement(

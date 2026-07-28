@@ -4,6 +4,7 @@ from collections import defaultdict
 
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.hardware import shapes
+from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import DataShape
@@ -341,3 +342,41 @@ def test_es_data_nodes_have_ram_left_after_reserves():
         assert ram_gib > reserved, (
             f"{cluster.instance.name} reserves {reserved} GiB of {ram_gib} GiB"
         )
+
+
+def test_es_rejections_explain_themselves():
+    """Rejected shapes come back as excuses, not a silent None.
+
+    Cassandra, Kafka and EVCache all excuse the shapes they turn down.
+    Elasticsearch dropped them on the floor, so a caller asking why their
+    instance family was ignored had nothing to read.
+    """
+    desires = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=Interval(
+                low=1000, mid=10_000, high=100_000, confidence=0.98
+            ),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(
+                low=100, mid=1000, high=4000, confidence=0.98
+            ),
+        ),
+    )
+
+    explained = planner.plan_certain_explained(
+        model_name="org.netflix.elasticsearch", region="us-east-1", desires=desires
+    )
+    assert explained.plans, "Expected Elasticsearch to still produce plans"
+
+    excuses = [e for es in explained.excuses_by_model.values() for e in es]
+    assert excuses, "Expected rejected shapes to be explained"
+
+    for excuse in excuses:
+        assert excuse.reason
+        assert excuse.bottleneck is not None
+
+    bottlenecks = {e.bottleneck for e in excuses}
+    assert Bottleneck.drive_type in bottlenecks  # EBS-only shapes
+    assert Bottleneck.memory in bottlenecks  # too small, or reserves overrun
