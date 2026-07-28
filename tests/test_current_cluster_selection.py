@@ -169,7 +169,42 @@ def test_cassandra_ignores_another_tier_in_a_composed_request():
     )
 
     assert cassandra_only and with_evcache_first
+    assert len(cassandra_only) == len(with_evcache_first)
     for own, composed in zip(cassandra_only, with_evcache_first):
+        own_zone = own.candidate_clusters.zonal[0]
+        composed_zone = composed.candidate_clusters.zonal[0]
+        assert own_zone.instance.name == composed_zone.instance.name
+        assert own_zone.count == composed_zone.count
+
+
+def test_evcache_ignores_another_tier_in_a_composed_request():
+    """The other half of the same collision.
+
+    Cassandra and EVCache are both zonal, so whichever the caller listed first
+    was the entry both models read. Fixing only Cassandra leaves EVCache
+    sizing itself off Cassandra's node count and disk.
+    """
+    evcache_only = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=_cassandra_desires(
+            [_live_cluster("i7ie.large", "evcache", count=6, disk_gib=100)]
+        ),
+    )
+    with_cassandra_first = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=_cassandra_desires(
+            [
+                _live_cluster("i4i.2xlarge", "cassandra", count=40, disk_gib=900),
+                _live_cluster("i7ie.large", "evcache", count=6, disk_gib=100),
+            ]
+        ),
+    )
+
+    assert evcache_only and with_cassandra_first
+    assert len(evcache_only) == len(with_cassandra_first)
+    for own, composed in zip(evcache_only, with_cassandra_first):
         own_zone = own.candidate_clusters.zonal[0]
         composed_zone = composed.candidate_clusters.zonal[0]
         assert own_zone.instance.name == composed_zone.instance.name

@@ -41,6 +41,7 @@ from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models import RANK_PENALTIES
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import current_cluster_capacity
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
@@ -112,11 +113,11 @@ def calculate_vitals_for_capacity_planner(
     needed_memory_gib = current_memory_gib
     needed_disk_gib = current_disk_gib
 
-    # Check if we can apply optimizations based on current cluster capacity
-    current_capacity = (
-        desires.current_clusters.zonal[0]
-        if desires.current_clusters and desires.current_clusters.zonal
-        else None
+    # Check if we can apply optimizations based on current cluster capacity.
+    # Cassandra is zonal too, so a composed KeyValue request lists both here
+    # and taking the first entry could size EVCache off Cassandra's cluster.
+    current_capacity = current_cluster_capacity(
+        desires, NflxEVCacheCapacityModel.cluster_type
     )
     if not current_capacity:
         return needed_cores, needed_network_mbps, needed_memory_gib, needed_disk_gib
