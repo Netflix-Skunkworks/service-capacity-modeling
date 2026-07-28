@@ -46,7 +46,6 @@ from service_capacity_modeling.models.common import get_effective_disk_per_node_
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import upsert_params
-from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -302,23 +301,6 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         # OS memory.
         variable_os = int(instance_mem_gib * 0.03)
         return base_mem + variable_os
-
-    # If the reserves swallow the whole instance there is nothing left to cache
-    # with, so no node count works and the shape has to go.
-    if usable_memory_gib(instance, reserve_memory) <= 0:
-        return Excuse(
-            instance=instance.name,
-            drive=drive.name,
-            reason=(
-                f"Reserved memory ({reserve_memory(instance.ram_gib):.0f} GiB) "
-                f"leaves no RAM for EVCache on a {instance.ram_gib:.0f} GiB shape"
-            ),
-            context={
-                "ram_gib": instance.ram_gib,
-                "reserved_gib": reserve_memory(instance.ram_gib),
-            },
-            bottleneck=Bottleneck.memory,
-        )
 
     requirement.context["osmem"] = reserve_memory(instance.ram_gib)
     # EVCache clusters aim to be at least 2 nodes per zone to start
