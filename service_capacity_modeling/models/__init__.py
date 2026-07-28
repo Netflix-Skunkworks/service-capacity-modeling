@@ -189,6 +189,16 @@ class CapacityModel:
 
     """
 
+    cluster_type: str = ""
+    """The label this model stamps on the clusters it produces.
+
+    Doubles as the name a caller uses in
+    ``CurrentClusterCapacity.cluster_type`` to say which tier an existing
+    cluster belongs to, so a composed request can describe several tiers and
+    each model can find its own. Empty means this model produces no clusters
+    of its own -- an aggregator that only composes with others.
+    """
+
     def __init__(self) -> None:
         pass
 

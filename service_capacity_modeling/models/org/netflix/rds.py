@@ -226,6 +226,8 @@ class NflxRDSArguments(BaseModel):
 
 
 class NflxRDSCapacityModel(CapacityModel):
+    cluster_type = "rds-cluster"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,

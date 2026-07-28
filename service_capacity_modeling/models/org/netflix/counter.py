@@ -56,6 +56,8 @@ class NflxCounterArguments(NflxJavaAppArguments):
 
 
 class NflxCounterCapacityModel(CapacityModel):
+    cluster_type = "dgwcounter"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,

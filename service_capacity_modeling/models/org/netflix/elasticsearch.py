@@ -186,6 +186,8 @@ class NflxElasticsearchArguments(BaseModel):
 
 
 class NflxElasticsearchDataCapacityModel(CapacityModel):
+    cluster_type = "elasticsearch-data"
+
     @staticmethod
     def default_buffers() -> Buffers:
         return Buffers(
@@ -419,6 +421,8 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
 
 
 class NflxElasticsearchMasterCapacityModel(CapacityModel):
+    cluster_type = "elasticsearch-master"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,
@@ -478,6 +482,8 @@ class NflxElasticsearchMasterCapacityModel(CapacityModel):
 
 
 class NflxElasticsearchSearchCapacityModel(CapacityModel):
+    cluster_type = "elasticsearch-search"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,

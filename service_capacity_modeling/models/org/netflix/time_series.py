@@ -23,6 +23,8 @@ from service_capacity_modeling.models import CapacityModel
 
 
 class NflxTimeSeriesCapacityModel(CapacityModel):
+    cluster_type = "dgwts"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,

@@ -20,6 +20,8 @@ from service_capacity_modeling.models import CapacityModel
 
 
 class NflxIdentifierCapacityModel(CapacityModel):
+    cluster_type = "dgwidentifier"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,

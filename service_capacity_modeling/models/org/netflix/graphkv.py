@@ -160,6 +160,8 @@ def _read_amplification(args: NflxGraphKVArguments) -> float:
 
 
 class NflxGraphKVCapacityModel(CapacityModel):
+    cluster_type = "dgwgraphkv"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,

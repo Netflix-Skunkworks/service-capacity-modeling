@@ -85,6 +85,8 @@ class NflxZookeeperArguments(BaseModel):
 
 
 class NflxZookeeperCapacityModel(CapacityModel):
+    cluster_type = "zk-zonal"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,

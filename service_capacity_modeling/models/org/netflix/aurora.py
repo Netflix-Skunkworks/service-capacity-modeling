@@ -328,6 +328,8 @@ class NflxAuroraArguments(BaseModel):
 
 
 class NflxAuroraCapacityModel(CapacityModel):
+    cluster_type = "aurora-cluster"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,

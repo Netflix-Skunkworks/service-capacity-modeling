@@ -22,6 +22,8 @@ from service_capacity_modeling.models import CapacityModel
 
 
 class NflxEntityCapacityModel(CapacityModel):
+    cluster_type = "dgwentity"
+
     @staticmethod
     def capacity_plan(
         instance: Instance,
