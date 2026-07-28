@@ -1511,12 +1511,17 @@ class CapacityPlanner:
             # default holds back reservations describing this model's own
             # instances. It is applied before the per-child transform so a
             # transform that sets something deliberately still wins.
+            #
+            # Both start from parent_desires, the desires this model was handed,
+            # so a chain composes: GraphKV amplifies logical traffic into KeyValue
+            # operations, and Cassandra sees the amplified figures rather than the
+            # user's original ones.
             parent_model = self._models[sub_model]
             for child_model, modify_child_desires in parent_model.compose_with(
-                desires, extra_model_arguments
+                parent_desires, extra_model_arguments
             ):
                 config = parent_model.child_desires_config(child_model)
-                child_desires = _configure_child_desires(desires, config)
+                child_desires = _configure_child_desires(parent_desires, config)
                 queue.append((modify_child_desires(child_desires), child_model))
 
             yield sub_model, sub_desires

@@ -102,6 +102,34 @@ def test_parent_tier_still_gets_the_caller_reserve():
     assert heavy["dgwkv"] != lean["dgwkv"]
 
 
+def test_transforms_compose_through_more_than_one_level():
+    """GraphKV fans out to KeyValue, which fans out to Cassandra.
+
+    Each compose_with transform used to receive the original user desires, so
+    a two-level chain dropped the middle one: Cassandra never saw GraphKV's
+    read and write amplification and was sized for logical graph traffic
+    rather than the backend KeyValue operations it actually serves.
+    """
+    by_model = dict(
+        planner._sub_models(  # pylint: disable=protected-access
+            "org.netflix.graphkv", _desires(24), extra_model_arguments={}
+        )
+    )
+
+    logical = by_model["org.netflix.graphkv"].query_pattern
+    backend = by_model["org.netflix.cassandra"].query_pattern
+
+    assert backend.estimated_read_per_second.mid > (
+        logical.estimated_read_per_second.mid * 10
+    )
+    assert backend.estimated_write_per_second.mid > (
+        logical.estimated_write_per_second.mid
+    )
+    assert by_model["org.netflix.cassandra"].data_shape.estimated_state_size_gib.mid > (
+        by_model["org.netflix.graphkv"].data_shape.estimated_state_size_gib.mid
+    )
+
+
 def test_a_model_that_owns_no_instances_passes_the_reserve_down():
     """org.netflix.elasticsearch owns no instances; it splits into node roles.
 
