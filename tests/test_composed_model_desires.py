@@ -154,6 +154,17 @@ def _submodels(model_name, desires, extra_model_arguments=None):
     )
 
 
+def test_elasticsearch_role_models_keep_the_caller_app_memory_reserve():
+    by_model = _submodels("org.netflix.elasticsearch", _desires(64))
+
+    for model_name in (
+        "org.netflix.elasticsearch.node",
+        "org.netflix.elasticsearch.master",
+        "org.netflix.elasticsearch.search",
+    ):
+        assert by_model[model_name].data_shape.reserved_instance_app_mem_gib == 64
+
+
 def test_composed_models_receive_only_their_current_cluster_type():
     desires = _desires(24)
     desires.current_clusters = CurrentClusters(
