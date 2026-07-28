@@ -8,6 +8,8 @@ from typing import Sequence
 from typing import Tuple
 from typing import Union
 
+from pydantic import BaseModel
+
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
@@ -40,6 +42,7 @@ __all__ = [
     "CapacityDesires",
     "CapacityPlan",
     "CapacityRegretParameters",
+    "ChildDesiresConfig",
     "certain_float",
     "Consistency",
     "DataShape",
@@ -56,6 +59,13 @@ __all__ = [
 ]
 
 __common_regrets__ = frozenset(("spend", "disk", "mem"))
+
+
+class ChildDesiresConfig(BaseModel):
+    """Controls which parent desires cross one composition edge."""
+
+    inherit_app_memory_reservation: bool = False
+    """Pass the parent's per-instance app memory reservation to the child."""
 
 
 def _disk_regret(  # noqa: C901
@@ -331,20 +341,16 @@ class CapacityModel:
         return True
 
     @staticmethod
-    def plans_own_cluster() -> bool:
-        """Whether this model sizes instances of its own.
+    def child_desires_config(child_model: str) -> ChildDesiresConfig:
+        """Configure desires inherited by one composed child model.
 
-        Most models do: they plan their tier and compose_with other services
-        that run on separate shapes. A few plan nothing themselves and only
-        split one service into node roles (Elasticsearch into data, master
-        and search nodes), so the caller's desires describe the composed
-        models rather than a tier of this model's own.
-
-        The planner uses this to decide whether per-instance reservations
-        such as reserved_instance_app_mem_gib belong to this model or to the
-        models it composes with.
+        Workload desires and accumulated transforms pass to children by
+        default. Per-instance application memory does not: each child uses
+        its own model default unless this parent opts into inheritance or its
+        edge transform supplies an explicit value.
         """
-        return True
+        _ = child_model
+        return ChildDesiresConfig()
 
     @classmethod
     def current_cluster_types(cls) -> Tuple[str, ...]:
@@ -367,7 +373,9 @@ class CapacityModel:
         The second element of the tuple is a capacity desire transform that
         takes the user desires, including transforms from ancestor models, and
         modifies them for the composed model. Model-specific defaults do not
-        cross this boundary; each child supplies its own defaults later.
+        cross this boundary; each child supplies its own defaults later. Models
+        can override ``child_desires_config`` to control inherited fields for a
+        particular child edge.
 
         (("model1", lambda x: x),
          ("model2", lambda x: transform(x)))

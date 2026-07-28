@@ -33,6 +33,7 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import ChildDesiresConfig
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
@@ -554,11 +555,11 @@ class NflxElasticsearchCapacityModel(CapacityModel):
         return None
 
     @staticmethod
-    def plans_own_cluster() -> bool:
-        # This model owns no instances; it splits Elasticsearch into its data,
-        # master and search node roles. The caller's desires describe those
-        # nodes, so per-instance reservations belong to them.
-        return False
+    def child_desires_config(child_model: str) -> ChildDesiresConfig:
+        # This model expands Elasticsearch into data, master, and search node
+        # roles. The caller's Elasticsearch reservation applies to those roles.
+        _ = child_model
+        return ChildDesiresConfig(inherit_app_memory_reservation=True)
 
     @staticmethod
     def description() -> str:

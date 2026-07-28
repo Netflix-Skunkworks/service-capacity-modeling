@@ -61,6 +61,7 @@ from service_capacity_modeling.interface import UncertainCapacityPlan
 from service_capacity_modeling.interface import SampleRef
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import ChildDesiresConfig
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.common import merge_plan
@@ -504,16 +505,18 @@ def _resolve_cluster_instances(desires: CapacityDesires) -> None:
                 cap.cluster_instance = shapes.instance(cap.cluster_instance_name)
 
 
-def _without_app_memory_reserve(desires: CapacityDesires) -> CapacityDesires:
-    """Drop the app memory reserve so a composed model uses its own.
+def _configure_child_desires(
+    desires: CapacityDesires, config: ChildDesiresConfig
+) -> CapacityDesires:
+    """Apply a parent's composition policy before its child transform.
 
-    ``reserved_instance_app_mem_gib`` is memory per instance of the tier it
-    was written for, and composed models run on their own shapes. A KeyValue
-    request that reserves 24 GiB for the dgwkv Java app should not make
-    Cassandra reserve 24 GiB per node for an app that is not there. Unsetting
-    the field (rather than picking a number) lets each model's
-    ``default_desires`` supply the reserve that suits it.
+    Unsetting a field rather than assigning a replacement lets the child
+    model's ``default_desires`` provide its own value. The edge transform runs
+    afterward and can still set an intentional child-specific override.
     """
+    if config.inherit_app_memory_reservation:
+        return desires
+
     data_shape = desires.data_shape.model_dump(exclude_unset=True)
     data_shape.pop("reserved_instance_app_mem_gib", None)
     return desires.model_copy(deep=True, update={"data_shape": DataShape(**data_shape)})
@@ -1547,27 +1550,13 @@ class CapacityPlanner:
                 )
             )
 
-            # We might have to compose this model with others depending on
-            # the user requirement. When this model sizes instances of its
-            # own, the caller's per-instance reservations describe those
-            # instances, and the models it composes with run on separate
-            # shapes -- so the reservation stops here. Aggregators that own no
-            # instances (Elasticsearch splitting into node roles) are the
-            # exception: the caller was describing the composed models all
-            # along. Strip before the modifier runs so a model that
-            # deliberately sets a child's reservation still wins.
-            child_desires = parent_desires
-            if self._models[sub_model].plans_own_cluster():
-                child_desires = _without_app_memory_reserve(parent_desires)
-
-            queue.extend(
-                [
-                    (modify_child_desires(child_desires), child_model)
-                    for child_model, modify_child_desires in self._models[
-                        sub_model
-                    ].compose_with(parent_desires, extra_model_arguments)
-                ]
-            )
+            parent_model = self._models[sub_model]
+            for child_model, modify_child_desires in parent_model.compose_with(
+                parent_desires, extra_model_arguments
+            ):
+                config = parent_model.child_desires_config(child_model)
+                child_desires = _configure_child_desires(parent_desires, config)
+                queue.append((modify_child_desires(child_desires), child_model))
 
             yield sub_model, sub_desires
 
