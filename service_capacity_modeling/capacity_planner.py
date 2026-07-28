@@ -1346,12 +1346,7 @@ class CapacityPlanner:
             explanation=PlanExplanation(
                 regret_params=regret_params,
                 desires_by_model={
-                    model: desires.merge_with(
-                        self._models[model].default_desires(
-                            sample_data.base_desires_by_model[model],
-                            extra_model_arguments,
-                        )
-                    )
+                    model: sample_data.base_desires_by_model[model]
                     for model in regret_details_by_model
                 },
                 regret_clusters_by_model={
