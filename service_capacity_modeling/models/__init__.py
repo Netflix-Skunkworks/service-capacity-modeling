@@ -8,6 +8,8 @@ from typing import Sequence
 from typing import Tuple
 from typing import Union
 
+from pydantic import BaseModel
+
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
@@ -40,6 +42,7 @@ __all__ = [
     "CapacityDesires",
     "CapacityPlan",
     "CapacityRegretParameters",
+    "ChildDesiresConfig",
     "certain_float",
     "Consistency",
     "DataShape",
@@ -56,6 +59,22 @@ __all__ = [
 ]
 
 __common_regrets__ = frozenset(("spend", "disk", "mem"))
+
+
+class ChildDesiresConfig(BaseModel):
+    """Which of a parent's desires cross one composition edge.
+
+    Declarative rather than a transform so the planner can report what a
+    boundary drops without having to run it.
+    """
+
+    inherit_app_memory_reservation: bool = False
+    """Pass the parent's per-instance app memory reservation to the child.
+
+    Off by default: the reservation describes the instances of the tier it was
+    written for. Turn it on for a child that runs on the parent's own
+    instances, such as a model that only splits one service into node roles.
+    """
 
 
 def _disk_regret(  # noqa: C901
@@ -331,27 +350,24 @@ class CapacityModel:
         return True
 
     @staticmethod
-    def desires_for_composed_model(desires: CapacityDesires) -> CapacityDesires:
-        """Adjust desires before they cross into a model composed with this one.
+    def child_desires_config(child_model: str) -> ChildDesiresConfig:
+        """Configure what one composed model inherits from this one.
 
-        The planner applies this to every model named by compose_with, before
-        that model's own transform runs, so a transform that sets something
-        deliberately still wins.
+        The planner applies this per edge, to the desires handed to each model
+        named by compose_with, before that model's own transform runs -- so a
+        transform that sets something deliberately still wins.
 
-        The default drops reserved_instance_app_mem_gib. That field is memory
-        per instance of the tier it was written for, and a composed model runs
-        on its own shapes -- a KeyValue request reserving 24 GiB for the dgwkv
-        Java app should not make Cassandra hold back 24 GiB per node for an app
-        that is not on the box. Unsetting it (rather than picking a number)
-        lets the composed model's own default_desires supply the reserve.
+        Workload desires and accumulated transforms pass down by default.
+        Per-instance memory reservations do not: they describe the instances of
+        the tier they were written for, and a composed model runs on its own
+        shapes. A KeyValue request reserving 24 GiB for the dgwkv Java app
+        should not make Cassandra hold 24 GiB back per node for an app that is
+        not on the box.
 
-        Override to keep it, or to add boundary rules of your own.
+        Override for a child that runs on this model's own instances.
         """
-        data_shape = desires.data_shape.model_dump(exclude_unset=True)
-        data_shape.pop("reserved_instance_app_mem_gib", None)
-        return desires.model_copy(
-            deep=True, update={"data_shape": DataShape(**data_shape)}
-        )
+        _ = child_model
+        return ChildDesiresConfig()
 
     @staticmethod
     def compose_with(

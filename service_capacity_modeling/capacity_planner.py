@@ -60,6 +60,7 @@ from service_capacity_modeling.interface import UncertainCapacityPlan
 from service_capacity_modeling.interface import SampleRef
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import ChildDesiresConfig
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.common import merge_plan
@@ -501,6 +502,23 @@ def _resolve_cluster_instances(desires: CapacityDesires) -> None:
         for cap in cluster_list:
             if cap.cluster_instance is None and cap.cluster_instance_name:
                 cap.cluster_instance = shapes.instance(cap.cluster_instance_name)
+
+
+def _configure_child_desires(
+    desires: CapacityDesires, config: ChildDesiresConfig
+) -> CapacityDesires:
+    """Apply a parent's composition policy before its per-child transform.
+
+    Unsetting a field rather than assigning a replacement lets the child
+    model's default_desires provide its own value, and leaves the per-child
+    transform free to set an intentional override afterwards.
+    """
+    if config.inherit_app_memory_reservation:
+        return desires
+
+    data_shape = desires.data_shape.model_dump(exclude_unset=True)
+    data_shape.pop("reserved_instance_app_mem_gib", None)
+    return desires.model_copy(deep=True, update={"data_shape": DataShape(**data_shape)})
 
 
 class CapacityPlanner:
@@ -1487,22 +1505,19 @@ class CapacityPlanner:
                 )
             )
 
-            # We might have to compose this model with others depending on
-            # the user requirement. What crosses that boundary is the composing
-            # model's call -- see CapacityModel.desires_for_composed_model,
-            # which by default drops reservations describing this model's own
-            # instances. It runs before the per-child transform so a transform
-            # that sets something deliberately still wins.
-            child_desires = self._models[sub_model].desires_for_composed_model(desires)
-
-            queue.extend(
-                [
-                    (modify_child_desires(child_desires), child_model)
-                    for child_model, modify_child_desires in self._models[
-                        sub_model
-                    ].compose_with(desires, extra_model_arguments)
-                ]
-            )
+            # We might have to compose this model with others depending on the
+            # user requirement. What crosses each of those edges is the composing
+            # model's call -- see CapacityModel.child_desires_config, which by
+            # default holds back reservations describing this model's own
+            # instances. It is applied before the per-child transform so a
+            # transform that sets something deliberately still wins.
+            parent_model = self._models[sub_model]
+            for child_model, modify_child_desires in parent_model.compose_with(
+                desires, extra_model_arguments
+            ):
+                config = parent_model.child_desires_config(child_model)
+                child_desires = _configure_child_desires(desires, config)
+                queue.append((modify_child_desires(child_desires), child_model))
 
             yield sub_model, sub_desires
 

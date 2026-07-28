@@ -7,6 +7,12 @@ from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.models.org.netflix.elasticsearch import (
+    nflx_elasticsearch_capacity_model,
+)
+from service_capacity_modeling.models.org.netflix.key_value import (
+    nflx_key_value_capacity_model,
+)
 
 # Sized to sit near the memory bound of the backing datastore, so a leaked
 # reserve visibly changes the shape it picks. A disk-bound namespace would
@@ -96,15 +102,29 @@ def test_parent_tier_still_gets_the_caller_reserve():
     assert heavy["dgwkv"] != lean["dgwkv"]
 
 
-def test_the_rule_holds_through_an_aggregator():
+def test_a_model_that_owns_no_instances_passes_the_reserve_down():
     """org.netflix.elasticsearch owns no instances; it splits into node roles.
 
-    The reserve still stops at the boundary rather than reaching the node
-    roles through it. Entity is the only composition that reaches
-    Elasticsearch in practice, and it strips one level higher anyway, so this
-    keeps the two paths agreeing instead of carving out a second mode.
+    Its capacity_plan returns None -- the data, master and search models run on
+    the shapes the caller was describing. So a reservation aimed at
+    Elasticsearch is aimed at those roles and has to cross, which is what
+    ChildDesiresConfig(inherit_app_memory_reservation=True) says.
+
+    Nothing plans this model directly today, so raising the reserve is not
+    observable in production. It is the behaviour we want when someone does.
     """
+    assert nflx_elasticsearch_capacity_model.child_desires_config(
+        "org.netflix.elasticsearch.node"
+    ).inherit_app_memory_reservation
+
     lean = _clusters_by_type("org.netflix.elasticsearch", 1)
     heavy = _clusters_by_type("org.netflix.elasticsearch", 64)
 
-    assert heavy["elasticsearch-data"] == lean["elasticsearch-data"]
+    assert heavy["elasticsearch-data"] != lean["elasticsearch-data"]
+
+
+def test_a_composed_model_on_its_own_shapes_does_not_inherit():
+    """The default direction, stated against a model that does own instances."""
+    assert not nflx_key_value_capacity_model.child_desires_config(
+        "org.netflix.cassandra"
+    ).inherit_app_memory_reservation

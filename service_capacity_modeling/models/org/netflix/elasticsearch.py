@@ -30,6 +30,7 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import ChildDesiresConfig
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
@@ -463,6 +464,16 @@ class NflxElasticsearchCapacityModel(CapacityModel):
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
         return None
+
+    @staticmethod
+    def child_desires_config(child_model: str) -> ChildDesiresConfig:
+        # This model owns no instances -- it splits Elasticsearch into its data,
+        # master and search node roles, which run on the shapes the caller was
+        # describing. A memory reservation aimed at Elasticsearch is aimed at
+        # those roles, so it crosses. Each role still states its own default,
+        # which applies when the caller sets nothing.
+        _ = child_model
+        return ChildDesiresConfig(inherit_app_memory_reservation=True)
 
     @staticmethod
     def description() -> str:
