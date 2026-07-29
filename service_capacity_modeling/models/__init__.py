@@ -377,8 +377,9 @@ class CapacityModel:
         """Return additional model names to compose with this one
 
         The second element of the tuple is a capacity desire transform that
-        takes the original user desire and modifies it for the composed
-        model.
+        takes the desires accumulated for this parent and modifies them for
+        the composed child model. The planner applies child_desires_config
+        before this transform.
 
         (("model1", lambda x: x),
          ("model2", lambda x: transform(x)))
