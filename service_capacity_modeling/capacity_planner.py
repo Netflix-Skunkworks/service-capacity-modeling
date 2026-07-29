@@ -516,9 +516,12 @@ def _configure_child_desires(
     if config.inherit_app_memory_reservation:
         return desires
 
-    data_shape = desires.data_shape.model_dump(exclude_unset=True)
-    data_shape.pop("reserved_instance_app_mem_gib", None)
-    return desires.model_copy(deep=True, update={"data_shape": DataShape(**data_shape)})
+    child_desires = desires.model_copy(deep=True)
+    child_desires.data_shape.reserved_instance_app_mem_gib = DataShape.model_fields[
+        "reserved_instance_app_mem_gib"
+    ].default
+    child_desires.data_shape.model_fields_set.discard("reserved_instance_app_mem_gib")
+    return child_desires
 
 
 class CapacityPlanner:
@@ -1364,12 +1367,7 @@ class CapacityPlanner:
             explanation=PlanExplanation(
                 regret_params=regret_params,
                 desires_by_model={
-                    model: desires.merge_with(
-                        self._models[model].default_desires(
-                            sample_data.base_desires_by_model[model],
-                            extra_model_arguments,
-                        )
-                    )
+                    model: sample_data.base_desires_by_model[model]
                     for model in regret_details_by_model
                 },
                 regret_clusters_by_model={
@@ -1513,10 +1511,10 @@ class CapacityPlanner:
             # transform that sets something deliberately still wins.
             parent_model = self._models[sub_model]
             for child_model, modify_child_desires in parent_model.compose_with(
-                desires, extra_model_arguments
+                parent_desires, extra_model_arguments
             ):
                 config = parent_model.child_desires_config(child_model)
-                child_desires = _configure_child_desires(desires, config)
+                child_desires = _configure_child_desires(parent_desires, config)
                 queue.append((modify_child_desires(child_desires), child_model))
 
             yield sub_model, sub_desires
