@@ -30,12 +30,14 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import ChildDesiresConfig
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import upsert_params
+from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
@@ -193,6 +195,11 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
     ) -> CapacityDesires:
         desires = CapacityModel.default_desires(user_desires, extra_model_arguments)
         desires.buffers = NflxElasticsearchDataCapacityModel.default_buffers()
+        # Elasticsearch has a 1 GiB sidecar. That figure was only stated on the
+        # aggregator model, which owns no instances, so the nodes that actually
+        # reserve the memory fell through to the DataShape default of 2. State
+        # it here, where the instances are.
+        desires.data_shape.reserved_instance_app_mem_gib = 1
         return desires
 
     @staticmethod
@@ -223,6 +230,22 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
 
         # Netflix Elasticsearch doesn't like to deploy on really small instances
         if instance.cpu < 2 or instance.ram_gib < 24:
+            return None
+
+        # Sidecars/System takes away memory from Elasticsearch
+        # which uses half of available system max of 32 for compressed oops
+        base_mem = (
+            desires.data_shape.reserved_instance_app_mem_gib
+            + desires.data_shape.reserved_instance_system_mem_gib
+        )
+
+        def reserve_memory(instance_mem_gib: float) -> float:
+            return base_mem + max(32, instance_mem_gib / 2)
+
+        # The 24 GiB floor above ignores the workload's reserved memory. If the
+        # reserves swallow the whole instance there is nothing left to hold
+        # shards, so no node count works and the shape has to go.
+        if usable_memory_gib(instance, reserve_memory) <= 0:
             return None
 
         # Right now Elasticsearch doesn't deploy to cloud drives
@@ -260,11 +283,6 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             copies_per_region=copies_per_region,
             max_rps_to_disk=max_rps_to_disk,
         )
-        base_mem = (
-            desires.data_shape.reserved_instance_app_mem_gib
-            + desires.data_shape.reserved_instance_system_mem_gib
-        )
-
         data_write_per_sec = (
             desires.query_pattern.estimated_write_per_second.mid // zones_in_region
         )
@@ -309,9 +327,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             # Elasticsearch clusters can auto-balance via shard placement
             cluster_size=lambda x: x,
             min_count=min_count,
-            # Sidecars/System takes away memory from Elasticsearch
-            # which uses half of available system max of 32 for compressed oops
-            reserve_memory=lambda x: base_mem + max(32, x / 2),
+            reserve_memory=reserve_memory,
         )
         data_cluster.cluster_type = "elasticsearch-data"
 
@@ -448,6 +464,16 @@ class NflxElasticsearchCapacityModel(CapacityModel):
         extra_model_arguments: Dict[str, Any],
     ) -> Optional[CapacityPlan]:
         return None
+
+    @staticmethod
+    def child_desires_config(child_model: str) -> ChildDesiresConfig:
+        # This model owns no instances -- it splits Elasticsearch into its data,
+        # master and search node roles, which run on the shapes the caller was
+        # describing. A memory reservation aimed at Elasticsearch is aimed at
+        # those roles, so it crosses. Each role still states its own default,
+        # which applies when the caller sets nothing.
+        _ = child_model
+        return ChildDesiresConfig(inherit_app_memory_reservation=True)
 
     @staticmethod
     def description() -> str:

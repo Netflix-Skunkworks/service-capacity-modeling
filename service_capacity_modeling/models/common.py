@@ -539,6 +539,19 @@ def compute_stateless_region(  # pylint: disable=too-many-positional-arguments
 # ---------------------------------------------------------------------------
 
 
+def usable_memory_gib(
+    instance: Instance, reserve_memory: Callable[[float], float]
+) -> float:
+    """RAM one node can give the datastore after reservations.
+
+    Reservations are things like the JVM heap, sidecars, and the OS. Zero or
+    less means the shape cannot host the workload at all: no node count
+    satisfies a memory requirement, so callers must reject the shape rather
+    than size a cluster out of it.
+    """
+    return instance.ram_gib - reserve_memory(instance.ram_gib)
+
+
 # pylint: disable=too-many-locals
 # pylint: disable=too-many-statements
 def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
@@ -574,9 +587,17 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     count_cpu = math.ceil(needed_cores / instance.cpu)
 
     # Memory (write-buffer floor bumps count when writes dominate)
-    count_memory = math.ceil(
-        needed_memory_gib / (instance.ram_gib - reserve_memory(instance.ram_gib))
-    )
+    memory_per_node_gib = usable_memory_gib(instance, reserve_memory)
+    if memory_per_node_gib <= 0:
+        raise ValueError(
+            f"{instance.name} reserves "
+            f"{instance.ram_gib - memory_per_node_gib} GiB of its "
+            f"{instance.ram_gib} GiB of RAM, leaving {memory_per_node_gib} GiB "
+            "for the datastore. No node count satisfies the memory "
+            "requirement, so this shape must be rejected before sizing "
+            "a cluster."
+        )
+    count_memory = math.ceil(needed_memory_gib / memory_per_node_gib)
     if write_buffer(instance.ram_gib) > 0:
         count_memory = max(
             count_memory,

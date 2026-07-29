@@ -825,7 +825,7 @@ class DataShape(ExcludeUnsetModel):
     Note: databases may have different compression strategies affecting this."""
 
     reserved_instance_app_mem_gib: float = 2
-    """Fixed memory per instance for application (e.g. process heap memory)"""
+    """Fixed application memory per instance of the model's own tier."""
 
     reserved_instance_system_mem_gib: float = 1
     """Fixed memory per instance for system (e.g. kernel and system processes)"""
@@ -1529,6 +1529,7 @@ class PlanExplanation(ExcludeUnsetModel):
         str, Sequence[Tuple[CapacityPlan, CapacityDesires, float]]
     ] = {}
     desires_by_model: Dict[str, CapacityDesires] = {}
+    """The base desires actually planned for each model in the composition."""
     excuses_by_model: Dict[str, Sequence[Excuse]] = {}
     context: Dict[str, Any] = {}
 

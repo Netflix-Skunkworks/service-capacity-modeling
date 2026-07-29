@@ -319,3 +319,30 @@ def test_topology_constraints_do_not_override_stronger_resource_limits():
     assert counts["cpu"] == 40
     assert counts["min_count"] == 6
     assert cluster.cluster_params["resource_bottleneck"] == "cpu"
+
+
+@pytest.mark.parametrize(
+    "reserve_memory",
+    [
+        lambda ram_gib: ram_gib,  # reserves exactly the whole box
+        lambda ram_gib: ram_gib + 8,  # reserves more than the box has
+    ],
+    ids=["reserves-all-ram", "reserves-more-than-ram"],
+)
+def test_shape_with_no_memory_left_over_is_rejected(reserve_memory):
+    """No node count satisfies memory when reservations eat the whole box.
+
+    Dividing by the leftover used to hand back either a ZeroDivisionError or a
+    negative node count that max() quietly discarded, which let an undersized
+    shape pass the memory check entirely.
+    """
+    with pytest.raises(ValueError, match="leaving .* for the datastore"):
+        compute_stateful_zone(
+            instance=M5_4XL,
+            drive=EBS,
+            needed_cores=4,
+            needed_disk_gib=100,
+            needed_memory_gib=1000,
+            needed_network_mbps=100,
+            reserve_memory=reserve_memory,
+        )

@@ -8,6 +8,8 @@ from typing import Sequence
 from typing import Tuple
 from typing import Union
 
+from pydantic import BaseModel
+
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
@@ -40,6 +42,7 @@ __all__ = [
     "CapacityDesires",
     "CapacityPlan",
     "CapacityRegretParameters",
+    "ChildDesiresConfig",
     "certain_float",
     "Consistency",
     "DataShape",
@@ -56,6 +59,22 @@ __all__ = [
 ]
 
 __common_regrets__ = frozenset(("spend", "disk", "mem"))
+
+
+class ChildDesiresConfig(BaseModel):
+    """Which of a parent's desires cross one composition edge.
+
+    Declarative rather than a transform so the planner can report what a
+    boundary drops without having to run it.
+    """
+
+    inherit_app_memory_reservation: bool = False
+    """Pass the parent's per-instance app memory reservation to the child.
+
+    Off by default: the reservation describes the instances of the tier it was
+    written for. Turn it on for a child that runs on the parent's own
+    instances, such as a model that only splits one service into node roles.
+    """
 
 
 def _disk_regret(  # noqa: C901
@@ -331,6 +350,26 @@ class CapacityModel:
         return True
 
     @staticmethod
+    def child_desires_config(child_model: str) -> ChildDesiresConfig:
+        """Configure what one composed model inherits from this one.
+
+        The planner applies this per edge, to the desires handed to each model
+        named by compose_with, before that model's own transform runs -- so a
+        transform that sets something deliberately still wins.
+
+        Workload desires and accumulated transforms pass down by default.
+        Per-instance memory reservations do not: they describe the instances of
+        the tier they were written for, and a composed model runs on its own
+        shapes. A KeyValue request reserving 24 GiB for the dgwkv Java app
+        should not make Cassandra hold 24 GiB back per node for an app that is
+        not on the box.
+
+        Override for a child that runs on this model's own instances.
+        """
+        _ = child_model
+        return ChildDesiresConfig()
+
+    @staticmethod
     def compose_with(
         user_desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
@@ -338,8 +377,9 @@ class CapacityModel:
         """Return additional model names to compose with this one
 
         The second element of the tuple is a capacity desire transform that
-        takes the original user desire and modifies it for the composed
-        model.
+        takes the desires accumulated for this parent and modifies them for
+        the composed child model. The planner applies child_desires_config
+        before this transform.
 
         (("model1", lambda x: x),
          ("model2", lambda x: transform(x)))

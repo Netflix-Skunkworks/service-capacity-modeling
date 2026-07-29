@@ -302,6 +302,11 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         variable_os = int(instance_mem_gib * 0.03)
         return base_mem + variable_os
 
+    # No guard for reserves overrunning the box here, unlike Cassandra, Kafka
+    # and Elasticsearch: the compute_stateful_zone call below does not pass
+    # reserve_memory, so it divides by the full instance RAM and cannot hit the
+    # non-positive case. Passing the reserve through would be a sizing change,
+    # not a fix.
     requirement.context["osmem"] = reserve_memory(instance.ram_gib)
     # EVCache clusters aim to be at least 2 nodes per zone to start
     # out with for tier 0
