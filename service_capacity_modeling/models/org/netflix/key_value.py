@@ -94,7 +94,12 @@ class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
         rps_interval = query_pattern.estimated_read_per_second
         rps: float = rps_interval.mid
         wps: float = query_pattern.estimated_write_per_second.mid
-        read_write_ratio: float = rps / wps
+        # compose_with reads the request as written, before default_desires has
+        # filled anything in, so a namespace that states no write rate arrives
+        # here with zero. Treat that as read-only: the ratio only gates whether
+        # EVCache is worth attaching, and no writes is the most cache-friendly
+        # shape there is.
+        read_write_ratio: float = rps / wps if wps else float("inf")
 
         # Parameterizing this in case we want to configure it to something else later.
         # The read/write ratio should be relatively high to make EVCache effective.
