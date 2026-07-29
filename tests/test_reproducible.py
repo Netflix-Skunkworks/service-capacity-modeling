@@ -111,6 +111,31 @@ def test_compositional():
         assert 100 > java.count * java.instance.cpu > 20
 
 
+def test_composed_explanation_reports_child_desires_used_for_planning():
+    result = planner.plan(
+        model_name="org.netflix.key-value",
+        region="us-east-1",
+        desires=uncertain_mid,
+        num_results=1,
+        simulations=2,
+        extra_model_arguments={
+            "kv_force_evcache": True,
+            "estimated_kv_cache_hit_rate": 0.8,
+        },
+    )
+
+    desires_by_model = result.explanation.desires_by_model
+    cassandra_rps = desires_by_model[
+        "org.netflix.cassandra"
+    ].query_pattern.estimated_read_per_second.mid
+    evcache_rps = desires_by_model[
+        "org.netflix.evcache"
+    ].query_pattern.estimated_read_per_second.mid
+
+    assert cassandra_rps == pytest.approx(2_000)
+    assert evcache_rps == pytest.approx(10_000)
+
+
 def test_multiple_options_diversify_with_more_simulations():
     """
     This test appears strange at first. The goal is to show that with less
