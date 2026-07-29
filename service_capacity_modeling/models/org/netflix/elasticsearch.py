@@ -195,10 +195,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
     ) -> CapacityDesires:
         desires = CapacityModel.default_desires(user_desires, extra_model_arguments)
         desires.buffers = NflxElasticsearchDataCapacityModel.default_buffers()
-        # Elasticsearch has a 1 GiB sidecar. That figure was only stated on the
-        # aggregator model, which owns no instances, so the nodes that actually
-        # reserve the memory fell through to the DataShape default of 2. State
-        # it here, where the instances are.
+        # Elasticsearch data nodes run a 1 GiB sidecar.
         desires.data_shape.reserved_instance_app_mem_gib = 1
         return desires
 
@@ -470,8 +467,8 @@ class NflxElasticsearchCapacityModel(CapacityModel):
         # This model owns no instances -- it splits Elasticsearch into its data,
         # master and search node roles, which run on the shapes the caller was
         # describing. A memory reservation aimed at Elasticsearch is aimed at
-        # those roles, so it crosses. Each role still states its own default,
-        # which applies when the caller sets nothing.
+        # those roles, so an explicit caller value crosses this boundary. The
+        # data node model supplies its own default when the caller sets nothing.
         _ = child_model
         return ChildDesiresConfig(inherit_app_memory_reservation=True)
 
@@ -576,8 +573,6 @@ class NflxElasticsearchCapacityModel(CapacityModel):
                         high=4,
                         confidence=0.98,
                     ),
-                    # Elasticsearch has a 1 GiB sidecar
-                    reserved_instance_app_mem_gib=1,
                 ),
             )
         else:
@@ -638,8 +633,6 @@ class NflxElasticsearchCapacityModel(CapacityModel):
                         high=4,
                         confidence=0.98,
                     ),
-                    # Elasticsearch has a 1 GiB sidecar
-                    reserved_instance_app_mem_gib=1,
                 ),
             )
 
