@@ -113,9 +113,6 @@ def test_a_model_that_owns_no_instances_passes_the_reserve_down():
     the shapes the caller was describing. So a reservation aimed at
     Elasticsearch is aimed at those roles and has to cross, which is what
     ChildDesiresConfig(inherit_app_memory_reservation=True) says.
-
-    Nothing plans this model directly today, so raising the reserve is not
-    observable in production. It is the behaviour we want when someone does.
     """
     assert nflx_elasticsearch_capacity_model.child_desires_config(
         "org.netflix.elasticsearch.node"
@@ -125,6 +122,37 @@ def test_a_model_that_owns_no_instances_passes_the_reserve_down():
     heavy = _clusters_by_type("org.netflix.elasticsearch", 64)
 
     assert heavy["elasticsearch-data"] != lean["elasticsearch-data"]
+
+
+def test_es_aggregator_default_does_not_override_role_defaults():
+    desires = CapacityDesires(
+        service_tier=1,
+        query_pattern=BASE_QUERY_PATTERN.model_copy(deep=True),
+        data_shape=DataShape(estimated_state_size_gib=BASE_STATE_SIZE),
+    )
+    result = planner.plan(
+        model_name="org.netflix.elasticsearch",
+        region="us-east-1",
+        desires=desires,
+        simulations=2,
+    )
+    reserves = {
+        model: model_desires.data_shape.reserved_instance_app_mem_gib
+        for model, model_desires in result.explanation.desires_by_model.items()
+    }
+    default_reserve = DataShape.model_fields["reserved_instance_app_mem_gib"].default
+
+    assert (
+        nflx_elasticsearch_capacity_model.default_desires(
+            desires, {}
+        ).data_shape.reserved_instance_app_mem_gib
+        == 1
+    )
+    assert reserves == {
+        "org.netflix.elasticsearch.master": default_reserve,
+        "org.netflix.elasticsearch.node": default_reserve,
+        "org.netflix.elasticsearch.search": default_reserve,
+    }
 
 
 def test_a_composed_model_on_its_own_shapes_does_not_inherit():

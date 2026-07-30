@@ -297,10 +297,9 @@ def zonal_summary(zlr):
 def test_es_data_nodes_have_ram_left_after_reserves():
     """Data nodes must have RAM left once sidecars and the heap are carved out.
 
-    Elasticsearch reserves ``base_mem + max(32, ram / 2)`` per node, which
-    overruns shapes at or below ~34 GiB. Those used to yield a negative memory
-    node count that max() discarded, silently dropping the memory constraint
-    and letting an undersized shape win on cost.
+    Elasticsearch reserves the app and system memory plus half of instance RAM
+    for heap, capped at 32 GiB. A shape can only be chosen if something remains
+    for shards and the filesystem cache.
     """
     desires = CapacityDesires(
         service_tier=1,
@@ -337,7 +336,30 @@ def test_es_data_nodes_have_ram_left_after_reserves():
 
     for cluster in data_clusters:
         ram_gib = cluster.instance.ram_gib
-        reserved = base_mem + max(32, ram_gib / 2)
+        reserved = base_mem + min(32, ram_gib / 2)
         assert ram_gib > reserved, (
             f"{cluster.instance.name} reserves {reserved} GiB of {ram_gib} GiB"
         )
+
+
+def test_es_100_gib_plan_can_use_r5d_xlarge_data_nodes():
+    desires = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(estimated_read_per_second=certain_int(1000)),
+        data_shape=DataShape(estimated_state_size_gib=certain_int(100)),
+    )
+
+    plans = planner.plan_certain(
+        model_name="org.netflix.elasticsearch.node",
+        region="us-east-1",
+        desires=desires,
+        instance_families=["r5d"],
+        num_results=1,
+    )
+    data_clusters = plans[0].candidate_clusters.zonal
+
+    assert {cluster.instance.name for cluster in data_clusters} == {"r5d.xlarge"}
+    assert {
+        cluster.cluster_params["required_nodes_by_type"]["memory"]
+        for cluster in data_clusters
+    } == {1}

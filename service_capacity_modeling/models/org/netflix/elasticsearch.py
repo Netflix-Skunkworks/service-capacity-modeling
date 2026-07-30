@@ -195,8 +195,6 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
     ) -> CapacityDesires:
         desires = CapacityModel.default_desires(user_desires, extra_model_arguments)
         desires.buffers = NflxElasticsearchDataCapacityModel.default_buffers()
-        # Elasticsearch data nodes run a 1 GiB sidecar.
-        desires.data_shape.reserved_instance_app_mem_gib = 1
         return desires
 
     @staticmethod
@@ -229,15 +227,15 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         if instance.cpu < 2 or instance.ram_gib < 24:
             return None
 
-        # Sidecars/System takes away memory from Elasticsearch
-        # which uses half of available system max of 32 for compressed oops
+        # Sidecars and the OS take memory away from Elasticsearch. The JVM heap
+        # uses half of instance RAM, capped at 32 GiB for compressed pointers.
         base_mem = (
             desires.data_shape.reserved_instance_app_mem_gib
             + desires.data_shape.reserved_instance_system_mem_gib
         )
 
         def reserve_memory(instance_mem_gib: float) -> float:
-            return base_mem + max(32, instance_mem_gib / 2)
+            return base_mem + min(32, instance_mem_gib / 2)
 
         # The 24 GiB floor above ignores the workload's reserved memory. If the
         # reserves swallow the whole instance there is nothing left to hold
@@ -467,8 +465,8 @@ class NflxElasticsearchCapacityModel(CapacityModel):
         # This model owns no instances -- it splits Elasticsearch into its data,
         # master and search node roles, which run on the shapes the caller was
         # describing. A memory reservation aimed at Elasticsearch is aimed at
-        # those roles, so an explicit caller value crosses this boundary. The
-        # data node model supplies its own default when the caller sets nothing.
+        # those roles, so an explicit caller value crosses this boundary. When
+        # the caller sets nothing, each role uses the DataShape default.
         _ = child_model
         return ChildDesiresConfig(inherit_app_memory_reservation=True)
 
@@ -573,6 +571,8 @@ class NflxElasticsearchCapacityModel(CapacityModel):
                         high=4,
                         confidence=0.98,
                     ),
+                    # Elasticsearch has a 1 GiB sidecar
+                    reserved_instance_app_mem_gib=1,
                 ),
             )
         else:
@@ -633,6 +633,8 @@ class NflxElasticsearchCapacityModel(CapacityModel):
                         high=4,
                         confidence=0.98,
                     ),
+                    # Elasticsearch has a 1 GiB sidecar
+                    reserved_instance_app_mem_gib=1,
                 ),
             )
 
