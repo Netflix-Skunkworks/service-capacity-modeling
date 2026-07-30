@@ -571,7 +571,9 @@ class NflxElasticsearchCapacityModel(CapacityModel):
                         high=4,
                         confidence=0.98,
                     ),
-                    # Elasticsearch has a 1 GiB sidecar
+                    # Elasticsearch has a 1 GiB sidecar. This model plans no
+                    # instances, so the figure stops here -- see
+                    # child_desires_config for what reaches the node roles.
                     reserved_instance_app_mem_gib=1,
                 ),
             )
@@ -633,7 +635,9 @@ class NflxElasticsearchCapacityModel(CapacityModel):
                         high=4,
                         confidence=0.98,
                     ),
-                    # Elasticsearch has a 1 GiB sidecar
+                    # Elasticsearch has a 1 GiB sidecar. This model plans no
+                    # instances, so the figure stops here -- see
+                    # child_desires_config for what reaches the node roles.
                     reserved_instance_app_mem_gib=1,
                 ),
             )

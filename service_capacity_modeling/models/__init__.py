@@ -74,6 +74,10 @@ class ChildDesiresConfig(BaseModel):
     Off by default: the reservation describes the instances of the tier it was
     written for. Turn it on for a child that runs on the parent's own
     instances, such as a model that only splits one service into node roles.
+
+    Either way only a reservation the caller set crosses: composition hands
+    children the caller's desires, so a parent model's own default_desires
+    reservation applies to that model alone.
     """
 
 
