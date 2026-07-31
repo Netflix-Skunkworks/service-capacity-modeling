@@ -395,6 +395,7 @@ def _derived_write_buffer_requirement_gib(
 
 class _CassandraRequirementEstimate(BaseModel):
     requirement: CapacityRequirement
+    disk_used_gib: float
     write_buffer_gib: float
     compaction_min_threshold: int
 
@@ -552,6 +553,7 @@ def _estimate_cassandra_requirement(
                 "read_per_second": reads_per_second,
             },
         ),
+        disk_used_gib=disk_used_gib,
         write_buffer_gib=write_buffer_gib,
         compaction_min_threshold=min_threshold,
     )
@@ -630,6 +632,7 @@ def _compute_penalties(
 
 
 # pylint: disable=too-many-locals
+# pylint: disable=too-many-branches
 # pylint: disable=too-many-return-statements
 # flake8: noqa: C901
 def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-arguments
@@ -656,6 +659,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     backup_retention_days: Optional[float] = None,
     max_disk_utilization: float = CASSANDRA_MAX_DISK_UTILIZATION,
     min_instance_ram_gib_exclusive: float = 16.0,
+    observed_ebs_read_io_per_read: Optional[float] = None,
+    observed_ebs_write_io_per_write: Optional[float] = None,
 ) -> Union[CapacityPlan, Excuse, None]:
     drive_name = drive.name
 
@@ -836,6 +841,41 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     )
 
     current_cluster_size = _get_current_cluster_size(desires)
+    read_io_calibration_factor = 1.0
+    read_io_calibrated = False
+    write_io_calibration_factor = 1.0
+    io_calibration: Dict[str, float] = {}
+    if is_ebs and current_cluster_size is not None and current_cluster_size > 0:
+        assert current_capacity is not None
+        current_count = math.ceil(current_cluster_size)
+        current_data_per_node_gib = max(1, current_capacity.disk_utilization_gib.mid)
+        if observed_ebs_read_io_per_read is not None and rps > 0:
+            modeled_read_io_per_read = _cass_io_per_read(current_data_per_node_gib) * (
+                math.ceil(read_io_per_sec / current_count) * current_count / rps
+            )
+            read_io_calibration_factor = (
+                observed_ebs_read_io_per_read / modeled_read_io_per_read
+            )
+            read_io_calibrated = True
+            io_calibration.update(
+                {
+                    "observed_read_io_per_read": observed_ebs_read_io_per_read,
+                    "modeled_read_io_per_read": modeled_read_io_per_read,
+                    "read_io_calibration_factor": read_io_calibration_factor,
+                }
+            )
+        if observed_ebs_write_io_per_write is not None and write_per_sec > 0:
+            modeled_write_io_per_write = write_io_per_sec / write_per_sec
+            write_io_calibration_factor = (
+                observed_ebs_write_io_per_write / modeled_write_io_per_write
+            )
+            io_calibration.update(
+                {
+                    "observed_write_io_per_write": observed_ebs_write_io_per_write,
+                    "modeled_write_io_per_write": modeled_write_io_per_write,
+                    "write_io_calibration_factor": write_io_calibration_factor,
+                }
+            )
     cluster_size_lambda = _get_cluster_size_lambda(
         cluster_size_mode,
         current_cluster_size=current_cluster_size,
@@ -872,9 +912,15 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         needed_network_mbps=requirement.network_mbps.mid,
         # Take into account the reads per read
         # from the per node dataset using leveled compaction
-        required_disk_ios=lambda size, count: (
-            _cass_io_per_read(size) * math.ceil(read_io_per_sec / count),
-            write_io_per_sec / count,
+        required_disk_ios=lambda _size, count: (
+            read_io_calibration_factor
+            * _cass_io_per_read(
+                max(1, requirement_estimate.disk_used_gib / count)
+                if read_io_calibrated
+                else _size
+            )
+            * math.ceil(read_io_per_sec / count),
+            write_io_calibration_factor * write_io_per_sec / count,
         ),
         # Critical C* clusters grow by doubling from the current cluster size.
         cluster_size=cluster_size_lambda,
@@ -906,6 +952,10 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             2,
         ),
     }
+    if io_calibration:
+        params["cassandra.ebs_io_calibration"] = {
+            key: round(value, 4) for key, value in io_calibration.items()
+        }
     upsert_params(cluster, params)
 
     # All penalties inflate plan.rank = cost * (1 + sum(penalties)),
@@ -940,6 +990,16 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             if node_counts is not None and node_counts.resource_bottleneck is not None
             else "unknown"
         )
+        excuse_context: Dict[str, Any] = {
+            "computed_count": cluster.count,
+            "required_cluster_size": required_cluster_size,
+            "required_nodes_by_type": required_nodes_by_type,
+            "resource_bottleneck": resource_bottleneck,
+        }
+        if io_calibration:
+            excuse_context["ebs_io_calibration"] = {
+                key: round(value, 4) for key, value in io_calibration.items()
+            }
         return Excuse(
             instance=instance.name,
             drive=drive_name,
@@ -948,12 +1008,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 f"(resource bottleneck: {resource_bottleneck}) "
                 f"!= required {required_cluster_size}"
             ),
-            context={
-                "computed_count": cluster.count,
-                "required_cluster_size": required_cluster_size,
-                "required_nodes_by_type": required_nodes_by_type,
-                "resource_bottleneck": resource_bottleneck,
-            },
+            context=excuse_context,
             bottleneck=Bottleneck.cluster_size,
         )
 
@@ -1273,6 +1328,22 @@ class NflxCassandraArguments(BaseModel):
         "Lower values are more conservative; higher values allow denser current "
         "shape planning.",
     )
+    observed_ebs_read_io_per_read: Optional[float] = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+        description="Observed EBS read operations per logical Cassandra read. "
+        "For existing EBS clusters, calibrates the theoretical LCS read-I/O "
+        "estimate while retaining candidate data-per-node sensitivity.",
+    )
+    observed_ebs_write_io_per_write: Optional[float] = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+        description="Observed EBS write operations per logical Cassandra write. "
+        "For existing EBS clusters, calibrates the theoretical commitlog and "
+        "compaction write-I/O estimate.",
+    )
 
     @model_validator(mode="after")
     def _check_storage_buffer_bounds(self) -> "NflxCassandraArguments":
@@ -1515,6 +1586,8 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             backup_retention_days=args.backup_retention_days,
             max_disk_utilization=args.max_disk_utilization,
             min_instance_ram_gib_exclusive=args.min_instance_ram_gib_exclusive,
+            observed_ebs_read_io_per_read=args.observed_ebs_read_io_per_read,
+            observed_ebs_write_io_per_write=args.observed_ebs_write_io_per_write,
         )
 
         return result
