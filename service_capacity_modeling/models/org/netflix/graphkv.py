@@ -39,6 +39,10 @@ from service_capacity_modeling.models import CapacityModel
 # intentionally excluded from this model.
 # ===========================================================================
 
+# Server-side ceiling on traversal depth, so a namespace cannot ask the model to
+# walk deeper than the engine will.
+MAX_TRAVERSAL_DEPTH = 3
+
 
 class NflxGraphKVArguments(NflxJavaAppArguments):
     """Per-namespace inputs describing the graph shape.
@@ -48,115 +52,76 @@ class NflxGraphKVArguments(NflxJavaAppArguments):
     constants below).
     """
 
-    edge_mapping_count: int = Field(
-        default=5,
-        alias="graphkv.edge-mapping-count",
+    avg_fanout_per_hop: float = Field(
+        default=10.0,
+        ge=0.0,
+        alias="graphkv.avg-fanout-per-hop",
         description=(
-            "Number of registered edge-mappings (distinct "
-            "(from_type, edge_type, to_type) triples) in the namespace. Drives "
-            "READ amplification: a traversal issues one KV scan per edge-mapping "
-            "per hop. Does not change per-write cost."
+            "Average number of edges a traversal follows out of one frontier "
+            "node in one hop, i.e. the branching factor. Grows the frontier the "
+            "next hop has to scan, so it only costs backend reads when the "
+            "traversal is deeper than one hop; at depth 1 it costs response "
+            "bytes, not requests."
         ),
     )
-    edge_mapping_property_count: int = Field(
+    avg_traversal_depth: int = Field(
         default=1,
-        alias="graphkv.edge-mapping-property-count",
+        ge=1,
+        le=MAX_TRAVERSAL_DEPTH,
+        alias="graphkv.avg-traversal-depth",
         description=(
-            "Average number of properties stored on an edge. Drives WRITE "
-            "amplification: each property is a separate KV item, so an edge "
-            "write fans out to (2 link items + this many property items)."
-        ),
-    )
-    node_mapping_count: int = Field(
-        default=5,
-        alias="graphkv.node-mapping-count",
-        description=(
-            "Number of registered node-mappings (distinct node types) in the "
-            "namespace. Used only to estimate the node-vs-edge WRITE mix; it "
-            "does not change per-operation amplification on its own."
-        ),
-    )
-    node_mapping_property_count: int = Field(
-        default=2,
-        alias="graphkv.node-mapping-property-count",
-        description=(
-            "Average number of properties stored on a node. Drives WRITE "
-            "amplification: each property is a separate KV item, so a node "
-            "write fans out to (1 metadata item + this many property items)."
+            "Average number of hops a traversal actually walks, 1 to "
+            f"{MAX_TRAVERSAL_DEPTH}. This is the achieved depth, not the "
+            "configured ceiling, which is set to the maximum far more often "
+            "than it is reached."
         ),
     )
 
 
 # --- Model assumptions (NOT namespace config) -----------------------------
-# Every edge is persisted twice: the forward link plus its inverse/reverse
-# link (bidirectional symmetry / inverse index). Edge properties are written
-# once, on the aligned direction only.
-EDGE_DIRECTION_COPIES = 2
-# A node write always stores one metadata item in addition to its properties.
-NODE_BASE_ITEMS = 1
-# Average out-degree a single edge-mapping contributes at a node, i.e. how many
-# neighbors of one edge-type a node has (formerly "average_node_fanout").
-AVG_FANOUT_PER_EDGE_MAPPING = 10
-# Directions scanned per hop: 1 for unidirectional, 2 if a namespace must scan
-# both OUT and IN. Held at 1 as the fleet default.
-DIRECTION_SCAN_FACTOR = 1
-# Property reads charged per visited neighbor. Properties are co-located under
-# the entity id, so one scan returns all of them (filter OR hydrate => 1).
-PROPERTY_READS_PER_NEIGHBOR = 1
-# Representative traversal depth in hops. Kept at 1 so the default estimate
-# stays bounded; the geometric fan-out below scales correctly if this is
-# raised to model multi-hop traversals.
-TRAVERSAL_DEPTH = 1
-
-
-def _write_amplification(args: NflxGraphKVArguments) -> float:
-    """Backend KV item-writes per logical write.
-
-      edge write -> EDGE_DIRECTION_COPIES link items + 1 item per edge property
-      node write -> NODE_BASE_ITEMS metadata item + 1 item per node property
-
-    Blended by the node-vs-edge write mix. We don't know the real mix, so we
-    proxy it with the registered mapping counts (more edge-mappings than
-    node-mappings => more edge-heavy writes).
-    """
-    edge_write_amp = EDGE_DIRECTION_COPIES + args.edge_mapping_property_count
-    node_write_amp = NODE_BASE_ITEMS + args.node_mapping_property_count
-
-    total_mappings = args.edge_mapping_count + args.node_mapping_count
-    edge_write_fraction = (
-        args.edge_mapping_count / total_mappings if total_mappings > 0 else 0.5
-    )
-    return (
-        edge_write_fraction * edge_write_amp
-        + (1 - edge_write_fraction) * node_write_amp
-    )
+# Empirically derived from two production workloads (Jul 2026), one node-heavy
+# and one edge-heavy, each compared against the backend load it actually caused.
+#
+# Backend reads per logical read at depth 1: a traversal reads its source entity
+# and scans one edge index, and a point read costs about one. Measured 1.17 to
+# 1.37 across both workloads at mean and peak.
+KV_READS_PER_LOGICAL_READ = 1.4
+# Backend write requests per logical write. A node write is one request; an edge
+# write is two, one per direction, plus one more when the edge carries
+# properties. Measured 1.2 on the node-heavy workload and 1.6 on the edge-heavy
+# one; held above the midpoint because under-provisioning writes costs more than
+# over-provisioning them.
+KV_WRITES_PER_LOGICAL_WRITE = 1.5
+# Bytes one backend record occupies including key and metadata. Measured at 122 B
+# and 207 B on the two workloads; rounded up for the same reason.
+BYTES_PER_KV_RECORD = 256
+# Server-side cap on edges walked in one traversal, which bounds the geometric
+# frontier growth below.
+MAX_EDGES_PER_TRAVERSAL = 100_000
 
 
 def _read_amplification(args: NflxGraphKVArguments) -> float:
-    """Backend KV reads per logical traversal.
+    """Backend KV reads per logical GraphKV read.
 
-    Per hop, per frontier node:
-      enumeration = edge_mappings_traversed * DIRECTION_SCAN_FACTOR
-                    (one scan per edge-mapping; each returns ~fanout neighbors --
-                    note this is ADDITIVE in edge-mappings, not multiplicative)
-      hydration   = neighbors * PROPERTY_READS_PER_NEIGHBOR
+    Each frontier node is expanded by its own KV request -- GraphKV does not
+    batch a hop's frontier into one call -- so request count is driven by how
+    many nodes get expanded, which is geometric in fan-out over hops:
 
-    Summed geometrically over TRAVERSAL_DEPTH hops, since the frontier grows by
-    the per-node neighbor count each hop.
+        frontier(1) = 1, frontier(h + 1) = frontier(h) * fanout
+        reads = KV_READS_PER_LOGICAL_READ * sum(frontier(1..depth))
+
+    Fan-out therefore costs nothing at depth 1 (the one scan returns all the
+    neighbors at once, as response bytes); it only multiplies request count once
+    there is a second hop to expand into.
     """
-    edge_mappings_traversed = args.edge_mapping_count
-    neighbors_per_hop = AVG_FANOUT_PER_EDGE_MAPPING * edge_mappings_traversed
-    enumeration_reads = edge_mappings_traversed * DIRECTION_SCAN_FACTOR
-    hydration_reads = neighbors_per_hop * PROPERTY_READS_PER_NEIGHBOR
-    read_amp_per_hop = enumeration_reads + hydration_reads
-
-    branch = neighbors_per_hop
-    if branch <= 1 or TRAVERSAL_DEPTH <= 1:
-        return read_amp_per_hop * TRAVERSAL_DEPTH
-    # Frontier at hop h is branch**h, so total reads =
-    # read_amp_per_hop * sum_{h=0}^{D-1} branch**h.
-    hop_multiplier = (float(branch) ** TRAVERSAL_DEPTH - 1) / (branch - 1)
-    return read_amp_per_hop * hop_multiplier
+    frontier, scans, edges = 1.0, 0.0, 0.0
+    for _ in range(args.avg_traversal_depth):
+        scans += frontier
+        edges += frontier * args.avg_fanout_per_hop
+        if edges >= MAX_EDGES_PER_TRAVERSAL:
+            break
+        frontier *= args.avg_fanout_per_hop
+    return KV_READS_PER_LOGICAL_READ * scans
 
 
 class NflxGraphKVCapacityModel(CapacityModel):
@@ -200,8 +165,8 @@ class NflxGraphKVCapacityModel(CapacityModel):
             relaxed = user_desires.model_copy(deep=True)
 
             # Per-namespace graph shape drives how each logical read/write fans
-            # out into backend KV operations. See _read_amplification /
-            # _write_amplification and the model constants above.
+            # out into backend KV operations. See _read_amplification and the
+            # model constants above.
             args = NflxGraphKVArguments.model_validate(extra_model_arguments)
             relaxed.query_pattern.estimated_read_per_second = (
                 user_desires.query_pattern.estimated_read_per_second.scale(
@@ -210,34 +175,19 @@ class NflxGraphKVCapacityModel(CapacityModel):
             )
             relaxed.query_pattern.estimated_write_per_second = (
                 user_desires.query_pattern.estimated_write_per_second.scale(
-                    _write_amplification(args)
+                    KV_WRITES_PER_LOGICAL_WRITE
                 )
             )
 
+            # An item count is logical nodes plus edges, so it has to be expanded
+            # into backend KV records to become a stored size. A state size in GiB
+            # is already a backend size -- re-deriving an item count from it and
+            # expanding that would charge the fan-out twice.
             item_count = relaxed.data_shape.estimated_state_item_count
-            if item_count is None:
-                # assume 1 KB items
-                if (
-                    user_desires.query_pattern.estimated_mean_write_size_bytes
-                    is not None
-                ):
-                    item_size_gib = (
-                        user_desires.query_pattern.estimated_mean_write_size_bytes.mid
-                        / 1024**3
-                    )
-                else:
-                    item_size_gib = 1 / 1024**2  # type: ignore[unreachable]
-                item_count = user_desires.data_shape.estimated_state_size_gib.scale(
-                    1 / item_size_gib
+            if item_count is not None:
+                relaxed.data_shape.estimated_state_size_gib = item_count.scale(
+                    KV_WRITES_PER_LOGICAL_WRITE * BYTES_PER_KV_RECORD / 1024**3
                 )
-            # item_count is the number of *logical* nodes/edges. Each one fans
-            # out into _write_amplification() backend KV items (2 links + one
-            # item per edge property; 1 metadata item + one per node property),
-            # and every item written is an item stored. Size each KV item at the
-            # ~512 B needed to track its id and metadata write_ts.
-            relaxed.data_shape.estimated_state_size_gib = item_count.scale(
-                _write_amplification(args) * 512 / 1024**3
-            )
             return relaxed
 
         return (("org.netflix.key-value", _modify_kv_desires),)
