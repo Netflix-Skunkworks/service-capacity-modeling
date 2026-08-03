@@ -26,6 +26,7 @@ from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
+from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import FixedInterval
@@ -215,6 +216,68 @@ def _estimate_evcache_requirement(
     )
 
 
+def _current_evcache_cluster(
+    desires: CapacityDesires,
+) -> Optional[CurrentZoneClusterCapacity]:
+    """Pick the current cluster the family-migration penalty should key off.
+
+    Prefer a zonal cluster explicitly tagged as evcache: when EVCache is a
+    sub-model of a composite (key-value / read-only-kv / graphkv), the current
+    clusters may also carry the Cassandra tier, so zonal[0] is not reliably the
+    EVCache cluster. When nothing is tagged, only a single current cluster is
+    unambiguously ours (direct EVCache planning); if several untagged clusters
+    are present we cannot identify ours, so return None (skip the penalty).
+    """
+    zonal = desires.current_clusters.zonal if desires.current_clusters else []
+    if not zonal:
+        return None
+    typed = [
+        c for c in zonal if c.cluster_type == NflxEVCacheCapacityModel.cluster_type
+    ]
+    if typed:
+        return typed[0]
+    return zonal[0] if len(zonal) == 1 else None
+
+
+def _compute_evcache_penalties(
+    instance: Instance,
+    desires: CapacityDesires,
+    cluster_count: int,
+    compute_cost: float,
+    different_family_regret: float,
+) -> Dict[str, float]:
+    """Named rank penalties (in dollars) for an EVCache plan.
+
+    Penalties inflate plan.rank without touching total_annual_cost:
+        rank = total_annual_cost + sum(penalties.values())
+
+    - under_spread: discourages small / under-spread clusters.
+    - family_migration: biases scale-up toward the instance family the cluster
+      already runs; a different family must be meaningfully cheaper (on compute)
+      to out-rank the incumbent. Soft, so a different family still wins when it
+      is genuinely much cheaper or when the current family cannot satisfy the
+      requirement -- avoiding empty results. Only applies when the current
+      EVCache cluster can be identified (see _current_evcache_cluster).
+    """
+    penalties: Dict[str, float] = {}
+
+    spread_cost = calculate_spread_cost(cluster_count)
+    if spread_cost > 0:
+        penalties["under_spread"] = spread_cost
+
+    current = _current_evcache_cluster(desires)
+    if different_family_regret > 0 and current is not None:
+        current_family = (
+            current.cluster_instance.family
+            if current.cluster_instance is not None
+            else current.cluster_instance_name.rsplit(".", 1)[0]
+        )
+        if instance.family != current_family:
+            penalties["family_migration"] = different_family_regret * compute_cost
+
+    return penalties
+
+
 # pylint: disable=too-many-locals
 def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many-positional-arguments
     instance: Instance,
@@ -226,6 +289,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     max_regional_size: int = 10000,
     min_instance_memory_gib: int = 12,
     cross_region_replication: Replication = Replication.none,
+    different_family_regret: float = 0.0,
 ) -> Union[CapacityPlan, Excuse, None]:
     # EVCache doesn't like to deploy on single CPU instances
     if instance.cpu < 2:
@@ -358,14 +422,6 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     }
     upsert_params(cluster, params)
 
-    # Penalize under-spread clusters via rank (deterministic sort) and
-    # regret (stochastic robustness). Uses the same additive dollar formula
-    # as before, but applied to plan.rank instead of annual_costs — keeping
-    # total_annual_cost honest while preserving identical selection order.
-    spread_cost = calculate_spread_cost(cluster.count)
-    if spread_cost > 0:
-        upsert_params(cluster, {RANK_PENALTIES: {"under_spread": spread_cost}})
-
     # evcache clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as
     #   * Security group limits. Since you must have < 500 rules if you're
@@ -403,10 +459,30 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     cluster.cluster_type = NflxEVCacheCapacityModel.cluster_type
     zonal_clusters = [cluster] * copies_per_region
 
-    evcache_costs = NflxEVCacheCapacityModel.cluster_costs(
+    compute_costs = NflxEVCacheCapacityModel.cluster_costs(
         service_type=NflxEVCacheCapacityModel.service_name,
         zonal_clusters=zonal_clusters,
     )
+    compute_cost = float(sum(compute_costs.values()))
+
+    # Rank penalties (under-spread + family-migration) bias plan.rank without
+    # touching total_annual_cost. Family-migration is a soft bias toward the
+    # currently running instance family: unlike a hard exclude it never drops
+    # the candidate, so a different family still wins when it is meaningfully
+    # cheaper or when the current family cannot satisfy the requirement. Upserted
+    # before Clusters() is built so the params live on the cluster object the
+    # plan carries; stored as dollar amounts (like under_spread).
+    penalties = _compute_evcache_penalties(
+        instance=instance,
+        desires=desires,
+        cluster_count=cluster.count,
+        compute_cost=compute_cost,
+        different_family_regret=different_family_regret,
+    )
+    if penalties:
+        upsert_params(cluster, {RANK_PENALTIES: penalties})
+
+    evcache_costs = dict(compute_costs)
     evcache_costs.update({s.service_type: s.annual_cost for s in services})
 
     clusters = Clusters(
@@ -416,7 +492,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         services=services,
     )
 
-    plan_rank = clusters.total_annual_cost + spread_cost
+    plan_rank = clusters.total_annual_cost + sum(penalties.values())
 
     return CapacityPlan(
         requirements=Requirements(
@@ -450,6 +526,20 @@ class NflxEVCacheArguments(BaseModel):
         description=(
             "Whether this evcache service does cross region replication. "
             "By default we do no replication"
+        ),
+    )
+    different_family_regret: float = Field(
+        default=0.05,
+        description=(
+            "Soft cost penalty (fraction of compute cost) added to the plan "
+            "rank when a candidate is a different instance family than the "
+            "current cluster. Biases re-plan / right-sizing recommendations "
+            "toward the incumbent family without excluding alternatives, so a "
+            "different family still wins when it is meaningfully cheaper or when "
+            "the current family cannot satisfy the requirement. Defaults to 0.05 "
+            "as an anti-thrashing floor (don't migrate families for <5% compute "
+            "savings); set to 0 to disable. Only applies when the current "
+            "EVCache cluster can be identified (see cluster_type)."
         ),
     )
 
@@ -537,6 +627,12 @@ class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
         cross_region_replication = Replication(
             extra_model_arguments.get("cross_region_replication", "none")
         )
+        # Soft preference for the currently running instance family on a
+        # scale-up: a different family must be this fraction cheaper (on
+        # compute) to be recommended over the incumbent. 0 disables it.
+        different_family_regret: float = float(
+            extra_model_arguments.get("different_family_regret", 0.05)
+        )
 
         return _estimate_evcache_cluster_zonal(
             instance=instance,
@@ -547,6 +643,7 @@ class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
             max_local_data_per_node_gib=max_local_data_per_node_gib,
             min_instance_memory_gib=min_instance_memory_gib,
             cross_region_replication=cross_region_replication,
+            different_family_regret=different_family_regret,
             context=context,
         )
 

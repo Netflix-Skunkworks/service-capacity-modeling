@@ -4,7 +4,16 @@ from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import (
     CapacityDesires,
 )
+from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import BufferComponent
+from service_capacity_modeling.interface import BufferIntent
+from service_capacity_modeling.interface import Buffers
+from service_capacity_modeling.interface import certain_float
+from service_capacity_modeling.interface import CurrentClusters
+from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import DriveType
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.org.netflix.evcache import (
@@ -639,3 +648,216 @@ def test_evcache_spread_invariants(desires):
         else:
             # Well-spread clusters should not have under_spread penalty
             assert "under_spread" not in penalties
+
+
+def _disk_heavy_evcache_desires(
+    current_instance: str = "i3en.2xlarge",
+) -> CapacityDesires:
+    """A large, disk-bound EVCache cluster already running on `current_instance`
+    (default i3en.2xlarge). Exercises the family-migration penalty when scaling
+    up an existing cluster."""
+    nodes = 100
+    current = CurrentZoneClusterCapacity(
+        cluster_instance_name=current_instance,
+        cluster_instance_count=Interval(
+            low=nodes, mid=nodes, high=nodes, confidence=1.0
+        ),
+        cluster_drive=Drive(
+            name="ephem", drive_type=DriveType.local_ssd, size_gib=4657
+        ),
+        cpu_utilization=certain_float(15.0),
+        memory_utilization_gib=certain_float(48.0),
+        network_utilization_mbps=certain_float(200.0),
+        disk_utilization_gib=certain_float(3000.0),
+    )
+    buffers = Buffers(
+        derived={
+            "scale_compute": Buffer(
+                intent=BufferIntent.scale,
+                ratio=1.3,
+                components=[BufferComponent.compute],
+            ),
+            "preserve_storage": Buffer(
+                intent=BufferIntent.preserve,
+                components=[BufferComponent.storage],
+            ),
+        }
+    )
+    return CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=Interval(
+                low=200000, mid=400000, high=480000, confidence=0.98
+            ),
+            estimated_write_per_second=Interval(
+                low=20000, mid=40000, high=48000, confidence=0.98
+            ),
+            estimated_mean_read_size_bytes=Interval(
+                low=1000, mid=40000, high=100000, confidence=0.98
+            ),
+        ),
+        data_shape=DataShape(
+            estimated_state_size_gib=Interval(
+                low=280000, mid=300000, high=320000, confidence=0.98
+            ),
+            estimated_state_item_count=Interval(
+                low=8_000_000_000,
+                mid=8_000_000_000,
+                high=8_000_000_000,
+                confidence=0.98,
+            ),
+        ),
+        current_clusters=CurrentClusters(zonal=[current]),
+        buffers=buffers,
+    )
+
+
+def _zone_cluster(
+    instance_name: str, cluster_type: str | None = None
+) -> CurrentZoneClusterCapacity:
+    """A single disk-bound current zonal cluster, optionally tier-tagged."""
+    return CurrentZoneClusterCapacity(
+        cluster_instance_name=instance_name,
+        cluster_type=cluster_type,
+        cluster_instance_count=Interval(low=100, mid=100, high=100, confidence=1.0),
+        cluster_drive=Drive(
+            name="ephem", drive_type=DriveType.local_ssd, size_gib=4657
+        ),
+        cpu_utilization=certain_float(15.0),
+        memory_utilization_gib=certain_float(48.0),
+        network_utilization_mbps=certain_float(200.0),
+        disk_utilization_gib=certain_float(3000.0),
+    )
+
+
+def test_evcache_different_family_regret():
+    from service_capacity_modeling.models import RANK_PENALTIES
+
+    desires = _disk_heavy_evcache_desires()
+
+    # The default (0.05) applies the family-migration penalty: the incumbent
+    # (i3en) carries none, a different family carries it (rank > honest cost),
+    # and the incumbent ranks first while alternatives remain available (soft
+    # bias -- a scale-up never fails for lack of same-family candidates).
+    plans = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=desires,
+        num_results=6,
+    )
+    families = [p.candidate_clusters.zonal[0].instance.family for p in plans]
+    assert families[0] == "i3en", f"incumbent should rank first, got {families}"
+    assert len(set(families)) > 1, f"alternatives should remain, got {families}"
+    for p in plans:
+        family = p.candidate_clusters.zonal[0].instance.family
+        penalties = p.candidate_clusters.zonal[0].cluster_params.get(RANK_PENALTIES, {})
+        if family == "i3en":
+            assert "family_migration" not in penalties
+        else:
+            assert penalties.get("family_migration", 0) > 0
+            assert p.rank > p.candidate_clusters.total_annual_cost
+
+    # Explicitly disabling (0.0) removes the family-migration penalty entirely.
+    plans_off = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=desires,
+        num_results=6,
+        extra_model_arguments={"different_family_regret": 0.0},
+    )
+    for p in plans_off:
+        penalties = p.candidate_clusters.zonal[0].cluster_params.get(RANK_PENALTIES, {})
+        assert "family_migration" not in penalties
+
+
+def test_evcache_different_family_regret_flips_selection():
+    # A cluster already on i7ie: with the penalty disabled the cheaper i3en
+    # family wins the top slot ...
+    desires = _disk_heavy_evcache_desires(current_instance="i7ie.2xlarge")
+    no_penalty = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=desires,
+        num_results=6,
+        extra_model_arguments={"different_family_regret": 0.0},
+    )
+    assert no_penalty[0].candidate_clusters.zonal[0].instance.family == "i3en"
+
+    # ... but a large enough migration penalty flips the top pick back to the
+    # incumbent family (i7ie), proving the penalty changes the selected plan.
+    with_penalty = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=desires,
+        num_results=6,
+        extra_model_arguments={"different_family_regret": 0.5},
+    )
+    assert with_penalty[0].candidate_clusters.zonal[0].instance.family == "i7ie"
+
+
+def test_evcache_family_penalty_targets_evcache_typed_current_cluster():
+    # Composed-style current state: a non-EVCache tier (i4i, tagged cassandra)
+    # at zonal[0], then the EVCache tier (i3en, tagged evcache). The penalty
+    # must key off the evcache-typed cluster, NOT zonal[0].
+    from service_capacity_modeling.models import RANK_PENALTIES
+
+    desires = _disk_heavy_evcache_desires().model_copy(
+        update={
+            "current_clusters": CurrentClusters(
+                zonal=[
+                    _zone_cluster("i4i.2xlarge", cluster_type="cassandra"),
+                    _zone_cluster("i3en.2xlarge", cluster_type="evcache"),
+                ]
+            )
+        }
+    )
+    plans = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=desires,
+        num_results=8,
+        extra_model_arguments={"different_family_regret": 0.5},
+    )
+    by_family = {p.candidate_clusters.zonal[0].instance.family: p for p in plans}
+    # i3en is the evcache-typed incumbent -> no penalty. Had the selection used
+    # zonal[0] (i4i), i3en would be "different" and carry a penalty instead.
+    assert "i3en" in by_family
+    i3en_penalties = (
+        by_family["i3en"]
+        .candidate_clusters.zonal[0]
+        .cluster_params.get(RANK_PENALTIES, {})
+    )
+    assert "family_migration" not in i3en_penalties
+    penalized = [
+        family
+        for family, p in by_family.items()
+        if p.candidate_clusters.zonal[0]
+        .cluster_params.get(RANK_PENALTIES, {})
+        .get("family_migration", 0)
+        > 0
+    ]
+    assert penalized and "i3en" not in penalized
+
+
+def test_evcache_family_penalty_skipped_for_ambiguous_untyped_current():
+    # Two untagged current clusters -> the model can't tell which is the EVCache
+    # tier, so it skips the family-migration penalty rather than guess.
+    from service_capacity_modeling.models import RANK_PENALTIES
+
+    desires = _disk_heavy_evcache_desires().model_copy(
+        update={
+            "current_clusters": CurrentClusters(
+                zonal=[_zone_cluster("i4i.2xlarge"), _zone_cluster("i3en.2xlarge")]
+            )
+        }
+    )
+    plans = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=desires,
+        num_results=6,
+        extra_model_arguments={"different_family_regret": 0.5},
+    )
+    for p in plans:
+        penalties = p.candidate_clusters.zonal[0].cluster_params.get(RANK_PENALTIES, {})
+        assert "family_migration" not in penalties
