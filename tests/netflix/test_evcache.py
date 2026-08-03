@@ -712,42 +712,43 @@ def _disk_heavy_evcache_desires(
     )
 
 
+def _zone_cluster(
+    instance_name: str, cluster_type: str | None = None
+) -> CurrentZoneClusterCapacity:
+    """A single disk-bound current zonal cluster, optionally tier-tagged."""
+    return CurrentZoneClusterCapacity(
+        cluster_instance_name=instance_name,
+        cluster_type=cluster_type,
+        cluster_instance_count=Interval(low=100, mid=100, high=100, confidence=1.0),
+        cluster_drive=Drive(
+            name="ephem", drive_type=DriveType.local_ssd, size_gib=4657
+        ),
+        cpu_utilization=certain_float(15.0),
+        memory_utilization_gib=certain_float(48.0),
+        network_utilization_mbps=certain_float(200.0),
+        disk_utilization_gib=certain_float(3000.0),
+    )
+
+
 def test_evcache_different_family_regret():
     from service_capacity_modeling.models import RANK_PENALTIES
 
     desires = _disk_heavy_evcache_desires()
 
-    # Default (0.0): no family-migration penalty is applied anywhere, so
-    # behavior is unchanged from before the feature.
-    plan_default = planner.plan_certain(
+    # The default (0.05) applies the family-migration penalty: the incumbent
+    # (i3en) carries none, a different family carries it (rank > honest cost),
+    # and the incumbent ranks first while alternatives remain available (soft
+    # bias -- a scale-up never fails for lack of same-family candidates).
+    plans = planner.plan_certain(
         model_name="org.netflix.evcache",
         region="us-east-1",
         desires=desires,
         num_results=6,
     )
-    for p in plan_default:
-        penalties = p.candidate_clusters.zonal[0].cluster_params.get(RANK_PENALTIES, {})
-        assert "family_migration" not in penalties
-
-    # Opted in: the incumbent family (i3en) is preferred (ranked first) but
-    # alternatives are NOT excluded -- this is a soft bias, so a scale-up never
-    # fails for lack of same-family candidates.
-    plan_on = planner.plan_certain(
-        model_name="org.netflix.evcache",
-        region="us-east-1",
-        desires=desires,
-        num_results=6,
-        extra_model_arguments={"different_family_regret": 0.10},
-    )
-    families_on = [p.candidate_clusters.zonal[0].instance.family for p in plan_on]
-    assert families_on[0] == "i3en", f"incumbent should rank first, got {families_on}"
-    assert len(set(families_on)) > 1, (
-        f"alternatives should remain available, got {families_on}"
-    )
-
-    # The incumbent carries no migration penalty; a different family carries the
-    # penalty, which inflates its rank above the (honest) total_annual_cost.
-    for p in plan_on:
+    families = [p.candidate_clusters.zonal[0].instance.family for p in plans]
+    assert families[0] == "i3en", f"incumbent should rank first, got {families}"
+    assert len(set(families)) > 1, f"alternatives should remain, got {families}"
+    for p in plans:
         family = p.candidate_clusters.zonal[0].instance.family
         penalties = p.candidate_clusters.zonal[0].cluster_params.get(RANK_PENALTIES, {})
         if family == "i3en":
@@ -756,22 +757,34 @@ def test_evcache_different_family_regret():
             assert penalties.get("family_migration", 0) > 0
             assert p.rank > p.candidate_clusters.total_annual_cost
 
+    # Explicitly disabling (0.0) removes the family-migration penalty entirely.
+    plans_off = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=desires,
+        num_results=6,
+        extra_model_arguments={"different_family_regret": 0.0},
+    )
+    for p in plans_off:
+        penalties = p.candidate_clusters.zonal[0].cluster_params.get(RANK_PENALTIES, {})
+        assert "family_migration" not in penalties
+
 
 def test_evcache_different_family_regret_flips_selection():
-    # A cluster already on i7ie: without a penalty the cheaper i3en family wins
-    # the top slot ...
+    # A cluster already on i7ie: with the penalty disabled the cheaper i3en
+    # family wins the top slot ...
     desires = _disk_heavy_evcache_desires(current_instance="i7ie.2xlarge")
     no_penalty = planner.plan_certain(
         model_name="org.netflix.evcache",
         region="us-east-1",
         desires=desires,
         num_results=6,
+        extra_model_arguments={"different_family_regret": 0.0},
     )
     assert no_penalty[0].candidate_clusters.zonal[0].instance.family == "i3en"
 
     # ... but a large enough migration penalty flips the top pick back to the
-    # incumbent family (i7ie). This proves the penalty actually changes the
-    # selected plan, not merely annotates it.
+    # incumbent family (i7ie), proving the penalty changes the selected plan.
     with_penalty = planner.plan_certain(
         model_name="org.netflix.evcache",
         region="us-east-1",
@@ -780,3 +793,71 @@ def test_evcache_different_family_regret_flips_selection():
         extra_model_arguments={"different_family_regret": 0.5},
     )
     assert with_penalty[0].candidate_clusters.zonal[0].instance.family == "i7ie"
+
+
+def test_evcache_family_penalty_targets_evcache_typed_current_cluster():
+    # Composed-style current state: a non-EVCache tier (i4i, tagged cassandra)
+    # at zonal[0], then the EVCache tier (i3en, tagged evcache). The penalty
+    # must key off the evcache-typed cluster, NOT zonal[0].
+    from service_capacity_modeling.models import RANK_PENALTIES
+
+    desires = _disk_heavy_evcache_desires().model_copy(
+        update={
+            "current_clusters": CurrentClusters(
+                zonal=[
+                    _zone_cluster("i4i.2xlarge", cluster_type="cassandra"),
+                    _zone_cluster("i3en.2xlarge", cluster_type="evcache"),
+                ]
+            )
+        }
+    )
+    plans = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=desires,
+        num_results=8,
+        extra_model_arguments={"different_family_regret": 0.5},
+    )
+    by_family = {p.candidate_clusters.zonal[0].instance.family: p for p in plans}
+    # i3en is the evcache-typed incumbent -> no penalty. Had the selection used
+    # zonal[0] (i4i), i3en would be "different" and carry a penalty instead.
+    assert "i3en" in by_family
+    i3en_penalties = (
+        by_family["i3en"]
+        .candidate_clusters.zonal[0]
+        .cluster_params.get(RANK_PENALTIES, {})
+    )
+    assert "family_migration" not in i3en_penalties
+    penalized = [
+        family
+        for family, p in by_family.items()
+        if p.candidate_clusters.zonal[0]
+        .cluster_params.get(RANK_PENALTIES, {})
+        .get("family_migration", 0)
+        > 0
+    ]
+    assert penalized and "i3en" not in penalized
+
+
+def test_evcache_family_penalty_skipped_for_ambiguous_untyped_current():
+    # Two untagged current clusters -> the model can't tell which is the EVCache
+    # tier, so it skips the family-migration penalty rather than guess.
+    from service_capacity_modeling.models import RANK_PENALTIES
+
+    desires = _disk_heavy_evcache_desires().model_copy(
+        update={
+            "current_clusters": CurrentClusters(
+                zonal=[_zone_cluster("i4i.2xlarge"), _zone_cluster("i3en.2xlarge")]
+            )
+        }
+    )
+    plans = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=desires,
+        num_results=6,
+        extra_model_arguments={"different_family_regret": 0.5},
+    )
+    for p in plans:
+        penalties = p.candidate_clusters.zonal[0].cluster_params.get(RANK_PENALTIES, {})
+        assert "family_migration" not in penalties

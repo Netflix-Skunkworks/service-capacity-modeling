@@ -26,6 +26,7 @@ from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
+from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import FixedInterval
@@ -215,6 +216,29 @@ def _estimate_evcache_requirement(
     )
 
 
+def _current_evcache_cluster(
+    desires: CapacityDesires,
+) -> Optional[CurrentZoneClusterCapacity]:
+    """Pick the current cluster the family-migration penalty should key off.
+
+    Prefer a zonal cluster explicitly tagged as evcache: when EVCache is a
+    sub-model of a composite (key-value / read-only-kv / graphkv), the current
+    clusters may also carry the Cassandra tier, so zonal[0] is not reliably the
+    EVCache cluster. When nothing is tagged, only a single current cluster is
+    unambiguously ours (direct EVCache planning); if several untagged clusters
+    are present we cannot identify ours, so return None (skip the penalty).
+    """
+    zonal = desires.current_clusters.zonal if desires.current_clusters else []
+    if not zonal:
+        return None
+    typed = [
+        c for c in zonal if c.cluster_type == NflxEVCacheCapacityModel.cluster_type
+    ]
+    if typed:
+        return typed[0]
+    return zonal[0] if len(zonal) == 1 else None
+
+
 def _compute_evcache_penalties(
     instance: Instance,
     desires: CapacityDesires,
@@ -232,8 +256,8 @@ def _compute_evcache_penalties(
       already runs; a different family must be meaningfully cheaper (on compute)
       to out-rank the incumbent. Soft, so a different family still wins when it
       is genuinely much cheaper or when the current family cannot satisfy the
-      requirement -- avoiding empty results. Only applies when a current cluster
-      is provided.
+      requirement -- avoiding empty results. Only applies when the current
+      EVCache cluster can be identified (see _current_evcache_cluster).
     """
     penalties: Dict[str, float] = {}
 
@@ -241,11 +265,7 @@ def _compute_evcache_penalties(
     if spread_cost > 0:
         penalties["under_spread"] = spread_cost
 
-    current = (
-        desires.current_clusters.zonal[0]
-        if desires.current_clusters and desires.current_clusters.zonal
-        else None
-    )
+    current = _current_evcache_cluster(desires)
     if different_family_regret > 0 and current is not None:
         current_family = (
             current.cluster_instance.family
@@ -504,17 +524,17 @@ class NflxEVCacheArguments(BaseModel):
         ),
     )
     different_family_regret: float = Field(
-        default=0.0,
+        default=0.05,
         description=(
             "Soft cost penalty (fraction of compute cost) added to the plan "
             "rank when a candidate is a different instance family than the "
-            "currently running cluster. Biases scale-up recommendations toward "
-            "the incumbent family without excluding alternatives, so a "
-            "different family still wins when it is meaningfully cheaper "
-            "or when the current family cannot satisfy the requirement. Only "
-            "applies when a current cluster is provided. Defaults to 0 (off) so "
-            "general and right-sizing planning is unchanged; callers scaling an "
-            "existing cluster opt in (e.g. 0.10)."
+            "current cluster. Biases re-plan / right-sizing recommendations "
+            "toward the incumbent family without excluding alternatives, so a "
+            "different family still wins when it is meaningfully cheaper or when "
+            "the current family cannot satisfy the requirement. Defaults to 0.05 "
+            "as an anti-thrashing floor (don't migrate families for <5% compute "
+            "savings); set to 0 to disable. Only applies when the current "
+            "EVCache cluster can be identified (see cluster_type)."
         ),
     )
 
@@ -606,7 +626,7 @@ class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
         # scale-up: a different family must be this fraction cheaper (on
         # compute) to be recommended over the incumbent. 0 disables it.
         different_family_regret: float = float(
-            extra_model_arguments.get("different_family_regret", 0.0)
+            extra_model_arguments.get("different_family_regret", 0.05)
         )
 
         return _estimate_evcache_cluster_zonal(
