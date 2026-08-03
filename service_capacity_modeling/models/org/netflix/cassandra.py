@@ -844,12 +844,16 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     read_io_calibration_factor = 1.0
     read_io_calibrated = False
     write_io_calibration_factor = 1.0
-    io_calibration: Dict[str, float] = {}
-    if is_ebs and current_cluster_size is not None and current_cluster_size > 0:
+    reported_io_calibration: Dict[str, float] = {}
+    if is_ebs and current_cluster_size > 0:
         assert current_capacity is not None
         current_count = math.ceil(current_cluster_size)
-        current_data_per_node_gib = max(1, current_capacity.disk_utilization_gib.mid)
-        if observed_ebs_read_io_per_read is not None and rps > 0:
+        current_data_per_node_gib = current_capacity.disk_utilization_gib.mid
+        if (
+            observed_ebs_read_io_per_read is not None
+            and rps > 0
+            and current_data_per_node_gib > 0
+        ):
             modeled_read_io_per_read = _cass_io_per_read(current_data_per_node_gib) * (
                 math.ceil(read_io_per_sec / current_count) * current_count / rps
             )
@@ -857,7 +861,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 observed_ebs_read_io_per_read / modeled_read_io_per_read
             )
             read_io_calibrated = True
-            io_calibration.update(
+            reported_io_calibration.update(
                 {
                     "observed_read_io_per_read": observed_ebs_read_io_per_read,
                     "modeled_read_io_per_read": modeled_read_io_per_read,
@@ -869,7 +873,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             write_io_calibration_factor = (
                 observed_ebs_write_io_per_write / modeled_write_io_per_write
             )
-            io_calibration.update(
+            reported_io_calibration.update(
                 {
                     "observed_write_io_per_write": observed_ebs_write_io_per_write,
                     "modeled_write_io_per_write": modeled_write_io_per_write,
@@ -952,10 +956,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             2,
         ),
     }
-    if io_calibration:
-        params["cassandra.ebs_io_calibration"] = {
-            key: round(value, 4) for key, value in io_calibration.items()
-        }
+    if reported_io_calibration:
+        params["cassandra.ebs_io_calibration"] = reported_io_calibration
     upsert_params(cluster, params)
 
     # All penalties inflate plan.rank = cost * (1 + sum(penalties)),
@@ -996,10 +998,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             "required_nodes_by_type": required_nodes_by_type,
             "resource_bottleneck": resource_bottleneck,
         }
-        if io_calibration:
-            excuse_context["ebs_io_calibration"] = {
-                key: round(value, 4) for key, value in io_calibration.items()
-            }
+        if reported_io_calibration:
+            excuse_context["ebs_io_calibration"] = reported_io_calibration
         return Excuse(
             instance=instance.name,
             drive=drive_name,
@@ -1022,18 +1022,21 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     #       duration of this can increase a lot with > 500 node clusters.
     max_zonal = max_regional_size // zones_per_region
     if cluster.count > max_zonal:
+        excuse_context = {
+            "zonal_count": cluster.count,
+            "max_zonal": max_zonal,
+            "needed_disk_gib": needed_disk_gib,
+            "disk_per_node_gib": effective_disk_per_node_gib,
+        }
+        if reported_io_calibration:
+            excuse_context["ebs_io_calibration"] = reported_io_calibration
         return Excuse(
             instance=instance.name,
             drive=drive_name,
             reason=(
                 f"Cluster too large: {cluster.count} nodes > max {max_zonal} per zone"
             ),
-            context={
-                "zonal_count": cluster.count,
-                "max_zonal": max_zonal,
-                "needed_disk_gib": needed_disk_gib,
-                "disk_per_node_gib": effective_disk_per_node_gib,
-            },
+            context=excuse_context,
             bottleneck=Bottleneck.disk_capacity,
         )
 
