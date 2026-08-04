@@ -2,6 +2,8 @@
 Tests for Netflix GraphKV model.
 """
 
+import pytest
+
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_int
@@ -9,9 +11,14 @@ from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.org.netflix.graphkv import (
     _read_amplification,
+    BYTES_PER_KV_RECORD,
+    DEFAULT_MAX_TRAVERSAL_DEPTH,
     KV_READS_PER_LOGICAL_READ,
+    KV_RECORDS_PER_LOGICAL_ITEM,
+    KV_WRITES_PER_LOGICAL_WRITE,
     MAX_EDGES_PER_TRAVERSAL,
     NflxGraphKVArguments,
+    NflxGraphKVCapacityModel,
 )
 
 # Property test configuration for GraphKV model.
@@ -55,6 +62,80 @@ def test_frontier_growth_stops_at_the_traversal_edge_limit():
     huge = _read_amplification(_args(MAX_EDGES_PER_TRAVERSAL * 10, 3))
     # The first hop already blows past the edge limit, so hops 2 and 3 never run.
     assert huge == KV_READS_PER_LOGICAL_READ
+
+
+def test_depth_beyond_the_fleet_default_is_accepted():
+    # GraphTraversalService.getMaxDepth prefers a namespace's own
+    # TraversalConfig.maxDepth whenever it is positive and never clamps it to the
+    # shard default, so a namespace can be configured deeper than
+    # DEFAULT_MAX_TRAVERSAL_DEPTH and the model has to plan it, not reject it.
+    deeper = _read_amplification(_args(2.0, DEFAULT_MAX_TRAVERSAL_DEPTH + 2))
+    assert deeper > _read_amplification(_args(2.0, DEFAULT_MAX_TRAVERSAL_DEPTH))
+    # The edge limit, not the depth field, is what stops a typo from exploding: at
+    # fan-out 1000 the second hop already exceeds it, so hops 3..50 never run.
+    assert _read_amplification(_args(1_000.0, 50)) == KV_READS_PER_LOGICAL_READ * 1_001
+
+
+def _composed_kv_data_shape(data_shape: DataShape) -> DataShape:
+    """Run the key-value composition transform alone, without the planner."""
+    desires = CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(1_000),
+            estimated_write_per_second=certain_int(100),
+        ),
+        data_shape=data_shape,
+    )
+    ((_, transform),) = NflxGraphKVCapacityModel.compose_with(desires, {})
+    return transform(desires).data_shape
+
+
+def test_state_size_alone_passes_through():
+    # A size in GiB is already a backend size, so it reaches KeyValue untouched.
+    size_only = _composed_kv_data_shape(
+        DataShape(estimated_state_size_gib=certain_int(100))
+    )
+    assert size_only.estimated_state_size_gib.mid == 100
+
+
+def test_explicit_state_size_wins_over_an_item_count():
+    # Expanding the item count on top of a size the caller gave us would charge the
+    # fan-out twice and silently discard what they asked for.
+    both = _composed_kv_data_shape(
+        DataShape(
+            estimated_state_size_gib=certain_int(100),
+            estimated_state_item_count=certain_int(1_000_000_000),
+        )
+    )
+    assert both.estimated_state_size_gib.mid == 100
+
+
+def test_item_count_alone_expands_by_the_stored_record_multiplier():
+    # Only an item count has to be expanded, and it expands by records STORED per
+    # logical entity -- not by the write-REQUEST multiplier, which is a different
+    # quantity that happens to share its value today.
+    count_only = _composed_kv_data_shape(
+        DataShape(estimated_state_item_count=certain_int(1_000_000_000))
+    )
+    expected_gib = (
+        1_000_000_000 * KV_RECORDS_PER_LOGICAL_ITEM * BYTES_PER_KV_RECORD / 1024**3
+    )
+    assert count_only.estimated_state_size_gib.mid == pytest.approx(expected_gib)
+
+
+def test_stored_size_ignores_the_write_request_multiplier(monkeypatch):
+    # The record count and the request count share a value today, so the test above
+    # cannot tell which one sizes the disk. Pull them apart and check that moving the
+    # throughput knob does not resize storage.
+    module = "service_capacity_modeling.models.org.netflix.graphkv"
+    monkeypatch.setattr(f"{module}.KV_RECORDS_PER_LOGICAL_ITEM", 4.0)
+    monkeypatch.setattr(f"{module}.KV_WRITES_PER_LOGICAL_WRITE", 99.0)
+
+    count_only = _composed_kv_data_shape(
+        DataShape(estimated_state_item_count=certain_int(1_000_000_000))
+    )
+    expected_gib = 1_000_000_000 * 4.0 * BYTES_PER_KV_RECORD / 1024**3
+    assert count_only.estimated_state_size_gib.mid == pytest.approx(expected_gib)
 
 
 # Two measured workload shapes and the backend KV load each produced.
@@ -103,9 +184,39 @@ def _plan(model, read_per_second, write_per_second, state_gib, extra_args=None):
     return plans[0].candidate_clusters
 
 
+def test_amplification_matches_measured_backend_load():
+    # The direct guard on the constants: what the model multiplies logical traffic
+    # by, against what each workload's backend load actually was. Two-sided on
+    # purpose -- an upper bound alone passes an arbitrarily under-estimated model,
+    # and under-estimating is the direction that under-provisions.
+    for workload in WORKLOADS:
+        modeled_read = _read_amplification(
+            _args(workload["fanout_per_hop"], workload["traversal_depth"])
+        )
+        operations = (
+            (
+                "read",
+                modeled_read,
+                workload["kv_read_per_second"] / workload["logical_read_per_second"],
+            ),
+            (
+                "write",
+                KV_WRITES_PER_LOGICAL_WRITE,
+                workload["kv_write_per_second"] / workload["logical_write_per_second"],
+            ),
+        )
+        for operation, modeled, measured in operations:
+            headroom = modeled / measured
+            assert 1.0 <= headroom <= 1.25, (
+                f"{workload['shape']} {operation} amplification is {headroom:.2f}x "
+                f"the backend load this workload actually produced. The band is "
+                f"deliberately tight; re-check the measurements before widening it."
+            )
+
+
 def test_production_shapes_land_near_their_key_value_counterparts():
     # Planning from logical traffic should land near the KeyValue plan built from
-    # the backend load that traffic actually produced.
+    # the backend load that traffic actually produced -- near from both sides.
     for workload in WORKLOADS:
         graph_candidate = _plan(
             "org.netflix.graphkv",
@@ -134,13 +245,21 @@ def test_production_shapes_land_near_their_key_value_counterparts():
         }
         assert "dgwgraphkv" in graph_clusters
         for cluster_type, kv_cluster in kv_clusters.items():
-            assert graph_clusters[cluster_type].count <= 2 * kv_cluster.count, (
-                f"{workload['shape']} over-provisions {cluster_type}"
+            assert cluster_type in graph_clusters, (
+                f"{workload['shape']} is missing the {cluster_type} tier that the "
+                f"KeyValue plan provisions"
+            )
+            count_ratio = graph_clusters[cluster_type].count / kv_cluster.count
+            assert 0.75 <= count_ratio <= 2.0, (
+                f"{workload['shape']} sizes {cluster_type} at {count_ratio:.2f}x the "
+                f"KeyValue shard behind it"
             )
 
-        graph_cost = float(graph_candidate.total_annual_cost)
-        kv_cost = float(kv_candidate.total_annual_cost)
-        assert graph_cost < 1.5 * kv_cost, (
-            f"{workload['shape']} costs {graph_cost:,.0f} against {kv_cost:,.0f} "
-            f"for the KeyValue shard behind it"
+        # Compared as a ratio: the graph plan adds its own tier on top of everything
+        # the KV plan plans, so it has to cost more, but not by a multiple.
+        cost_ratio = float(graph_candidate.total_annual_cost) / float(
+            kv_candidate.total_annual_cost
+        )
+        assert 1.0 < cost_ratio < 1.5, (
+            f"{workload['shape']} costs {cost_ratio:.2f}x the KeyValue shard behind it"
         )

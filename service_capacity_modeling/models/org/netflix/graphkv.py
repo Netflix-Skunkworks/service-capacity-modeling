@@ -39,9 +39,13 @@ from service_capacity_modeling.models import CapacityModel
 # intentionally excluded from this model.
 # ===========================================================================
 
-# Server-side ceiling on traversal depth, so a namespace cannot ask the model to
-# walk deeper than the engine will.
-MAX_TRAVERSAL_DEPTH = 3
+# Fleet-default traversal depth ceiling, from the shard config `max.traversal.depth`.
+# This is a default, NOT a ceiling we can validate against: GraphTraversalService
+# .getMaxDepth prefers a namespace's own TraversalConfig.maxDepth whenever that is
+# positive, and does not clamp it to the shard value. So a namespace may legitimately
+# walk deeper than this, and deeper inputs are accepted. What actually bounds the
+# amplification is MAX_EDGES_PER_TRAVERSAL below.
+DEFAULT_MAX_TRAVERSAL_DEPTH = 3
 
 
 class NflxGraphKVArguments(NflxJavaAppArguments):
@@ -67,13 +71,13 @@ class NflxGraphKVArguments(NflxJavaAppArguments):
     avg_traversal_depth: int = Field(
         default=1,
         ge=1,
-        le=MAX_TRAVERSAL_DEPTH,
         alias="graphkv.avg-traversal-depth",
         description=(
-            "Average number of hops a traversal actually walks, 1 to "
-            f"{MAX_TRAVERSAL_DEPTH}. This is the achieved depth, not the "
-            "configured ceiling, which is set to the maximum far more often "
-            "than it is reached."
+            "Average number of hops a traversal actually walks. This is the "
+            "achieved depth, not the configured ceiling, which is set to the "
+            "maximum far more often than it is reached. The fleet default "
+            f"ceiling is {DEFAULT_MAX_TRAVERSAL_DEPTH} hops, but a namespace can "
+            "raise its own, so deeper values are accepted."
         ),
     )
 
@@ -86,14 +90,23 @@ class NflxGraphKVArguments(NflxJavaAppArguments):
 # and scans one edge index, and a point read costs about one. Measured 1.17 to
 # 1.37 across both workloads at mean and peak.
 KV_READS_PER_LOGICAL_READ = 1.4
-# Backend write requests per logical write. A node write is one request; an edge
-# write is two, one per direction, plus one more when the edge carries
-# properties. Measured 1.2 on the node-heavy workload and 1.6 on the edge-heavy
-# one; held above the midpoint because under-provisioning writes costs more than
-# over-provisioning them.
+# Backend write REQUESTS per logical write. A node write is one request; an edge
+# write is two, one per direction, plus one more when the edge carries properties.
+# Held above the measured range because under-provisioning writes costs more than
+# over-provisioning them. This scales write RATE only -- stored size uses
+# KV_RECORDS_PER_LOGICAL_ITEM, which is a different quantity.
 KV_WRITES_PER_LOGICAL_WRITE = 1.5
-# Bytes one backend record occupies including key and metadata. Measured at 122 B
-# and 207 B on the two workloads; rounded up for the same reason.
+# Backend records STORED per logical node/edge. Not the same thing as the request
+# count above: a node write is one request but stores one metadata record plus one
+# per property, and an edge write stores one link record per direction plus its
+# property records. The two coincide numerically at the current fleet blend, which
+# is why they were a single constant before -- keeping them apart lets the
+# throughput knob move without silently resizing every namespace's disk.
+# TODO: carried over from the request multiplier rather than measured on its own.
+# Re-derive it from stored record counts per logical entity.
+KV_RECORDS_PER_LOGICAL_ITEM = 1.5
+# Bytes one backend record occupies including key and metadata, rounded up from the
+# measured range for the same reason.
 BYTES_PER_KV_RECORD = 256
 # Server-side cap on edges walked in one traversal, which bounds the geometric
 # frontier growth below.
@@ -182,11 +195,16 @@ class NflxGraphKVCapacityModel(CapacityModel):
             # An item count is logical nodes plus edges, so it has to be expanded
             # into backend KV records to become a stored size. A state size in GiB
             # is already a backend size -- re-deriving an item count from it and
-            # expanding that would charge the fan-out twice.
+            # expanding that would charge the fan-out twice. So when the caller
+            # supplied both, the GiB figure is the authoritative one and the count
+            # is left for the KeyValue model to interpret.
+            caller_set_state_size = (
+                "estimated_state_size_gib" in user_desires.data_shape.model_fields_set
+            )
             item_count = relaxed.data_shape.estimated_state_item_count
-            if item_count is not None:
+            if item_count is not None and not caller_set_state_size:
                 relaxed.data_shape.estimated_state_size_gib = item_count.scale(
-                    KV_WRITES_PER_LOGICAL_WRITE * BYTES_PER_KV_RECORD / 1024**3
+                    KV_RECORDS_PER_LOGICAL_ITEM * BYTES_PER_KV_RECORD / 1024**3
                 )
             return relaxed
 
