@@ -30,6 +30,8 @@ from service_capacity_modeling.models.org.netflix.cassandra import (
     _get_cluster_size_lambda,
     _get_min_count,
     CassandraClusterSizeMode,
+    KeyspaceReplication,
+    NflxCassandraArguments,
     NflxCassandraCapacityModel,
 )
 from tests.util import assert_minimum_storage_gib
@@ -1180,14 +1182,20 @@ class TestCassandraServiceCosts:
         *,
         num_regions=4,
         backup_retention_days=None,
+        keyspace_replication=None,
+        state_size_gib=300,
+        writes_per_second=100,
+        copies_per_region=None,
     ):
         hardware = shapes.region("us-east-1")
         desires = CapacityDesires(
             query_pattern=QueryPattern(
-                estimated_write_per_second=certain_float(100),
+                estimated_write_per_second=certain_float(writes_per_second),
                 estimated_mean_write_size_bytes=certain_int(512),
             ),
-            data_shape=DataShape(estimated_state_size_gib=certain_float(300)),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_float(state_size_gib)
+            ),
         )
         return NflxCassandraCapacityModel.service_costs(
             "cassandra",
@@ -1199,6 +1207,8 @@ class TestCassandraServiceCosts:
             desires,
             {
                 "backup_retention_days": backup_retention_days,
+                "keyspace_replication": keyspace_replication,
+                "copies_per_region": copies_per_region,
             },
         )
 
@@ -1244,3 +1254,219 @@ class TestCassandraServiceCosts:
         assert "cassandra.backup.s3-standard" not in disabled
         assert "cassandra.net.inter.region" in disabled
         assert "cassandra.net.intra.region" in disabled
+
+    @pytest.mark.parametrize(
+        "keyspace_replication",
+        [
+            pytest.param(None, id="single-replication"),
+            pytest.param(
+                [
+                    KeyspaceReplication(
+                        keyspaces=["one"],
+                        copies_per_region=3,
+                        num_regions=1,
+                        state_size_share=1.0,
+                        write_share=1.0,
+                    )
+                ],
+                id="per-placement",
+            ),
+        ],
+    )
+    def test_backup_disabled_does_no_backup_arithmetic(self, keyspace_replication):
+        # zones_in_region is an unconstrained int, so a caller can hand us zero.
+        # Backup eligibility must be settled before anything divides by it.
+        services = NflxCassandraCapacityModel.service_costs(
+            "cassandra",
+            RegionContext(services={}, zones_in_region=0, num_regions=1),
+            CapacityDesires(),
+            {
+                "backup_retention_days": 0,
+                "keyspace_replication": keyspace_replication,
+            },
+        )
+
+        assert [service.service_type for service in services] == []
+
+    def test_keyspace_replication_equals_independently_modeled_service_costs(self):
+        # The two entries partition a 300 GiB / 100 wps plan, so pricing them
+        # together must cost the same as pricing each one as its own plan.
+        entries = [
+            KeyspaceReplication(
+                keyspaces=["rf2"],
+                copies_per_region=2,
+                num_regions=2,
+                state_size_share=0.3,
+                write_share=0.4,
+            ),
+            KeyspaceReplication(
+                keyspaces=["rf3"],
+                copies_per_region=3,
+                num_regions=2,
+                state_size_share=0.7,
+                write_share=0.6,
+            ),
+        ]
+        combined = {
+            service.service_type: service
+            for service in self._services(num_regions=2, keyspace_replication=entries)
+        }
+
+        def independently(**overrides):
+            return [
+                {
+                    service.service_type: service
+                    for service in self._services(
+                        num_regions=entry.num_regions,
+                        state_size_gib=300 * entry.state_size_share,
+                        writes_per_second=100 * entry.write_share,
+                        copies_per_region=entry.copies_per_region,
+                        **overrides,
+                    )
+                }
+                for entry in entries
+            ]
+
+        for service_type in (
+            "cassandra.net.inter.region",
+            "cassandra.net.intra.region",
+            "cassandra.backup.s3-standard",
+        ):
+            assert combined[service_type].annual_cost == pytest.approx(
+                sum(services[service_type].annual_cost for services in independently())
+            ), service_type
+
+        backup = combined["cassandra.backup.s3-standard"]
+        assert backup.service_params["snapshot_gib"] == 405
+        assert [
+            placement["snapshot_gib"]
+            for placement in backup.service_params["placements"]
+        ] == [90, 315]
+        assert [
+            placement["keyspaces"]
+            for placement in combined["cassandra.net.inter.region"].service_params[
+                "placements"
+            ]
+        ] == [["rf2"], ["rf3"]]
+
+    def test_keyspace_replication_empty_disables_service_costs(self):
+        assert self._services(keyspace_replication=[]) == []
+
+    def test_keyspace_replication_prices_a_single_replica_keyspace(self):
+        # RF=1 is unwise but real, and a measured factor is taken as fact. There
+        # are no remote copies to ship a write to, in this region or any other.
+        services = {
+            service.service_type: service
+            for service in self._services(
+                keyspace_replication=[
+                    KeyspaceReplication(
+                        keyspaces=["unreplicated"],
+                        copies_per_region=1,
+                        num_regions=1,
+                        state_size_share=1.0,
+                        write_share=1.0,
+                    )
+                ]
+            )
+        }
+
+        assert services["cassandra.net.inter.region"].annual_cost == 0
+        assert services["cassandra.net.intra.region"].annual_cost == 0
+        assert services["cassandra.backup.s3-standard"].annual_cost > 0
+
+    def test_island_keyspace_replication_pays_no_inter_region_cost(self):
+        island = KeyspaceReplication(
+            keyspaces=["events_useast1"],
+            copies_per_region=3,
+            num_regions=1,
+            state_size_share=0.5,
+            write_share=0.5,
+        )
+        global_keyspace = island.model_copy(
+            update={"keyspaces": ["events"], "num_regions": 4}
+        )
+
+        islands_only = {
+            service.service_type: service
+            for service in self._services(
+                num_regions=4,
+                keyspace_replication=[
+                    island,
+                    island.model_copy(update={"keyspaces": ["events_uswest2"]}),
+                ],
+            )
+        }
+        mixed = {
+            service.service_type: service
+            for service in self._services(
+                num_regions=4, keyspace_replication=[island, global_keyspace]
+            )
+        }
+
+        # An island never ships a write across a region boundary, so all of the
+        # cross-region charge a single-replication plan would pay is phantom.
+        assert islands_only["cassandra.net.inter.region"].annual_cost == 0
+        assert [
+            placement["annual_cost"]
+            for placement in mixed["cassandra.net.inter.region"].service_params[
+                "placements"
+            ]
+        ] == [0, pytest.approx(mixed["cassandra.net.inter.region"].annual_cost)]
+        assert mixed["cassandra.net.inter.region"].annual_cost > 0
+
+    @pytest.mark.parametrize("field", ["state_size_share", "write_share"])
+    @pytest.mark.parametrize("share", [0.4, 0.6])
+    def test_keyspace_replication_shares_must_partition_the_plan(self, field, share):
+        entries = [
+            {
+                "keyspaces": ["one"],
+                "copies_per_region": 3,
+                "num_regions": 1,
+                "state_size_share": 0.5,
+                "write_share": 0.5,
+            },
+            {
+                "keyspaces": ["two"],
+                "copies_per_region": 3,
+                "num_regions": 1,
+                "state_size_share": 0.5,
+                "write_share": 0.5,
+            },
+        ]
+        entries[1][field] = share
+
+        with pytest.raises(ValueError, match=f"{field} must sum to 1.0"):
+            NflxCassandraArguments.from_extra_model_arguments(
+                {"keyspace_replication": entries}
+            )
+
+    def test_keyspace_replication_backup_floor_applies_once(self):
+        entries = [
+            KeyspaceReplication(
+                keyspaces=[keyspace],
+                copies_per_region=2,
+                num_regions=1,
+                state_size_share=0.5,
+                write_share=0.5,
+            )
+            for keyspace in ("one", "two")
+        ]
+
+        # An empty plan leaves nothing for either placement to snapshot, so the
+        # one-GiB floor must apply to the plan and not once per placement.
+        services = {
+            service.service_type: service
+            for service in self._services(
+                num_regions=1,
+                state_size_gib=0,
+                writes_per_second=0,
+                keyspace_replication=entries,
+            )
+        }
+
+        backup = services["cassandra.backup.s3-standard"]
+        assert backup.service_params["snapshot_gib"] == 1
+        assert [
+            placement["snapshot_gib"]
+            for placement in backup.service_params["placements"]
+        ] == [0, 0]

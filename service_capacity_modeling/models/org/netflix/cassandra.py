@@ -14,6 +14,7 @@ from typing import Union
 
 from pydantic import BaseModel
 from pydantic import Field
+from pydantic import field_validator
 from pydantic import model_validator
 
 from service_capacity_modeling.enum_utils import enum_docstrings
@@ -179,6 +180,11 @@ _CASSANDRA_SERIALIZATION_AMPLIFICATION = 1.42
 # with different compaction strategies (TWCS) or aggressive TTLs.
 _DEFAULT_BACKUP_RETENTION_DAYS = 14.0
 
+# Float slack allowed when checking that keyspace replication shares partition
+# a plan. Shares are computed by a caller dividing measured telemetry, so exact
+# equality to 1.0 is not achievable.
+_KEYSPACE_SHARE_TOLERANCE = 1e-6
+
 # Known Cassandra write size defaults (from default_desires() and interface.py).
 # Used to detect whether estimated_mean_write_size_bytes was user-supplied or
 # model-defaulted. Interval has frozen=True (hashable), so set membership works.
@@ -267,6 +273,84 @@ def _get_disk_from_desires(desires: CapacityDesires, copies_per_region: int) -> 
         * desires.data_shape.estimated_state_size_gib.mid
         * copies_per_region
         * disk_buffer.ratio
+    )
+
+
+def _backup_components(
+    desires: CapacityDesires,
+    context: RegionContext,
+    copies_per_region: int,
+) -> Tuple[int, float]:
+    """Snapshot GiB per zone and daily backup upload GiB for one replication.
+
+    Backup storage is dominated by continuous SSTable uploads, not just the
+    data-at-rest snapshot. The upload volume uses the overhead-adjusted wire
+    size because SSTables include full serialized mutations (cell metadata,
+    timestamps, bloom filter contributions), not just the raw app payload.
+    """
+    snapshot_gib = (
+        _get_disk_from_desires(desires, copies_per_region) // context.zones_in_region
+    )
+    wire_write_size = _cassandra_wire_write_size(
+        desires.query_pattern.estimated_mean_write_size_bytes.mid
+    )
+    wps = desires.query_pattern.estimated_write_per_second.mid
+    daily_write_gib = (wps * wire_write_size * 86400) / (
+        (1024**3) * max(context.num_regions, 1)
+    )
+    return snapshot_gib, daily_write_gib
+
+
+def _backup_charged(
+    context: RegionContext,
+    desires: CapacityDesires,
+    args: "NflxCassandraArguments",
+) -> bool:
+    """Whether this plan is charged for backups at all.
+
+    Callers check this before computing backup components, so a plan with backup
+    switched off does no backup arithmetic -- and so cannot fail on a region
+    shape it never divides by.
+    """
+    if (
+        args.backup_retention_days == 0
+        or desires.data_shape.durability_slo_order.mid < 1000
+    ):
+        return False
+    return bool(context.services.get("blob.standard", None))
+
+
+def _backup_service(
+    service_type: str,
+    context: RegionContext,
+    desires: CapacityDesires,
+    args: "NflxCassandraArguments",
+    *,
+    snapshot_gib: int,
+    daily_write_gib: float,
+    extra_service_params: Optional[Dict[str, Any]] = None,
+) -> ServiceCapacity:
+    """Blob cost of retaining one plan's backups. Requires `_backup_charged`."""
+    blob = context.services["blob.standard"]
+    retention_days = (
+        _DEFAULT_BACKUP_RETENTION_DAYS
+        if args.backup_retention_days is None
+        else args.backup_retention_days
+    )
+    # The snapshot floor is a per-plan minimum, so callers summing several
+    # replication placements pass the already-summed snapshot and get one floor.
+    backup_disk_gib = max(1, snapshot_gib)
+    backup_total_gib = backup_disk_gib + daily_write_gib * retention_days
+    return ServiceCapacity(
+        service_type=f"{service_type}.backup.{blob.name}",
+        annual_cost=blob.annual_cost_gib(backup_total_gib),
+        service_params={
+            "snapshot_gib": backup_disk_gib,
+            "daily_write_gib": round(daily_write_gib, 1),
+            "retention_days": retention_days,
+            "write_size_defaulted": _is_write_size_defaulted(desires),
+            **(extra_service_params or {}),
+        },
     )
 
 
@@ -1100,7 +1184,10 @@ def _cass_io_per_read(node_size_gib: float, sstable_size_mb: int = 160) -> int:
 
 def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
     if user_copies is not None:
-        assert user_copies > 1
+        # An explicitly supplied factor is taken as measured fact, including
+        # RF=1: a single-replica keyspace is unwise but real, and costing it
+        # correctly matters more than refusing to model it.
+        assert user_copies > 0
         return user_copies
 
     # Due to the relaxed durability and consistency requirements we can
@@ -1187,6 +1274,44 @@ def _adaptive_compute_buffer_ratio(
     return max_ratio - t * (max_ratio - min_ratio)
 
 
+class KeyspaceReplication(BaseModel):
+    """How one set of keyspaces is replicated, and its share of the load.
+
+    A Cassandra cluster can host keyspaces with different replication placements
+    at once: some replicated to every region, others confined to a single region
+    with no cross-region replication. Since network cost scales with the regions
+    a write must cross, pricing the whole cluster at one placement charges
+    phantom cross-region replication to the single-region keyspaces.
+    """
+
+    keyspaces: List[str] = Field(
+        min_length=1,
+        description="Keyspaces sharing this replication placement.",
+    )
+    copies_per_region: int = Field(
+        gt=0,
+        description="How many copies of these keyspaces exist inside one region,"
+        " e.g. RF=3.",
+    )
+    num_regions: int = Field(
+        gt=0,
+        description="How many regions these keyspaces replicate into. One means"
+        " the data never leaves its region, so no cross-region replication.",
+    )
+    state_size_share: float = Field(
+        ge=0,
+        le=1,
+        description="Fraction of the plan's estimated_state_size_gib that these"
+        " keyspaces hold.",
+    )
+    write_share: float = Field(
+        ge=0,
+        le=1,
+        description="Fraction of the plan's estimated_write_per_second that these"
+        " keyspaces receive.",
+    )
+
+
 class NflxCassandraArguments(BaseModel):
     """Configuration arguments for the Netflix Cassandra capacity model.
 
@@ -1198,6 +1323,15 @@ class NflxCassandraArguments(BaseModel):
         default=None,
         description="How many copies of the data will exist e.g. RF=3. If unsupplied"
         " this will be deduced from durability and consistency desires",
+    )
+    keyspace_replication: Optional[List[KeyspaceReplication]] = Field(
+        default=None,
+        description="Replication placements of the keyspaces this plan holds, used"
+        " to attribute network and backup cost. When supplied, each entry is priced"
+        " at its own replication factor and region count using its share of the"
+        " plan's state size and write rate, and the results are summed. An empty"
+        " list attributes no service cost. When unsupplied, the whole plan is"
+        " priced at one replication factor.",
     )
     require_local_disks: bool = Field(
         default=True,
@@ -1366,6 +1500,24 @@ class NflxCassandraArguments(BaseModel):
             )
         return self
 
+    @field_validator("keyspace_replication")
+    @classmethod
+    def _check_replication_shares(
+        cls, value: Optional[List[KeyspaceReplication]]
+    ) -> Optional[List[KeyspaceReplication]]:
+        # The placements partition one plan, so their shares must account for all
+        # of it. Requiring that here makes a breakdown that contradicts the plan's
+        # own state size or write rate unrepresentable.
+        if not value:
+            return value
+        for field in ("state_size_share", "write_share"):
+            total = math.fsum(getattr(entry, field) for entry in value)
+            if abs(total - 1.0) > _KEYSPACE_SHARE_TOLERANCE:
+                raise ValueError(
+                    f"keyspace_replication {field} must sum to 1.0, got {total}"
+                )
+        return value
+
     @classmethod
     def from_extra_model_arguments(
         cls, extra_model_arguments: Dict[str, Any]
@@ -1445,8 +1597,17 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         and backup write-throughput costs so summing all regions recovers the
         fleetwide cost. The schema-backed ``backup_retention_days`` argument owns
         backup inclusion and retention; it does not affect network costs.
+
+        When ``keyspace_replication`` is supplied, the plan is instead priced once
+        per replication placement and summed, so keyspaces that never leave their
+        region are not charged cross-region replication.
         """
         args = NflxCassandraArguments.from_extra_model_arguments(extra_model_arguments)
+        if args.keyspace_replication is not None:
+            return NflxCassandraCapacityModel._replicated_service_costs(
+                service_type, context, desires, extra_model_arguments, args
+            )
+
         copies_per_region: int = _target_rf(
             desires, extra_model_arguments.get("copies_per_region")
         )
@@ -1484,52 +1645,122 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             svc.service_params["write_size_defaulted"] = write_size_defaulted
         services.extend(net_services)
 
-        if (
-            args.backup_retention_days != 0
-            and desires.data_shape.durability_slo_order.mid >= 1000
-        ):
-            blob = context.services.get("blob.standard", None)
-            if blob:
-                # Snapshot component: data-at-rest per zone
-                backup_disk_gib = max(
-                    1,
-                    _get_disk_from_desires(desires, copies_per_region)
-                    // context.zones_in_region,
+        if _backup_charged(context, desires, args):
+            snapshot_gib, daily_write_gib = _backup_components(
+                desires, context, copies_per_region
+            )
+            services.append(
+                _backup_service(
+                    service_type,
+                    context,
+                    desires,
+                    args,
+                    snapshot_gib=snapshot_gib,
+                    daily_write_gib=daily_write_gib,
                 )
-
-                # Write-throughput component: backup storage is dominated by
-                # continuous SSTable uploads, not just the data-at-rest snapshot.
-                # Uses overhead-adjusted wire size because SSTables include
-                # full serialized mutations (cell metadata, timestamps, bloom
-                # filter contributions), not just raw app payload.
-                wps = desires.query_pattern.estimated_write_per_second.mid
-                write_region_count = max(context.num_regions, 1)
-                daily_write_gib = (wps * wire_write_size * 86400) / (
-                    (1024**3) * write_region_count
-                )
-                retention_days = (
-                    _DEFAULT_BACKUP_RETENTION_DAYS
-                    if args.backup_retention_days is None
-                    else args.backup_retention_days
-                )
-
-                # Total = state snapshot + retained write volume
-                backup_total_gib = backup_disk_gib + daily_write_gib * retention_days
-
-                services.append(
-                    ServiceCapacity(
-                        service_type=f"{service_type}.backup.{blob.name}",
-                        annual_cost=blob.annual_cost_gib(backup_total_gib),
-                        service_params={
-                            "snapshot_gib": backup_disk_gib,
-                            "daily_write_gib": round(daily_write_gib, 1),
-                            "retention_days": retention_days,
-                            "write_size_defaulted": write_size_defaulted,
-                        },
-                    )
-                )
+            )
 
         return services
+
+    @staticmethod
+    def _replicated_service_costs(
+        service_type: str,
+        context: RegionContext,
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
+        args: NflxCassandraArguments,
+    ) -> List[ServiceCapacity]:
+        """Price each keyspace replication placement separately and sum them.
+
+        Every entry re-enters ``service_costs`` carrying its own share of the
+        plan's state size and write rate, its own replication factor, and its own
+        region count, so an entry with ``num_regions == 1`` is charged no
+        cross-region replication at all. Backup is charged once over the whole
+        plan because the snapshot floor and retention are per-plan.
+        """
+        entries = args.keyspace_replication or []
+        if not entries:
+            return []
+        plan_state_size_gib = desires.data_shape.estimated_state_size_gib.mid
+        plan_write_per_second = desires.query_pattern.estimated_write_per_second.mid
+        charge_backup = _backup_charged(context, desires, args)
+
+        services_by_type: Dict[str, ServiceCapacity] = {}
+        snapshot_gib = 0
+        daily_write_gib = 0.0
+        backup_placements: List[Dict[str, Any]] = []
+        for entry in entries:
+            entry_desires = desires.model_copy(deep=True)
+            entry_desires.data_shape.estimated_state_size_gib = certain_float(
+                plan_state_size_gib * entry.state_size_share
+            )
+            entry_desires.query_pattern.estimated_write_per_second = certain_float(
+                plan_write_per_second * entry.write_share
+            )
+            entry_context = context.model_copy(
+                update={"num_regions": entry.num_regions}
+            )
+            entry_arguments = dict(extra_model_arguments)
+            # Dropping the placements is what ends the recursion: the inner call
+            # takes the single-replication path for this entry alone. Backup is
+            # disabled there so it is charged once, on the summed snapshot.
+            entry_arguments.pop("keyspace_replication", None)
+            entry_arguments["copies_per_region"] = entry.copies_per_region
+            entry_arguments["backup_retention_days"] = 0
+            for service in NflxCassandraCapacityModel.service_costs(
+                service_type, entry_context, entry_desires, entry_arguments
+            ):
+                aggregate = services_by_type.setdefault(
+                    service.service_type,
+                    ServiceCapacity(
+                        service_type=service.service_type,
+                        annual_cost=0,
+                        service_params={
+                            "write_size_defaulted": service.service_params.get(
+                                "write_size_defaulted", False
+                            ),
+                            "placements": [],
+                        },
+                    ),
+                )
+                aggregate.annual_cost += service.annual_cost
+                aggregate.service_params["placements"].append(
+                    {
+                        "keyspaces": entry.keyspaces,
+                        "copies_per_region": entry.copies_per_region,
+                        "num_regions": entry.num_regions,
+                        "annual_cost": service.annual_cost,
+                    }
+                )
+
+            if charge_backup:
+                entry_snapshot_gib, entry_daily_write_gib = _backup_components(
+                    entry_desires, entry_context, entry.copies_per_region
+                )
+                snapshot_gib += entry_snapshot_gib
+                daily_write_gib += entry_daily_write_gib
+                backup_placements.append(
+                    {
+                        "keyspaces": entry.keyspaces,
+                        "copies_per_region": entry.copies_per_region,
+                        "num_regions": entry.num_regions,
+                        "snapshot_gib": entry_snapshot_gib,
+                        "daily_write_gib": round(entry_daily_write_gib, 1),
+                    }
+                )
+
+        if charge_backup:
+            backup = _backup_service(
+                service_type,
+                context,
+                desires,
+                args,
+                snapshot_gib=snapshot_gib,
+                daily_write_gib=daily_write_gib,
+                extra_service_params={"placements": backup_placements},
+            )
+            services_by_type[backup.service_type] = backup
+        return list(services_by_type.values())
 
     @staticmethod
     def capacity_plan(
