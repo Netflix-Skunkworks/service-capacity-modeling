@@ -14,7 +14,6 @@ from typing import Union
 
 from pydantic import BaseModel
 from pydantic import Field
-from pydantic import field_validator
 from pydantic import model_validator
 
 from service_capacity_modeling.enum_utils import enum_docstrings
@@ -179,11 +178,6 @@ _CASSANDRA_SERIALIZATION_AMPLIFICATION = 1.42
 # Configurable via backup_retention_days in extra_model_arguments for clusters
 # with different compaction strategies (TWCS) or aggressive TTLs.
 _DEFAULT_BACKUP_RETENTION_DAYS = 14.0
-
-# Float slack allowed when checking that keyspace replication shares partition
-# a plan. Shares are computed by a caller dividing measured telemetry, so exact
-# equality to 1.0 is not achievable.
-_KEYSPACE_SHARE_TOLERANCE = 1e-6
 
 # Known Cassandra write size defaults (from default_desires() and interface.py).
 # Used to detect whether estimated_mean_write_size_bytes was user-supplied or
@@ -1282,6 +1276,11 @@ class KeyspaceReplication(BaseModel):
     with no cross-region replication. Since network cost scales with the regions
     a write must cross, pricing the whole cluster at one placement charges
     phantom cross-region replication to the single-region keyspaces.
+
+    Weights are relative, not fractions: pass measured magnitudes and the model
+    normalises them against each other. The plan's own totals stay the source of
+    truth, so a breakdown cannot contradict them no matter what scale the caller
+    works in, and there is no sum-to-one rule to get wrong.
     """
 
     keyspaces: List[str] = Field(
@@ -1298,17 +1297,17 @@ class KeyspaceReplication(BaseModel):
         description="How many regions these keyspaces replicate into. One means"
         " the data never leaves its region, so no cross-region replication.",
     )
-    state_size_share: float = Field(
+    state_size_weight: float = Field(
         ge=0,
-        le=1,
-        description="Fraction of the plan's estimated_state_size_gib that these"
-        " keyspaces hold.",
+        description="Relative amount of the plan's stored bytes these keyspaces"
+        " hold. Any non-negative scale works -- measured GiB is fine -- because"
+        " weights are normalised against the other entries rather than being"
+        " required to sum to anything.",
     )
-    write_share: float = Field(
+    write_weight: float = Field(
         ge=0,
-        le=1,
-        description="Fraction of the plan's estimated_write_per_second that these"
-        " keyspaces receive.",
+        description="Relative amount of the plan's write rate these keyspaces"
+        " receive, on the same footing as state_size_weight.",
     )
 
 
@@ -1328,10 +1327,10 @@ class NflxCassandraArguments(BaseModel):
         default=None,
         description="Replication placements of the keyspaces this plan holds, used"
         " to attribute network and backup cost. When supplied, each entry is priced"
-        " at its own replication factor and region count using its share of the"
-        " plan's state size and write rate, and the results are summed. An empty"
-        " list attributes no service cost. When unsupplied, the whole plan is"
-        " priced at one replication factor.",
+        " at its own replication factor and region count using its normalised"
+        " weight of the plan's state size and write rate, and the results are"
+        " summed. An empty list attributes no service cost. When unsupplied, the"
+        " whole plan is priced at one replication factor.",
     )
     require_local_disks: bool = Field(
         default=True,
@@ -1499,24 +1498,6 @@ class NflxCassandraArguments(BaseModel):
                 f"must be <= max_compute_buffer_ratio ({self.max_compute_buffer_ratio})"
             )
         return self
-
-    @field_validator("keyspace_replication")
-    @classmethod
-    def _check_replication_shares(
-        cls, value: Optional[List[KeyspaceReplication]]
-    ) -> Optional[List[KeyspaceReplication]]:
-        # The placements partition one plan, so their shares must account for all
-        # of it. Requiring that here makes a breakdown that contradicts the plan's
-        # own state size or write rate unrepresentable.
-        if not value:
-            return value
-        for field in ("state_size_share", "write_share"):
-            total = math.fsum(getattr(entry, field) for entry in value)
-            if abs(total - 1.0) > _KEYSPACE_SHARE_TOLERANCE:
-                raise ValueError(
-                    f"keyspace_replication {field} must sum to 1.0, got {total}"
-                )
-        return value
 
     @classmethod
     def from_extra_model_arguments(
@@ -1697,6 +1678,10 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             return []
         plan_state_size_gib = desires.data_shape.estimated_state_size_gib.mid
         plan_write_per_second = desires.query_pattern.estimated_write_per_second.mid
+        # Normalising here is what makes the parts sum to the plan by
+        # construction. A zero total means nothing to attribute, not an error.
+        state_weight_total = math.fsum(entry.state_size_weight for entry in entries)
+        write_weight_total = math.fsum(entry.write_weight for entry in entries)
         charge_backup = _backup_charged(context, desires, args)
 
         services_by_type: Dict[str, ServiceCapacity] = {}
@@ -1706,10 +1691,14 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         for entry in entries:
             entry_desires = desires.model_copy(deep=True)
             entry_desires.data_shape.estimated_state_size_gib = certain_float(
-                plan_state_size_gib * entry.state_size_share
+                plan_state_size_gib * entry.state_size_weight / state_weight_total
+                if state_weight_total
+                else 0.0
             )
             entry_desires.query_pattern.estimated_write_per_second = certain_float(
-                plan_write_per_second * entry.write_share
+                plan_write_per_second * entry.write_weight / write_weight_total
+                if write_weight_total
+                else 0.0
             )
             entry_context = context.model_copy(
                 update={"num_regions": entry.num_regions}

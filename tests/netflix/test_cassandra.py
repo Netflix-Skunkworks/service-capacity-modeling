@@ -1264,8 +1264,8 @@ class TestCassandraServiceCosts:
                         keyspaces=["one"],
                         copies_per_region=3,
                         num_regions=1,
-                        state_size_share=1.0,
-                        write_share=1.0,
+                        state_size_weight=1.0,
+                        write_weight=1.0,
                     )
                 ],
                 id="per-placement",
@@ -1295,15 +1295,15 @@ class TestCassandraServiceCosts:
                 keyspaces=["rf2"],
                 copies_per_region=2,
                 num_regions=2,
-                state_size_share=0.3,
-                write_share=0.4,
+                state_size_weight=0.3,
+                write_weight=0.4,
             ),
             KeyspaceReplication(
                 keyspaces=["rf3"],
                 copies_per_region=3,
                 num_regions=2,
-                state_size_share=0.7,
-                write_share=0.6,
+                state_size_weight=0.7,
+                write_weight=0.6,
             ),
         ]
         combined = {
@@ -1317,8 +1317,8 @@ class TestCassandraServiceCosts:
                     service.service_type: service
                     for service in self._services(
                         num_regions=entry.num_regions,
-                        state_size_gib=300 * entry.state_size_share,
-                        writes_per_second=100 * entry.write_share,
+                        state_size_gib=300 * entry.state_size_weight,
+                        writes_per_second=100 * entry.write_weight,
                         copies_per_region=entry.copies_per_region,
                         **overrides,
                     )
@@ -1359,8 +1359,8 @@ class TestCassandraServiceCosts:
             keyspaces=["local_only"],
             copies_per_region=3,
             num_regions=1,
-            state_size_share=1.0,
-            write_share=1.0,
+            state_size_weight=1.0,
+            write_weight=1.0,
         )
         spread = confined.model_copy(update={"num_regions": 4})
 
@@ -1391,15 +1391,15 @@ class TestCassandraServiceCosts:
                 keyspaces=["rf2"],
                 copies_per_region=2,
                 num_regions=2,
-                state_size_share=0.3,
-                write_share=0.5,
+                state_size_weight=0.3,
+                write_weight=0.5,
             ),
             KeyspaceReplication(
                 keyspaces=["rf3"],
                 copies_per_region=3,
                 num_regions=2,
-                state_size_share=0.7,
-                write_share=0.5,
+                state_size_weight=0.7,
+                write_weight=0.5,
             ),
         ]
 
@@ -1432,8 +1432,8 @@ class TestCassandraServiceCosts:
                         keyspaces=["unreplicated"],
                         copies_per_region=1,
                         num_regions=1,
-                        state_size_share=1.0,
-                        write_share=1.0,
+                        state_size_weight=1.0,
+                        write_weight=1.0,
                     )
                 ]
             )
@@ -1448,8 +1448,8 @@ class TestCassandraServiceCosts:
             keyspaces=["events_useast1"],
             copies_per_region=3,
             num_regions=1,
-            state_size_share=0.5,
-            write_share=0.5,
+            state_size_weight=0.5,
+            write_weight=0.5,
         )
         global_keyspace = island.model_copy(
             update={"keyspaces": ["events"], "num_regions": 4}
@@ -1483,35 +1483,79 @@ class TestCassandraServiceCosts:
         ] == [0, pytest.approx(mixed["cassandra.net.inter.region"].annual_cost)]
         assert mixed["cassandra.net.inter.region"].annual_cost > 0
 
-    @pytest.mark.parametrize("field", ["state_size_share", "write_share"])
-    @pytest.mark.parametrize("share", [0.4, 0.6])
-    def test_keyspace_replication_shares_must_partition_the_plan(self, field, share):
-        entries = [
-            {
-                "keyspaces": ["one"],
-                "copies_per_region": 3,
-                "num_regions": 1,
-                "state_size_share": 0.5,
-                "write_share": 0.5,
-            },
-            {
-                "keyspaces": ["two"],
-                "copies_per_region": 3,
-                "num_regions": 1,
-                "state_size_share": 0.5,
-                "write_share": 0.5,
-            },
-        ]
-        entries[1][field] = share
+    def test_weights_are_relative_so_any_scale_gives_the_same_cost(self):
+        # Weights are normalised against each other, so a caller can pass raw
+        # measured magnitudes without dividing anything. That removes the whole
+        # class of "my shares did not add up" caller error: there is no total to
+        # get wrong, and the plan's own figures stay the source of truth.
+        def costs_at(scale):
+            entries = [
+                KeyspaceReplication(
+                    keyspaces=["confined"],
+                    copies_per_region=3,
+                    num_regions=1,
+                    state_size_weight=0.25 * scale,
+                    write_weight=0.25 * scale,
+                ),
+                KeyspaceReplication(
+                    keyspaces=["global"],
+                    copies_per_region=3,
+                    num_regions=4,
+                    state_size_weight=0.75 * scale,
+                    write_weight=0.75 * scale,
+                ),
+            ]
+            return {
+                service.service_type: service.annual_cost
+                for service in self._services(
+                    num_regions=4, keyspace_replication=entries
+                )
+            }
 
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
+        fractions = costs_at(1.0)
+        # Percentages, and raw measured GiB -- the same split at wildly different
+        # magnitudes must price identically.
+        for scale in (100.0, 4_812_935.0):
+            other = costs_at(scale)
+            assert set(other) == set(fractions)
+            for service_type, cost in fractions.items():
+                assert other[service_type] == pytest.approx(cost), service_type
+
+        # And the split is doing something: the confined entry pays no
+        # cross-region transfer, so the charge is strictly below a plan where
+        # everything is globally replicated.
+        assert fractions["cassandra.net.inter.region"] > 0
+        assert (
+            fractions["cassandra.net.inter.region"]
+            < self._service_cost_without_placements()
         )
 
-        with pytest.raises(ValueError, match=f"{field} must sum to 1.0"):
-            NflxCassandraArguments.from_extra_model_arguments(
-                {"keyspace_replication": entries}
+    def _service_cost_without_placements(self):
+        return next(
+            service.annual_cost
+            for service in self._services(num_regions=4)
+            if service.service_type == "cassandra.net.inter.region"
+        )
+
+    def test_zero_weights_attribute_nothing_rather_than_dividing_by_zero(self):
+        entries = [
+            KeyspaceReplication(
+                keyspaces=[name],
+                copies_per_region=3,
+                num_regions=1,
+                state_size_weight=0.0,
+                write_weight=0.0,
             )
+            for name in ("a", "b")
+        ]
+
+        costs = {
+            service.service_type: service.annual_cost
+            for service in self._services(num_regions=4, keyspace_replication=entries)
+        }
+
+        assert costs["cassandra.net.inter.region"] == 0
+        assert costs["cassandra.net.intra.region"] == 0
 
     def test_keyspace_replication_backup_floor_applies_once(self):
         entries = [
@@ -1519,8 +1563,8 @@ class TestCassandraServiceCosts:
                 keyspaces=[keyspace],
                 copies_per_region=2,
                 num_regions=1,
-                state_size_share=0.5,
-                write_share=0.5,
+                state_size_weight=0.5,
+                write_weight=0.5,
             )
             for keyspace in ("one", "two")
         ]
