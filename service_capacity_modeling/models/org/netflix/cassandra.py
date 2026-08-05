@@ -1676,6 +1676,15 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         so an entry with ``num_regions == 1`` is charged no cross-region
         replication at all.
 
+        **Entries are scoped to this region, and a single-region entry is priced
+        as a whole.** Regional plans return an additive share so that summing all
+        regions recovers the fleetwide cost, and that share is what
+        ``num_regions`` divides by. An entry with ``num_regions == 1`` therefore
+        comes back undivided -- correctly, because those keyspaces exist only
+        here and no other region's plan will contribute to them. Callers must
+        list such an entry in that one region's input only; repeating it in every
+        region's input multiplies it by the region count.
+
         Stored bytes are deliberately not split. The backup snapshot depends on
         what a region holds, not on how many regions hold it, so it is computed
         once from the plan's own state size; only the upload volume, which scales

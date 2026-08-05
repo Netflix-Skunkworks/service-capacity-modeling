@@ -1362,6 +1362,38 @@ class TestCassandraServiceCosts:
             ]
         ] == [["rf2"], ["rf3"]]
 
+    def test_single_region_entry_is_priced_whole_not_as_a_regional_share(self):
+        # Regional plans return a share that sums to the fleet cost across
+        # regions, and `num_regions` is the divisor. A single-region entry has no
+        # other region contributing to it, so it must come back undivided -- and
+        # a caller must therefore list it in one region's input only. Getting
+        # this wrong multiplies that entry by the region count, which looks like
+        # a plausible number rather than an error.
+        confined = KeyspaceReplication(
+            keyspaces=["local_only"],
+            copies_per_region=3,
+            num_regions=1,
+            write_share=1.0,
+        )
+        spread = confined.model_copy(update={"num_regions": 4})
+
+        one_region = {
+            s.service_type: s.annual_cost
+            for s in self._services(num_regions=4, keyspace_replication=[confined])
+        }
+        four_regions = {
+            s.service_type: s.annual_cost
+            for s in self._services(num_regions=4, keyspace_replication=[spread])
+        }
+
+        assert one_region["cassandra.net.inter.region"] == 0
+        assert four_regions["cassandra.net.inter.region"] > 0
+        # Same writes, same RF: the confined entry is the whole cost, the spread
+        # entry is this region's quarter of it.
+        assert one_region["cassandra.net.intra.region"] == pytest.approx(
+            four_regions["cassandra.net.intra.region"] * 4
+        )
+
     def test_keyspace_replication_empty_disables_service_costs(self):
         assert not self._services(keyspace_replication=[])
 
