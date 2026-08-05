@@ -1264,7 +1264,6 @@ class TestCassandraServiceCosts:
                         keyspaces=["one"],
                         copies_per_region=3,
                         num_regions=1,
-                        state_size_share=1.0,
                         write_share=1.0,
                     )
                 ],
@@ -1295,14 +1294,12 @@ class TestCassandraServiceCosts:
                 keyspaces=["rf2"],
                 copies_per_region=2,
                 num_regions=2,
-                state_size_share=0.3,
                 write_share=0.4,
             ),
             KeyspaceReplication(
                 keyspaces=["rf3"],
                 copies_per_region=3,
                 num_regions=2,
-                state_size_share=0.7,
                 write_share=0.6,
             ),
         ]
@@ -1317,7 +1314,6 @@ class TestCassandraServiceCosts:
                     service.service_type: service
                     for service in self._services(
                         num_regions=entry.num_regions,
-                        state_size_gib=300 * entry.state_size_share,
                         writes_per_second=100 * entry.write_share,
                         copies_per_region=entry.copies_per_region,
                         **overrides,
@@ -1326,21 +1322,39 @@ class TestCassandraServiceCosts:
                 for entry in entries
             ]
 
+        # Network cost is what placement changes, and it does not depend on stored
+        # bytes, so the parts must add up to independently modelling each entry.
         for service_type in (
             "cassandra.net.inter.region",
             "cassandra.net.intra.region",
-            "cassandra.backup.s3-standard",
         ):
             assert combined[service_type].annual_cost == pytest.approx(
                 sum(services[service_type].annual_cost for services in independently())
             ), service_type
 
+        # Backup splits differently on purpose: the snapshot is what the plan
+        # stores, charged once, while the upload volume follows write fan-out and
+        # so is summed per placement. Summing snapshots instead would count the
+        # same bytes once per placement.
+        whole_plan = {
+            service.service_type: service
+            for service in self._services(num_regions=2, writes_per_second=0)
+        }
         backup = combined["cassandra.backup.s3-standard"]
-        assert backup.service_params["snapshot_gib"] == 405
-        assert [
-            placement["snapshot_gib"]
-            for placement in backup.service_params["placements"]
-        ] == [90, 315]
+        assert (
+            backup.service_params["snapshot_gib"]
+            == whole_plan["cassandra.backup.s3-standard"].service_params["snapshot_gib"]
+        )
+        assert backup.service_params["daily_write_gib"] == pytest.approx(
+            sum(
+                services["cassandra.backup.s3-standard"].service_params[
+                    "daily_write_gib"
+                ]
+                for services in independently()
+            ),
+            abs=0.2,
+        )
+        assert "snapshot_gib" not in backup.service_params["placements"][0]
         assert [
             placement["keyspaces"]
             for placement in combined["cassandra.net.inter.region"].service_params[
@@ -1362,7 +1376,6 @@ class TestCassandraServiceCosts:
                         keyspaces=["unreplicated"],
                         copies_per_region=1,
                         num_regions=1,
-                        state_size_share=1.0,
                         write_share=1.0,
                     )
                 ]
@@ -1378,7 +1391,6 @@ class TestCassandraServiceCosts:
             keyspaces=["events_useast1"],
             copies_per_region=3,
             num_regions=1,
-            state_size_share=0.5,
             write_share=0.5,
         )
         global_keyspace = island.model_copy(
@@ -1413,32 +1425,29 @@ class TestCassandraServiceCosts:
         ] == [0, pytest.approx(mixed["cassandra.net.inter.region"].annual_cost)]
         assert mixed["cassandra.net.inter.region"].annual_cost > 0
 
-    @pytest.mark.parametrize("field", ["state_size_share", "write_share"])
     @pytest.mark.parametrize("share", [0.4, 0.6])
-    def test_keyspace_replication_shares_must_partition_the_plan(self, field, share):
+    def test_keyspace_replication_shares_must_partition_the_plan(self, share):
         entries = [
             {
                 "keyspaces": ["one"],
                 "copies_per_region": 3,
                 "num_regions": 1,
-                "state_size_share": 0.5,
                 "write_share": 0.5,
             },
             {
                 "keyspaces": ["two"],
                 "copies_per_region": 3,
                 "num_regions": 1,
-                "state_size_share": 0.5,
                 "write_share": 0.5,
             },
         ]
-        entries[1][field] = share
+        entries[1]["write_share"] = share
 
         from service_capacity_modeling.models.org.netflix.cassandra import (
             NflxCassandraArguments,
         )
 
-        with pytest.raises(ValueError, match=f"{field} must sum to 1.0"):
+        with pytest.raises(ValueError, match="write_share must sum to 1.0"):
             NflxCassandraArguments.from_extra_model_arguments(
                 {"keyspace_replication": entries}
             )
@@ -1449,7 +1458,6 @@ class TestCassandraServiceCosts:
                 keyspaces=[keyspace],
                 copies_per_region=2,
                 num_regions=1,
-                state_size_share=0.5,
                 write_share=0.5,
             )
             for keyspace in ("one", "two")
@@ -1470,6 +1478,6 @@ class TestCassandraServiceCosts:
         backup = services["cassandra.backup.s3-standard"]
         assert backup.service_params["snapshot_gib"] == 1
         assert [
-            placement["snapshot_gib"]
+            placement["daily_write_gib"]
             for placement in backup.service_params["placements"]
-        ] == [0, 0]
+        ] == [0.0, 0.0]

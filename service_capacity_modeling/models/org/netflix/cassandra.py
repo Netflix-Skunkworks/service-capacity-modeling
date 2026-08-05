@@ -1282,6 +1282,10 @@ class KeyspaceReplication(BaseModel):
     with no cross-region replication. Since network cost scales with the regions
     a write must cross, pricing the whole cluster at one placement charges
     phantom cross-region replication to the single-region keyspaces.
+
+    Only the write rate is split. Stored bytes are not: the backup snapshot is a
+    function of what a region holds, not of how many regions hold it, so splitting
+    state size across placements changes nothing except rounding.
     """
 
     keyspaces: List[str] = Field(
@@ -1298,17 +1302,13 @@ class KeyspaceReplication(BaseModel):
         description="How many regions these keyspaces replicate into. One means"
         " the data never leaves its region, so no cross-region replication.",
     )
-    state_size_share: float = Field(
-        ge=0,
-        le=1,
-        description="Fraction of the plan's estimated_state_size_gib that these"
-        " keyspaces hold.",
-    )
     write_share: float = Field(
         ge=0,
         le=1,
         description="Fraction of the plan's estimated_write_per_second that these"
-        " keyspaces receive.",
+        " keyspaces receive. Write rate is the only placement-sensitive input:"
+        " cross-region transfer scales with it, while the backup snapshot depends"
+        " on stored bytes and not on how many regions hold them.",
     )
 
 
@@ -1329,9 +1329,9 @@ class NflxCassandraArguments(BaseModel):
         description="Replication placements of the keyspaces this plan holds, used"
         " to attribute network and backup cost. When supplied, each entry is priced"
         " at its own replication factor and region count using its share of the"
-        " plan's state size and write rate, and the results are summed. An empty"
-        " list attributes no service cost. When unsupplied, the whole plan is"
-        " priced at one replication factor.",
+        " plan's write rate, and the results are summed. An empty list attributes"
+        " no service cost. When unsupplied, the whole plan is priced at one"
+        " replication factor.",
     )
     require_local_disks: bool = Field(
         default=True,
@@ -1510,12 +1510,11 @@ class NflxCassandraArguments(BaseModel):
         # own state size or write rate unrepresentable.
         if not value:
             return value
-        for field in ("state_size_share", "write_share"):
-            total = math.fsum(getattr(entry, field) for entry in value)
-            if abs(total - 1.0) > _KEYSPACE_SHARE_TOLERANCE:
-                raise ValueError(
-                    f"keyspace_replication {field} must sum to 1.0, got {total}"
-                )
+        total = math.fsum(entry.write_share for entry in value)
+        if abs(total - 1.0) > _KEYSPACE_SHARE_TOLERANCE:
+            raise ValueError(
+                f"keyspace_replication write_share must sum to 1.0, got {total}"
+            )
         return value
 
     @classmethod
@@ -1673,27 +1672,26 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         """Price each keyspace replication placement separately and sum them.
 
         Every entry re-enters ``service_costs`` carrying its own share of the
-        plan's state size and write rate, its own replication factor, and its own
-        region count, so an entry with ``num_regions == 1`` is charged no
-        cross-region replication at all. Backup is charged once over the whole
-        plan because the snapshot floor and retention are per-plan.
+        plan's write rate, its own replication factor, and its own region count,
+        so an entry with ``num_regions == 1`` is charged no cross-region
+        replication at all.
+
+        Stored bytes are deliberately not split. The backup snapshot depends on
+        what a region holds, not on how many regions hold it, so it is computed
+        once from the plan's own state size; only the upload volume, which scales
+        with write fan-out, is summed per placement.
         """
         entries = args.keyspace_replication or []
         if not entries:
             return []
-        plan_state_size_gib = desires.data_shape.estimated_state_size_gib.mid
         plan_write_per_second = desires.query_pattern.estimated_write_per_second.mid
         charge_backup = _backup_charged(context, desires, args)
 
         services_by_type: Dict[str, ServiceCapacity] = {}
-        snapshot_gib = 0
         daily_write_gib = 0.0
         backup_placements: List[Dict[str, Any]] = []
         for entry in entries:
             entry_desires = desires.model_copy(deep=True)
-            entry_desires.data_shape.estimated_state_size_gib = certain_float(
-                plan_state_size_gib * entry.state_size_share
-            )
             entry_desires.query_pattern.estimated_write_per_second = certain_float(
                 plan_write_per_second * entry.write_share
             )
@@ -1734,22 +1732,26 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
                 )
 
             if charge_backup:
-                entry_snapshot_gib, entry_daily_write_gib = _backup_components(
+                # Only the upload volume is placement-sensitive: it divides by the
+                # regions a write fans out to. The snapshot is charged once below,
+                # on the plan's own state size.
+                _, entry_daily_write_gib = _backup_components(
                     entry_desires, entry_context, entry.copies_per_region
                 )
-                snapshot_gib += entry_snapshot_gib
                 daily_write_gib += entry_daily_write_gib
                 backup_placements.append(
                     {
                         "keyspaces": entry.keyspaces,
                         "copies_per_region": entry.copies_per_region,
                         "num_regions": entry.num_regions,
-                        "snapshot_gib": entry_snapshot_gib,
                         "daily_write_gib": round(entry_daily_write_gib, 1),
                     }
                 )
 
         if charge_backup:
+            snapshot_gib, _ = _backup_components(
+                desires, context, _target_rf(desires, args.copies_per_region)
+            )
             backup = _backup_service(
                 service_type,
                 context,
