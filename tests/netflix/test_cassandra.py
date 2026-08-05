@@ -31,7 +31,6 @@ from service_capacity_modeling.models.org.netflix.cassandra import (
     _get_min_count,
     CassandraClusterSizeMode,
     KeyspaceReplication,
-    NflxCassandraArguments,
     NflxCassandraCapacityModel,
 )
 from tests.util import assert_minimum_storage_gib
@@ -1350,7 +1349,7 @@ class TestCassandraServiceCosts:
         ] == [["rf2"], ["rf3"]]
 
     def test_keyspace_replication_empty_disables_service_costs(self):
-        assert self._services(keyspace_replication=[]) == []
+        assert not self._services(keyspace_replication=[])
 
     def test_keyspace_replication_prices_a_single_replica_keyspace(self):
         # RF=1 is unwise but real, and a measured factor is taken as fact. There
@@ -1434,6 +1433,10 @@ class TestCassandraServiceCosts:
             },
         ]
         entries[1][field] = share
+
+        from service_capacity_modeling.models.org.netflix.cassandra import (
+            NflxCassandraArguments,
+        )
 
         with pytest.raises(ValueError, match=f"{field} must sum to 1.0"):
             NflxCassandraArguments.from_extra_model_arguments(
