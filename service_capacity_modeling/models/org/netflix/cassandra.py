@@ -1281,6 +1281,10 @@ class KeyspaceReplication(BaseModel):
     normalises them against each other. The plan's own totals stay the source of
     truth, so a breakdown cannot contradict them no matter what scale the caller
     works in, and there is no sum-to-one rule to get wrong.
+
+    Prefer :func:`keyspace_replication_by_region` over constructing these
+    directly; it derives correctly-scoped per-region inputs from the placements a
+    caller already has.
     """
 
     keyspaces: List[str] = Field(
@@ -1309,6 +1313,79 @@ class KeyspaceReplication(BaseModel):
         description="Relative amount of the plan's write rate these keyspaces"
         " receive, on the same footing as state_size_weight.",
     )
+
+
+class KeyspacePlacement(BaseModel):
+    """Where one set of keyspaces actually lives, as a caller measures it.
+
+    This is the shape a caller has: a keyspace, its replication factor, and the
+    regions it is deployed into. Hand these to
+    :func:`keyspace_replication_by_region` rather than assembling
+    :class:`KeyspaceReplication` lists directly -- the per-region scoping is easy
+    to get wrong by hand and wrong in a way that looks plausible.
+    """
+
+    keyspaces: List[str] = Field(
+        min_length=1,
+        description="Keyspaces sharing this placement.",
+    )
+    copies_per_region: int = Field(
+        gt=0,
+        description="Copies inside one region, e.g. RF=3.",
+    )
+    regions: List[str] = Field(
+        min_length=1,
+        description="Regions these keyspaces are deployed into. One region means"
+        " the data never leaves it, so no cross-region replication.",
+    )
+    state_size_weight: float = Field(
+        ge=0,
+        default=0.0,
+        description="Relative stored bytes, on any non-negative scale. Measured"
+        " GiB is the natural thing to pass.",
+    )
+    write_weight: float = Field(
+        ge=0,
+        default=0.0,
+        description="Relative write rate, on the same footing as"
+        " state_size_weight. Measured writes per second is the natural thing.",
+    )
+
+
+def keyspace_replication_by_region(
+    placements: List[KeyspacePlacement],
+) -> Dict[str, List[KeyspaceReplication]]:
+    """Per-region ``keyspace_replication`` inputs, scoped correctly by construction.
+
+    Each regional plan returns an additive share so that summing every region
+    recovers the fleetwide cost, and ``num_regions`` is the divisor. A placement
+    confined to one region therefore has to appear in *that region's* input only:
+    repeat it everywhere and it is counted once per region, which produces a
+    number that looks reasonable and is wrong by the region count.
+
+    Describing the placements once and deriving the per-region lists removes that
+    choice from the caller. ``num_regions`` is computed from the regions given
+    rather than passed separately, so it cannot disagree with them either.
+
+    Returns a mapping keyed by region, ready to drop into that region's
+    ``extra_model_arguments["keyspace_replication"]``. Regions with no placements
+    are present with an empty list, which attributes no service cost -- rather
+    than being absent and silently falling back to single-replication pricing.
+    """
+    by_region: Dict[str, List[KeyspaceReplication]] = {
+        region: [] for placement in placements for region in placement.regions
+    }
+    for placement in placements:
+        entry = KeyspaceReplication(
+            keyspaces=placement.keyspaces,
+            copies_per_region=placement.copies_per_region,
+            num_regions=len(set(placement.regions)),
+            state_size_weight=placement.state_size_weight,
+            write_weight=placement.write_weight,
+        )
+        for region in set(placement.regions):
+            by_region[region].append(entry)
+    return by_region
 
 
 class NflxCassandraArguments(BaseModel):
@@ -1663,9 +1740,12 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         regions recovers the fleetwide cost, and that share is what
         ``num_regions`` divides by. An entry with ``num_regions == 1`` therefore
         comes back undivided -- correctly, because those keyspaces exist only
-        here and no other region's plan will contribute to them. Callers must
-        list such an entry in that one region's input only; repeating it in every
-        region's input multiplies it by the region count.
+        here and no other region's plan will contribute to them.
+
+        Build these with :func:`keyspace_replication_by_region` rather than by
+        hand. It takes the placements a caller actually measures and derives the
+        per-region lists, so the scoping above is satisfied by construction
+        instead of being a rule to remember.
 
         Backup is charged once over the whole plan because the snapshot floor and
         retention are per-plan, but the snapshot is accumulated *per placement*:

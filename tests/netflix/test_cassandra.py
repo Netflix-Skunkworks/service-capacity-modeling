@@ -30,6 +30,8 @@ from service_capacity_modeling.models.org.netflix.cassandra import (
     _get_cluster_size_lambda,
     _get_min_count,
     CassandraClusterSizeMode,
+    keyspace_replication_by_region,
+    KeyspacePlacement,
     KeyspaceReplication,
     NflxCassandraCapacityModel,
 )
@@ -1417,6 +1419,66 @@ class TestCassandraServiceCosts:
         # The single-RF whole-plan figure, which is what a collapsed snapshot
         # would have produced.
         assert backup.service_params["snapshot_gib"] != 450
+
+    def test_placements_derive_per_region_inputs_scoped_to_where_they_live(self):
+        # The shape a caller actually has: a keyspace, its RF, and the regions it
+        # is deployed into. Deriving the per-region inputs means the caller never
+        # chooses whether a confined placement appears in one region or all four
+        # -- the choice that is easy to get wrong and wrong by the region count.
+        regions = ["us-east-1", "us-east-2", "us-west-2", "eu-west-1"]
+        by_region = keyspace_replication_by_region(
+            [
+                KeyspacePlacement(
+                    keyspaces=["events"],
+                    copies_per_region=3,
+                    regions=regions,
+                    state_size_weight=1200.0,
+                    write_weight=40.0,
+                ),
+                KeyspacePlacement(
+                    keyspaces=["events_useast1"],
+                    copies_per_region=3,
+                    regions=["us-east-1"],
+                    state_size_weight=600.0,
+                    write_weight=90.0,
+                ),
+            ]
+        )
+
+        assert set(by_region) == set(regions)
+        # The confined placement lands only where it lives.
+        assert [entry.keyspaces for entry in by_region["us-east-1"]] == [
+            ["events"],
+            ["events_useast1"],
+        ]
+        assert [entry.keyspaces for entry in by_region["eu-west-1"]] == [["events"]]
+        # num_regions is derived from the regions, so it cannot disagree with them.
+        assert [entry.num_regions for entry in by_region["us-east-1"]] == [4, 1]
+
+    def test_derived_inputs_charge_no_cross_region_transfer_for_a_confined_keyspace(
+        self,
+    ):
+        # End to end through the helper: the region hosting a confined keyspace
+        # pays cross-region transfer only for the globally replicated one.
+        by_region = keyspace_replication_by_region(
+            [
+                KeyspacePlacement(
+                    keyspaces=["events_useast1"],
+                    copies_per_region=3,
+                    regions=["us-east-1"],
+                    write_weight=100.0,
+                ),
+            ]
+        )
+
+        costs = {
+            service.service_type: service.annual_cost
+            for service in self._services(
+                num_regions=4, keyspace_replication=by_region["us-east-1"]
+            )
+        }
+
+        assert costs["cassandra.net.inter.region"] == 0
 
     def test_keyspace_replication_empty_disables_service_costs(self):
         assert not self._services(keyspace_replication=[])
