@@ -909,6 +909,36 @@ class TestCassandraReplicationArguments:
             == 2
         )
 
+    def test_capacity_plan_prices_confined_keyspace_without_inter_region_cost(self):
+        hardware = shapes.region("us-east-1")
+        result = NflxCassandraCapacityModel.capacity_plan(
+            instance=hardware.instances["m6id.2xlarge"],
+            drive=hardware.drives["gp3"],
+            context=RegionContext(
+                zones_in_region=hardware.zones_in_region,
+                num_regions=4,
+                services=hardware.services,
+            ),
+            desires=small_but_high_qps,
+            extra_model_arguments={
+                "require_local_disks": False,
+                "keyspace_replication": [
+                    {
+                        **self._replication_entry(),
+                        "num_regions": 1,
+                    }
+                ],
+            },
+        )
+
+        assert result is not None
+        assert not isinstance(result, Excuse)
+        services = {
+            service.service_type: service
+            for service in result.candidate_clusters.services
+        }
+        assert services["cassandra.net.inter.region"].annual_cost == 0
+
     @pytest.mark.parametrize("keyspace_replication", [[], "mixed"])
     def test_capacity_plan_requires_one_replication_factor(self, keyspace_replication):
         if keyspace_replication == "mixed":

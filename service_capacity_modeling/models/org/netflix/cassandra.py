@@ -718,6 +718,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     drive: Drive,
     context: RegionContext,
     desires: CapacityDesires,
+    extra_model_arguments: Dict[str, Any],
     zones_per_region: int = 3,
     copies_per_region: int = 3,
     require_local_disks: bool = False,
@@ -734,7 +735,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     large_instance_regret: float = 0.2,
     different_family_regret: float = 0.10,
     max_page_cache_gib: float = DEFAULT_MAX_PAGE_CACHE_GIB,
-    backup_retention_days: Optional[float] = None,
     max_disk_utilization: float = CASSANDRA_MAX_DISK_UTILIZATION,
     min_instance_ram_gib_exclusive: float = 16.0,
     observed_ebs_read_io_per_read: Optional[float] = None,
@@ -1123,10 +1123,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         service_type=NflxCassandraCapacityModel.service_name,
         context=context,
         desires=desires,
-        extra_model_arguments={
-            "copies_per_region": copies_per_region,
-            "backup_retention_days": backup_retention_days,
-        },
+        extra_model_arguments=extra_model_arguments,
     )
 
     cluster.cluster_type = NflxCassandraCapacityModel.cluster_type
@@ -1922,6 +1919,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             drive=drive,
             context=context,
             desires=desires,
+            extra_model_arguments=extra_model_arguments,
             zones_per_region=context.zones_in_region,
             copies_per_region=copies_per_region,
             require_local_disks=args.require_local_disks,
@@ -1939,7 +1937,6 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             large_instance_regret=args.large_instance_regret,
             different_family_regret=args.different_family_regret,
             max_page_cache_gib=args.max_page_cache_gib,
-            backup_retention_days=args.backup_retention_days,
             max_disk_utilization=args.max_disk_utilization,
             min_instance_ram_gib_exclusive=args.min_instance_ram_gib_exclusive,
             observed_ebs_read_io_per_read=args.observed_ebs_read_io_per_read,
