@@ -257,12 +257,14 @@ def _get_cores_from_desires(desires: CapacityDesires, instance: Instance) -> int
     return needed_cores
 
 
-def _get_disk_from_desires(desires: CapacityDesires, copies_per_region: int) -> int:
+def _get_raw_disk_from_desires(
+    desires: CapacityDesires, copies_per_region: int
+) -> float:
     disk_buffer = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     )
     # Do not add disk buffers now as memory calculation is done on the disk usage
-    return math.ceil(
+    return (
         (1.0 / desires.data_shape.estimated_compression_ratio.mid)
         * desires.data_shape.estimated_state_size_gib.mid
         * copies_per_region
@@ -270,21 +272,23 @@ def _get_disk_from_desires(desires: CapacityDesires, copies_per_region: int) -> 
     )
 
 
+def _get_disk_from_desires(desires: CapacityDesires, copies_per_region: int) -> int:
+    return math.ceil(_get_raw_disk_from_desires(desires, copies_per_region))
+
+
 def _backup_components(
     desires: CapacityDesires,
     context: RegionContext,
     copies_per_region: int,
-) -> Tuple[int, float]:
-    """Snapshot GiB per zone and daily backup upload GiB for one replication.
+) -> Tuple[float, float]:
+    """Raw replicated disk GiB and daily upload GiB for one replication.
 
     Backup storage is dominated by continuous SSTable uploads, not just the
     data-at-rest snapshot. The upload volume uses the overhead-adjusted wire
     size because SSTables include full serialized mutations (cell metadata,
     timestamps, bloom filter contributions), not just the raw app payload.
     """
-    snapshot_gib = (
-        _get_disk_from_desires(desires, copies_per_region) // context.zones_in_region
-    )
+    snapshot_disk_gib = _get_raw_disk_from_desires(desires, copies_per_region)
     wire_write_size = _cassandra_wire_write_size(
         desires.query_pattern.estimated_mean_write_size_bytes.mid
     )
@@ -292,7 +296,7 @@ def _backup_components(
     daily_write_gib = (wps * wire_write_size * 86400) / (
         (1024**3) * max(context.num_regions, 1)
     )
-    return snapshot_gib, daily_write_gib
+    return snapshot_disk_gib, daily_write_gib
 
 
 def _backup_charged(
@@ -1748,7 +1752,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         services.extend(net_services)
 
         if _backup_charged(context, desires, args):
-            snapshot_gib, daily_write_gib = _backup_components(
+            snapshot_disk_gib, daily_write_gib = _backup_components(
                 desires, context, copies_per_region
             )
             services.append(
@@ -1757,7 +1761,9 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
                     context,
                     desires,
                     args,
-                    snapshot_gib=snapshot_gib,
+                    snapshot_gib=(
+                        math.ceil(snapshot_disk_gib) // context.zones_in_region
+                    ),
                     daily_write_gib=daily_write_gib,
                 )
             )
@@ -1805,7 +1811,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         charge_backup = _backup_charged(context, desires, args)
 
         services_by_type: Dict[str, ServiceCapacity] = {}
-        snapshot_gib = 0
+        placement_snapshot_disk_gib: List[float] = []
         daily_write_gib = 0.0
         backup_placements: List[Dict[str, Any]] = []
         for entry in entries:
@@ -1853,22 +1859,28 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
                 )
 
             if charge_backup:
-                entry_snapshot_gib, entry_daily_write_gib = _backup_components(
+                entry_snapshot_disk_gib, entry_daily_write_gib = _backup_components(
                     entry_desires, entry_context, entry.copies_per_region
                 )
-                snapshot_gib += entry_snapshot_gib
+                placement_snapshot_disk_gib.append(entry_snapshot_disk_gib)
                 daily_write_gib += entry_daily_write_gib
                 backup_placements.append(
                     {
                         "keyspaces": entry.keyspaces,
                         "copies_per_region": entry.copies_per_region,
                         "num_regions": entry.num_regions,
-                        "snapshot_gib": entry_snapshot_gib,
+                        "snapshot_gib": (
+                            entry_snapshot_disk_gib / context.zones_in_region
+                        ),
                         "daily_write_gib": round(entry_daily_write_gib, 1),
                     }
                 )
 
         if charge_backup:
+            snapshot_gib = (
+                math.ceil(math.fsum(placement_snapshot_disk_gib))
+                // context.zones_in_region
+            )
             backup = _backup_service(
                 service_type,
                 context,

@@ -1495,9 +1495,34 @@ class TestCassandraServiceCosts:
             for placement in backup.service_params["placements"]
         ] == [90, 315]
         assert backup.service_params["snapshot_gib"] == 405
-        # The single-RF whole-plan figure, which is what a collapsed snapshot
-        # would have produced.
-        assert backup.service_params["snapshot_gib"] != 450
+
+    def test_backup_snapshot_rounds_after_summing_placements(self):
+        entries = [
+            KeyspaceReplication(
+                keyspaces=[f"keyspace-{index}"],
+                copies_per_region=3,
+                num_regions=1,
+                state_size_share=0.01,
+                write_share=0.01,
+            )
+            for index in range(100)
+        ]
+
+        services = {
+            service.service_type: service
+            for service in self._services(
+                num_regions=1,
+                state_size_gib=20,
+                keyspace_replication=entries,
+            )
+        }
+        backup = services["cassandra.backup.s3-standard"]
+
+        assert backup.service_params["snapshot_gib"] == 30
+        assert sum(
+            placement["snapshot_gib"]
+            for placement in backup.service_params["placements"]
+        ) == pytest.approx(30)
 
     def test_placements_derive_per_region_inputs_scoped_to_where_they_live(self):
         # The shape a caller actually has: a keyspace, its RF, and the regions it
