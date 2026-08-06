@@ -868,13 +868,13 @@ class TestCassandraCurrentCapacity:
 
 class TestCassandraReplicationArguments:
     @staticmethod
-    def _replication_entry(copies_per_region=3, keyspace="events"):
+    def _replication_entry(copies_per_region=3, keyspace="events", share=1.0):
         return {
             "keyspaces": [keyspace],
             "copies_per_region": copies_per_region,
             "num_regions": 2,
-            "state_size_share": 1.0,
-            "write_share": 1.0,
+            "state_size_share": share,
+            "write_share": share,
         }
 
     def test_replication_inputs_are_mutually_exclusive(self):
@@ -884,6 +884,55 @@ class TestCassandraReplicationArguments:
                     "copies_per_region": 3,
                     "keyspace_replication": [self._replication_entry()],
                 }
+            )
+
+    @pytest.mark.parametrize(
+        "state_size_share, write_share",
+        [
+            (0.0, 0.0),
+            (0.00000025, 0.0),
+            (0.50000025, 0.50000025),
+            (0.5, 0.25),
+        ],
+    )
+    def test_replication_share_totals_accept_valid_rounding_and_partial_writes(
+        self, state_size_share, write_share
+    ):
+        NflxCassandraArguments.from_extra_model_arguments(
+            {
+                "keyspace_replication": [
+                    {
+                        **self._replication_entry(keyspace=f"keyspace-{index}"),
+                        "state_size_share": state_size_share,
+                        "write_share": write_share,
+                    }
+                    for index in range(2)
+                ]
+            }
+        )
+
+    @pytest.mark.parametrize(
+        "state_size_share, write_share, invalid_total",
+        [
+            (0.45, 0.5, "state_size_share"),
+            (0.5, 0.6, "write_share"),
+        ],
+    )
+    def test_replication_share_totals_reject_invalid_aggregates(
+        self, state_size_share, write_share, invalid_total
+    ):
+        entries = [
+            {
+                **self._replication_entry(keyspace=f"keyspace-{index}"),
+                "state_size_share": state_size_share,
+                "write_share": write_share,
+            }
+            for index in range(2)
+        ]
+
+        with pytest.raises(ValueError, match=f"{invalid_total} total"):
+            NflxCassandraArguments.from_extra_model_arguments(
+                {"keyspace_replication": entries}
             )
 
     def test_capacity_plan_derives_rf_from_keyspace_replication(self):
@@ -943,8 +992,8 @@ class TestCassandraReplicationArguments:
     def test_capacity_plan_requires_one_replication_factor(self, keyspace_replication):
         if keyspace_replication == "mixed":
             keyspace_replication = [
-                self._replication_entry(2),
-                self._replication_entry(3, "sessions"),
+                self._replication_entry(2, share=0.5),
+                self._replication_entry(3, "sessions", share=0.5),
             ]
         hardware = shapes.region("us-east-1")
 

@@ -1601,11 +1601,33 @@ class NflxCassandraArguments(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _check_replication_source(self) -> "NflxCassandraArguments":
+    def _check_replication_source(  # pylint: disable=not-an-iterable
+        self,
+    ) -> "NflxCassandraArguments":
         if self.copies_per_region is not None and self.keyspace_replication is not None:
             raise ValueError(
                 "copies_per_region and keyspace_replication are mutually exclusive"
             )
+        entries = self.keyspace_replication or []
+        if entries:
+            state_size_share_total = math.fsum(
+                entry.state_size_share for entry in entries
+            )
+            if not (
+                math.isclose(state_size_share_total, 0.0, abs_tol=1e-6)
+                or math.isclose(state_size_share_total, 1.0, abs_tol=1e-6)
+            ):
+                raise ValueError(
+                    "keyspace_replication state_size_share total must be "
+                    "approximately 0 or 1"
+                )
+            write_share_total = math.fsum(entry.write_share for entry in entries)
+            if write_share_total > 1 and not math.isclose(
+                write_share_total, 1.0, abs_tol=1e-6
+            ):
+                raise ValueError(
+                    "keyspace_replication write_share total must be at most 1"
+                )
         return self
 
     @model_validator(mode="after")
