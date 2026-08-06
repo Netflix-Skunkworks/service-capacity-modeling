@@ -213,7 +213,7 @@
           "effective_disk_per_node_gib": 2100,
           "required_nodes_by_type": {
             "cluster_size": 8,
-            "cpu": 7,
+            "cpu": 5,
             "disk_capacity": 1,
             "disk_iops": 0,
             "memory": 5,
@@ -243,7 +243,7 @@
           "effective_disk_per_node_gib": 2100,
           "required_nodes_by_type": {
             "cluster_size": 8,
-            "cpu": 7,
+            "cpu": 5,
             "disk_capacity": 1,
             "disk_iops": 0,
             "memory": 5,
@@ -273,7 +273,7 @@
           "effective_disk_per_node_gib": 2100,
           "required_nodes_by_type": {
             "cluster_size": 8,
-            "cpu": 7,
+            "cpu": 5,
             "disk_capacity": 1,
             "disk_iops": 0,
             "memory": 5,
@@ -417,7 +417,7 @@
           },
           "required_nodes_by_type": {
             "cluster_size": 64,
-            "cpu": 50,
+            "cpu": 39,
             "disk_capacity": 63,
             "disk_iops": 0,
             "memory": 2,
@@ -450,7 +450,7 @@
           },
           "required_nodes_by_type": {
             "cluster_size": 64,
-            "cpu": 50,
+            "cpu": 39,
             "disk_capacity": 63,
             "disk_iops": 0,
             "memory": 2,
@@ -483,7 +483,7 @@
           },
           "required_nodes_by_type": {
             "cluster_size": 64,
-            "cpu": 50,
+            "cpu": 39,
             "disk_capacity": 63,
             "disk_iops": 0,
             "memory": 2,
