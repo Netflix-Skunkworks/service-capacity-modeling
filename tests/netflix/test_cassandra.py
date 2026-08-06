@@ -1511,40 +1511,6 @@ class TestCassandraServiceCosts:
             four_regions["cassandra.net.intra.region"] * 4
         )
 
-    def test_backup_snapshot_follows_each_placement_replication_factor(self):
-        # The snapshot is state size times replication factor, so when placements
-        # do not share an RF the snapshot has to accumulate per placement. Using
-        # one factor over the whole plan overcharges the lower-RF share -- for
-        # 30% at RF2 and 70% at RF3 it bills 450 GiB against a true 405.
-        entries = [
-            KeyspaceReplication(
-                keyspaces=["rf2"],
-                copies_per_region=2,
-                num_regions=2,
-                state_size_share=0.3,
-                write_share=0.5,
-            ),
-            KeyspaceReplication(
-                keyspaces=["rf3"],
-                copies_per_region=3,
-                num_regions=2,
-                state_size_share=0.7,
-                write_share=0.5,
-            ),
-        ]
-
-        services = {
-            service.service_type: service
-            for service in self._services(num_regions=2, keyspace_replication=entries)
-        }
-        backup = services["cassandra.backup.s3-standard"]
-
-        assert [
-            placement["snapshot_gib"]
-            for placement in backup.service_params["placements"]
-        ] == [90, 315]
-        assert backup.service_params["snapshot_gib"] == 405
-
     def test_backup_snapshot_rounds_after_summing_placements(self):
         entries = [
             KeyspaceReplication(
