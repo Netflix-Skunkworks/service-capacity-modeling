@@ -1387,10 +1387,11 @@ def keyspace_replication_by_region(
     fleetwide write rate. Normalising writes separately inside each regional list
     would inflate a global keyspace wherever it is the only local placement.
 
-    Returns a mapping keyed by region, ready to drop into that region's
-    ``extra_model_arguments["keyspace_replication"]``. Regions with no placements
-    are present with an empty list, which attributes no service cost -- rather
-    than being absent and silently falling back to single-replication pricing.
+    Returns a mapping whose keys are exactly the regions named by the placements,
+    ready to drop into each region's
+    ``extra_model_arguments["keyspace_replication"]``. Callers must validate that
+    those keys cover every deployed region; an omitted region could otherwise
+    silently fall back to single-replication pricing.
     """
     by_region: Dict[str, List[KeyspaceReplication]] = {
         region: [] for placement in placements for region in placement.regions
