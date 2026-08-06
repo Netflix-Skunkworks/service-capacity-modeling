@@ -33,6 +33,7 @@ from service_capacity_modeling.models.org.netflix.cassandra import (
     keyspace_replication_by_region,
     KeyspacePlacement,
     KeyspaceReplication,
+    NflxCassandraArguments,
     NflxCassandraCapacityModel,
 )
 from tests.util import assert_minimum_storage_gib
@@ -865,6 +866,74 @@ class TestCassandraCurrentCapacity:
         assert result.count == 24
 
 
+class TestCassandraReplicationArguments:
+    @staticmethod
+    def _replication_entry(copies_per_region=3, keyspace="events"):
+        return {
+            "keyspaces": [keyspace],
+            "copies_per_region": copies_per_region,
+            "num_regions": 2,
+            "state_size_share": 1.0,
+            "write_share": 1.0,
+        }
+
+    def test_replication_inputs_are_mutually_exclusive(self):
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            NflxCassandraArguments.from_extra_model_arguments(
+                {
+                    "copies_per_region": 3,
+                    "keyspace_replication": [self._replication_entry()],
+                }
+            )
+
+    def test_capacity_plan_derives_rf_from_keyspace_replication(self):
+        hardware = shapes.region("us-east-1")
+        result = NflxCassandraCapacityModel.capacity_plan(
+            instance=hardware.instances["m6id.2xlarge"],
+            drive=hardware.drives["gp3"],
+            context=RegionContext(
+                zones_in_region=hardware.zones_in_region,
+                services=hardware.services,
+            ),
+            desires=small_but_high_qps,
+            extra_model_arguments={
+                "require_local_disks": False,
+                "keyspace_replication": [self._replication_entry(2)],
+            },
+        )
+
+        assert result is not None
+        assert not isinstance(result, Excuse)
+        assert (
+            result.candidate_clusters.zonal[0].cluster_params["cassandra.keyspace.rf"]
+            == 2
+        )
+
+    @pytest.mark.parametrize("keyspace_replication", [[], "mixed"])
+    def test_capacity_plan_requires_one_replication_factor(self, keyspace_replication):
+        if keyspace_replication == "mixed":
+            keyspace_replication = [
+                self._replication_entry(2),
+                self._replication_entry(3, "sessions"),
+            ]
+        hardware = shapes.region("us-east-1")
+
+        with pytest.raises(ValueError, match="capacity planning"):
+            NflxCassandraCapacityModel.capacity_plan(
+                instance=hardware.instances["m6id.2xlarge"],
+                drive=hardware.drives["gp3"],
+                context=RegionContext(
+                    zones_in_region=hardware.zones_in_region,
+                    services=hardware.services,
+                ),
+                desires=small_but_high_qps,
+                extra_model_arguments={
+                    "require_local_disks": False,
+                    "keyspace_replication": keyspace_replication,
+                },
+            )
+
+
 class TestCassandraExtraModelArguments:
     """Test model argument validation."""
 
@@ -1065,18 +1134,10 @@ class TestCassandraExtraModelArguments:
         )
 
     def test_page_cache_cap_default(self):
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
-        )
-
         args = NflxCassandraArguments.from_extra_model_arguments({})
         assert args.max_page_cache_gib == 28.0
 
     def test_min_instance_ram_gib_exclusive_default(self):
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
-        )
-
         args = NflxCassandraArguments.from_extra_model_arguments({})
         assert args.min_instance_ram_gib_exclusive == 16.0
 
@@ -1116,10 +1177,6 @@ class TestCassandraExtraModelArguments:
         assert result.candidate_clusters.zonal[0].instance.name == "m6id.xlarge"
 
     def test_cluster_size_mode_extra_argument(self):
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
-        )
-
         assert (
             NflxCassandraArguments.from_extra_model_arguments({}).cluster_size_mode
             is None
@@ -1138,10 +1195,6 @@ class TestCassandraExtraModelArguments:
         )
 
     def test_allow_ebs_volume_shrink_extra_argument(self):
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
-        )
-
         assert (
             NflxCassandraArguments.from_extra_model_arguments(
                 {}
@@ -1156,10 +1209,6 @@ class TestCassandraExtraModelArguments:
         )
 
     def test_cluster_size_mode_schema_exposes_enum_docstrings(self):
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
-        )
-
         schema = NflxCassandraArguments.model_json_schema()
         cluster_size_mode = schema["$defs"]["CassandraClusterSizeMode"]
 
@@ -1266,8 +1315,8 @@ class TestCassandraServiceCosts:
                         keyspaces=["one"],
                         copies_per_region=3,
                         num_regions=1,
-                        state_size_weight=1.0,
-                        write_weight=1.0,
+                        state_size_share=1.0,
+                        write_share=1.0,
                     )
                 ],
                 id="per-placement",
@@ -1297,15 +1346,15 @@ class TestCassandraServiceCosts:
                 keyspaces=["rf2"],
                 copies_per_region=2,
                 num_regions=2,
-                state_size_weight=0.3,
-                write_weight=0.4,
+                state_size_share=0.3,
+                write_share=0.4,
             ),
             KeyspaceReplication(
                 keyspaces=["rf3"],
                 copies_per_region=3,
                 num_regions=2,
-                state_size_weight=0.7,
-                write_weight=0.6,
+                state_size_share=0.7,
+                write_share=0.6,
             ),
         ]
         combined = {
@@ -1319,8 +1368,8 @@ class TestCassandraServiceCosts:
                     service.service_type: service
                     for service in self._services(
                         num_regions=entry.num_regions,
-                        state_size_gib=300 * entry.state_size_weight,
-                        writes_per_second=100 * entry.write_weight,
+                        state_size_gib=300 * entry.state_size_share,
+                        writes_per_second=100 * entry.write_share,
                         copies_per_region=entry.copies_per_region,
                         **overrides,
                     )
@@ -1361,8 +1410,8 @@ class TestCassandraServiceCosts:
             keyspaces=["local_only"],
             copies_per_region=3,
             num_regions=1,
-            state_size_weight=1.0,
-            write_weight=1.0,
+            state_size_share=1.0,
+            write_share=1.0,
         )
         spread = confined.model_copy(update={"num_regions": 4})
 
@@ -1393,15 +1442,15 @@ class TestCassandraServiceCosts:
                 keyspaces=["rf2"],
                 copies_per_region=2,
                 num_regions=2,
-                state_size_weight=0.3,
-                write_weight=0.5,
+                state_size_share=0.3,
+                write_share=0.5,
             ),
             KeyspaceReplication(
                 keyspaces=["rf3"],
                 copies_per_region=3,
                 num_regions=2,
-                state_size_weight=0.7,
-                write_weight=0.5,
+                state_size_share=0.7,
+                write_share=0.5,
             ),
         ]
 
@@ -1454,6 +1503,71 @@ class TestCassandraServiceCosts:
         assert [entry.keyspaces for entry in by_region["eu-west-1"]] == [["events"]]
         # num_regions is derived from the regions, so it cannot disagree with them.
         assert [entry.num_regions for entry in by_region["us-east-1"]] == [4, 1]
+        assert [
+            entry.state_size_share for entry in by_region["us-east-1"]
+        ] == pytest.approx([2 / 3, 1 / 3])
+        assert [entry.write_share for entry in by_region["us-east-1"]] == pytest.approx(
+            [40 / 130, 90 / 130]
+        )
+        assert by_region["eu-west-1"][0].state_size_share == 1
+        assert by_region["eu-west-1"][0].write_share == pytest.approx(40 / 130)
+
+    def test_derived_inputs_preserve_fleetwide_weights_across_regions(self):
+        regions = ["us-east-1", "us-east-2", "us-west-2", "eu-west-1"]
+        by_region = keyspace_replication_by_region(
+            [
+                KeyspacePlacement(
+                    keyspaces=["events"],
+                    copies_per_region=3,
+                    regions=regions,
+                    write_weight=40.0,
+                ),
+                KeyspacePlacement(
+                    keyspaces=["events_useast1"],
+                    copies_per_region=3,
+                    regions=["us-east-1"],
+                    write_weight=60.0,
+                ),
+            ]
+        )
+
+        actual = {}
+        for region in regions:
+            for service in self._services(
+                num_regions=len(regions),
+                backup_retention_days=0,
+                keyspace_replication=by_region[region],
+            ):
+                actual[service.service_type] = (
+                    actual.get(service.service_type, 0) + service.annual_cost
+                )
+
+        global_share = {
+            service.service_type: service.annual_cost
+            for service in self._services(
+                num_regions=len(regions),
+                backup_retention_days=0,
+                writes_per_second=40,
+                copies_per_region=3,
+            )
+        }
+        confined = {
+            service.service_type: service.annual_cost
+            for service in self._services(
+                num_regions=1,
+                backup_retention_days=0,
+                writes_per_second=60,
+                copies_per_region=3,
+            )
+        }
+
+        assert actual["cassandra.net.inter.region"] == pytest.approx(
+            global_share["cassandra.net.inter.region"] * len(regions)
+        )
+        assert actual["cassandra.net.intra.region"] == pytest.approx(
+            global_share["cassandra.net.intra.region"] * len(regions)
+            + confined["cassandra.net.intra.region"]
+        )
 
     def test_derived_inputs_charge_no_cross_region_transfer_for_a_confined_keyspace(
         self,
@@ -1494,8 +1608,8 @@ class TestCassandraServiceCosts:
                         keyspaces=["unreplicated"],
                         copies_per_region=1,
                         num_regions=1,
-                        state_size_weight=1.0,
-                        write_weight=1.0,
+                        state_size_share=1.0,
+                        write_share=1.0,
                     )
                 ]
             )
@@ -1510,8 +1624,8 @@ class TestCassandraServiceCosts:
             keyspaces=["events_useast1"],
             copies_per_region=3,
             num_regions=1,
-            state_size_weight=0.5,
-            write_weight=0.5,
+            state_size_share=0.5,
+            write_share=0.5,
         )
         global_keyspace = island.model_copy(
             update={"keyspaces": ["events"], "num_regions": 4}
@@ -1551,26 +1665,34 @@ class TestCassandraServiceCosts:
         # class of "my shares did not add up" caller error: there is no total to
         # get wrong, and the plan's own figures stay the source of truth.
         def costs_at(scale):
-            entries = [
-                KeyspaceReplication(
-                    keyspaces=["confined"],
-                    copies_per_region=3,
-                    num_regions=1,
-                    state_size_weight=0.25 * scale,
-                    write_weight=0.25 * scale,
-                ),
-                KeyspaceReplication(
-                    keyspaces=["global"],
-                    copies_per_region=3,
-                    num_regions=4,
-                    state_size_weight=0.75 * scale,
-                    write_weight=0.75 * scale,
-                ),
-            ]
+            by_region = keyspace_replication_by_region(
+                [
+                    KeyspacePlacement(
+                        keyspaces=["confined"],
+                        copies_per_region=3,
+                        regions=["us-east-1"],
+                        state_size_weight=0.25 * scale,
+                        write_weight=0.25 * scale,
+                    ),
+                    KeyspacePlacement(
+                        keyspaces=["global"],
+                        copies_per_region=3,
+                        regions=[
+                            "us-east-1",
+                            "us-east-2",
+                            "us-west-2",
+                            "eu-west-1",
+                        ],
+                        state_size_weight=0.75 * scale,
+                        write_weight=0.75 * scale,
+                    ),
+                ]
+            )
             return {
                 service.service_type: service.annual_cost
                 for service in self._services(
-                    num_regions=4, keyspace_replication=entries
+                    num_regions=4,
+                    keyspace_replication=by_region["us-east-1"],
                 )
             }
 
@@ -1599,14 +1721,14 @@ class TestCassandraServiceCosts:
             if service.service_type == "cassandra.net.inter.region"
         )
 
-    def test_zero_weights_attribute_nothing_rather_than_dividing_by_zero(self):
+    def test_zero_shares_attribute_nothing(self):
         entries = [
             KeyspaceReplication(
                 keyspaces=[name],
                 copies_per_region=3,
                 num_regions=1,
-                state_size_weight=0.0,
-                write_weight=0.0,
+                state_size_share=0.0,
+                write_share=0.0,
             )
             for name in ("a", "b")
         ]
@@ -1625,8 +1747,8 @@ class TestCassandraServiceCosts:
                 keyspaces=[keyspace],
                 copies_per_region=2,
                 num_regions=1,
-                state_size_weight=0.5,
-                write_weight=0.5,
+                state_size_share=0.5,
+                write_share=0.5,
             )
             for keyspace in ("one", "two")
         ]

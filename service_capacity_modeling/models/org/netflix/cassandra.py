@@ -1196,6 +1196,24 @@ def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
     return 3
 
 
+def _capacity_rf(desires: CapacityDesires, args: "NflxCassandraArguments") -> int:
+    """Resolve the one replication factor used for regional capacity sizing."""
+    entries = args.keyspace_replication
+    if entries is None:
+        return _target_rf(desires, args.copies_per_region)
+    if not entries:
+        raise ValueError(
+            "keyspace_replication must contain at least one placement for "
+            "capacity planning"
+        )
+    factors = {entry.copies_per_region for entry in entries}
+    if len(factors) != 1:
+        raise ValueError(
+            "mixed keyspace replication factors are not supported for capacity planning"
+        )
+    return factors.pop()
+
+
 def _adaptive_storage_buffer_ratio(
     zonal_data_gib: float,
     max_ratio: float = 4.0,
@@ -1269,7 +1287,7 @@ def _adaptive_compute_buffer_ratio(
 
 
 class KeyspaceReplication(BaseModel):
-    """How one set of keyspaces is replicated, and its share of the load.
+    """Planner-ready regional share for one keyspace replication placement.
 
     A Cassandra cluster can host keyspaces with different replication placements
     at once: some replicated to every region, others confined to a single region
@@ -1277,14 +1295,10 @@ class KeyspaceReplication(BaseModel):
     a write must cross, pricing the whole cluster at one placement charges
     phantom cross-region replication to the single-region keyspaces.
 
-    Weights are relative, not fractions: pass measured magnitudes and the model
-    normalises them against each other. The plan's own totals stay the source of
-    truth, so a breakdown cannot contradict them no matter what scale the caller
-    works in, and there is no sum-to-one rule to get wrong.
-
-    Prefer :func:`keyspace_replication_by_region` over constructing these
-    directly; it derives correctly-scoped per-region inputs from the placements a
-    caller already has.
+    Prefer :func:`keyspace_replication_by_region` over constructing these directly.
+    It accepts raw measured weights and derives both the regional scoping and the
+    shares. State shares are relative to this regional plan, while write shares are
+    relative to the fleetwide write rate carried by every regional plan.
     """
 
     keyspaces: List[str] = Field(
@@ -1301,17 +1315,16 @@ class KeyspaceReplication(BaseModel):
         description="How many regions these keyspaces replicate into. One means"
         " the data never leaves its region, so no cross-region replication.",
     )
-    state_size_weight: float = Field(
+    state_size_share: float = Field(
         ge=0,
-        description="Relative amount of the plan's stored bytes these keyspaces"
-        " hold. Any non-negative scale works -- measured GiB is fine -- because"
-        " weights are normalised against the other entries rather than being"
-        " required to sum to anything.",
+        le=1,
+        description="Share of this regional plan's stored bytes held by these"
+        " keyspaces.",
     )
-    write_weight: float = Field(
+    write_share: float = Field(
         ge=0,
-        description="Relative amount of the plan's write rate these keyspaces"
-        " receive, on the same footing as state_size_weight.",
+        le=1,
+        description="Share of the fleetwide write rate received by these keyspaces.",
     )
 
 
@@ -1341,14 +1354,15 @@ class KeyspacePlacement(BaseModel):
     state_size_weight: float = Field(
         ge=0,
         default=0.0,
-        description="Relative stored bytes, on any non-negative scale. Measured"
-        " GiB is the natural thing to pass.",
+        description="Relative stored bytes held in each participating region, on"
+        " any non-negative scale. The helper normalises these within each regional"
+        " plan.",
     )
     write_weight: float = Field(
         ge=0,
         default=0.0,
-        description="Relative write rate, on the same footing as"
-        " state_size_weight. Measured writes per second is the natural thing.",
+        description="Relative fleetwide write rate, on any non-negative scale."
+        " Measured writes per second is the natural thing to pass.",
     )
 
 
@@ -1367,6 +1381,12 @@ def keyspace_replication_by_region(
     choice from the caller. ``num_regions`` is computed from the regions given
     rather than passed separately, so it cannot disagree with them either.
 
+    State weights are normalised among the placements present in each region,
+    because every plan carries that region's state size. Write weights are
+    normalised once across all placements, because every plan carries the same
+    fleetwide write rate. Normalising writes separately inside each regional list
+    would inflate a global keyspace wherever it is the only local placement.
+
     Returns a mapping keyed by region, ready to drop into that region's
     ``extra_model_arguments["keyspace_replication"]``. Regions with no placements
     are present with an empty list, which attributes no service cost -- rather
@@ -1375,16 +1395,32 @@ def keyspace_replication_by_region(
     by_region: Dict[str, List[KeyspaceReplication]] = {
         region: [] for placement in placements for region in placement.regions
     }
-    for placement in placements:
-        entry = KeyspaceReplication(
-            keyspaces=placement.keyspaces,
-            copies_per_region=placement.copies_per_region,
-            num_regions=len(set(placement.regions)),
-            state_size_weight=placement.state_size_weight,
-            write_weight=placement.write_weight,
+    write_weight_total = math.fsum(placement.write_weight for placement in placements)
+    for region in by_region:
+        regional_placements = [
+            placement for placement in placements if region in placement.regions
+        ]
+        state_weight_total = math.fsum(
+            placement.state_size_weight for placement in regional_placements
         )
-        for region in set(placement.regions):
-            by_region[region].append(entry)
+        for placement in regional_placements:
+            by_region[region].append(
+                KeyspaceReplication(
+                    keyspaces=placement.keyspaces,
+                    copies_per_region=placement.copies_per_region,
+                    num_regions=len(set(placement.regions)),
+                    state_size_share=(
+                        placement.state_size_weight / state_weight_total
+                        if state_weight_total
+                        else 0.0
+                    ),
+                    write_share=(
+                        placement.write_weight / write_weight_total
+                        if write_weight_total
+                        else 0.0
+                    ),
+                )
+            )
     return by_region
 
 
@@ -1398,16 +1434,20 @@ class NflxCassandraArguments(BaseModel):
     copies_per_region: Optional[int] = Field(
         default=None,
         description="How many copies of the data will exist e.g. RF=3. If unsupplied"
-        " this will be deduced from durability and consistency desires",
+        " this will be deduced from durability and consistency desires. This is"
+        " the simple replication input and cannot be combined with"
+        " keyspace_replication.",
     )
     keyspace_replication: Optional[List[KeyspaceReplication]] = Field(
         default=None,
         description="Replication placements of the keyspaces this plan holds, used"
         " to attribute network and backup cost. When supplied, each entry is priced"
-        " at its own replication factor and region count using its normalised"
-        " weight of the plan's state size and write rate, and the results are"
-        " summed. An empty list attributes no service cost. When unsupplied, the"
-        " whole plan is priced at one replication factor.",
+        " at its own replication factor and region count using its share of the"
+        " plan's state size and write rate, and the results are summed. Placements"
+        " are authoritative when supplied, so copies_per_region must be omitted."
+        " Capacity planning currently requires every placement to use the same"
+        " replication factor. When unsupplied, the whole plan is priced at one"
+        " replication factor.",
     )
     require_local_disks: bool = Field(
         default=True,
@@ -1559,6 +1599,14 @@ class NflxCassandraArguments(BaseModel):
     )
 
     @model_validator(mode="after")
+    def _check_replication_source(self) -> "NflxCassandraArguments":
+        if self.copies_per_region is not None and self.keyspace_replication is not None:
+            raise ValueError(
+                "copies_per_region and keyspace_replication are mutually exclusive"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _check_storage_buffer_bounds(self) -> "NflxCassandraArguments":
         if self.min_storage_buffer_ratio > self.max_storage_buffer_ratio:
             raise ValueError(
@@ -1666,9 +1714,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
                 service_type, context, desires, extra_model_arguments, args
             )
 
-        copies_per_region: int = _target_rf(
-            desires, extra_model_arguments.get("copies_per_region")
-        )
+        copies_per_region = _target_rf(desires, args.copies_per_region)
 
         # Compute overhead-adjusted wire write size for CRR network cost.
         # Cassandra mutations carry ~900B fixed overhead plus 1.42x proportional
@@ -1758,10 +1804,6 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             return []
         plan_state_size_gib = desires.data_shape.estimated_state_size_gib.mid
         plan_write_per_second = desires.query_pattern.estimated_write_per_second.mid
-        # Normalising here is what makes the parts sum to the plan by
-        # construction. A zero total means nothing to attribute, not an error.
-        state_weight_total = math.fsum(entry.state_size_weight for entry in entries)
-        write_weight_total = math.fsum(entry.write_weight for entry in entries)
         charge_backup = _backup_charged(context, desires, args)
 
         services_by_type: Dict[str, ServiceCapacity] = {}
@@ -1771,14 +1813,10 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         for entry in entries:
             entry_desires = desires.model_copy(deep=True)
             entry_desires.data_shape.estimated_state_size_gib = certain_float(
-                plan_state_size_gib * entry.state_size_weight / state_weight_total
-                if state_weight_total
-                else 0.0
+                plan_state_size_gib * entry.state_size_share
             )
             entry_desires.query_pattern.estimated_write_per_second = certain_float(
-                plan_write_per_second * entry.write_weight / write_weight_total
-                if write_weight_total
-                else 0.0
+                plan_write_per_second * entry.write_share
             )
             entry_context = context.model_copy(
                 update={"num_regions": entry.num_regions}
@@ -1857,7 +1895,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         args = NflxCassandraArguments.from_extra_model_arguments(extra_model_arguments)
 
         # Use durability and consistency to compute RF if not explicitly set
-        copies_per_region = _target_rf(desires, args.copies_per_region)
+        copies_per_region = _capacity_rf(desires, args)
 
         # Validate required_cluster_size for critical tiers
         required_cluster_size: Optional[int] = (
@@ -1986,17 +2024,16 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
                     f"User asked for {key}={value}"
                 )
 
+        args = NflxCassandraArguments.from_extra_model_arguments(extra_model_arguments)
+
         # Lower RF = less write compute
-        rf = _target_rf(
-            user_desires, extra_model_arguments.get("copies_per_region", None)
-        )
+        rf = _capacity_rf(user_desires, args)
         if rf < 3:
             rf_write_latency = Interval(low=0.2, mid=0.6, high=2, confidence=0.98)
         else:
             rf_write_latency = Interval(low=0.4, mid=1, high=2, confidence=0.98)
 
         # Compute adaptive storage buffer ratio based on data size
-        args = NflxCassandraArguments.from_extra_model_arguments(extra_model_arguments)
         storage_ratio = args.max_storage_buffer_ratio
         if args.adaptive_storage_buffer:
             storage_ratio = _adaptive_storage_buffer_ratio(
