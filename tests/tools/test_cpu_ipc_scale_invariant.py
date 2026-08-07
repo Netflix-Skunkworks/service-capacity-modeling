@@ -8,6 +8,7 @@ relationship, so a family generated before a deduce_cpu_ipc_scale fix (or
 regenerated with a stale override) could silently drift from the constant
 that's supposed to back it.
 """
+
 import json
 from pathlib import Path
 
