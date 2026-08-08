@@ -30,6 +30,7 @@ from service_capacity_modeling.models.org.netflix.cassandra import (
     _get_cluster_size_lambda,
     _get_min_count,
     CassandraClusterSizeMode,
+    NflxCassandraArguments,
     NflxCassandraCapacityModel,
 )
 from tests.util import assert_minimum_storage_gib
@@ -233,6 +234,56 @@ class TestCassandraStorage:
         )[0]
         return plan.candidate_clusters.zonal[0]
 
+    @staticmethod
+    def _deployed_topology_evidence(observed_iops=16_000):
+        return {
+            "observed_ebs_max_total_io_per_second": observed_iops,
+            "observed_ebs_node_count": 768,
+            "observed_ebs_baseline_read_per_second": 300_000,
+            "observed_ebs_baseline_write_per_second": 300_000,
+        }
+
+    def _ebs_explained(
+        self,
+        desires,
+        *,
+        observed_iops=16_000,
+        instance_family="r7a",
+        num_results=1,
+        **extra_model_arguments,
+    ):
+        return planner.plan_certain_explained(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_attached_disks": True,
+                "require_local_disks": False,
+                "cluster_size_mode": "unrestricted",
+                **self._deployed_topology_evidence(observed_iops),
+                **extra_model_arguments,
+            },
+            num_regions=4,
+            instance_families=[instance_family],
+            num_results=num_results,
+            max_results_per_family=num_results,
+        )
+
+    @staticmethod
+    def _compute_buffer(kind, ratio):
+        intent = BufferIntent.scale_up if kind == "derived" else BufferIntent.desired
+        return Buffers(
+            **{
+                kind: {
+                    "scale_compute": Buffer(
+                        ratio=ratio,
+                        intent=intent,
+                        components=[BufferComponent.compute],
+                    )
+                }
+            }
+        )
+
     def test_ebs_io_per_request_calibrates_candidate_iops(self):
         desires = self._existing_ebs_desires()
         baseline = self._ebs_plan(desires)
@@ -335,6 +386,157 @@ class TestCassandraStorage:
             )
             for candidate, scale in ((current_load, 1), (future_growth, 2))
         ] == [(89, 2400, 10), (122, 2000, 12)]
+
+    def test_aligned_observed_iops_preserve_the_exact_deployed_topology(self):
+        observed_iops = 15_999
+        desires = self._existing_ebs_desires()
+        explained = self._ebs_explained(
+            desires,
+            observed_iops=observed_iops,
+            required_cluster_size=64,
+            observed_ebs_read_io_per_read=20.0,
+            observed_ebs_write_io_per_write=1.0,
+        )
+
+        cluster = explained.plans[0].candidate_clusters.zonal[0]
+        drive = cluster.attached_drives[0]
+        calibration = cluster.cluster_params["cassandra.ebs_io_calibration"]
+        assert (cluster.count, cluster.instance.name) == (64, "r7a.4xlarge")
+        assert (drive.name, drive.drive_type) == (
+            "gp3",
+            desires.current_clusters.zonal[0].cluster_drive.drive_type,
+        )
+        assert (
+            calibration["observed_max_total_iops_per_node"],
+            calibration["observed_node_count"],
+            calibration["current_topology_iops_governor"],
+            drive.read_io_per_s,
+            drive.write_io_per_s,
+        ) == (observed_iops, 768, "deployed_topology", 15_200, 800)
+
+    def test_deployed_topology_evidence_requires_all_fields(self):
+        evidence = self._deployed_topology_evidence(15_999)
+        for missing_field in evidence:
+            incomplete = evidence | {missing_field: None}
+            with pytest.raises(ValueError, match=f"missing: {missing_field}"):
+                NflxCassandraArguments.from_extra_model_arguments(incomplete)
+
+    @pytest.mark.parametrize(
+        ("buffer_kind", "instance_family", "observed_iops", "expected_governor"),
+        [
+            ("derived", "r7a", 16_000, "candidate_model_scaled_demand"),
+            ("desired", "r7a", 8_000, "candidate_model_scaled_demand"),
+            (None, "m7a", 16_000, "candidate_model_different_topology"),
+        ],
+    )
+    def test_aligned_iops_do_not_cross_workload_or_topology_boundaries(
+        self, buffer_kind, instance_family, observed_iops, expected_governor
+    ):
+        desires = self._existing_ebs_desires()
+        if buffer_kind:
+            desires = desires.model_copy(
+                update={
+                    "buffers": self._compute_buffer(
+                        buffer_kind, 2.0 if buffer_kind == "derived" else 4.0
+                    )
+                }
+            )
+        explained = self._ebs_explained(
+            desires,
+            observed_iops=observed_iops,
+            instance_family=instance_family,
+            required_cluster_size=64,
+            observed_ebs_read_io_per_read=20.0,
+        )
+
+        candidate_excuse = next(
+            excuse
+            for excuse in explained.excuses_by_model["org.netflix.cassandra"]
+            if excuse.instance == f"{instance_family}.4xlarge"
+        )
+        calibration = candidate_excuse.context["ebs_io_calibration"]
+        assert not explained.plans
+        assert calibration["current_topology_iops_governor"] == expected_governor
+        if instance_family != "r7a":
+            assert "observed_saturation_min_count" not in calibration
+
+    def test_aligned_observed_saturation_survives_missing_disk_utilization(self):
+        desires = self._existing_ebs_desires(disk_utilization_gib=0)
+        explained = self._ebs_explained(
+            desires,
+            required_cluster_size=64,
+            observed_ebs_read_io_per_read=20.0,
+        )
+
+        current_shape_excuse = next(
+            excuse
+            for excuse in explained.excuses_by_model["org.netflix.cassandra"]
+            if excuse.instance == "r7a.4xlarge"
+        )
+        calibration = current_shape_excuse.context["ebs_io_calibration"]
+        assert "read_io_calibration_factor" not in calibration
+        assert calibration["current_topology_iops_governor"] == "observed_saturation"
+
+    @pytest.mark.parametrize(
+        "read_per_second,write_per_second,derived_scale,"
+        "cluster_size_mode,expected_floor",
+        [
+            (300_000, 300_000, None, "unrestricted", 65),
+            (600_000, 600_000, None, "unrestricted", 65),
+            (300_000, 300_000, 2.0, "unrestricted", 65),
+            (150_000, 150_000, None, "unrestricted", None),
+            (600_000, 150_000, None, "unrestricted", None),
+            (300_000, 300_000, None, "doubling", 128),
+        ],
+    )
+    def test_observed_saturation_bounds_only_equal_or_higher_demand(
+        self,
+        read_per_second,
+        write_per_second,
+        derived_scale,
+        cluster_size_mode,
+        expected_floor,
+    ):
+        desires = self._existing_ebs_desires()
+        desires.query_pattern = desires.query_pattern.model_copy(
+            update={
+                "estimated_read_per_second": certain_int(read_per_second),
+                "estimated_write_per_second": certain_int(write_per_second),
+            }
+        )
+        if derived_scale is not None:
+            desires = desires.model_copy(
+                update={"buffers": self._compute_buffer("derived", derived_scale)}
+            )
+        explained = self._ebs_explained(
+            desires,
+            num_results=20,
+            max_regional_size=768,
+            cluster_size_mode=cluster_size_mode,
+        )
+
+        assert explained.plans
+        clusters = [plan.candidate_clusters.zonal[0] for plan in explained.plans]
+        current_cluster = next(
+            cluster for cluster in clusters if cluster.instance.name == "r7a.4xlarge"
+        )
+        current_calibration = current_cluster.cluster_params[
+            "cassandra.ebs_io_calibration"
+        ]
+        assert (
+            current_calibration.get("observed_saturation_min_count") == expected_floor
+        )
+        assert expected_floor is None or current_cluster.count >= expected_floor
+        assert all(
+            "observed_saturation_min_count"
+            not in cluster.cluster_params["cassandra.ebs_io_calibration"]
+            for cluster in clusters
+            if cluster.instance.name != "r7a.4xlarge"
+        )
+        if read_per_second == write_per_second == 150_000:
+            assert current_cluster.count <= 64
+        if cluster_size_mode == "doubling":
+            assert current_cluster.count == 128
 
     @pytest.mark.parametrize(
         "constraint",
@@ -1062,18 +1264,10 @@ class TestCassandraExtraModelArguments:
         )
 
     def test_page_cache_cap_default(self):
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
-        )
-
         args = NflxCassandraArguments.from_extra_model_arguments({})
         assert args.max_page_cache_gib == 28.0
 
     def test_min_instance_ram_gib_exclusive_default(self):
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
-        )
-
         args = NflxCassandraArguments.from_extra_model_arguments({})
         assert args.min_instance_ram_gib_exclusive == 16.0
 
@@ -1113,10 +1307,6 @@ class TestCassandraExtraModelArguments:
         assert result.candidate_clusters.zonal[0].instance.name == "m6id.xlarge"
 
     def test_cluster_size_mode_extra_argument(self):
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
-        )
-
         assert (
             NflxCassandraArguments.from_extra_model_arguments({}).cluster_size_mode
             is None
@@ -1135,10 +1325,6 @@ class TestCassandraExtraModelArguments:
         )
 
     def test_allow_ebs_volume_shrink_extra_argument(self):
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
-        )
-
         assert (
             NflxCassandraArguments.from_extra_model_arguments(
                 {}
@@ -1153,10 +1339,6 @@ class TestCassandraExtraModelArguments:
         )
 
     def test_cluster_size_mode_schema_exposes_enum_docstrings(self):
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
-        )
-
         schema = NflxCassandraArguments.model_json_schema()
         cluster_size_mode = schema["$defs"]["CassandraClusterSizeMode"]
 
