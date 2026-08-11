@@ -58,7 +58,7 @@ from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
     CapacityProblem,
-    search_for_max_rf,
+    search_for_min_nodes,
 )
 
 logger = logging.getLogger(__name__)
@@ -108,9 +108,16 @@ class NflxReadOnlyKVArguments(BaseModel):
     )
     reserved_memory_gib: float = Field(
         default=8.0,
-        description="Reserved memory for OS, bloom filters, index blocks, "
+        description="Reserved memory for the OS, JVM heap, block cache, "
         "and other processes (GiB).",
         ge=0,
+    )
+    sst_memory_overhead_ratio: float = Field(
+        default=0.05,
+        description="Resident RocksDB table-reader memory as a ratio of SST data "
+        "placed on each node.",
+        ge=0,
+        le=1,
     )
     large_instance_regret: float = Field(
         default=0.2,
@@ -120,13 +127,9 @@ class NflxReadOnlyKVArguments(BaseModel):
     )
 
 
-# TODO: Memory estimation is currently disabled because working_set_from_drive_and_slo
-# doesn't work well for large datasets (which is all of OODM use cases). The working
-# set calculation assumes a relationship between drive latency and SLO that doesn't
-# hold for large datasets where the working set is a small fraction of total data.
-# For now, we rely on the 30 GiB minimum RAM filter on instances and don't use
-# memory as a sizing constraint. Future work: implement a better memory estimation
-# that considers actual access patterns and cache hit rates for large datasets.
+# TODO: Data-block working set estimation remains disabled because
+# working_set_from_drive_and_slo does not work well for large OODM datasets.
+# Resident SST table-reader memory is modeled separately as a percentage of data.
 
 
 def _estimate_read_only_kv_requirement(
@@ -136,9 +139,10 @@ def _estimate_read_only_kv_requirement(
 ) -> CapacityRequirement:
     """Estimate the capacity requirement for the read-only KV regional cluster.
 
-    Note: For the partition-aware algorithm, we calculate requirements that are
-    independent of replica count. The actual replica count is determined by the
-    cluster computation based on partition placement and compute needs.
+    Note: For the partition-aware algorithm, we calculate requirements for one
+    complete data copy. The actual replica count is determined by the cluster
+    computation based on partition placement and compute needs. Cluster parameters
+    report the resulting total SST memory across all replicas.
 
     Args:
         instance: The compute instance being considered
@@ -161,8 +165,9 @@ def _estimate_read_only_kv_requirement(
         reference_shape=desires.reference_shape,
     )
 
-    # Memory: not used as sizing constraint (see TODO at top of file)
-    # Instances are filtered to require 30+ GiB RAM
+    needed_sst_memory_gib = (
+        desires.data_shape.estimated_state_size_gib.mid * args.sst_memory_overhead_ratio
+    )
 
     # Network calculation (read-only, so only outbound read traffic)
     needed_network_mbps = simple_network_mbps(desires)
@@ -171,7 +176,7 @@ def _estimate_read_only_kv_requirement(
         requirement_type=NflxReadOnlyKVCapacityModel.cluster_type,
         reference_shape=desires.reference_shape,
         cpu_cores=certain_int(needed_cores),
-        mem_gib=certain_float(0),  # Not used (see TODO at top of file)
+        mem_gib=certain_float(needed_sst_memory_gib),
         disk_gib=certain_float(0),  # Disk computed via partition-aware algorithm
         network_mbps=certain_float(needed_network_mbps),
         context={},
@@ -188,7 +193,8 @@ def _compute_read_only_kv_regional_cluster(
     """Compute the regional cluster configuration using the partition-aware algorithm.
 
     Partition-aware algorithm (local disks only):
-    1. DISK FIRST: Calculate partitions_per_node based on local disk capacity
+    1. CAPACITY FIRST: Calculate partitions_per_node from independent local disk
+       and resident SST memory constraints
     2. Calculate nodes_for_one_copy = total_partitions / partitions_per_node
     3. Start with min_replica_count, calculate initial node count
     4. CHECK CPU: If not satisfied, increase replica_count (uses spare disk)
@@ -213,7 +219,6 @@ def _compute_read_only_kv_regional_cluster(
 
     total_needed_cores = math.ceil(requirement.cpu_cores.mid)
 
-    # Step 1 (DISK): Calculate effective disk capacity per node using helper
     effective_disk_per_node = get_effective_disk_per_node_gib(
         instance=instance,
         drive=instance.drive,
@@ -221,18 +226,29 @@ def _compute_read_only_kv_regional_cluster(
         max_local_data_per_node_gib=args.max_data_per_node_gib,
     )
 
+    sst_memory_per_partition_gib = requirement.mem_gib.mid / args.total_num_partitions
+    available_sst_memory_per_node_gib = None
+    if args.sst_memory_overhead_ratio > 0:
+        available_sst_memory_per_node_gib = max(
+            0, instance.ram_gib - args.reserved_memory_gib
+        )
+
     # Step 2: Use partition-aware algorithm to find optimal configuration
     problem = CapacityProblem(
         n_partitions=args.total_num_partitions,
         partition_size_gib=partition_size_with_buffer_gib,
         disk_per_node_gib=effective_disk_per_node,
+        memory_per_partition_gib=(
+            sst_memory_per_partition_gib if args.sst_memory_overhead_ratio > 0 else None
+        ),
+        memory_per_node_gib=available_sst_memory_per_node_gib,
         cpu_per_node=instance.cpu,
         cpu_needed=total_needed_cores,
         min_rf=args.min_replica_count,
         max_nodes=args.max_regional_size,
     )
 
-    result = search_for_max_rf(problem)
+    result = search_for_min_nodes(problem)
     if result is None:
         return None
 
@@ -251,6 +267,15 @@ def _compute_read_only_kv_regional_cluster(
         "read-only-kv.partitions_per_node": result.partitions_per_node,
         "read-only-kv.nodes_for_one_copy": result.nodes_for_one_copy,
         "read-only-kv.nodes_for_cpu": math.ceil(total_needed_cores / instance.cpu),
+        "read-only-kv.sst_memory_overhead_ratio": args.sst_memory_overhead_ratio,
+        "read-only-kv.sst_memory_per_partition_gib": sst_memory_per_partition_gib,
+        "read-only-kv.sst_memory_per_copy_gib": requirement.mem_gib.mid,
+        "read-only-kv.total_sst_memory_gib": (
+            requirement.mem_gib.mid * result.replica_count
+        ),
+        "read-only-kv.available_sst_memory_per_node_gib": (
+            available_sst_memory_per_node_gib
+        ),
         EFFECTIVE_DISK_PER_NODE_GIB: effective_disk_per_node,
     }
     upsert_params(cluster, params)

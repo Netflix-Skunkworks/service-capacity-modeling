@@ -1,18 +1,19 @@
 """
 Tests for the Partition-Aware Capacity Planning Algorithm.
 
-These tests verify the core algorithm behavior, especially the bias for higher
-replication factors (RF) which provides better fault tolerance.
+These tests verify the core algorithm behavior, especially minimizing node count
+while preferring higher replication factors (RF) for cost-equivalent plans.
 """
 
 import math
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
+import pytest
 
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
     CapacityProblem,
-    search_for_max_rf,
+    search_for_min_nodes,
 )
 
 
@@ -30,7 +31,7 @@ class TestAlgorithmBasics:
             min_rf=2,
             max_nodes=100,
         )
-        result = search_for_max_rf(problem)
+        result = search_for_min_nodes(problem)
         assert result is None
 
     def test_returns_none_when_exceeds_max_nodes(self):
@@ -44,7 +45,7 @@ class TestAlgorithmBasics:
             min_rf=2,
             max_nodes=10,  # Very restrictive
         )
-        result = search_for_max_rf(problem)
+        result = search_for_min_nodes(problem)
         assert result is None
 
     def test_simple_case_returns_valid_result(self):
@@ -58,21 +59,108 @@ class TestAlgorithmBasics:
             min_rf=2,
             max_nodes=100,
         )
-        result = search_for_max_rf(problem)
+        result = search_for_min_nodes(problem)
 
         assert result is not None
         assert result.node_count <= problem.max_nodes
         assert result.replica_count >= problem.min_rf
 
+    def test_memory_limits_partitions_per_node_independently_from_disk(self):
+        """Memory can limit partition placement while disk remains unchanged."""
+        problem = CapacityProblem(
+            n_partitions=10,
+            partition_size_gib=100,
+            disk_per_node_gib=500,
+            memory_per_partition_gib=25,
+            memory_per_node_gib=50,
+            cpu_per_node=16,
+            cpu_needed=32,
+            min_rf=2,
+            max_nodes=100,
+        )
 
-class TestHigherRFBias:
-    """Tests that verify the algorithm's bias for higher replication factors."""
+        result = search_for_min_nodes(problem)
 
-    def test_chooses_max_ppn_when_it_fits(self):
-        """Algorithm chooses maximum PPn (highest RF) when it fits within max_nodes.
+        assert result is not None
+        assert result.partitions_per_node == 2
+        assert result.nodes_for_one_copy == 5
 
-        Higher PPn → fewer base nodes → higher RF for same CPU.
-        """
+    def test_returns_none_when_partition_exceeds_node_memory(self):
+        """Algorithm rejects a partition that cannot fit in node memory."""
+        problem = CapacityProblem(
+            n_partitions=10,
+            partition_size_gib=100,
+            disk_per_node_gib=500,
+            memory_per_partition_gib=60,
+            memory_per_node_gib=50,
+            cpu_per_node=16,
+            cpu_needed=32,
+            min_rf=2,
+            max_nodes=100,
+        )
+
+        assert search_for_min_nodes(problem) is None
+
+    def test_memory_driven_nodes_reduce_cpu_replica_count(self):
+        """Memory-driven nodes replace replicas that were needed only for CPU."""
+        problem = CapacityProblem(
+            n_partitions=8,
+            partition_size_gib=100,
+            disk_per_node_gib=500,
+            memory_per_partition_gib=25,
+            memory_per_node_gib=50,
+            cpu_per_node=1,
+            cpu_needed=12,
+            min_rf=2,
+            max_nodes=100,
+        )
+
+        result = search_for_min_nodes(problem)
+
+        assert result is not None
+        assert result.nodes_for_one_copy == 4
+        assert result.replica_count == 3
+        assert result.node_count == 12
+
+    def test_requires_complete_memory_constraint(self):
+        """Memory placement requires both the partition need and node capacity."""
+        with pytest.raises(ValueError, match="must be set together"):
+            CapacityProblem(
+                n_partitions=10,
+                partition_size_gib=100,
+                disk_per_node_gib=500,
+                memory_per_partition_gib=25,
+                cpu_per_node=16,
+                cpu_needed=32,
+                min_rf=2,
+                max_nodes=100,
+            )
+
+    def test_tiny_partitions_preserve_maximum_packing(self):
+        """Packing above the partition count is one equivalent search candidate."""
+        problem = CapacityProblem(
+            n_partitions=12,
+            partition_size_gib=0.1,
+            disk_per_node_gib=14_000,
+            cpu_per_node=16,
+            cpu_needed=16,
+            min_rf=2,
+            max_nodes=100,
+        )
+
+        result = search_for_min_nodes(problem)
+
+        assert result is not None
+        assert result.node_count == 2
+        assert result.nodes_for_one_copy == 1
+        assert result.partitions_per_node == 140_000
+
+
+class TestPlanSelection:
+    """Tests that verify cost and replication factor plan selection."""
+
+    def test_chooses_max_ppn_when_it_minimizes_nodes(self):
+        """Dense packing minimizes nodes when the minimum RF dominates."""
         problem = CapacityProblem(
             n_partitions=100,
             partition_size_gib=100,
@@ -82,7 +170,7 @@ class TestHigherRFBias:
             min_rf=2,
             max_nodes=1000,  # Relaxed constraint
         )
-        result = search_for_max_rf(problem)
+        result = search_for_min_nodes(problem)
 
         assert result is not None
         # With max_ppn=10, base=ceil(100/10)=10, cpu_per_copy=160 >= 64
@@ -91,14 +179,14 @@ class TestHigherRFBias:
         assert result.nodes_for_one_copy == 10
         assert result.replica_count == 2
 
-    def test_higher_ppn_gives_higher_rf_for_cpu_constrained(self):
-        """For CPU-constrained workloads, higher PPn results in higher RF.
+    def test_prefers_fewer_nodes_over_higher_rf(self):
+        """For CPU-constrained workloads, prefer fewer nodes over higher RF.
 
         Example: 200 partitions, 575 GiB each, 2048 GiB disk, need 3200 cores
         - PPn=3: base=67, needs RF=3 for CPU → 201 nodes
         - PPn=2: base=100, needs RF=2 for CPU → 200 nodes
 
-        Algorithm chooses PPn=3 (higher RF) even though it uses 1 more node.
+        The lower RF plan saves one node while satisfying the minimum RF.
         """
         problem = CapacityProblem(
             n_partitions=200,
@@ -109,21 +197,15 @@ class TestHigherRFBias:
             min_rf=2,
             max_nodes=10000,
         )
-        result = search_for_max_rf(problem)
+        result = search_for_min_nodes(problem)
 
         assert result is not None
-        assert result.partitions_per_node == 3  # Max PPn, not 2
-        assert result.replica_count == 3  # Higher RF
-        assert (
-            result.node_count == 201
-        )  # Slightly more nodes, but better fault tolerance
+        assert result.partitions_per_node == 2
+        assert result.replica_count == 2
+        assert result.node_count == 200
 
-    def test_falls_back_to_lower_ppn_when_max_exceeds_limit(self):
-        """Algorithm falls back to lower PPn when max PPn exceeds max_nodes.
-
-        This is where the algorithm shines: it finds solutions that a greedy
-        max-PPn approach would miss.
-        """
+    def test_returns_none_when_every_ppn_exceeds_limit(self):
+        """Algorithm returns None when no partition density fits the node limit."""
         problem = CapacityProblem(
             n_partitions=21,
             partition_size_gib=200,
@@ -139,12 +221,12 @@ class TestHigherRFBias:
         # PPn=3: base=7, cpu_per_copy=56, needs RF=3, nodes=21 > 10 ❌
         # PPn=2: base=11, cpu_per_copy=88, needs RF=2, nodes=22 > 10 ❌
 
-        result = search_for_max_rf(problem)
+        result = search_for_min_nodes(problem)
         # All configurations exceed max_nodes
         assert result is None
 
-    def test_finds_first_valid_from_max_ppn(self):
-        """Algorithm returns first valid configuration starting from max PPn."""
+    def test_selects_cheapest_valid_configuration(self):
+        """Algorithm evaluates valid configurations instead of returning the first."""
         problem = CapacityProblem(
             n_partitions=100,
             partition_size_gib=100,
@@ -154,37 +236,36 @@ class TestHigherRFBias:
             min_rf=2,
             max_nodes=60,
         )
-        # PPn=5: base=20, cpu_per_copy=320, needs RF=3, nodes=60 ✓ FIRST VALID
-        # PPn=4: base=25, cpu_per_copy=400, needs RF=2, nodes=50 ✓ (fewer nodes)
+        # PPn=5: base=20, cpu_per_copy=320, needs RF=3, nodes=60
+        # PPn=4: base=25, cpu_per_copy=400, needs RF=2, nodes=50
 
-        result = search_for_max_rf(problem)
+        result = search_for_min_nodes(problem)
 
         assert result is not None
-        # Algorithm returns PPn=5 (first valid from max), not PPn=4 (fewer nodes)
-        assert result.partitions_per_node == 5
-        assert result.replica_count == 3  # Higher RF
-        assert result.node_count == 60
+        assert result.partitions_per_node == 4
+        assert result.replica_count == 2
+        assert result.node_count == 50
 
-    def test_prefers_rf3_over_rf2_when_both_fit(self):
-        """When both RF=3 and RF=2 configurations fit, prefer higher RF."""
+    def test_prefers_higher_rf_for_equal_node_count(self):
+        """Prefer higher RF when two configurations use the same node count."""
         problem = CapacityProblem(
             n_partitions=30,
             partition_size_gib=100,
-            disk_per_node_gib=1000,  # max_ppn = 10
+            disk_per_node_gib=1500,  # max_ppn = 15
             cpu_per_node=16,
-            cpu_needed=96,  # 6 nodes worth
+            cpu_needed=80,  # 5 nodes worth
             min_rf=2,
             max_nodes=100,
         )
-        # PPn=10: base=3, cpu_per_copy=48, needs RF=2, nodes=6 ✓
-        # But PPn=10 is first, so we get RF=2
+        # PPn=15: base=2, needs RF=3, nodes=6
+        # PPn=10: base=3, needs RF=2, nodes=6
 
-        result = search_for_max_rf(problem)
+        result = search_for_min_nodes(problem)
 
         assert result is not None
-        assert result.partitions_per_node == 10
-        # Algorithm gives RF=2 here because cpu_per_copy=48 < 96, so min_rf_for_cpu=2
-        assert result.replica_count == 2
+        assert result.node_count == 6
+        assert result.partitions_per_node == 15
+        assert result.replica_count == 3
 
 
 class TestAlgorithmProperties:
@@ -208,7 +289,7 @@ class TestAlgorithmProperties:
     @settings(max_examples=500, deadline=None)
     def test_result_satisfies_all_constraints(self, problem: CapacityProblem):
         """PROPERTY: Any result returned satisfies all constraints."""
-        result = search_for_max_rf(problem)
+        result = search_for_min_nodes(problem)
         if result is None:
             return
 
@@ -228,51 +309,34 @@ class TestAlgorithmProperties:
 
     @given(problem=valid_problems())
     @settings(max_examples=500, deadline=None)
-    def test_no_higher_ppn_is_valid(self, problem: CapacityProblem):
-        """PROPERTY: No PPn higher than the chosen one is valid.
-
-        This confirms the algorithm returns the FIRST valid configuration
-        starting from max PPn (i.e., it prefers higher RF).
-        """
-        result = search_for_max_rf(problem)
+    def test_result_is_best_valid_configuration(self, problem: CapacityProblem):
+        """PROPERTY: No valid configuration has a better selection rank."""
+        result = search_for_min_nodes(problem)
         if result is None:
             return
 
         max_ppn = int(problem.disk_per_node_gib / problem.partition_size_gib)
 
-        # Check all PPn values higher than the chosen one
-        for ppn in range(max_ppn, result.partitions_per_node, -1):
+        result_rank = (
+            result.node_count,
+            -result.replica_count,
+            -result.partitions_per_node,
+        )
+        for ppn in range(max_ppn, 0, -1):
             base = math.ceil(problem.n_partitions / ppn)
-
-            if base >= 2:
-                min_rf = max(
-                    1, math.ceil(problem.cpu_needed / (base * problem.cpu_per_node))
-                )
-                rf = max(problem.min_rf, min_rf)
-                nodes = base * rf
-            else:
-                if 2 * problem.cpu_per_node >= problem.cpu_needed:
-                    rf = problem.min_rf
-                    nodes = max(2, rf)
-                else:
-                    rf = max(
-                        problem.min_rf,
-                        math.ceil(problem.cpu_needed / problem.cpu_per_node),
-                    )
-                    nodes = rf
-
-            # This higher PPn must exceed max_nodes
-            assert nodes > problem.max_nodes, (
-                f"Higher PPn={ppn} gives {nodes} nodes "
-                f"<= max_nodes={problem.max_nodes}, "
-                f"but algorithm chose PPn={result.partitions_per_node}"
+            rf = max(
+                problem.min_rf,
+                math.ceil(problem.cpu_needed / (base * problem.cpu_per_node)),
             )
+            nodes = max(base * rf, 2)
+            if nodes <= problem.max_nodes:
+                assert result_rank <= (nodes, -rf, -ppn)
 
     @given(problem=valid_problems())
     @settings(max_examples=500, deadline=None)
     def test_node_count_formula_is_correct(self, problem: CapacityProblem):
         """PROPERTY: node_count = nodes_for_one_copy * replica_count."""
-        result = search_for_max_rf(problem)
+        result = search_for_min_nodes(problem)
         if result is None:
             return
 
@@ -302,10 +366,10 @@ class TestEdgeCases:
             min_rf=2,
             max_nodes=100,
         )
-        result = search_for_max_rf(problem)
+        result = search_for_min_nodes(problem)
 
         assert result is not None
-        # Algorithm returns first valid PPn from max (5), not 1
+        # Equal-cost plans retain the densest partition packing.
         assert result.partitions_per_node == 5
         assert result.nodes_for_one_copy == 1
         assert result.replica_count == 2  # min_rf (2*16=32 >= 32 cpu_needed)
@@ -322,7 +386,7 @@ class TestEdgeCases:
             min_rf=1,
             max_nodes=100,
         )
-        result = search_for_max_rf(problem)
+        result = search_for_min_nodes(problem)
 
         assert result is not None
         assert result.replica_count >= 1
@@ -338,7 +402,7 @@ class TestEdgeCases:
             min_rf=2,
             max_nodes=4,  # Exactly fits 2 nodes * 2 RF
         )
-        result = search_for_max_rf(problem)
+        result = search_for_min_nodes(problem)
 
         assert result is not None
         assert result.node_count == 4
