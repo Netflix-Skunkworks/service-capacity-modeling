@@ -1261,31 +1261,36 @@
   },
   {
     "annual_costs": {
-      "read-only-kv.regional-clusters": 149967.0
+      "read-only-kv.regional-clusters": 434718.04
     },
     "clusters": [
       {
-        "annual_cost": 149967.0,
+        "annual_cost": 434718.04,
         "cluster_params": {
-          "effective_disk_per_node_gib": 2328,
+          "effective_disk_per_node_gib": 1900,
+          "read-only-kv.available_sst_memory_per_node_gib": 53.39,
           "read-only-kv.min_replica_count": 4,
-          "read-only-kv.nodes_for_cpu": 15,
-          "read-only-kv.nodes_for_one_copy": 25,
-          "read-only-kv.partitions_per_node": 21,
+          "read-only-kv.nodes_for_cpu": 10,
+          "read-only-kv.nodes_for_one_copy": 47,
+          "read-only-kv.partitions_per_node": 11,
           "read-only-kv.replica_count": 4,
-          "read-only-kv.total_num_partitions": 512
+          "read-only-kv.sst_memory_overhead_ratio": 0.05,
+          "read-only-kv.sst_memory_per_copy_gib": 2400.0,
+          "read-only-kv.sst_memory_per_partition_gib": 4.6875,
+          "read-only-kv.total_num_partitions": 512,
+          "read-only-kv.total_sst_memory_gib": 9600.0
         },
         "cluster_type": "read-only-kv",
-        "count": 100,
+        "count": 188,
         "deployment": "regional",
-        "instance": "i3en.xlarge"
+        "instance": "i3.2xlarge"
       }
     ],
     "model": "org.netflix.read-only-kv",
     "region": "us-east-1",
     "scenario": "read_only_kv_large",
     "service_tier": 1,
-    "total_annual_cost": 149967.0
+    "total_annual_cost": 434718.04
   },
   {
     "annual_costs": {
@@ -1296,12 +1301,17 @@
         "annual_cost": 14523.96,
         "cluster_params": {
           "effective_disk_per_node_gib": 873,
+          "read-only-kv.available_sst_memory_per_node_gib": 22.52,
           "read-only-kv.min_replica_count": 3,
           "read-only-kv.nodes_for_cpu": 12,
-          "read-only-kv.nodes_for_one_copy": 2,
-          "read-only-kv.partitions_per_node": 4,
-          "read-only-kv.replica_count": 6,
-          "read-only-kv.total_num_partitions": 8
+          "read-only-kv.nodes_for_one_copy": 4,
+          "read-only-kv.partitions_per_node": 2,
+          "read-only-kv.replica_count": 3,
+          "read-only-kv.sst_memory_overhead_ratio": 0.05,
+          "read-only-kv.sst_memory_per_copy_gib": 69.85000000000001,
+          "read-only-kv.sst_memory_per_partition_gib": 8.731250000000001,
+          "read-only-kv.total_num_partitions": 8,
+          "read-only-kv.total_sst_memory_gib": 209.55
         },
         "cluster_type": "read-only-kv",
         "count": 12,
@@ -1324,12 +1334,17 @@
         "annual_cost": 7816.65,
         "cluster_params": {
           "effective_disk_per_node_gib": 441,
+          "read-only-kv.available_sst_memory_per_node_gib": 22.52,
           "read-only-kv.min_replica_count": 4,
           "read-only-kv.nodes_for_cpu": 5,
           "read-only-kv.nodes_for_one_copy": 1,
           "read-only-kv.partitions_per_node": 102,
           "read-only-kv.replica_count": 5,
-          "read-only-kv.total_num_partitions": 16
+          "read-only-kv.sst_memory_overhead_ratio": 0.05,
+          "read-only-kv.sst_memory_per_copy_gib": 3.0,
+          "read-only-kv.sst_memory_per_partition_gib": 0.1875,
+          "read-only-kv.total_num_partitions": 16,
+          "read-only-kv.total_sst_memory_gib": 15.0
         },
         "cluster_type": "read-only-kv",
         "count": 5,
