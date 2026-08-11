@@ -881,7 +881,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             and drive.name == current_drive.name
             and drive.drive_type == current_drive.drive_type
         )
-        component_scales = []
+        component_scales: Dict[BufferComponent, float] = {}
         for component in (
             BufferComponent.cpu,
             BufferComponent.network,
@@ -898,19 +898,46 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             derived_ratio = DerivedBuffers.for_components(
                 desires.buffers.derived, [component]
             ).scale
-            component_scales.append(desired_ratio * derived_ratio)
+            component_scales[component] = desired_ratio * derived_ratio
         same_baseline_scale = all(
-            math.isclose(scale, 1.0) for scale in component_scales
+            math.isclose(scale, 1.0) for scale in component_scales.values()
         )
-        same_or_higher_baseline_demand = (
-            observed_ebs_baseline_read_per_second is not None
-            and observed_ebs_baseline_write_per_second is not None
-            and all(scale >= 1.0 for scale in component_scales)
-            and desires.query_pattern.estimated_read_per_second.mid
-            >= observed_ebs_baseline_read_per_second
-            and desires.query_pattern.estimated_write_per_second.mid
-            >= observed_ebs_baseline_write_per_second
+        same_storage_scale = all(
+            math.isclose(component_scales[component], 1.0)
+            for component in (BufferComponent.memory, BufferComponent.disk)
         )
+        same_or_lower_data = (
+            desires.data_shape.estimated_state_size_gib.mid
+            <= current_data_per_node_gib * current_count
+        )
+
+        def demand_scale(current: float, baseline: Optional[float]) -> Optional[float]:
+            if baseline is None:
+                return None
+            if baseline == 0:
+                return 1.0 if current == 0 else None
+            return current / baseline
+
+        read_demand_scale = demand_scale(
+            desires.query_pattern.estimated_read_per_second.mid,
+            observed_ebs_baseline_read_per_second,
+        )
+        write_demand_scale = demand_scale(
+            desires.query_pattern.estimated_write_per_second.mid,
+            observed_ebs_baseline_write_per_second,
+        )
+        projected_iops_scale = None
+        if (
+            same_storage_scale
+            and same_or_lower_data
+            and read_demand_scale is not None
+            and write_demand_scale is not None
+        ):
+            projected_iops_scale = max(
+                1.0,
+                component_scales[BufferComponent.cpu],
+                component_scales[BufferComponent.network],
+            ) * max(read_demand_scale, write_demand_scale)
         same_baseline_demand = (
             observed_ebs_baseline_read_per_second is not None
             and observed_ebs_baseline_write_per_second is not None
@@ -928,6 +955,11 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             observed_ebs_max_total_io_per_second is not None
             and observed_ebs_node_count is not None
         ):
+            projected_max_total_iops = (
+                observed_ebs_max_total_io_per_second * projected_iops_scale
+                if projected_iops_scale is not None
+                else None
+            )
             same_or_lower_drive_iops = (
                 current_drive is not None
                 and drive.drive_type == current_drive.drive_type
@@ -936,17 +968,19 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             observed_saturation_floor = (
                 same_deployed_topology
                 and same_or_lower_drive_iops
-                and same_or_higher_baseline_demand
-                and observed_ebs_max_total_io_per_second >= drive.max_io_per_s
+                and projected_max_total_iops is not None
+                and projected_max_total_iops >= drive.max_io_per_s
             )
-            if not same_baseline_demand:
-                current_topology_iops_governor = "candidate_model_scaled_demand"
-            elif not same_deployed_topology:
+            if not same_deployed_topology:
                 current_topology_iops_governor = "candidate_model_different_topology"
-            elif observed_ebs_max_total_io_per_second >= drive.max_io_per_s:
+            elif projected_max_total_iops is None:
+                current_topology_iops_governor = "candidate_model_unprojectable_demand"
+            elif projected_max_total_iops >= drive.max_io_per_s:
                 current_topology_iops_governor = "observed_saturation"
-            else:
+            elif same_baseline_demand:
                 current_topology_iops_governor = "deployed_topology"
+            else:
+                current_topology_iops_governor = "deployed_topology_projected"
             reported_io_calibration.update(
                 {
                     "observed_max_total_iops_per_node": (
@@ -957,6 +991,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                     "baseline_write_per_second": (
                         observed_ebs_baseline_write_per_second
                     ),
+                    "projected_iops_scale": projected_iops_scale,
+                    "projected_max_total_iops_per_node": projected_max_total_iops,
                     "current_topology_iops_limit": drive.max_io_per_s,
                     "current_topology_iops_governor": current_topology_iops_governor,
                 }
@@ -1044,22 +1080,28 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 saturated_total_iops * read_fraction,
                 saturated_total_iops * (1 - read_fraction),
             )
-        if (
-            count != current_count
-            or current_topology_iops_governor != "deployed_topology"
+        if count != current_count or current_topology_iops_governor not in (
+            "deployed_topology",
+            "deployed_topology_projected",
         ):
             return modeled_read_iops, modeled_write_iops
-        if modeled_total_iops <= drive.max_io_per_s:
-            return modeled_read_iops, modeled_write_iops
+        projected_max_total_iops = reported_io_calibration.get(
+            "projected_max_total_iops_per_node"
+        )
+        assert projected_max_total_iops is not None
+        evidence_total_iops = min(
+            max(modeled_total_iops, projected_max_total_iops),
+            drive.max_io_per_s,
+        )
         # Preserve the modeled read/write mix at the configured drive-class limit.
         # The observation proves this topology works; it is not a provisioning cap.
         read_iops = (
             math.floor(
-                drive.max_io_per_s * modeled_read_iops / modeled_total_iops / 200
+                evidence_total_iops * modeled_read_iops / modeled_total_iops / 200
             )
             * 200
         )
-        return read_iops, drive.max_io_per_s - read_iops
+        return read_iops, evidence_total_iops - read_iops
 
     cluster = compute_stateful_zone(
         instance=instance,

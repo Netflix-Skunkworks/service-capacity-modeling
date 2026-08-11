@@ -250,8 +250,23 @@ class TestCassandraStorage:
         observed_iops=16_000,
         instance_family="r7a",
         num_results=1,
+        same_data_as_deployed=True,
         **extra_model_arguments,
     ):
+        if same_data_as_deployed:
+            current = desires.current_clusters.zonal[0]
+            desires = desires.model_copy(
+                update={
+                    "data_shape": desires.data_shape.model_copy(
+                        update={
+                            "estimated_state_size_gib": certain_float(
+                                current.disk_utilization_gib.mid
+                                * current.cluster_instance_count.mid
+                            )
+                        }
+                    )
+                }
+            )
         return planner.plan_certain_explained(
             model_name="org.netflix.cassandra",
             region="us-east-1",
@@ -421,32 +436,56 @@ class TestCassandraStorage:
             with pytest.raises(ValueError, match=f"missing: {missing_field}"):
                 NflxCassandraArguments.from_extra_model_arguments(incomplete)
 
-    @pytest.mark.parametrize(
-        ("buffer_kind", "instance_family", "observed_iops", "expected_governor"),
-        [
-            ("derived", "r7a", 16_000, "candidate_model_scaled_demand"),
-            ("desired", "r7a", 8_000, "candidate_model_scaled_demand"),
-            (None, "m7a", 16_000, "candidate_model_different_topology"),
-        ],
-    )
-    def test_aligned_iops_do_not_cross_workload_or_topology_boundaries(
-        self, buffer_kind, instance_family, observed_iops, expected_governor
-    ):
+    def test_aligned_iops_project_compute_growth_for_deployed_topology(self):
         desires = self._existing_ebs_desires()
-        if buffer_kind:
+        desires = desires.model_copy(
+            update={"buffers": self._compute_buffer("derived", 1.12)}
+        )
+        explained = self._ebs_explained(
+            desires,
+            observed_iops=8_000,
+            required_cluster_size=64,
+            observed_ebs_read_io_per_read=20.0,
+        )
+
+        cluster = explained.plans[0].candidate_clusters.zonal[0]
+        calibration = cluster.cluster_params["cassandra.ebs_io_calibration"]
+        assert (cluster.count, cluster.instance.name) == (64, "r7a.4xlarge")
+        assert (
+            calibration["projected_iops_scale"],
+            calibration["projected_max_total_iops_per_node"],
+            calibration["current_topology_iops_governor"],
+        ) == (1.12, pytest.approx(8_960), "deployed_topology_projected")
+
+    @pytest.mark.parametrize(
+        "boundary", ["different_topology", "storage_growth", "data_growth"]
+    )
+    def test_aligned_iops_do_not_cross_topology_or_storage_boundaries(self, boundary):
+        desires = self._existing_ebs_desires()
+        instance_family = "r7a"
+        if boundary == "different_topology":
+            instance_family = "m7a"
+        elif boundary == "storage_growth":
             desires = desires.model_copy(
                 update={
-                    "buffers": self._compute_buffer(
-                        buffer_kind, 2.0 if buffer_kind == "derived" else 4.0
+                    "buffers": Buffers(
+                        derived={
+                            "scale_storage": Buffer(
+                                ratio=2.0,
+                                intent=BufferIntent.scale_up,
+                                components=[BufferComponent.storage],
+                            )
+                        }
                     )
                 }
             )
         explained = self._ebs_explained(
             desires,
-            observed_iops=observed_iops,
+            observed_iops=8_000,
             instance_family=instance_family,
             required_cluster_size=64,
             observed_ebs_read_io_per_read=20.0,
+            same_data_as_deployed=boundary != "data_growth",
         )
 
         candidate_excuse = next(
@@ -456,9 +495,37 @@ class TestCassandraStorage:
         )
         calibration = candidate_excuse.context["ebs_io_calibration"]
         assert not explained.plans
+        expected_governor = (
+            "candidate_model_different_topology"
+            if boundary == "different_topology"
+            else "candidate_model_unprojectable_demand"
+        )
         assert calibration["current_topology_iops_governor"] == expected_governor
-        if instance_family != "r7a":
-            assert "observed_saturation_min_count" not in calibration
+        assert "observed_saturation_min_count" not in calibration
+
+    def test_projected_observed_iops_at_drive_limit_is_saturated(self):
+        desires = self._existing_ebs_desires()
+        desires = desires.model_copy(
+            update={"buffers": self._compute_buffer("derived", 2.0)}
+        )
+        explained = self._ebs_explained(
+            desires,
+            observed_iops=8_000,
+            required_cluster_size=64,
+            observed_ebs_read_io_per_read=20.0,
+        )
+
+        candidate_excuse = next(
+            excuse
+            for excuse in explained.excuses_by_model["org.netflix.cassandra"]
+            if excuse.instance == "r7a.4xlarge"
+        )
+        calibration = candidate_excuse.context["ebs_io_calibration"]
+        assert not explained.plans
+        assert (
+            calibration["projected_max_total_iops_per_node"],
+            calibration["current_topology_iops_governor"],
+        ) == (16_000, "observed_saturation")
 
     def test_aligned_observed_saturation_survives_missing_disk_utilization(self):
         desires = self._existing_ebs_desires(disk_utilization_gib=0)
@@ -485,11 +552,11 @@ class TestCassandraStorage:
             (600_000, 600_000, None, "unrestricted", 65),
             (300_000, 300_000, 2.0, "unrestricted", 65),
             (150_000, 150_000, None, "unrestricted", None),
-            (600_000, 150_000, None, "unrestricted", None),
+            (600_000, 150_000, None, "unrestricted", 65),
             (300_000, 300_000, None, "doubling", 128),
         ],
     )
-    def test_observed_saturation_bounds_only_equal_or_higher_demand(
+    def test_observed_saturation_projects_request_demand(
         self,
         read_per_second,
         write_per_second,
