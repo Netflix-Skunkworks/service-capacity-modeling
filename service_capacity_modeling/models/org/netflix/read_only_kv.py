@@ -64,6 +64,9 @@ from service_capacity_modeling.models.org.netflix.partition_aware_algorithm impo
 
 logger = logging.getLogger(__name__)
 
+# A namespace opts in by supplying this named desired memory buffer.
+SST_MEMORY_BUFFER_NAME = "read_only_kv_sst_memory"
+
 
 def _compute_penalties(
     instance: Instance,
@@ -117,7 +120,8 @@ class NflxReadOnlyKVArguments(BaseModel):
     sst_memory_overhead_ratio: float = Field(
         default=0.05,
         description="Planning assumption for resident RocksDB table-reader memory "
-        "per complete data copy, as a ratio of SST data.",
+        "per complete data copy, as a ratio of SST data. Applied only when "
+        f"the {SST_MEMORY_BUFFER_NAME!r} desired memory buffer is present.",
         ge=0,
         le=1,
     )
@@ -137,7 +141,7 @@ class NflxReadOnlyKVArguments(BaseModel):
 def _estimate_read_only_kv_requirement(
     instance: Instance,
     desires: CapacityDesires,
-    args: NflxReadOnlyKVArguments,
+    sst_memory_overhead_ratio: float,
     memory_buffer_ratio: float,
 ) -> CapacityRequirement:
     """Estimate the capacity requirement for the read-only KV regional cluster.
@@ -150,7 +154,7 @@ def _estimate_read_only_kv_requirement(
     Args:
         instance: The compute instance being considered
         desires: User's capacity desires
-        args: Read-only KV specific arguments
+        sst_memory_overhead_ratio: Resident SST memory as a ratio of SST data
         memory_buffer_ratio: Memory headroom applied to the SST estimate
 
     Returns:
@@ -172,7 +176,7 @@ def _estimate_read_only_kv_requirement(
 
     needed_sst_memory_gib = (
         desires.data_shape.estimated_state_size_gib.mid
-        * args.sst_memory_overhead_ratio
+        * sst_memory_overhead_ratio
         * memory_buffer_ratio
     )
 
@@ -197,6 +201,7 @@ def _compute_read_only_kv_regional_cluster(
     args: NflxReadOnlyKVArguments,
     partition_size_with_buffer_gib: float,
     disk_buffer_ratio: float,
+    sst_memory_overhead_ratio: float,
     memory_buffer_ratio: float,
     reserved_memory_gib: float,
 ) -> Optional[RegionClusterCapacity]:
@@ -218,6 +223,7 @@ def _compute_read_only_kv_regional_cluster(
         args: Read-only KV specific arguments
         partition_size_with_buffer_gib: Size of one partition with disk buffer applied
         disk_buffer_ratio: Disk buffer ratio for headroom
+        sst_memory_overhead_ratio: Active resident SST memory estimate
         memory_buffer_ratio: Memory buffer ratio for headroom
         reserved_memory_gib: Total memory reserved outside SST table readers
 
@@ -239,7 +245,7 @@ def _compute_read_only_kv_regional_cluster(
 
     sst_memory_per_partition_gib = requirement.mem_gib.mid / args.total_num_partitions
     available_sst_memory_per_node_gib = None
-    if args.sst_memory_overhead_ratio > 0:
+    if sst_memory_overhead_ratio > 0:
         usable_memory_per_node_gib = usable_memory_gib(
             instance, lambda _: reserved_memory_gib
         )
@@ -252,7 +258,7 @@ def _compute_read_only_kv_regional_cluster(
         partition_size_gib=partition_size_with_buffer_gib,
         disk_per_node_gib=effective_disk_per_node,
         memory_per_partition_gib=(
-            sst_memory_per_partition_gib if args.sst_memory_overhead_ratio > 0 else None
+            sst_memory_per_partition_gib if sst_memory_overhead_ratio > 0 else None
         ),
         memory_per_node_gib=available_sst_memory_per_node_gib,
         cpu_per_node=instance.cpu,
@@ -273,37 +279,45 @@ def _compute_read_only_kv_regional_cluster(
     )
 
     # Add cluster parameters for provisioning
-    params = {
+    params: Dict[str, Any] = {
         "read-only-kv.total_num_partitions": args.total_num_partitions,
         "read-only-kv.min_replica_count": args.min_replica_count,
         "read-only-kv.replica_count": result.replica_count,
         "read-only-kv.partitions_per_node": result.partitions_per_node,
         "read-only-kv.nodes_for_one_copy": result.nodes_for_one_copy,
         "read-only-kv.nodes_for_cpu": math.ceil(total_needed_cores / instance.cpu),
-        "read-only-kv.sst_memory_overhead_ratio": args.sst_memory_overhead_ratio,
-        "read-only-kv.memory_buffer_ratio": memory_buffer_ratio,
-        "read-only-kv.reserved_memory_per_node_gib": reserved_memory_gib,
-        "read-only-kv.buffered_sst_memory_per_partition_gib": (
-            sst_memory_per_partition_gib
-        ),
-        "read-only-kv.estimated_sst_memory_per_copy_gib": (
-            requirement.mem_gib.mid / memory_buffer_ratio
-        ),
-        "read-only-kv.buffered_sst_memory_per_copy_gib": requirement.mem_gib.mid,
-        "read-only-kv.total_buffered_sst_memory_gib": (
-            requirement.mem_gib.mid * result.replica_count
-        ),
-        "read-only-kv.available_sst_memory_per_node_gib": (
-            available_sst_memory_per_node_gib
-        ),
-        "read-only-kv.max_partitions_per_node_by_disk": (
-            result.max_partitions_per_node_by_disk
-        ),
-        "read-only-kv.max_partitions_per_node_by_memory": (
-            result.max_partitions_per_node_by_memory
-        ),
         EFFECTIVE_DISK_PER_NODE_GIB: effective_disk_per_node,
     }
+    if sst_memory_overhead_ratio > 0:
+        params.update(
+            {
+                "read-only-kv.sst_memory_buffer": SST_MEMORY_BUFFER_NAME,
+                "read-only-kv.sst_memory_overhead_ratio": sst_memory_overhead_ratio,
+                "read-only-kv.memory_buffer_ratio": memory_buffer_ratio,
+                "read-only-kv.reserved_memory_per_node_gib": reserved_memory_gib,
+                "read-only-kv.buffered_sst_memory_per_partition_gib": (
+                    sst_memory_per_partition_gib
+                ),
+                "read-only-kv.estimated_sst_memory_per_copy_gib": (
+                    requirement.mem_gib.mid / memory_buffer_ratio
+                ),
+                "read-only-kv.buffered_sst_memory_per_copy_gib": (
+                    requirement.mem_gib.mid
+                ),
+                "read-only-kv.total_buffered_sst_memory_gib": (
+                    requirement.mem_gib.mid * result.replica_count
+                ),
+                "read-only-kv.available_sst_memory_per_node_gib": (
+                    available_sst_memory_per_node_gib
+                ),
+                "read-only-kv.max_partitions_per_node_by_disk": (
+                    result.max_partitions_per_node_by_disk
+                ),
+                "read-only-kv.max_partitions_per_node_by_memory": (
+                    result.max_partitions_per_node_by_memory
+                ),
+            }
+        )
     upsert_params(cluster, params)
 
     penalties = _compute_penalties(
@@ -351,18 +365,29 @@ def _estimate_read_only_kv_cluster(
     if unreplicated_data_gib <= 0:
         return None
 
-    memory_buffer = buffer_for_components(
-        buffers=desires.buffers, components=[BufferComponent.memory]
-    )
-    if memory_buffer.ratio <= 0:
-        return None
+    sst_memory_buffer = desires.buffers.desired.get(SST_MEMORY_BUFFER_NAME)
+    sst_memory_overhead_ratio = 0.0
+    memory_buffer_ratio = 1.0
+    if args.sst_memory_overhead_ratio > 0 and sst_memory_buffer is not None:
+        if set(sst_memory_buffer.components).intersection(
+            {BufferComponent.memory, BufferComponent.storage}
+        ):
+            memory_buffer = buffer_for_components(
+                buffers=desires.buffers, components=[BufferComponent.memory]
+            )
+            memory_buffer_ratio = memory_buffer.ratio
+        else:
+            memory_buffer_ratio = 0
+        if memory_buffer_ratio <= 0:
+            return None
+        sst_memory_overhead_ratio = args.sst_memory_overhead_ratio
 
     # Calculate requirements
     per_copy_requirement = _estimate_read_only_kv_requirement(
         instance=instance,
         desires=desires,
-        args=args,
-        memory_buffer_ratio=memory_buffer.ratio,
+        sst_memory_overhead_ratio=sst_memory_overhead_ratio,
+        memory_buffer_ratio=memory_buffer_ratio,
     )
 
     # Compute disk buffer values inline (not via context)
@@ -384,7 +409,8 @@ def _estimate_read_only_kv_cluster(
         args=args,
         partition_size_with_buffer_gib=partition_size_with_buffer_gib,
         disk_buffer_ratio=disk_buffer.ratio,
-        memory_buffer_ratio=memory_buffer.ratio,
+        sst_memory_overhead_ratio=sst_memory_overhead_ratio,
+        memory_buffer_ratio=memory_buffer_ratio,
         reserved_memory_gib=reserved_memory_gib,
     )
 
@@ -506,8 +532,6 @@ class NflxReadOnlyKVCapacityModel(CapacityModel, CostAwareModel):
                 ),  # 67% utilization target
                 # Read-only: can run at high disk utilization
                 "disk": Buffer(ratio=1.15, components=[BufferComponent.disk]),  # 87%
-                # Keep the 5% SST estimate at or below 83.3% of its allocation.
-                "memory": Buffer(ratio=1.2, components=[BufferComponent.memory]),  # 83%
             },
         )
 
