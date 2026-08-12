@@ -84,6 +84,24 @@ CRITICAL_TIERS: Set[int] = {0, 1}
 CRITICAL_TIER_MIN_CLUSTER_SIZE = 2
 EBS_HOTTER_BUFFER_RATIO = 0.5
 CASSANDRA_MAX_DISK_UTILIZATION = 0.55
+_ATTACHED_DRIVE_IOPS_QUANTUM = 200
+
+
+def _deployed_topology_saturation_min_count(
+    current_count: int,
+    projected_iops_per_node: float,
+    drive_iops_limit: int,
+) -> int:
+    if drive_iops_limit <= _ATTACHED_DRIVE_IOPS_QUANTUM:
+        return current_count + 1
+    return max(
+        current_count + 1,
+        math.ceil(
+            current_count
+            * projected_iops_per_node
+            / (drive_iops_limit - _ATTACHED_DRIVE_IOPS_QUANTUM)
+        ),
+    )
 
 
 def _with_disk_utilization_buffer(
@@ -662,10 +680,13 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     min_instance_ram_gib_exclusive: float = 16.0,
     observed_ebs_read_io_per_read: Optional[float] = None,
     observed_ebs_write_io_per_write: Optional[float] = None,
-    observed_ebs_max_total_io_per_second: Optional[float] = None,
-    observed_ebs_node_count: Optional[int] = None,
-    observed_ebs_baseline_read_per_second: Optional[float] = None,
-    observed_ebs_baseline_write_per_second: Optional[float] = None,
+    observed_ebs_max_total_iops_per_node: Optional[float] = None,
+    observed_ebs_node_count_at_peak: Optional[int] = None,
+    ebs_planning_baseline_read_per_second: Optional[float] = None,
+    ebs_planning_baseline_write_per_second: Optional[float] = None,
+    ebs_planning_baseline_mean_read_size_bytes: Optional[float] = None,
+    ebs_planning_baseline_mean_write_size_bytes: Optional[float] = None,
+    ebs_planning_baseline_copies_per_region: Optional[int] = None,
 ) -> Union[CapacityPlan, Excuse, None]:
     drive_name = drive.name
 
@@ -852,6 +873,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     write_io_calibration_factor = 1.0
     reported_io_calibration: Dict[str, Any] = {}
     current_topology_iops_governor: Optional[str] = None
+    deployed_topology_iops_min_count: Optional[int] = None
     if is_ebs and current_cluster_size > 0:
         assert current_capacity is not None
         current_data_per_node_gib = current_capacity.disk_utilization_gib.mid
@@ -874,132 +896,220 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                     "read_io_calibration_factor": read_io_calibration_factor,
                 }
             )
-        current_drive = current_capacity.cluster_drive
-        same_deployed_topology = (
-            instance.name == current_capacity.cluster_instance_name
-            and current_drive is not None
-            and drive.name == current_drive.name
-            and drive.drive_type == current_drive.drive_type
-        )
-        component_scales: Dict[BufferComponent, float] = {}
-        for component in (
-            BufferComponent.cpu,
-            BufferComponent.network,
-            BufferComponent.memory,
-            BufferComponent.disk,
-        ):
-            # Model-default desired buffers are baseline policy headroom. Only
-            # desired headroom beyond their configured maxima scales the workload.
-            desired_ratio = max(
-                1.0,
-                buffer_for_components(desires.buffers, [component]).ratio
-                / buffer_for_components(maximum_baseline_buffers, [component]).ratio,
-            )
-            derived_ratio = DerivedBuffers.for_components(
-                desires.buffers.derived, [component]
-            ).scale
-            component_scales[component] = desired_ratio * derived_ratio
-        same_baseline_scale = all(
-            math.isclose(scale, 1.0) for scale in component_scales.values()
-        )
-        same_storage_scale = all(
-            math.isclose(component_scales[component], 1.0)
-            for component in (BufferComponent.memory, BufferComponent.disk)
-        )
-        same_or_lower_data = (
-            desires.data_shape.estimated_state_size_gib.mid
-            <= current_data_per_node_gib * current_count
-        )
-
-        def demand_scale(current: float, baseline: Optional[float]) -> Optional[float]:
-            if baseline is None:
-                return None
-            if baseline == 0:
-                return 1.0 if current == 0 else None
-            return current / baseline
-
-        read_demand_scale = demand_scale(
-            desires.query_pattern.estimated_read_per_second.mid,
-            observed_ebs_baseline_read_per_second,
-        )
-        write_demand_scale = demand_scale(
-            desires.query_pattern.estimated_write_per_second.mid,
-            observed_ebs_baseline_write_per_second,
-        )
-        projected_iops_scale = None
         if (
-            same_storage_scale
-            and same_or_lower_data
-            and read_demand_scale is not None
-            and write_demand_scale is not None
+            observed_ebs_max_total_iops_per_node is not None
+            and observed_ebs_node_count_at_peak is not None
         ):
-            projected_iops_scale = max(
-                1.0,
-                component_scales[BufferComponent.cpu],
-                component_scales[BufferComponent.network],
-            ) * max(read_demand_scale, write_demand_scale)
-        same_baseline_demand = (
-            observed_ebs_baseline_read_per_second is not None
-            and observed_ebs_baseline_write_per_second is not None
-            and same_baseline_scale
-            and math.isclose(
-                desires.query_pattern.estimated_read_per_second.mid,
-                observed_ebs_baseline_read_per_second,
+            current_drive = current_capacity.cluster_drive
+            expected_deployed_node_count = (
+                current_count * zones_per_region * context.num_regions
             )
-            and math.isclose(
-                desires.query_pattern.estimated_write_per_second.mid,
-                observed_ebs_baseline_write_per_second,
+            same_observed_node_count = (
+                observed_ebs_node_count_at_peak == expected_deployed_node_count
             )
-        )
-        if (
-            observed_ebs_max_total_io_per_second is not None
-            and observed_ebs_node_count is not None
-        ):
+            same_deployed_topology = (
+                instance.name == current_capacity.cluster_instance_name
+                and current_drive is not None
+                and drive.name == current_drive.name
+                and drive.drive_type == current_drive.drive_type
+                and same_observed_node_count
+            )
+            current_topology_iops_limit = None
+            if (
+                current_drive is not None
+                and current_drive.read_io_per_s is not None
+                and current_drive.write_io_per_s is not None
+            ):
+                current_topology_iops_limit = min(
+                    current_drive.read_io_per_s + current_drive.write_io_per_s,
+                    drive.max_io_per_s,
+                )
+            configured_iops_limit_missing = current_topology_iops_limit is None
+            observation_at_configured_limit = (
+                current_topology_iops_limit is not None
+                and observed_ebs_max_total_iops_per_node
+                > current_topology_iops_limit - _ATTACHED_DRIVE_IOPS_QUANTUM
+            )
+            component_scales: Dict[BufferComponent, float] = {}
+            desired_component_scales: Dict[BufferComponent, float] = {}
+            derived_component_policies: Dict[BufferComponent, DerivedBuffers] = {}
+            for component in (
+                BufferComponent.cpu,
+                BufferComponent.network,
+                BufferComponent.memory,
+                BufferComponent.disk,
+            ):
+                # Desired buffers are headroom policy, not observed workload.
+                # Evidence is projectable only while that policy matches the model baseline.
+                desired_ratio = max(
+                    1.0,
+                    buffer_for_components(desires.buffers, [component]).ratio
+                    / max(
+                        1.0,
+                        buffer_for_components(
+                            maximum_baseline_buffers, [component]
+                        ).ratio,
+                    ),
+                )
+                derived_policy = DerivedBuffers.for_components(
+                    desires.buffers.derived, [component]
+                )
+                desired_component_scales[component] = desired_ratio
+                derived_component_policies[component] = derived_policy
+                component_scales[component] = derived_policy.scale
+            same_desired_buffer_policy = all(
+                math.isclose(scale, 1.0) for scale in desired_component_scales.values()
+            )
+            unbounded_storage_derived_policy = all(
+                derived_component_policies[component].floor is None
+                and derived_component_policies[component].ceiling is None
+                for component in (BufferComponent.memory, BufferComponent.disk)
+            )
+            same_storage_scale = all(
+                math.isclose(component_scales[component], 1.0)
+                for component in (BufferComponent.memory, BufferComponent.disk)
+            )
+            projectable_buffer_policy = (
+                same_desired_buffer_policy
+                and unbounded_storage_derived_policy
+                and same_storage_scale
+            )
+            desired_zonal_data_gib = (
+                desires.data_shape.estimated_state_size_gib.mid
+                / max(desires.data_shape.estimated_compression_ratio.mid, 1.0)
+                * copies_per_region
+                / zones_per_region
+            )
+            same_or_lower_data = (
+                desired_zonal_data_gib <= current_data_per_node_gib * current_count
+            )
+            same_planning_demand = (
+                ebs_planning_baseline_read_per_second is not None
+                and ebs_planning_baseline_write_per_second is not None
+                and ebs_planning_baseline_mean_read_size_bytes is not None
+                and ebs_planning_baseline_mean_write_size_bytes is not None
+                and ebs_planning_baseline_copies_per_region is not None
+                and math.isclose(
+                    desires.query_pattern.estimated_read_per_second.mid,
+                    ebs_planning_baseline_read_per_second,
+                )
+                and math.isclose(
+                    desires.query_pattern.estimated_write_per_second.mid,
+                    ebs_planning_baseline_write_per_second,
+                )
+                and math.isclose(
+                    desires.query_pattern.estimated_mean_read_size_bytes.mid,
+                    ebs_planning_baseline_mean_read_size_bytes,
+                )
+                and math.isclose(
+                    desires.query_pattern.estimated_mean_write_size_bytes.mid,
+                    ebs_planning_baseline_mean_write_size_bytes,
+                )
+                and copies_per_region == ebs_planning_baseline_copies_per_region
+            )
+            projected_iops_scale = None
+            if (
+                projectable_buffer_policy
+                and same_or_lower_data
+                and same_planning_demand
+                and not configured_iops_limit_missing
+                and not observation_at_configured_limit
+            ):
+                projected_iops_scale = max(
+                    1.0,
+                    component_scales[BufferComponent.cpu],
+                    component_scales[BufferComponent.network],
+                )
             projected_max_total_iops = (
-                observed_ebs_max_total_io_per_second * projected_iops_scale
+                observed_ebs_max_total_iops_per_node * projected_iops_scale
                 if projected_iops_scale is not None
                 else None
             )
-            same_or_lower_drive_iops = (
-                current_drive is not None
-                and drive.drive_type == current_drive.drive_type
-                and drive.max_io_per_s <= current_drive.max_io_per_s
-            )
-            observed_saturation_floor = (
+            deployed_topology_saturation_floor = (
                 same_deployed_topology
-                and same_or_lower_drive_iops
                 and projected_max_total_iops is not None
-                and projected_max_total_iops >= drive.max_io_per_s
+                and projected_max_total_iops
+                > drive.max_io_per_s - _ATTACHED_DRIVE_IOPS_QUANTUM
             )
             if not same_deployed_topology:
                 current_topology_iops_governor = "candidate_model_different_topology"
+            elif configured_iops_limit_missing:
+                current_topology_iops_governor = (
+                    "candidate_model_missing_configured_iops_limit"
+                )
+            elif observation_at_configured_limit:
+                current_topology_iops_governor = (
+                    "candidate_model_observation_at_configured_limit"
+                )
             elif projected_max_total_iops is None:
                 current_topology_iops_governor = "candidate_model_unprojectable_demand"
-            elif projected_max_total_iops >= drive.max_io_per_s:
-                current_topology_iops_governor = "observed_saturation"
-            elif same_baseline_demand:
+            elif (
+                projected_max_total_iops
+                > drive.max_io_per_s - _ATTACHED_DRIVE_IOPS_QUANTUM
+            ):
+                current_topology_iops_governor = "deployed_topology_saturation"
+            elif projected_iops_scale is not None and math.isclose(
+                projected_iops_scale, 1.0
+            ):
                 current_topology_iops_governor = "deployed_topology"
             else:
                 current_topology_iops_governor = "deployed_topology_projected"
+            if current_topology_iops_governor in (
+                "deployed_topology",
+                "deployed_topology_projected",
+            ):
+                deployed_topology_iops_min_count = current_count
             reported_io_calibration.update(
                 {
                     "observed_max_total_iops_per_node": (
-                        observed_ebs_max_total_io_per_second
+                        observed_ebs_max_total_iops_per_node
                     ),
-                    "observed_node_count": observed_ebs_node_count,
-                    "baseline_read_per_second": (observed_ebs_baseline_read_per_second),
-                    "baseline_write_per_second": (
-                        observed_ebs_baseline_write_per_second
+                    "observed_node_count_at_peak": observed_ebs_node_count_at_peak,
+                    "expected_deployed_node_count": expected_deployed_node_count,
+                    "planning_baseline_read_per_second": (
+                        ebs_planning_baseline_read_per_second
+                    ),
+                    "planning_baseline_write_per_second": (
+                        ebs_planning_baseline_write_per_second
+                    ),
+                    "planning_baseline_mean_read_size_bytes": (
+                        ebs_planning_baseline_mean_read_size_bytes
+                    ),
+                    "planning_baseline_mean_write_size_bytes": (
+                        ebs_planning_baseline_mean_write_size_bytes
+                    ),
+                    "planning_baseline_copies_per_region": (
+                        ebs_planning_baseline_copies_per_region
                     ),
                     "projected_iops_scale": projected_iops_scale,
                     "projected_max_total_iops_per_node": projected_max_total_iops,
-                    "current_topology_iops_limit": drive.max_io_per_s,
+                    "candidate_drive_max_iops_per_node": drive.max_io_per_s,
+                    "deployed_configured_iops_limit": current_topology_iops_limit,
+                    "configured_iops_limit_missing": configured_iops_limit_missing,
+                    "observation_at_configured_limit": observation_at_configured_limit,
                     "current_topology_iops_governor": current_topology_iops_governor,
+                    "same_deployed_topology": same_deployed_topology,
+                    "same_observed_node_count": same_observed_node_count,
+                    "same_desired_buffer_policy": same_desired_buffer_policy,
+                    "unbounded_storage_derived_policy": (
+                        unbounded_storage_derived_policy
+                    ),
+                    "same_storage_scale": same_storage_scale,
+                    "same_or_lower_data": same_or_lower_data,
+                    "same_planning_demand": same_planning_demand,
                 }
             )
-            if observed_saturation_floor:
-                reported_io_calibration["observed_saturation_min_count"] = (
-                    current_count + 1
+            if deployed_topology_saturation_floor:
+                assert projected_max_total_iops is not None
+                deployed_topology_iops_min_count = (
+                    _deployed_topology_saturation_min_count(
+                        current_count,
+                        projected_max_total_iops,
+                        drive.max_io_per_s,
+                    )
+                )
+                reported_io_calibration["deployed_topology_saturation_min_count"] = (
+                    deployed_topology_iops_min_count
                 )
         if observed_ebs_write_io_per_write is not None and write_per_sec > 0:
             modeled_write_io_per_write = write_io_per_sec / write_per_sec
@@ -1025,15 +1135,13 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         disk_per_node_gib=effective_disk_per_node_gib,
         cluster_size_lambda=cluster_size_lambda,
     )
-    if reported_io_calibration.get("observed_saturation_min_count") is not None:
-        saturation_min_count = cluster_size_lambda(
-            int(reported_io_calibration["observed_saturation_min_count"])
-        )
-        reported_io_calibration["observed_saturation_min_count"] = saturation_min_count
-        min_count = max(
-            min_count,
-            saturation_min_count,
-        )
+    if deployed_topology_iops_min_count is not None:
+        evidence_min_count = cluster_size_lambda(deployed_topology_iops_min_count)
+        min_count = max(min_count, evidence_min_count)
+        if "deployed_topology_saturation_min_count" in reported_io_calibration:
+            reported_io_calibration["deployed_topology_saturation_min_count"] = (
+                evidence_min_count
+            )
 
     @lru_cache(maxsize=None)
     def memory_layout(ram_gib: float) -> MemoryLayout:
@@ -1062,44 +1170,28 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         modeled_write_iops = write_io_calibration_factor * write_io_per_sec / count
         modeled_total_iops = modeled_read_iops + modeled_write_iops
         if (
-            count == current_count
-            and current_topology_iops_governor == "observed_saturation"
-            and observed_ebs_max_total_io_per_second is not None
-        ):
-            saturated_total_iops = max(
-                modeled_total_iops,
-                observed_ebs_max_total_io_per_second,
-                drive.max_io_per_s + 1,
+            current_topology_iops_governor
+            not in (
+                "deployed_topology",
+                "deployed_topology_projected",
+                "deployed_topology_saturation",
             )
-            read_fraction = (
-                modeled_read_iops / modeled_total_iops
-                if modeled_total_iops > 0
-                else 1.0
-            )
-            return (
-                saturated_total_iops * read_fraction,
-                saturated_total_iops * (1 - read_fraction),
-            )
-        if count != current_count or current_topology_iops_governor not in (
-            "deployed_topology",
-            "deployed_topology_projected",
+            or count < current_count
         ):
             return modeled_read_iops, modeled_write_iops
         projected_max_total_iops = reported_io_calibration.get(
             "projected_max_total_iops_per_node"
         )
         assert projected_max_total_iops is not None
-        evidence_total_iops = min(
-            max(modeled_total_iops, projected_max_total_iops),
-            drive.max_io_per_s,
+        evidence_total_iops = projected_max_total_iops * current_count / count
+        read_fraction = (
+            modeled_read_iops / modeled_total_iops if modeled_total_iops > 0 else 1.0
         )
-        # Preserve the modeled read/write mix at the configured drive-class limit.
-        # The observation proves this topology works; it is not a provisioning cap.
         read_iops = (
             math.floor(
-                evidence_total_iops * modeled_read_iops / modeled_total_iops / 200
+                evidence_total_iops * read_fraction / _ATTACHED_DRIVE_IOPS_QUANTUM
             )
-            * 200
+            * _ATTACHED_DRIVE_IOPS_QUANTUM
         )
         return read_iops, evidence_total_iops - read_iops
 
@@ -1534,47 +1626,77 @@ class NflxCassandraArguments(BaseModel):
         "For existing EBS clusters, calibrates the theoretical commitlog and "
         "compaction write-I/O estimate.",
     )
-    observed_ebs_max_total_io_per_second: Optional[float] = Field(
+    observed_ebs_max_total_iops_per_node: Optional[float] = Field(
         default=None,
         gt=0,
         allow_inf_nan=False,
         description="Largest aligned read-plus-write EBS IOPS observed on one "
-        "data node. This is direct saturation evidence for the deployed topology, "
-        "not a candidate calibration ratio.",
+        "data node. This may replace the theoretical IOPS magnitude only for the "
+        "same deployed instance and drive at the deployed or a larger node count, "
+        "with compatible certain demand. Larger counts use inverse node-count "
+        "projection, and the observation never permits a downscale. It is not a "
+        "candidate calibration ratio; the directional fields retain that role.",
     )
-    observed_ebs_node_count: Optional[int] = Field(
+    observed_ebs_node_count_at_peak: Optional[int] = Field(
         default=None,
         gt=0,
-        description="Number of EBS data nodes represented in the aligned window "
-        "that produced observed_ebs_max_total_io_per_second. Retained as evidence "
-        "provenance after the caller validates window coverage.",
+        description="Number of EBS data nodes represented in the aligned peak "
+        "window. Retained as evidence provenance after the caller validates "
+        "window coverage.",
     )
-    observed_ebs_baseline_read_per_second: Optional[float] = Field(
+    ebs_planning_baseline_read_per_second: Optional[float] = Field(
         default=None,
         ge=0,
         allow_inf_nan=False,
-        description="Exact 1x read demand paired with deployed-topology EBS evidence.",
+        description="Exact 1x planning read demand paired with the EBS evidence. "
+        "This is a request fingerprint for certain planning, not a co-timed "
+        "observation.",
     )
-    observed_ebs_baseline_write_per_second: Optional[float] = Field(
+    ebs_planning_baseline_write_per_second: Optional[float] = Field(
         default=None,
         ge=0,
         allow_inf_nan=False,
-        description="Exact 1x write demand paired with deployed-topology EBS evidence.",
+        description="Exact 1x planning write demand paired with the EBS evidence. "
+        "This is a request fingerprint for certain planning, not a co-timed "
+        "observation.",
+    )
+    ebs_planning_baseline_mean_read_size_bytes: Optional[float] = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+        description="Exact mean read size paired with the deployed-topology EBS "
+        "evidence for certain planning.",
+    )
+    ebs_planning_baseline_mean_write_size_bytes: Optional[float] = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+        description="Exact mean write size paired with the deployed-topology EBS "
+        "evidence for certain planning.",
+    )
+    ebs_planning_baseline_copies_per_region: Optional[int] = Field(
+        default=None,
+        gt=1,
+        description="Replication factor paired with the deployed-topology EBS "
+        "evidence for certain planning.",
     )
 
     @model_validator(mode="after")
     def _check_ebs_topology_evidence(self) -> "NflxCassandraArguments":
         fields = (
-            "observed_ebs_max_total_io_per_second",
-            "observed_ebs_node_count",
-            "observed_ebs_baseline_read_per_second",
-            "observed_ebs_baseline_write_per_second",
+            "observed_ebs_max_total_iops_per_node",
+            "observed_ebs_node_count_at_peak",
+            "ebs_planning_baseline_read_per_second",
+            "ebs_planning_baseline_write_per_second",
+            "ebs_planning_baseline_mean_read_size_bytes",
+            "ebs_planning_baseline_mean_write_size_bytes",
+            "ebs_planning_baseline_copies_per_region",
         )
         supplied = {name for name in fields if getattr(self, name) is not None}
         if supplied and len(supplied) != len(fields):
             missing = ", ".join(sorted(set(fields) - supplied))
             raise ValueError(
-                "deployed-topology EBS evidence requires all four fields; "
+                "deployed-topology EBS evidence requires all seven fields; "
                 f"missing: {missing}"
             )
         return self
@@ -1828,15 +1950,24 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             min_instance_ram_gib_exclusive=args.min_instance_ram_gib_exclusive,
             observed_ebs_read_io_per_read=args.observed_ebs_read_io_per_read,
             observed_ebs_write_io_per_write=args.observed_ebs_write_io_per_write,
-            observed_ebs_max_total_io_per_second=(
-                args.observed_ebs_max_total_io_per_second
+            observed_ebs_max_total_iops_per_node=(
+                args.observed_ebs_max_total_iops_per_node
             ),
-            observed_ebs_node_count=args.observed_ebs_node_count,
-            observed_ebs_baseline_read_per_second=(
-                args.observed_ebs_baseline_read_per_second
+            observed_ebs_node_count_at_peak=args.observed_ebs_node_count_at_peak,
+            ebs_planning_baseline_read_per_second=(
+                args.ebs_planning_baseline_read_per_second
             ),
-            observed_ebs_baseline_write_per_second=(
-                args.observed_ebs_baseline_write_per_second
+            ebs_planning_baseline_write_per_second=(
+                args.ebs_planning_baseline_write_per_second
+            ),
+            ebs_planning_baseline_mean_read_size_bytes=(
+                args.ebs_planning_baseline_mean_read_size_bytes
+            ),
+            ebs_planning_baseline_mean_write_size_bytes=(
+                args.ebs_planning_baseline_mean_write_size_bytes
+            ),
+            ebs_planning_baseline_copies_per_region=(
+                args.ebs_planning_baseline_copies_per_region
             ),
         )
 
