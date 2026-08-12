@@ -45,6 +45,9 @@ from service_capacity_modeling.models.org.netflix.read_only_kv import (
 from service_capacity_modeling.models.org.netflix.read_only_kv import (
     NflxReadOnlyKVArguments,
 )
+from service_capacity_modeling.models.org.netflix.read_only_kv import (
+    SST_MEMORY_BUFFER_NAME,
+)
 from tests.util import get_total_storage_gib
 from tests.util import has_local_storage
 
@@ -642,6 +645,10 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
 
     @pytest.fixture
     def sst_memory_desires(self):
+        buffers = NflxReadOnlyKVCapacityModel.default_buffers()
+        buffers.desired[SST_MEMORY_BUFFER_NAME] = Buffer(
+            ratio=1.2, components=[BufferComponent.memory]
+        )
         return CapacityDesires(
             service_tier=1,
             query_pattern=QueryPattern(
@@ -652,11 +659,15 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
                 estimated_mean_read_size_bytes=certain_int(2048),
             ),
             data_shape=DataShape(estimated_state_size_gib=certain_int(13_000)),
-            buffers=NflxReadOnlyKVCapacityModel.default_buffers(),
+            buffers=buffers,
         )
 
     def test_large_manifest_uses_memory_safe_lowest_cost_plan(self):
         """A 1.3 TiB, 50k RPS workload cannot place one copy on one node."""
+        buffers = NflxReadOnlyKVCapacityModel.default_buffers()
+        buffers.desired[SST_MEMORY_BUFFER_NAME] = Buffer(
+            ratio=1.2, components=[BufferComponent.memory]
+        )
         desires = CapacityDesires(
             service_tier=1,
             query_pattern=QueryPattern(
@@ -669,7 +680,7 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
             data_shape=DataShape(
                 estimated_state_size_gib=certain_int(1_300),
             ),
-            buffers=NflxReadOnlyKVCapacityModel.default_buffers(),
+            buffers=buffers,
         )
         instance = shapes.instance("i4i.2xlarge")
 
@@ -714,6 +725,68 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
         )
         assert memory_safe_cluster.cluster_params["read-only-kv.replica_count"] == 7
         assert memory_safe_cluster.count == 14
+
+    def test_sst_memory_requires_named_buffer(self, sst_memory_desires):
+        """The SST estimate remains dormant without an explicit opt-in buffer."""
+        desires = sst_memory_desires.model_copy(deep=True)
+        desires.buffers.desired.pop(SST_MEMORY_BUFFER_NAME)
+        desires.buffers.desired["other-memory"] = Buffer(
+            ratio=2, components=[BufferComponent.memory]
+        )
+
+        plan = _estimate_read_only_kv_cluster(
+            instance=shapes.instance("i3en.2xlarge"),
+            desires=desires,
+            args=NflxReadOnlyKVArguments(total_num_partitions=64),
+        )
+
+        assert plan is not None
+        cluster = plan.candidate_clusters.regional[0]
+        assert cluster.cluster_params["read-only-kv.partitions_per_node"] == 10
+        assert plan.requirements.regional[0].mem_gib.mid == 0
+        assert "read-only-kv.sst_memory_overhead_ratio" not in cluster.cluster_params
+
+    def test_planner_merges_named_sst_memory_buffer(self, sst_memory_desires):
+        """The namespace buffer survives merging with model defaults."""
+        desires = sst_memory_desires.model_copy(deep=True)
+        desires.buffers = Buffers(
+            desired={
+                SST_MEMORY_BUFFER_NAME: Buffer(
+                    ratio=1.2, components=[BufferComponent.memory]
+                )
+            }
+        )
+
+        plan = planner.plan_certain(
+            model_name="org.netflix.read-only-kv",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={"total_num_partitions": 64},
+            instance_families=["i3en"],
+        )[0]
+
+        cluster = plan.candidate_clusters.regional[0]
+        assert (
+            cluster.cluster_params["read-only-kv.sst_memory_buffer"]
+            == SST_MEMORY_BUFFER_NAME
+        )
+        assert cluster.cluster_params["read-only-kv.memory_buffer_ratio"] == 1.2
+
+    def test_named_sst_memory_buffer_requires_memory_component(
+        self, sst_memory_desires
+    ):
+        desires = sst_memory_desires.model_copy(deep=True)
+        desires.buffers.desired[SST_MEMORY_BUFFER_NAME] = Buffer(
+            ratio=1.2, components=[BufferComponent.compute]
+        )
+
+        plan = _estimate_read_only_kv_cluster(
+            instance=shapes.instance("i3en.2xlarge"),
+            desires=desires,
+            args=NflxReadOnlyKVArguments(total_num_partitions=64),
+        )
+
+        assert plan is None
 
     def test_sst_memory_overhead_limits_partitions_per_node(self, sst_memory_desires):
         """SST index memory limits packing before local disk is full."""
@@ -774,8 +847,8 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
         assert cluster.cluster_params["read-only-kv.partitions_per_node"] == 10
         assert plan.requirements.regional[0].mem_gib.mid == 0
         assert (
-            cluster.cluster_params["read-only-kv.available_sst_memory_per_node_gib"]
-            is None
+            "read-only-kv.available_sst_memory_per_node_gib"
+            not in cluster.cluster_params
         )
 
     def test_disabled_sst_memory_ignores_memory_reservations(self, sst_memory_desires):
@@ -863,10 +936,7 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
 
         assert plan is None
 
-    @pytest.mark.parametrize("sst_memory_overhead_ratio", [0, 0.05])
-    def test_zero_memory_buffer_returns_no_plan(
-        self, sst_memory_desires, sst_memory_overhead_ratio
-    ):
+    def test_zero_memory_buffer_returns_no_plan(self, sst_memory_desires):
         desires = sst_memory_desires.model_copy(deep=True)
         desires.buffers.desired["memory"] = Buffer(
             ratio=0, components=[BufferComponent.memory]
@@ -875,10 +945,7 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
         plan = _estimate_read_only_kv_cluster(
             instance=shapes.instance("i3en.2xlarge"),
             desires=desires,
-            args=NflxReadOnlyKVArguments(
-                total_num_partitions=64,
-                sst_memory_overhead_ratio=sst_memory_overhead_ratio,
-            ),
+            args=NflxReadOnlyKVArguments(total_num_partitions=64),
         )
 
         assert plan is None
