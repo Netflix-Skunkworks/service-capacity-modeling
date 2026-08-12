@@ -206,8 +206,6 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             cluster_instance_count=certain_int(64),
             cluster_drive=simple_drive(
                 size_gib=max(1200, disk_utilization_gib),
-                read_io_per_s=8_000,
-                write_io_per_s=8_000,
             ),
             cpu_utilization=certain_float(20),
             disk_utilization_gib=certain_float(disk_utilization_gib),
@@ -246,11 +244,14 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         return {
             "observed_ebs_max_total_iops_per_node": observed_iops,
             "observed_ebs_node_count_at_peak": 768,
+            "deployed_ebs_configured_iops_per_node": 16_000,
             "ebs_planning_baseline_read_per_second": 300_000,
             "ebs_planning_baseline_write_per_second": 300_000,
             "ebs_planning_baseline_mean_read_size_bytes": 1024,
             "ebs_planning_baseline_mean_write_size_bytes": 256,
             "ebs_planning_baseline_copies_per_region": 3,
+            "ebs_planning_baseline_zones_per_region": 3,
+            "ebs_planning_baseline_num_regions": 4,
         }
 
     def _ebs_explained(
@@ -460,6 +461,7 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             desires,
             observed_iops=12_000,
             required_cluster_size=64,
+            deployed_ebs_configured_iops_per_node=None,
         )
 
         candidate_excuse = next(
@@ -514,7 +516,7 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         explained = self._ebs_explained(
             desires,
             observed_iops=16_000,
-            required_cluster_size=64,
+            num_results=20,
         )
 
         candidate_excuse = next(
@@ -530,10 +532,15 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         assert calibration["observation_at_configured_limit"] is True
         assert calibration["projected_max_total_iops_per_node"] is None
         assert "deployed_topology_saturation_min_count" not in calibration
+        assert all(
+            plan.candidate_clusters.zonal[0].count >= 64
+            for plan in explained.plans
+            if plan.candidate_clusters.zonal[0].instance.name == "r7a.4xlarge"
+        )
 
     @pytest.mark.parametrize(
         ("compression_ratio", "logical_data_multiplier"),
-        [(3.0, 3.0), (0.5, 1.0)],
+        [(3.0, 3.0), (0.5, 0.5)],
     )
     def test_deployed_topology_compares_data_in_on_disk_units(
         self, compression_ratio, logical_data_multiplier
@@ -561,6 +568,35 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         calibration = cluster.cluster_params["cassandra.ebs_io_calibration"]
         assert (cluster.count, cluster.instance.name) == (64, "r7a.4xlarge")
         assert calibration["current_topology_iops_governor"] == "deployed_topology"
+
+    def test_deployed_topology_rejects_compression_expansion(self):
+        desires = self._existing_ebs_desires()
+        current = desires.current_clusters.zonal[0]
+        physical_zonal_gib = (
+            current.disk_utilization_gib.mid * current.cluster_instance_count.mid
+        )
+        desires.data_shape = DataShape(
+            estimated_state_size_gib=certain_float(physical_zonal_gib),
+            estimated_compression_ratio=certain_float(0.5),
+        )
+
+        explained = self._ebs_explained(
+            desires,
+            observed_iops=12_000,
+            required_cluster_size=64,
+            same_data_as_deployed=False,
+        )
+
+        candidate_excuse = next(
+            excuse
+            for excuse in explained.excuses_by_model["org.netflix.cassandra"]
+            if excuse.instance == "r7a.4xlarge"
+        )
+        calibration = candidate_excuse.context["ebs_io_calibration"]
+        assert calibration["same_or_lower_data"] is False
+        assert calibration["current_topology_iops_governor"] == (
+            "candidate_model_unprojectable_demand"
+        )
 
     def test_deployed_topology_compares_zonal_data_at_non_default_rf(self):
         desires = self._existing_ebs_desires()
@@ -606,7 +642,7 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             if excuse.instance == "r7a.4xlarge"
         )
         calibration = candidate_excuse.context["ebs_io_calibration"]
-        assert calibration["same_planning_demand"] is False
+        assert calibration["complete_planning_baseline"] is False
         assert calibration["planning_baseline_copies_per_region"] == 3
         assert (
             calibration["current_topology_iops_governor"]
@@ -616,6 +652,8 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
     def test_deployed_topology_evidence_requires_all_fields(self):
         evidence = self._deployed_topology_evidence(15_999)
         for missing_field in evidence:
+            if missing_field == "deployed_ebs_configured_iops_per_node":
+                continue
             incomplete = evidence | {missing_field: None}
             with pytest.raises(ValueError, match=f"missing: {missing_field}"):
                 NflxCassandraArguments.from_extra_model_arguments(incomplete)
@@ -710,7 +748,7 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         assert cluster.count == 96
         assert drive.read_io_per_s + drive.write_io_per_s == 10_000
 
-    def test_deployed_topology_evidence_requires_directional_demand_fingerprint(self):
+    def test_deployed_topology_evidence_projects_directional_demand_growth(self):
         desires = self._existing_ebs_desires()
         desires.query_pattern = desires.query_pattern.model_copy(
             update={
@@ -733,10 +771,10 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             if plan.candidate_clusters.zonal[0].instance.name == "r7a.4xlarge"
         )
         calibration = cluster.cluster_params["cassandra.ebs_io_calibration"]
-        assert calibration["same_planning_demand"] is False
-        assert (
-            calibration["current_topology_iops_governor"]
-            == "candidate_model_unprojectable_demand"
+        assert calibration["demand_iops_scale"] == pytest.approx(5.0625)
+        assert calibration["projected_max_total_iops_per_node"] == pytest.approx(10_125)
+        assert calibration["current_topology_iops_governor"] == (
+            "deployed_topology_projected"
         )
 
     def test_deployed_topology_evidence_requires_matching_fleet_node_count(self):
@@ -761,7 +799,33 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             == "candidate_model_different_topology"
         )
 
-    def test_deployed_topology_evidence_does_not_cross_request_size_boundary(self):
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("ebs_planning_baseline_zones_per_region", 4),
+            ("ebs_planning_baseline_num_regions", 3),
+        ],
+    )
+    def test_deployed_topology_evidence_requires_matching_layout(self, field, value):
+        explained = self._ebs_explained(
+            self._existing_ebs_desires(),
+            required_cluster_size=64,
+            **{field: value},
+        )
+
+        candidate_excuse = next(
+            excuse
+            for excuse in explained.excuses_by_model["org.netflix.cassandra"]
+            if excuse.instance == "r7a.4xlarge"
+        )
+        calibration = candidate_excuse.context["ebs_io_calibration"]
+        assert calibration["same_observed_node_count"] is True
+        assert calibration["same_observed_topology"] is False
+        assert calibration["current_topology_iops_governor"] == (
+            "candidate_model_different_topology"
+        )
+
+    def test_deployed_topology_evidence_projects_request_size_growth(self):
         desires = self._existing_ebs_desires()
         desires.query_pattern = desires.query_pattern.model_copy(
             update={"estimated_mean_read_size_bytes": certain_int(64 * 1024)}
@@ -781,12 +845,11 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         calibration = current_family_cluster.cluster_params[
             "cassandra.ebs_io_calibration"
         ]
-        assert current_family_cluster.count > 64
-        assert (
-            calibration["current_topology_iops_governor"]
-            == "candidate_model_unprojectable_demand"
+        assert current_family_cluster.count >= 64
+        assert calibration["demand_iops_scale"] == 4
+        assert calibration["current_topology_iops_governor"] == (
+            "deployed_topology_projected"
         )
-        assert calibration["same_planning_demand"] is False
 
     @pytest.mark.parametrize(
         "boundary",
@@ -907,10 +970,10 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             (300_000, 300_000, None, "unrestricted", (None, 12_000)),
             (300_000, 300_000, 1.325, "unrestricted", (65, 15_800)),
             (300_000, 300_000, 4 / 3, "unrestricted", (65, 15_800)),
-            (600_000, 600_000, None, "unrestricted", (None, None)),
+            (600_000, 600_000, None, "unrestricted", (98, 15_800)),
             (300_000, 300_000, 2.0, "unrestricted", (98, 15_800)),
-            (150_000, 150_000, None, "unrestricted", (None, None)),
-            (600_000, 150_000, None, "unrestricted", (None, None)),
+            (150_000, 150_000, None, "unrestricted", (None, 12_000)),
+            (600_000, 150_000, None, "unrestricted", (98, 15_800)),
             (300_000, 300_000, 2.0, "doubling", (128, 12_000)),
         ],
     )
@@ -966,11 +1029,15 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             if cluster.instance.name != "r7a.4xlarge"
         )
         if read_per_second == write_per_second == 150_000:
-            assert current_cluster.count < 64
-        if (read_per_second, write_per_second) != (300_000, 300_000):
+            assert current_cluster.count == 64
+        if expected_floor is not None:
             assert (
                 current_calibration["current_topology_iops_governor"]
-                == "candidate_model_unprojectable_demand"
+                == "deployed_topology_saturation"
+            )
+        else:
+            assert current_calibration["current_topology_iops_governor"] == (
+                "deployed_topology"
             )
         if cluster_size_mode == "doubling":
             assert current_cluster.count == 128

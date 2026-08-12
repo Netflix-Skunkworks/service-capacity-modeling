@@ -682,11 +682,14 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     observed_ebs_write_io_per_write: Optional[float] = None,
     observed_ebs_max_total_iops_per_node: Optional[float] = None,
     observed_ebs_node_count_at_peak: Optional[int] = None,
+    deployed_ebs_configured_iops_per_node: Optional[int] = None,
     ebs_planning_baseline_read_per_second: Optional[float] = None,
     ebs_planning_baseline_write_per_second: Optional[float] = None,
     ebs_planning_baseline_mean_read_size_bytes: Optional[float] = None,
     ebs_planning_baseline_mean_write_size_bytes: Optional[float] = None,
     ebs_planning_baseline_copies_per_region: Optional[int] = None,
+    ebs_planning_baseline_zones_per_region: Optional[int] = None,
+    ebs_planning_baseline_num_regions: Optional[int] = None,
 ) -> Union[CapacityPlan, Excuse, None]:
     drive_name = drive.name
 
@@ -907,23 +910,19 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             same_observed_node_count = (
                 observed_ebs_node_count_at_peak == expected_deployed_node_count
             )
+            same_observed_topology = (
+                same_observed_node_count
+                and ebs_planning_baseline_zones_per_region == zones_per_region
+                and ebs_planning_baseline_num_regions == context.num_regions
+            )
             same_deployed_topology = (
                 instance.name == current_capacity.cluster_instance_name
                 and current_drive is not None
                 and drive.name == current_drive.name
                 and drive.drive_type == current_drive.drive_type
-                and same_observed_node_count
+                and same_observed_topology
             )
-            current_topology_iops_limit = None
-            if (
-                current_drive is not None
-                and current_drive.read_io_per_s is not None
-                and current_drive.write_io_per_s is not None
-            ):
-                current_topology_iops_limit = min(
-                    current_drive.read_io_per_s + current_drive.write_io_per_s,
-                    drive.max_io_per_s,
-                )
+            current_topology_iops_limit = deployed_ebs_configured_iops_per_node
             configured_iops_limit_missing = current_topology_iops_limit is None
             observation_at_configured_limit = (
                 current_topology_iops_limit is not None
@@ -976,47 +975,70 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             )
             desired_zonal_data_gib = (
                 desires.data_shape.estimated_state_size_gib.mid
-                / max(desires.data_shape.estimated_compression_ratio.mid, 1.0)
+                / desires.data_shape.estimated_compression_ratio.mid
                 * copies_per_region
                 / zones_per_region
             )
             same_or_lower_data = (
                 desired_zonal_data_gib <= current_data_per_node_gib * current_count
             )
-            same_planning_demand = (
+            complete_planning_baseline = (
                 ebs_planning_baseline_read_per_second is not None
                 and ebs_planning_baseline_write_per_second is not None
                 and ebs_planning_baseline_mean_read_size_bytes is not None
                 and ebs_planning_baseline_mean_write_size_bytes is not None
                 and ebs_planning_baseline_copies_per_region is not None
-                and math.isclose(
-                    desires.query_pattern.estimated_read_per_second.mid,
-                    ebs_planning_baseline_read_per_second,
-                )
-                and math.isclose(
-                    desires.query_pattern.estimated_write_per_second.mid,
-                    ebs_planning_baseline_write_per_second,
-                )
-                and math.isclose(
-                    desires.query_pattern.estimated_mean_read_size_bytes.mid,
-                    ebs_planning_baseline_mean_read_size_bytes,
-                )
-                and math.isclose(
-                    desires.query_pattern.estimated_mean_write_size_bytes.mid,
-                    ebs_planning_baseline_mean_write_size_bytes,
-                )
+                and ebs_planning_baseline_zones_per_region is not None
+                and ebs_planning_baseline_num_regions is not None
                 and copies_per_region == ebs_planning_baseline_copies_per_region
+                and zones_per_region == ebs_planning_baseline_zones_per_region
+                and context.num_regions == ebs_planning_baseline_num_regions
             )
+            demand_iops_scale = None
+            if complete_planning_baseline:
+                assert ebs_planning_baseline_read_per_second is not None
+                assert ebs_planning_baseline_write_per_second is not None
+                assert ebs_planning_baseline_mean_read_size_bytes is not None
+                assert ebs_planning_baseline_mean_write_size_bytes is not None
+                baseline_read_per_zone = (
+                    ebs_planning_baseline_read_per_second // zones_per_region
+                )
+                baseline_write_per_zone = (
+                    ebs_planning_baseline_write_per_second // zones_per_region
+                )
+                baseline_read_iops = max(
+                    baseline_read_per_zone,
+                    baseline_read_per_zone
+                    * ebs_planning_baseline_mean_read_size_bytes
+                    // (drive.rand_io_size_kib * 1024),
+                )
+                baseline_write_iops = 5 * max(
+                    1,
+                    baseline_write_per_zone
+                    * ebs_planning_baseline_mean_write_size_bytes
+                    // (drive.seq_io_size_kib * 1024),
+                )
+
+                def demand_growth(current: float, baseline: float) -> Optional[float]:
+                    if baseline > 0:
+                        return max(1.0, current / baseline)
+                    return 1.0 if current <= 0 else None
+
+                read_growth = demand_growth(read_io_per_sec, baseline_read_iops)
+                write_growth = demand_growth(write_io_per_sec, baseline_write_iops)
+                if read_growth is not None and write_growth is not None:
+                    demand_iops_scale = max(read_growth, write_growth)
             projected_iops_scale = None
             if (
                 projectable_buffer_policy
                 and same_or_lower_data
-                and same_planning_demand
+                and demand_iops_scale is not None
                 and not configured_iops_limit_missing
                 and not observation_at_configured_limit
             ):
                 projected_iops_scale = max(
                     1.0,
+                    demand_iops_scale,
                     component_scales[BufferComponent.cpu],
                     component_scales[BufferComponent.network],
                 )
@@ -1041,6 +1063,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 current_topology_iops_governor = (
                     "candidate_model_observation_at_configured_limit"
                 )
+                if same_deployed_topology:
+                    deployed_topology_iops_min_count = current_count
             elif projected_max_total_iops is None:
                 current_topology_iops_governor = "candidate_model_unprojectable_demand"
             elif (
@@ -1081,6 +1105,13 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                     "planning_baseline_copies_per_region": (
                         ebs_planning_baseline_copies_per_region
                     ),
+                    "planning_baseline_zones_per_region": (
+                        ebs_planning_baseline_zones_per_region
+                    ),
+                    "planning_baseline_num_regions": (
+                        ebs_planning_baseline_num_regions
+                    ),
+                    "demand_iops_scale": demand_iops_scale,
                     "projected_iops_scale": projected_iops_scale,
                     "projected_max_total_iops_per_node": projected_max_total_iops,
                     "candidate_drive_max_iops_per_node": drive.max_io_per_s,
@@ -1090,13 +1121,14 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                     "current_topology_iops_governor": current_topology_iops_governor,
                     "same_deployed_topology": same_deployed_topology,
                     "same_observed_node_count": same_observed_node_count,
+                    "same_observed_topology": same_observed_topology,
                     "same_desired_buffer_policy": same_desired_buffer_policy,
                     "unbounded_storage_derived_policy": (
                         unbounded_storage_derived_policy
                     ),
                     "same_storage_scale": same_storage_scale,
                     "same_or_lower_data": same_or_lower_data,
-                    "same_planning_demand": same_planning_demand,
+                    "complete_planning_baseline": complete_planning_baseline,
                 }
             )
             if deployed_topology_saturation_floor:
@@ -1644,21 +1676,23 @@ class NflxCassandraArguments(BaseModel):
         "window. Retained as evidence provenance after the caller validates "
         "window coverage.",
     )
+    deployed_ebs_configured_iops_per_node: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Configured shared read-plus-write IOPS limit on each deployed "
+        "EBS data volume. Kept separate from directional Drive pricing fields.",
+    )
     ebs_planning_baseline_read_per_second: Optional[float] = Field(
         default=None,
         ge=0,
         allow_inf_nan=False,
-        description="Exact 1x planning read demand paired with the EBS evidence. "
-        "This is a request fingerprint for certain planning, not a co-timed "
-        "observation.",
+        description="Fleet read rate co-timed with the aligned EBS IOPS peak.",
     )
     ebs_planning_baseline_write_per_second: Optional[float] = Field(
         default=None,
         ge=0,
         allow_inf_nan=False,
-        description="Exact 1x planning write demand paired with the EBS evidence. "
-        "This is a request fingerprint for certain planning, not a co-timed "
-        "observation.",
+        description="Fleet write rate co-timed with the aligned EBS IOPS peak.",
     )
     ebs_planning_baseline_mean_read_size_bytes: Optional[float] = Field(
         default=None,
@@ -1680,6 +1714,16 @@ class NflxCassandraArguments(BaseModel):
         description="Replication factor paired with the deployed-topology EBS "
         "evidence for certain planning.",
     )
+    ebs_planning_baseline_zones_per_region: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Zones per region represented by the aligned EBS evidence.",
+    )
+    ebs_planning_baseline_num_regions: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Regions represented by the aligned EBS evidence.",
+    )
 
     @model_validator(mode="after")
     def _check_ebs_topology_evidence(self) -> "NflxCassandraArguments":
@@ -1691,12 +1735,14 @@ class NflxCassandraArguments(BaseModel):
             "ebs_planning_baseline_mean_read_size_bytes",
             "ebs_planning_baseline_mean_write_size_bytes",
             "ebs_planning_baseline_copies_per_region",
+            "ebs_planning_baseline_zones_per_region",
+            "ebs_planning_baseline_num_regions",
         )
         supplied = {name for name in fields if getattr(self, name) is not None}
         if supplied and len(supplied) != len(fields):
             missing = ", ".join(sorted(set(fields) - supplied))
             raise ValueError(
-                "deployed-topology EBS evidence requires all seven fields; "
+                "deployed-topology EBS evidence requires the complete bundle; "
                 f"missing: {missing}"
             )
         return self
@@ -1954,6 +2000,9 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
                 args.observed_ebs_max_total_iops_per_node
             ),
             observed_ebs_node_count_at_peak=args.observed_ebs_node_count_at_peak,
+            deployed_ebs_configured_iops_per_node=(
+                args.deployed_ebs_configured_iops_per_node
+            ),
             ebs_planning_baseline_read_per_second=(
                 args.ebs_planning_baseline_read_per_second
             ),
@@ -1969,6 +2018,10 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             ebs_planning_baseline_copies_per_region=(
                 args.ebs_planning_baseline_copies_per_region
             ),
+            ebs_planning_baseline_zones_per_region=(
+                args.ebs_planning_baseline_zones_per_region
+            ),
+            ebs_planning_baseline_num_regions=(args.ebs_planning_baseline_num_regions),
         )
 
         return result
