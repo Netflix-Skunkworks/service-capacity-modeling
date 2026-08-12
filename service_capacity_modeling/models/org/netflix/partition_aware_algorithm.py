@@ -49,6 +49,14 @@ class CapacityResult(BaseModel):
     replica_count: int  # Replication factor
     partitions_per_node: int  # Partitions placed on each node
     nodes_for_one_copy: int  # Nodes needed for one complete copy of data
+    max_partitions_per_node_by_disk: int
+    max_partitions_per_node_by_memory: Optional[int] = None
+
+
+def _partitions_that_fit(capacity_gib: float, partition_size_gib: float) -> int:
+    """Floor a capacity ratio without losing an exact fit to float error."""
+    fit = capacity_gib / partition_size_gib
+    return math.floor(math.nextafter(fit, math.inf))
 
 
 def search_for_min_nodes(
@@ -67,21 +75,24 @@ def search_for_min_nodes(
         CapacityResult with the lowest node count, or None if no valid
         configuration exists within the constraints.
     """
-    max_ppn = int(problem.disk_per_node_gib / problem.partition_size_gib)
+    disk_ppn = _partitions_that_fit(
+        problem.disk_per_node_gib, problem.partition_size_gib
+    )
+    memory_ppn = None
     if problem.memory_per_partition_gib is not None:
         assert problem.memory_per_node_gib is not None
-        max_ppn = min(
-            max_ppn,
-            int(problem.memory_per_node_gib / problem.memory_per_partition_gib),
+        memory_ppn = _partitions_that_fit(
+            problem.memory_per_node_gib, problem.memory_per_partition_gib
         )
+
+    max_ppn = min(disk_ppn, memory_ppn) if memory_ppn is not None else disk_ppn
     if max_ppn < 1:
         return None
 
-    best_result: Optional[CapacityResult] = None
-    best_rank: Optional[tuple[int, int, int]] = None
-    for ppn in range(min(max_ppn, problem.n_partitions), 0, -1):
+    best_candidate: Optional[tuple[int, int, int, int]] = None
+    ppn = max_ppn
+    while ppn > 0:
         nodes_for_one_copy = math.ceil(problem.n_partitions / ppn)
-        reported_ppn = max_ppn if nodes_for_one_copy == 1 else ppn
 
         # Calculate minimum RF for CPU
         rf = max(
@@ -92,15 +103,23 @@ def search_for_min_nodes(
         total_nodes = max(nodes_for_one_copy * rf, 2)
 
         if total_nodes <= problem.max_nodes:
-            candidate = CapacityResult(
-                node_count=total_nodes,
-                replica_count=rf,
-                partitions_per_node=reported_ppn,
-                nodes_for_one_copy=nodes_for_one_copy,
-            )
-            candidate_rank = (total_nodes, -rf, -reported_ppn)
-            if best_rank is None or candidate_rank < best_rank:
-                best_result = candidate
-                best_rank = candidate_rank
+            candidate = (total_nodes, -rf, -ppn, nodes_for_one_copy)
+            if best_candidate is None or candidate[:3] < best_candidate[:3]:
+                best_candidate = candidate
 
-    return best_result
+        # All skipped densities have the same nodes_for_one_copy and therefore
+        # the same RF and node count. The current ppn wins their tie-break.
+        ppn = (problem.n_partitions - 1) // nodes_for_one_copy
+
+    if best_candidate is None:
+        return None
+
+    node_count, negative_rf, negative_ppn, nodes_for_one_copy = best_candidate
+    return CapacityResult(
+        node_count=node_count,
+        replica_count=-negative_rf,
+        partitions_per_node=-negative_ppn,
+        nodes_for_one_copy=nodes_for_one_copy,
+        max_partitions_per_node_by_disk=disk_ppn,
+        max_partitions_per_node_by_memory=memory_ppn,
+    )
