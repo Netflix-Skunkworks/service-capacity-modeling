@@ -17,6 +17,44 @@ from service_capacity_modeling.models.org.netflix.partition_aware_algorithm impo
 )
 
 
+@st.composite
+def valid_problems(draw):
+    """Generate disk-only and memory-constrained capacity problems."""
+    n_partitions = draw(st.integers(min_value=1, max_value=1000))
+    partition_size_gib = draw(st.floats(min_value=1, max_value=500, allow_nan=False))
+    disk_per_node_gib = partition_size_gib * draw(
+        st.integers(min_value=1, max_value=40)
+    )
+    memory_per_partition_gib = None
+    memory_per_node_gib = None
+    if draw(st.booleans()):
+        memory_per_partition_gib = draw(
+            st.floats(min_value=0.1, max_value=100, allow_nan=False)
+        )
+        memory_per_node_gib = memory_per_partition_gib * draw(
+            st.integers(min_value=1, max_value=40)
+        )
+
+    cpu_per_node = draw(st.integers(min_value=2, max_value=128))
+    cpu_needed = draw(st.integers(min_value=1, max_value=10000))
+    min_rf = draw(st.integers(min_value=1, max_value=5))
+    max_nodes = n_partitions * max(
+        min_rf, math.ceil(cpu_needed / (n_partitions * cpu_per_node))
+    )
+
+    return CapacityProblem(
+        n_partitions=n_partitions,
+        partition_size_gib=partition_size_gib,
+        disk_per_node_gib=disk_per_node_gib,
+        memory_per_partition_gib=memory_per_partition_gib,
+        memory_per_node_gib=memory_per_node_gib,
+        cpu_per_node=cpu_per_node,
+        cpu_needed=cpu_needed,
+        min_rf=min_rf,
+        max_nodes=max_nodes,
+    )
+
+
 class TestAlgorithmBasics:
     """Basic functionality tests for the algorithm."""
 
@@ -84,6 +122,27 @@ class TestAlgorithmBasics:
         assert result is not None
         assert result.partitions_per_node == 2
         assert result.nodes_for_one_copy == 5
+        assert result.max_partitions_per_node_by_disk == 5
+        assert result.max_partitions_per_node_by_memory == 2
+
+    def test_exact_float_boundary_keeps_valid_partition_fit(self):
+        problem = CapacityProblem(
+            n_partitions=188,
+            partition_size_gib=1,
+            disk_per_node_gib=10_000,
+            memory_per_partition_gib=53.39 / 47,
+            memory_per_node_gib=53.39,
+            cpu_per_node=16,
+            cpu_needed=1,
+            min_rf=2,
+            max_nodes=8,
+        )
+
+        result = search_for_min_nodes(problem)
+
+        assert result is not None
+        assert result.partitions_per_node == 47
+        assert result.node_count == 8
 
     def test_returns_none_when_partition_exceeds_node_memory(self):
         """Algorithm rejects a partition that cannot fit in node memory."""
@@ -267,23 +326,41 @@ class TestPlanSelection:
         assert result.partitions_per_node == 15
         assert result.replica_count == 3
 
+    def test_skips_equivalent_partition_densities(self, monkeypatch):
+        real_ceil = math.ceil
+        ceil_calls = 0
+
+        def counting_ceil(value):
+            nonlocal ceil_calls
+            ceil_calls += 1
+            assert ceil_calls <= 5_000
+            return real_ceil(value)
+
+        monkeypatch.setattr(
+            "service_capacity_modeling.models.org.netflix."
+            "partition_aware_algorithm.math.ceil",
+            counting_ceil,
+        )
+        problem = CapacityProblem(
+            n_partitions=1_000_000,
+            partition_size_gib=1,
+            disk_per_node_gib=100_000,
+            cpu_per_node=16,
+            cpu_needed=10_000,
+            min_rf=2,
+            max_nodes=1_000_000_000,
+        )
+
+        result = search_for_min_nodes(problem)
+
+        assert result is not None
+        assert result.node_count == 625
+        assert result.replica_count == 25
+        assert result.partitions_per_node == 41_666
+
 
 class TestAlgorithmProperties:
     """Property-based tests using Hypothesis."""
-
-    @staticmethod
-    def valid_problems():
-        """Generate valid capacity problems."""
-        return st.builds(
-            CapacityProblem,
-            n_partitions=st.integers(min_value=1, max_value=1000),
-            partition_size_gib=st.floats(min_value=1, max_value=500),
-            disk_per_node_gib=st.floats(min_value=100, max_value=4000),
-            cpu_per_node=st.integers(min_value=2, max_value=128),
-            cpu_needed=st.integers(min_value=1, max_value=10000),
-            min_rf=st.integers(min_value=1, max_value=5),
-            max_nodes=st.integers(min_value=2, max_value=1000),
-        ).filter(lambda p: p.disk_per_node_gib >= p.partition_size_gib)
 
     @given(problem=valid_problems())
     @settings(max_examples=500, deadline=None)
@@ -300,8 +377,21 @@ class TestAlgorithmProperties:
         assert result.replica_count >= problem.min_rf
 
         # PPn is valid
-        max_ppn = int(problem.disk_per_node_gib / problem.partition_size_gib)
-        assert 1 <= result.partitions_per_node <= max_ppn
+        assert 1 <= result.partitions_per_node <= result.max_partitions_per_node_by_disk
+        used_disk_gib = result.partitions_per_node * problem.partition_size_gib
+        assert used_disk_gib <= math.nextafter(problem.disk_per_node_gib, math.inf)
+        if problem.memory_per_partition_gib is not None:
+            assert result.max_partitions_per_node_by_memory is not None
+            assert (
+                result.partitions_per_node <= result.max_partitions_per_node_by_memory
+            )
+            assert problem.memory_per_node_gib is not None
+            used_memory_gib = (
+                result.partitions_per_node * problem.memory_per_partition_gib
+            )
+            assert used_memory_gib <= math.nextafter(
+                problem.memory_per_node_gib, math.inf
+            )
 
         # CPU constraint satisfied
         total_cpu = result.node_count * problem.cpu_per_node
@@ -315,7 +405,21 @@ class TestAlgorithmProperties:
         if result is None:
             return
 
-        max_ppn = int(problem.disk_per_node_gib / problem.partition_size_gib)
+        disk_ppn = math.floor(
+            math.nextafter(
+                problem.disk_per_node_gib / problem.partition_size_gib, math.inf
+            )
+        )
+        max_ppn = disk_ppn
+        if problem.memory_per_partition_gib is not None:
+            assert problem.memory_per_node_gib is not None
+            memory_ppn = math.floor(
+                math.nextafter(
+                    problem.memory_per_node_gib / problem.memory_per_partition_gib,
+                    math.inf,
+                )
+            )
+            max_ppn = min(max_ppn, memory_ppn)
 
         result_rank = (
             result.node_count,
@@ -397,6 +501,8 @@ class TestEdgeCases:
             n_partitions=10,
             partition_size_gib=100,
             disk_per_node_gib=500,  # Exactly 5 partitions per node
+            memory_per_partition_gib=10,
+            memory_per_node_gib=50,
             cpu_per_node=16,
             cpu_needed=32,
             min_rf=2,
@@ -409,3 +515,5 @@ class TestEdgeCases:
         assert result.partitions_per_node == 5
         assert result.nodes_for_one_copy == 2
         assert result.replica_count == 2
+        assert result.max_partitions_per_node_by_disk == 5
+        assert result.max_partitions_per_node_by_memory == 5

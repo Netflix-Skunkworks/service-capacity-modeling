@@ -56,6 +56,7 @@ from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
+from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
     CapacityProblem,
     search_for_min_nodes,
@@ -108,14 +109,15 @@ class NflxReadOnlyKVArguments(BaseModel):
     )
     reserved_memory_gib: float = Field(
         default=8.0,
-        description="Reserved memory for the OS, JVM heap, block cache, "
-        "and other processes (GiB).",
+        description="Minimum memory reserved for the OS, JVM heap, block cache, "
+        "and other processes (GiB). Data-shape reservations take precedence when "
+        "their sum is larger.",
         ge=0,
     )
     sst_memory_overhead_ratio: float = Field(
         default=0.05,
-        description="Resident RocksDB table-reader memory as a ratio of SST data "
-        "placed on each node.",
+        description="Planning assumption for resident RocksDB table-reader memory "
+        "per complete data copy, as a ratio of SST data.",
         ge=0,
         le=1,
     )
@@ -136,6 +138,7 @@ def _estimate_read_only_kv_requirement(
     instance: Instance,
     desires: CapacityDesires,
     args: NflxReadOnlyKVArguments,
+    memory_buffer_ratio: float,
 ) -> CapacityRequirement:
     """Estimate the capacity requirement for the read-only KV regional cluster.
 
@@ -147,6 +150,8 @@ def _estimate_read_only_kv_requirement(
     Args:
         instance: The compute instance being considered
         desires: User's capacity desires
+        args: Read-only KV specific arguments
+        memory_buffer_ratio: Memory headroom applied to the SST estimate
 
     Returns:
         CapacityRequirement for the regional cluster
@@ -166,7 +171,9 @@ def _estimate_read_only_kv_requirement(
     )
 
     needed_sst_memory_gib = (
-        desires.data_shape.estimated_state_size_gib.mid * args.sst_memory_overhead_ratio
+        desires.data_shape.estimated_state_size_gib.mid
+        * args.sst_memory_overhead_ratio
+        * memory_buffer_ratio
     )
 
     # Network calculation (read-only, so only outbound read traffic)
@@ -183,21 +190,23 @@ def _estimate_read_only_kv_requirement(
     )
 
 
+# pylint: disable-next=too-many-positional-arguments
 def _compute_read_only_kv_regional_cluster(
     instance: Instance,
     requirement: CapacityRequirement,
     args: NflxReadOnlyKVArguments,
     partition_size_with_buffer_gib: float,
     disk_buffer_ratio: float,
+    memory_buffer_ratio: float,
+    reserved_memory_gib: float,
 ) -> Optional[RegionClusterCapacity]:
     """Compute the regional cluster configuration using the partition-aware algorithm.
 
     Partition-aware algorithm (local disks only):
-    1. CAPACITY FIRST: Calculate partitions_per_node from independent local disk
-       and resident SST memory constraints
-    2. Calculate nodes_for_one_copy = total_partitions / partitions_per_node
-    3. Start with min_replica_count, calculate initial node count
-    4. CHECK CPU: If not satisfied, increase replica_count (uses spare disk)
+    1. Calculate independent disk and resident SST memory partition ceilings.
+    2. Evaluate each distinct nodes-per-copy placement below those ceilings.
+    3. Calculate the replica count required by minimum RF and CPU for each placement.
+    4. Select the fewest nodes, then prefer higher RF and denser packing on ties.
 
     Note: Only supports local disks. EBS/attached disk is not supported because:
     - EBS disk is provisioned exactly for data needs (no spare space)
@@ -209,6 +218,8 @@ def _compute_read_only_kv_regional_cluster(
         args: Read-only KV specific arguments
         partition_size_with_buffer_gib: Size of one partition with disk buffer applied
         disk_buffer_ratio: Disk buffer ratio for headroom
+        memory_buffer_ratio: Memory buffer ratio for headroom
+        reserved_memory_gib: Total memory reserved outside SST table readers
 
     Returns:
         RegionClusterCapacity or None if configuration is not viable
@@ -229,11 +240,13 @@ def _compute_read_only_kv_regional_cluster(
     sst_memory_per_partition_gib = requirement.mem_gib.mid / args.total_num_partitions
     available_sst_memory_per_node_gib = None
     if args.sst_memory_overhead_ratio > 0:
-        available_sst_memory_per_node_gib = max(
-            0, instance.ram_gib - args.reserved_memory_gib
+        usable_memory_per_node_gib = usable_memory_gib(
+            instance, lambda _: reserved_memory_gib
         )
+        if usable_memory_per_node_gib <= 0:
+            return None
+        available_sst_memory_per_node_gib = usable_memory_per_node_gib
 
-    # Step 2: Use partition-aware algorithm to find optimal configuration
     problem = CapacityProblem(
         n_partitions=args.total_num_partitions,
         partition_size_gib=partition_size_with_buffer_gib,
@@ -268,13 +281,26 @@ def _compute_read_only_kv_regional_cluster(
         "read-only-kv.nodes_for_one_copy": result.nodes_for_one_copy,
         "read-only-kv.nodes_for_cpu": math.ceil(total_needed_cores / instance.cpu),
         "read-only-kv.sst_memory_overhead_ratio": args.sst_memory_overhead_ratio,
-        "read-only-kv.sst_memory_per_partition_gib": sst_memory_per_partition_gib,
-        "read-only-kv.sst_memory_per_copy_gib": requirement.mem_gib.mid,
-        "read-only-kv.total_sst_memory_gib": (
+        "read-only-kv.memory_buffer_ratio": memory_buffer_ratio,
+        "read-only-kv.reserved_memory_per_node_gib": reserved_memory_gib,
+        "read-only-kv.buffered_sst_memory_per_partition_gib": (
+            sst_memory_per_partition_gib
+        ),
+        "read-only-kv.estimated_sst_memory_per_copy_gib": (
+            requirement.mem_gib.mid / memory_buffer_ratio
+        ),
+        "read-only-kv.buffered_sst_memory_per_copy_gib": requirement.mem_gib.mid,
+        "read-only-kv.total_buffered_sst_memory_gib": (
             requirement.mem_gib.mid * result.replica_count
         ),
         "read-only-kv.available_sst_memory_per_node_gib": (
             available_sst_memory_per_node_gib
+        ),
+        "read-only-kv.max_partitions_per_node_by_disk": (
+            result.max_partitions_per_node_by_disk
+        ),
+        "read-only-kv.max_partitions_per_node_by_memory": (
+            result.max_partitions_per_node_by_memory
         ),
         EFFECTIVE_DISK_PER_NODE_GIB: effective_disk_per_node,
     }
@@ -321,30 +347,54 @@ def _estimate_read_only_kv_cluster(
     if instance.drive is None:
         return None
 
+    unreplicated_data_gib = desires.data_shape.estimated_state_size_gib.mid
+    if unreplicated_data_gib <= 0:
+        return None
+
+    memory_buffer = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.memory]
+    )
+    if memory_buffer.ratio <= 0:
+        return None
+
     # Calculate requirements
-    requirement = _estimate_read_only_kv_requirement(
-        instance=instance, desires=desires, args=args
+    per_copy_requirement = _estimate_read_only_kv_requirement(
+        instance=instance,
+        desires=desires,
+        args=args,
+        memory_buffer_ratio=memory_buffer.ratio,
     )
 
     # Compute disk buffer values inline (not via context)
     disk_buffer = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     )
-    unreplicated_data_gib = desires.data_shape.estimated_state_size_gib.mid
     partition_size_gib = unreplicated_data_gib / args.total_num_partitions
     partition_size_with_buffer_gib = partition_size_gib * disk_buffer.ratio
+    reserved_memory_gib = max(
+        args.reserved_memory_gib,
+        desires.data_shape.reserved_instance_app_mem_gib
+        + desires.data_shape.reserved_instance_system_mem_gib,
+    )
 
     # Compute cluster
     cluster = _compute_read_only_kv_regional_cluster(
         instance=instance,
-        requirement=requirement,
+        requirement=per_copy_requirement,
         args=args,
         partition_size_with_buffer_gib=partition_size_with_buffer_gib,
         disk_buffer_ratio=disk_buffer.ratio,
+        memory_buffer_ratio=memory_buffer.ratio,
+        reserved_memory_gib=reserved_memory_gib,
     )
 
     if cluster is None:
         return None
+
+    replica_count = int(cluster.cluster_params["read-only-kv.replica_count"])
+    regional_requirement = per_copy_requirement.model_copy(
+        update={"mem_gib": per_copy_requirement.mem_gib.scale(replica_count)}
+    )
 
     # Build cost breakdown using cluster_costs (consistent with CostAwareModel)
     rokv_costs = NflxReadOnlyKVCapacityModel.cluster_costs(
@@ -363,7 +413,7 @@ def _estimate_read_only_kv_cluster(
     )
 
     return CapacityPlan(
-        requirements=Requirements(regional=[requirement]),
+        requirements=Requirements(regional=[regional_requirement]),
         candidate_clusters=clusters,
         rank=clusters.total_annual_cost * (1 + penalty_ratio),
     )
@@ -456,6 +506,8 @@ class NflxReadOnlyKVCapacityModel(CapacityModel, CostAwareModel):
                 ),  # 67% utilization target
                 # Read-only: can run at high disk utilization
                 "disk": Buffer(ratio=1.15, components=[BufferComponent.disk]),  # 87%
+                # Keep the 5% SST estimate at or below 83.3% of its allocation.
+                "memory": Buffer(ratio=1.2, components=[BufferComponent.memory]),  # 83%
             },
         )
 
