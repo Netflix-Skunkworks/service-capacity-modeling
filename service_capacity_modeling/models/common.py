@@ -582,7 +582,11 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     # Maximum EBS volume size per node. Default caps at 1/3 max to leave
     # growth headroom. Models can override for clusters with known disk needs.
     max_node_disk_gib: Callable[[Drive], int] = lambda d: math.ceil(d.max_size_gib / 3),
+    max_attached_drive_io_per_s: Optional[float] = None,
 ) -> ZoneClusterCapacity:
+    if max_attached_drive_io_per_s is not None and max_attached_drive_io_per_s <= 0:
+        raise ValueError("max_attached_drive_io_per_s must be positive")
+
     # CPU
     count_cpu = math.ceil(needed_cores / instance.cpu)
 
@@ -629,6 +633,7 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
             min_count=min_count,
             required_disk_ios=required_disk_ios,
             max_node_disk_gib=max_node_disk_gib,
+            max_attached_drive_io_per_s=max_attached_drive_io_per_s,
         )
         count_disk_capacity = attached_drive_plan.count_disk_capacity
         count_disk_iops = attached_drive_plan.count_disk_iops
@@ -725,11 +730,18 @@ def _attached_drive_plan(
     min_count: int,
     required_disk_ios: Callable[[float, int], Tuple[float, float]],
     max_node_disk_gib: Callable[[Drive], int],
+    max_attached_drive_io_per_s: Optional[float],
 ) -> _AttachedDrivePlanResult:
     preliminary_resource_count = max(count_cpu, count_memory, count_network)
     min_count = int(math.ceil(min_count))
     initial_count = max(cluster_size(preliminary_resource_count), min_count)
     max_size_gib = max_node_disk_gib(drive)
+    attached_drive_io_limit = min(
+        drive.max_io_per_s,
+        max_attached_drive_io_per_s
+        if max_attached_drive_io_per_s is not None
+        else drive.max_io_per_s,
+    )
 
     class AttachedDriveSizing(NamedTuple):
         count_disk_capacity: int
@@ -758,9 +770,9 @@ def _attached_drive_plan(
             drive_size_gib = min(drive_size_gib, int(max_size_gib))
 
         count_disk_iops = 0
-        if (read_io + write_io) > drive.max_io_per_s:
+        if (read_io + write_io) > attached_drive_io_limit:
             count_disk_iops = math.ceil(
-                node_count * ((read_io + write_io) / drive.max_io_per_s)
+                node_count * ((read_io + write_io) / attached_drive_io_limit)
             )
 
         next_count = int(

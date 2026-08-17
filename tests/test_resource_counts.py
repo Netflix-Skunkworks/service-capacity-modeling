@@ -23,6 +23,21 @@ EXPECTED_KEYS = {
 }
 
 
+def test_attached_drive_iops_limit_must_be_positive():
+    with pytest.raises(
+        ValueError, match="max_attached_drive_io_per_s must be positive"
+    ):
+        compute_stateful_zone(
+            instance=M5_4XL,
+            drive=EBS,
+            needed_cores=1,
+            needed_disk_gib=100,
+            needed_memory_gib=1,
+            needed_network_mbps=1,
+            max_attached_drive_io_per_s=0,
+        )
+
+
 @pytest.mark.parametrize(
     "cores,mem,disk,net,expected_bottleneck",
     [

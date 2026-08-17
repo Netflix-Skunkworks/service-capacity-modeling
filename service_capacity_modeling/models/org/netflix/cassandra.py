@@ -877,6 +877,9 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     reported_io_calibration: Dict[str, Any] = {}
     current_topology_iops_governor: Optional[str] = None
     deployed_topology_iops_min_count: Optional[int] = None
+    deployed_topology_iops_floor_per_node: Optional[float] = None
+    projected_max_total_iops: Optional[float] = None
+    max_attached_drive_io_per_s: Optional[float] = None
     if is_ebs and current_cluster_size > 0:
         assert current_capacity is not None
         current_data_per_node_gib = current_capacity.disk_utilization_gib.mid
@@ -923,10 +926,9 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 and same_observed_topology
             )
             current_topology_iops_limit = deployed_ebs_configured_iops_per_node
-            configured_iops_limit_missing = current_topology_iops_limit is None
+            assert current_topology_iops_limit is not None
             observation_at_configured_limit = (
-                current_topology_iops_limit is not None
-                and observed_ebs_max_total_iops_per_node
+                observed_ebs_max_total_iops_per_node
                 > current_topology_iops_limit - _ATTACHED_DRIVE_IOPS_QUANTUM
             )
             component_scales: Dict[BufferComponent, float] = {}
@@ -979,8 +981,14 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 * copies_per_region
                 / zones_per_region
             )
-            same_or_lower_data = (
-                desired_zonal_data_gib <= current_data_per_node_gib * current_count
+            deployed_zonal_data_gib = current_data_per_node_gib * current_count
+            same_or_lower_data = desired_zonal_data_gib <= deployed_zonal_data_gib or (
+                math.isclose(
+                    desired_zonal_data_gib,
+                    deployed_zonal_data_gib,
+                    rel_tol=1e-9,
+                    abs_tol=1e-9,
+                )
             )
             complete_planning_baseline = (
                 ebs_planning_baseline_read_per_second is not None
@@ -1006,6 +1014,10 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 baseline_write_per_zone = (
                     ebs_planning_baseline_write_per_second // zones_per_region
                 )
+                baseline_write_bytes_per_second = round(
+                    baseline_write_per_zone
+                    * ebs_planning_baseline_mean_write_size_bytes
+                )
                 baseline_read_iops = max(
                     baseline_read_per_zone,
                     baseline_read_per_zone
@@ -1014,9 +1026,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 )
                 baseline_write_iops = 5 * max(
                     1,
-                    baseline_write_per_zone
-                    * ebs_planning_baseline_mean_write_size_bytes
-                    // (drive.seq_io_size_kib * 1024),
+                    baseline_write_bytes_per_second // (drive.seq_io_size_kib * 1024),
                 )
 
                 def demand_growth(current: float, baseline: float) -> Optional[float]:
@@ -1028,20 +1038,21 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 write_growth = demand_growth(write_io_per_sec, baseline_write_iops)
                 if read_growth is not None and write_growth is not None:
                     demand_iops_scale = max(read_growth, write_growth)
-            projected_iops_scale = None
+            comparable_iops_scale = None
             if (
                 projectable_buffer_policy
                 and same_or_lower_data
                 and demand_iops_scale is not None
-                and not configured_iops_limit_missing
-                and not observation_at_configured_limit
             ):
-                projected_iops_scale = max(
+                comparable_iops_scale = max(
                     1.0,
                     demand_iops_scale,
                     component_scales[BufferComponent.cpu],
                     component_scales[BufferComponent.network],
                 )
+            projected_iops_scale = (
+                comparable_iops_scale if not observation_at_configured_limit else None
+            )
             projected_max_total_iops = (
                 observed_ebs_max_total_iops_per_node * projected_iops_scale
                 if projected_iops_scale is not None
@@ -1055,16 +1066,39 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             )
             if not same_deployed_topology:
                 current_topology_iops_governor = "candidate_model_different_topology"
-            elif configured_iops_limit_missing:
-                current_topology_iops_governor = (
-                    "candidate_model_missing_configured_iops_limit"
-                )
             elif observation_at_configured_limit:
                 current_topology_iops_governor = (
                     "candidate_model_observation_at_configured_limit"
                 )
-                if same_deployed_topology:
-                    deployed_topology_iops_min_count = current_count
+                # At-limit evidence always prevents downscale. Comparable demand
+                # is required only for projecting a stronger floor above today's
+                # topology and reserving one sizing quantum of drive headroom.
+                deployed_topology_iops_min_count = current_count
+                if comparable_iops_scale is not None:
+                    deployed_topology_iops_floor_per_node = (
+                        min(
+                            float(current_topology_iops_limit),
+                            observed_ebs_max_total_iops_per_node,
+                        )
+                        * comparable_iops_scale
+                    )
+                    candidate_drive_iops_limit = (
+                        drive.max_io_per_s - _ATTACHED_DRIVE_IOPS_QUANTUM
+                    )
+                    if (
+                        deployed_topology_iops_floor_per_node
+                        > candidate_drive_iops_limit
+                    ):
+                        deployed_topology_iops_min_count = (
+                            _deployed_topology_saturation_min_count(
+                                current_count,
+                                deployed_topology_iops_floor_per_node,
+                                drive.max_io_per_s,
+                            )
+                        )
+                    # The deployed setting identifies censored evidence, but EBS
+                    # IOPS can be raised independently for a candidate volume.
+                    max_attached_drive_io_per_s = candidate_drive_iops_limit
             elif projected_max_total_iops is None:
                 current_topology_iops_governor = "candidate_model_unprojectable_demand"
             elif (
@@ -1116,7 +1150,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                     "projected_max_total_iops_per_node": projected_max_total_iops,
                     "candidate_drive_max_iops_per_node": drive.max_io_per_s,
                     "deployed_configured_iops_limit": current_topology_iops_limit,
-                    "configured_iops_limit_missing": configured_iops_limit_missing,
                     "observation_at_configured_limit": observation_at_configured_limit,
                     "current_topology_iops_governor": current_topology_iops_governor,
                     "same_deployed_topology": same_deployed_topology,
@@ -1139,6 +1172,17 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                         projected_max_total_iops,
                         drive.max_io_per_s,
                     )
+                )
+                reported_io_calibration["deployed_topology_saturation_min_count"] = (
+                    deployed_topology_iops_min_count
+                )
+            if deployed_topology_iops_floor_per_node is not None:
+                assert comparable_iops_scale is not None
+                reported_io_calibration["deployed_topology_iops_floor_per_node"] = (
+                    deployed_topology_iops_floor_per_node
+                )
+                reported_io_calibration["deployed_topology_iops_floor_scale"] = (
+                    comparable_iops_scale
                 )
                 reported_io_calibration["deployed_topology_saturation_min_count"] = (
                     deployed_topology_iops_min_count
@@ -1201,21 +1245,28 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         )
         modeled_write_iops = write_io_calibration_factor * write_io_per_sec / count
         modeled_total_iops = modeled_read_iops + modeled_write_iops
-        if (
+        if current_topology_iops_governor not in (
+            "deployed_topology",
+            "deployed_topology_projected",
+            "deployed_topology_saturation",
+            "candidate_model_observation_at_configured_limit",
+        ) or (
             current_topology_iops_governor
-            not in (
-                "deployed_topology",
-                "deployed_topology_projected",
-                "deployed_topology_saturation",
-            )
-            or count < current_count
+            == "candidate_model_observation_at_configured_limit"
+            and deployed_topology_iops_floor_per_node is None
         ):
             return modeled_read_iops, modeled_write_iops
-        projected_max_total_iops = reported_io_calibration.get(
-            "projected_max_total_iops_per_node"
-        )
-        assert projected_max_total_iops is not None
-        evidence_total_iops = projected_max_total_iops * current_count / count
+        evidence_iops_per_node = deployed_topology_iops_floor_per_node
+        if evidence_iops_per_node is None:
+            evidence_iops_per_node = projected_max_total_iops
+        assert evidence_iops_per_node is not None
+        evidence_total_iops = evidence_iops_per_node * current_count / count
+        if (
+            current_topology_iops_governor
+            == "candidate_model_observation_at_configured_limit"
+            and modeled_total_iops >= evidence_total_iops
+        ):
+            return modeled_read_iops, modeled_write_iops
         read_fraction = (
             modeled_read_iops / modeled_total_iops if modeled_total_iops > 0 else 1.0
         )
@@ -1244,6 +1295,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         write_buffer=lambda x: heap_fn(x) * max_write_buffer_percent * 0.25,
         required_write_buffer_gib=requirement_estimate.write_buffer_gib,
         max_node_disk_gib=max_node_disk,
+        max_attached_drive_io_per_s=max_attached_drive_io_per_s,
     )
     if ebs_disk_floor and cluster.attached_drives:
         for attached_drive in cluster.attached_drives:
@@ -1678,9 +1730,10 @@ class NflxCassandraArguments(BaseModel):
     )
     deployed_ebs_configured_iops_per_node: Optional[int] = Field(
         default=None,
-        gt=0,
+        gt=_ATTACHED_DRIVE_IOPS_QUANTUM,
         description="Configured shared read-plus-write IOPS limit on each deployed "
-        "EBS data volume. Kept separate from directional Drive pricing fields.",
+        "EBS data volume. The limit must leave at least one 200-IOPS sizing "
+        "quantum of headroom. Kept separate from directional Drive pricing fields.",
     )
     ebs_planning_baseline_read_per_second: Optional[float] = Field(
         default=None,
@@ -1730,6 +1783,7 @@ class NflxCassandraArguments(BaseModel):
         fields = (
             "observed_ebs_max_total_iops_per_node",
             "observed_ebs_node_count_at_peak",
+            "deployed_ebs_configured_iops_per_node",
             "ebs_planning_baseline_read_per_second",
             "ebs_planning_baseline_write_per_second",
             "ebs_planning_baseline_mean_read_size_bytes",
