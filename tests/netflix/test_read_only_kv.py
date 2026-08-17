@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """
 Tests for Netflix Read-Only Key-Value capacity model.
 
@@ -36,7 +37,16 @@ from service_capacity_modeling.models.org.netflix.read_only_kv import (
     _compute_penalties,
 )
 from service_capacity_modeling.models.org.netflix.read_only_kv import (
+    _estimate_read_only_kv_cluster,
+)
+from service_capacity_modeling.models.org.netflix.read_only_kv import (
     NflxReadOnlyKVCapacityModel,
+)
+from service_capacity_modeling.models.org.netflix.read_only_kv import (
+    NflxReadOnlyKVArguments,
+)
+from service_capacity_modeling.models.org.netflix.read_only_kv import (
+    SST_MEMORY_BUFFER_NAME,
 )
 from tests.util import get_total_storage_gib
 from tests.util import has_local_storage
@@ -632,6 +642,334 @@ class TestReadOnlyKVMultiplePlans:
 
 class TestReadOnlyKVPartitionAwareAlgorithm:
     """Tests for the partition-aware capacity planning algorithm."""
+
+    @pytest.fixture
+    def sst_memory_desires(self):
+        buffers = NflxReadOnlyKVCapacityModel.default_buffers()
+        buffers.desired[SST_MEMORY_BUFFER_NAME] = Buffer(
+            ratio=1.2, components=[BufferComponent.memory]
+        )
+        return CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                access_pattern=AccessPattern.latency,
+                estimated_read_per_second=certain_int(2_000),
+                estimated_write_per_second=certain_int(0),
+                estimated_mean_read_latency_ms=certain_float(2.0),
+                estimated_mean_read_size_bytes=certain_int(2048),
+            ),
+            data_shape=DataShape(estimated_state_size_gib=certain_int(13_000)),
+            buffers=buffers,
+        )
+
+    def test_large_manifest_uses_memory_safe_lowest_cost_plan(self):
+        """A 1.3 TiB, 50k RPS workload cannot place one copy on one node."""
+        buffers = NflxReadOnlyKVCapacityModel.default_buffers()
+        buffers.desired[SST_MEMORY_BUFFER_NAME] = Buffer(
+            ratio=1.2, components=[BufferComponent.memory]
+        )
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                access_pattern=AccessPattern.latency,
+                estimated_read_per_second=certain_int(50_000),
+                estimated_write_per_second=certain_int(0),
+                estimated_mean_read_latency_ms=certain_float(2.0),
+                estimated_mean_read_size_bytes=certain_int(2048),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(1_300),
+            ),
+            buffers=buffers,
+        )
+        instance = shapes.instance("i4i.2xlarge")
+
+        disk_only_plan = _estimate_read_only_kv_cluster(
+            instance=instance,
+            desires=desires,
+            args=NflxReadOnlyKVArguments(
+                total_num_partitions=16,
+                sst_memory_overhead_ratio=0,
+            ),
+        )
+        memory_safe_plan = _estimate_read_only_kv_cluster(
+            instance=instance,
+            desires=desires,
+            args=NflxReadOnlyKVArguments(total_num_partitions=16),
+        )
+
+        assert disk_only_plan is not None
+        assert memory_safe_plan is not None
+        disk_only_cluster = disk_only_plan.candidate_clusters.regional[0]
+        memory_safe_cluster = memory_safe_plan.candidate_clusters.regional[0]
+        assert disk_only_cluster.cluster_params["read-only-kv.nodes_for_one_copy"] == 1
+        assert disk_only_cluster.cluster_params["read-only-kv.replica_count"] == 13
+        sst_memory_per_copy_gib = memory_safe_cluster.cluster_params[
+            "read-only-kv.buffered_sst_memory_per_copy_gib"
+        ]
+        available_sst_memory_per_node_gib = memory_safe_cluster.cluster_params[
+            "read-only-kv.available_sst_memory_per_node_gib"
+        ]
+        assert sst_memory_per_copy_gib == 78
+        assert available_sst_memory_per_node_gib == pytest.approx(53.04)
+        assert sst_memory_per_copy_gib > available_sst_memory_per_node_gib
+        assert (
+            memory_safe_cluster.cluster_params["read-only-kv.nodes_for_one_copy"] == 2
+        )
+        assert (
+            memory_safe_cluster.cluster_params[
+                "read-only-kv.buffered_sst_memory_per_partition_gib"
+            ]
+            * memory_safe_cluster.cluster_params["read-only-kv.partitions_per_node"]
+            <= available_sst_memory_per_node_gib
+        )
+        assert memory_safe_cluster.cluster_params["read-only-kv.replica_count"] == 7
+        assert memory_safe_cluster.count == 14
+
+    def test_sst_memory_requires_named_buffer(self, sst_memory_desires):
+        """The SST estimate remains dormant without an explicit opt-in buffer."""
+        desires = sst_memory_desires.model_copy(deep=True)
+        desires.buffers.desired.pop(SST_MEMORY_BUFFER_NAME)
+        desires.buffers.desired["other-memory"] = Buffer(
+            ratio=2, components=[BufferComponent.memory]
+        )
+
+        plan = _estimate_read_only_kv_cluster(
+            instance=shapes.instance("i3en.2xlarge"),
+            desires=desires,
+            args=NflxReadOnlyKVArguments(total_num_partitions=64),
+        )
+
+        assert plan is not None
+        cluster = plan.candidate_clusters.regional[0]
+        assert cluster.cluster_params["read-only-kv.partitions_per_node"] == 10
+        assert plan.requirements.regional[0].mem_gib.mid == 0
+        assert "read-only-kv.sst_memory_overhead_ratio" not in cluster.cluster_params
+
+    def test_planner_merges_named_sst_memory_buffer(self, sst_memory_desires):
+        """The namespace buffer survives merging with model defaults."""
+        desires = sst_memory_desires.model_copy(deep=True)
+        desires.buffers = Buffers(
+            desired={
+                SST_MEMORY_BUFFER_NAME: Buffer(
+                    ratio=1.2, components=[BufferComponent.memory]
+                )
+            }
+        )
+
+        plan = planner.plan_certain(
+            model_name="org.netflix.read-only-kv",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={"total_num_partitions": 64},
+            instance_families=["i3en"],
+        )[0]
+
+        cluster = plan.candidate_clusters.regional[0]
+        assert (
+            cluster.cluster_params["read-only-kv.sst_memory_buffer"]
+            == SST_MEMORY_BUFFER_NAME
+        )
+        assert cluster.cluster_params["read-only-kv.memory_buffer_ratio"] == 1.2
+
+    def test_named_sst_memory_buffer_requires_memory_component(
+        self, sst_memory_desires
+    ):
+        desires = sst_memory_desires.model_copy(deep=True)
+        desires.buffers.desired[SST_MEMORY_BUFFER_NAME] = Buffer(
+            ratio=1.2, components=[BufferComponent.compute]
+        )
+
+        plan = _estimate_read_only_kv_cluster(
+            instance=shapes.instance("i3en.2xlarge"),
+            desires=desires,
+            args=NflxReadOnlyKVArguments(total_num_partitions=64),
+        )
+
+        assert plan is None
+
+    def test_sst_memory_overhead_limits_partitions_per_node(self, sst_memory_desires):
+        """SST index memory limits packing before local disk is full."""
+        instance = shapes.instance("i3en.2xlarge")
+
+        plan = _estimate_read_only_kv_cluster(
+            instance=instance,
+            desires=sst_memory_desires,
+            args=NflxReadOnlyKVArguments(total_num_partitions=64),
+        )
+
+        assert plan is not None
+        cluster = plan.candidate_clusters.regional[0]
+        assert cluster.cluster_params["read-only-kv.partitions_per_node"] == 4
+        assert plan.requirements.regional[0].mem_gib.mid == pytest.approx(1_560)
+        assert (
+            plan.requirements.regional[0].mem_gib.mid
+            == cluster.cluster_params["read-only-kv.total_buffered_sst_memory_gib"]
+        )
+        assert cluster.cluster_params["effective_disk_per_node_gib"] == pytest.approx(
+            2048 * 1.15
+        )
+        assert cluster.cluster_params[
+            "read-only-kv.available_sst_memory_per_node_gib"
+        ] == pytest.approx(instance.ram_gib - 8)
+        assert (
+            cluster.cluster_params["read-only-kv.max_partitions_per_node_by_disk"] == 10
+        )
+        assert (
+            cluster.cluster_params["read-only-kv.max_partitions_per_node_by_memory"]
+            == 4
+        )
+        assert cluster.cluster_params["read-only-kv.memory_buffer_ratio"] == 1.2
+        assert cluster.cluster_params["read-only-kv.replica_count"] == 2
+        assert (
+            cluster.cluster_params["read-only-kv.estimated_sst_memory_per_copy_gib"]
+            == 650
+        )
+        assert (
+            cluster.cluster_params["read-only-kv.total_buffered_sst_memory_gib"] == 1560
+        )
+
+    def test_sst_memory_overhead_can_be_disabled(self, sst_memory_desires):
+        """A zero overhead ratio preserves disk-only partition packing."""
+        instance = shapes.instance("i3en.2xlarge")
+
+        plan = _estimate_read_only_kv_cluster(
+            instance=instance,
+            desires=sst_memory_desires,
+            args=NflxReadOnlyKVArguments(
+                total_num_partitions=64,
+                sst_memory_overhead_ratio=0,
+            ),
+        )
+
+        assert plan is not None
+        cluster = plan.candidate_clusters.regional[0]
+        assert cluster.cluster_params["read-only-kv.partitions_per_node"] == 10
+        assert plan.requirements.regional[0].mem_gib.mid == 0
+        assert (
+            "read-only-kv.available_sst_memory_per_node_gib"
+            not in cluster.cluster_params
+        )
+
+    def test_disabled_sst_memory_ignores_memory_reservations(self, sst_memory_desires):
+        desires = sst_memory_desires.model_copy(deep=True)
+        desires.data_shape.reserved_instance_app_mem_gib = 64
+
+        plan = _estimate_read_only_kv_cluster(
+            instance=shapes.instance("i3en.2xlarge"),
+            desires=desires,
+            args=NflxReadOnlyKVArguments(
+                total_num_partitions=64,
+                sst_memory_overhead_ratio=0,
+            ),
+        )
+
+        assert plan is not None
+
+    @pytest.mark.parametrize(
+        "component, expected_disk_limit",
+        [(BufferComponent.memory, 10), (BufferComponent.storage, 9)],
+    )
+    def test_memory_buffer_limits_partition_packing(
+        self, sst_memory_desires, component, expected_disk_limit
+    ):
+        desires = sst_memory_desires.model_copy(deep=True)
+        desires.buffers.desired["sst-headroom"] = Buffer(
+            ratio=2, components=[component]
+        )
+
+        plan = _estimate_read_only_kv_cluster(
+            instance=shapes.instance("i3en.2xlarge"),
+            desires=desires,
+            args=NflxReadOnlyKVArguments(total_num_partitions=64),
+        )
+
+        assert plan is not None
+        cluster = plan.candidate_clusters.regional[0]
+        assert cluster.cluster_params["read-only-kv.memory_buffer_ratio"] == 2.4
+        assert cluster.cluster_params["read-only-kv.partitions_per_node"] == 2
+        assert (
+            cluster.cluster_params["read-only-kv.max_partitions_per_node_by_memory"]
+            == 2
+        )
+        assert (
+            cluster.cluster_params["read-only-kv.max_partitions_per_node_by_disk"]
+            == expected_disk_limit
+        )
+
+    def test_data_shape_reservation_limits_partition_packing(self, sst_memory_desires):
+        desires = sst_memory_desires.model_copy(deep=True)
+        desires.data_shape.reserved_instance_app_mem_gib = 40
+
+        plan = _estimate_read_only_kv_cluster(
+            instance=shapes.instance("i3en.2xlarge"),
+            desires=desires,
+            args=NflxReadOnlyKVArguments(total_num_partitions=64),
+        )
+
+        assert plan is not None
+        cluster = plan.candidate_clusters.regional[0]
+        assert cluster.cluster_params["read-only-kv.reserved_memory_per_node_gib"] == 41
+        assert cluster.cluster_params["read-only-kv.partitions_per_node"] == 1
+
+    def test_reservation_exceeding_ram_rejects_instance(self, sst_memory_desires):
+        desires = sst_memory_desires.model_copy(deep=True)
+        desires.data_shape.reserved_instance_app_mem_gib = 64
+
+        plan = _estimate_read_only_kv_cluster(
+            instance=shapes.instance("i3en.2xlarge"),
+            desires=desires,
+            args=NflxReadOnlyKVArguments(total_num_partitions=64),
+        )
+
+        assert plan is None
+
+    def test_zero_state_returns_no_plan(self, sst_memory_desires):
+        desires = sst_memory_desires.model_copy(deep=True)
+        desires.data_shape.estimated_state_size_gib = certain_int(0)
+
+        plan = _estimate_read_only_kv_cluster(
+            instance=shapes.instance("i3en.2xlarge"),
+            desires=desires,
+            args=NflxReadOnlyKVArguments(total_num_partitions=64),
+        )
+
+        assert plan is None
+
+    def test_zero_memory_buffer_returns_no_plan(self, sst_memory_desires):
+        desires = sst_memory_desires.model_copy(deep=True)
+        desires.buffers.desired["memory"] = Buffer(
+            ratio=0, components=[BufferComponent.memory]
+        )
+
+        plan = _estimate_read_only_kv_cluster(
+            instance=shapes.instance("i3en.2xlarge"),
+            desires=desires,
+            args=NflxReadOnlyKVArguments(total_num_partitions=64),
+        )
+
+        assert plan is None
+
+    def test_sst_memory_does_not_change_effective_disk(self, sst_memory_desires):
+        plans = [
+            _estimate_read_only_kv_cluster(
+                instance=shapes.instance("i3en.2xlarge"),
+                desires=sst_memory_desires,
+                args=NflxReadOnlyKVArguments(
+                    total_num_partitions=64,
+                    sst_memory_overhead_ratio=ratio,
+                ),
+            )
+            for ratio in (0.05, 0.15)
+        ]
+
+        assert all(plan is not None for plan in plans)
+        clusters = [plan.candidate_clusters.regional[0] for plan in plans if plan]
+        assert clusters[0].count != clusters[1].count
+        assert (
+            clusters[0].cluster_params["effective_disk_per_node_gib"]
+            == clusters[1].cluster_params["effective_disk_per_node_gib"]
+        )
 
     def test_compute_heavy_increases_replica_count(self):
         """Test that compute-heavy workloads increase replica count.
