@@ -23,6 +23,51 @@ EXPECTED_KEYS = {
 }
 
 
+@pytest.mark.parametrize("limit", [0, 100, float("nan"), float("inf")])
+def test_attached_drive_iops_limit_must_cover_one_sizing_quantum(limit):
+    with pytest.raises(
+        ValueError, match="max_attached_drive_io_per_s must be finite and at least 200"
+    ):
+        compute_stateful_zone(
+            instance=M5_4XL,
+            drive=EBS,
+            needed_cores=1,
+            needed_disk_gib=100,
+            needed_memory_gib=1,
+            needed_network_mbps=1,
+            max_attached_drive_io_per_s=limit,
+        )
+
+
+def test_attached_drive_iops_limit_cannot_return_drive_above_limit():
+    with pytest.raises(ValueError, match="required rounded IOPS remain above"):
+        compute_stateful_zone(
+            instance=M5_4XL,
+            drive=EBS,
+            needed_cores=1,
+            needed_disk_gib=100,
+            needed_memory_gib=1,
+            needed_network_mbps=1,
+            required_disk_ios=lambda _size, count: (1 / count, 1 / count),
+            max_attached_drive_io_per_s=200,
+        )
+
+
+def test_attached_drive_fixed_min_count_does_not_require_rounding_fixed_point():
+    cluster = compute_stateful_zone(
+        instance=M5_4XL,
+        drive=EBS,
+        needed_cores=1,
+        needed_disk_gib=100,
+        needed_memory_gib=1,
+        needed_network_mbps=1,
+        cluster_size=lambda count: 1 << (count - 1).bit_length(),
+        min_count=100,
+    )
+
+    assert cluster.count == 100
+
+
 @pytest.mark.parametrize(
     "cores,mem,disk,net,expected_bottleneck",
     [
@@ -142,6 +187,27 @@ def test_attached_drive_capacity_overflow_recalculates_per_node_ios():
     assert attached_drive.read_io_per_s == 400
 
 
+def test_attached_drive_capacity_uses_clamped_non_aligned_volume_size():
+    cluster = compute_stateful_zone(
+        instance=M5_4XL,
+        drive=Drive(
+            name="odd-cap",
+            size_gib=0,
+            max_scale_size_gib=591,
+            max_scale_io_per_s=16_000,
+        ),
+        needed_cores=4,
+        needed_disk_gib=5_826,
+        needed_memory_gib=10,
+        needed_network_mbps=100,
+        max_attached_drive_io_per_s=16_000,
+    )
+
+    assert cluster.count == 30
+    assert cluster.attached_drives[0].size_gib == 197
+    assert cluster.cluster_params["resource_bottleneck"] == "disk_capacity"
+
+
 def test_attached_drive_capacity_reports_final_recomputed_count():
     cluster = compute_stateful_zone(
         instance=M5_4XL,
@@ -224,6 +290,29 @@ def test_gp2_attached_drive_recomputes_per_node_size_after_count_increase():
     assert cluster.count == 3
     assert attached_drive.size_gib == 900
     assert attached_drive.read_io_per_s == 2600
+
+
+def test_attached_drive_best_effort_evaluates_the_advanced_boundary():
+    cluster = compute_stateful_zone(
+        instance=M5_4XL,
+        drive=Drive(
+            name="gp3",
+            size_gib=0,
+            max_scale_size_gib=1_000,
+            max_scale_io_per_s=16_000,
+        ),
+        needed_cores=4,
+        needed_disk_gib=100,
+        needed_memory_gib=10,
+        needed_network_mbps=100,
+        required_disk_ios=lambda _size, count: (
+            (16_001, 0.0) if count < 11 else (0.0, 0.0)
+        ),
+        max_node_disk_gib=lambda d: int(d.max_size_gib),
+    )
+
+    assert cluster.count == 11
+    assert cluster.attached_drives[0].read_io_per_s == 0
 
 
 def test_attached_drive_iops_uses_smallest_valid_recomputed_count():
