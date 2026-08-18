@@ -64,9 +64,6 @@ from service_capacity_modeling.models.org.netflix.partition_aware_algorithm impo
 
 logger = logging.getLogger(__name__)
 
-# A namespace opts in by supplying this named desired memory buffer.
-SST_MEMORY_BUFFER_NAME = "read_only_kv_sst_memory"
-
 
 def _compute_penalties(
     instance: Instance,
@@ -120,8 +117,8 @@ class NflxReadOnlyKVArguments(BaseModel):
     sst_memory_overhead_ratio: float = Field(
         default=0.05,
         description="Planning assumption for resident RocksDB table-reader memory "
-        "per complete data copy, as a ratio of SST data. Applied only when "
-        f"the {SST_MEMORY_BUFFER_NAME!r} desired memory buffer is present.",
+        "per complete data copy, as a ratio of SST data. Applied only when a "
+        "desired buffer explicitly targets memory.",
         ge=0,
         le=1,
     )
@@ -291,7 +288,7 @@ def _compute_read_only_kv_regional_cluster(
     if sst_memory_overhead_ratio > 0:
         params.update(
             {
-                "read-only-kv.sst_memory_buffer": SST_MEMORY_BUFFER_NAME,
+                "read-only-kv.sst_memory_placement_enabled": True,
                 "read-only-kv.sst_memory_overhead_ratio": sst_memory_overhead_ratio,
                 "read-only-kv.memory_buffer_ratio": memory_buffer_ratio,
                 "read-only-kv.reserved_memory_per_node_gib": reserved_memory_gib,
@@ -365,19 +362,23 @@ def _estimate_read_only_kv_cluster(
     if unreplicated_data_gib <= 0:
         return None
 
-    sst_memory_buffer = desires.buffers.desired.get(SST_MEMORY_BUFFER_NAME)
+    has_explicit_memory_buffer = any(
+        BufferComponent.memory in buffer.components
+        for buffer in desires.buffers.desired.values()
+    )
     sst_memory_overhead_ratio = 0.0
     memory_buffer_ratio = 1.0
-    if args.sst_memory_overhead_ratio > 0 and sst_memory_buffer is not None:
-        if set(sst_memory_buffer.components).intersection(
-            {BufferComponent.memory, BufferComponent.storage}
-        ):
-            memory_buffer = buffer_for_components(
-                buffers=desires.buffers, components=[BufferComponent.memory]
-            )
-            memory_buffer_ratio = memory_buffer.ratio
-        else:
-            memory_buffer_ratio = 0
+    if args.sst_memory_overhead_ratio > 0 and has_explicit_memory_buffer:
+        # WFS buffer names are decorative and may change during conversion. An
+        # explicit memory component is the durable opt-in signal. Do not inherit
+        # generic storage headroom: disk-only placement remains the cost-optimal
+        # default until a workload asks the model to reserve SST metadata memory.
+        memory_buffer = buffer_for_components(
+            buffers=desires.buffers,
+            components=[BufferComponent.memory],
+            component_fallbacks={},
+        )
+        memory_buffer_ratio = memory_buffer.ratio
         if memory_buffer_ratio <= 0:
             return None
         sst_memory_overhead_ratio = args.sst_memory_overhead_ratio

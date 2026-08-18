@@ -45,9 +45,6 @@ from service_capacity_modeling.models.org.netflix.read_only_kv import (
 from service_capacity_modeling.models.org.netflix.read_only_kv import (
     NflxReadOnlyKVArguments,
 )
-from service_capacity_modeling.models.org.netflix.read_only_kv import (
-    SST_MEMORY_BUFFER_NAME,
-)
 from tests.util import get_total_storage_gib
 from tests.util import has_local_storage
 
@@ -646,7 +643,7 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
     @pytest.fixture
     def sst_memory_desires(self):
         buffers = NflxReadOnlyKVCapacityModel.default_buffers()
-        buffers.desired[SST_MEMORY_BUFFER_NAME] = Buffer(
+        buffers.desired["wfs_generated_memory_context"] = Buffer(
             ratio=1.2, components=[BufferComponent.memory]
         )
         return CapacityDesires(
@@ -665,7 +662,7 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
     def test_large_manifest_uses_memory_safe_lowest_cost_plan(self):
         """A 1.3 TiB, 50k RPS workload cannot place one copy on one node."""
         buffers = NflxReadOnlyKVCapacityModel.default_buffers()
-        buffers.desired[SST_MEMORY_BUFFER_NAME] = Buffer(
+        buffers.desired["capacity_reserve"] = Buffer(
             ratio=1.2, components=[BufferComponent.memory]
         )
         desires = CapacityDesires(
@@ -726,12 +723,12 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
         assert memory_safe_cluster.cluster_params["read-only-kv.replica_count"] == 7
         assert memory_safe_cluster.count == 14
 
-    def test_sst_memory_requires_named_buffer(self, sst_memory_desires):
-        """The SST estimate remains dormant without an explicit opt-in buffer."""
+    def test_storage_buffer_does_not_activate_sst_memory(self, sst_memory_desires):
+        """Generic storage headroom retains cost-optimal disk-only placement."""
         desires = sst_memory_desires.model_copy(deep=True)
-        desires.buffers.desired.pop(SST_MEMORY_BUFFER_NAME)
-        desires.buffers.desired["other-memory"] = Buffer(
-            ratio=2, components=[BufferComponent.memory]
+        desires.buffers.desired.pop("wfs_generated_memory_context")
+        desires.buffers.desired["storage-headroom"] = Buffer(
+            ratio=2, components=[BufferComponent.storage]
         )
 
         plan = _estimate_read_only_kv_cluster(
@@ -742,16 +739,17 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
 
         assert plan is not None
         cluster = plan.candidate_clusters.regional[0]
-        assert cluster.cluster_params["read-only-kv.partitions_per_node"] == 10
         assert plan.requirements.regional[0].mem_gib.mid == 0
         assert "read-only-kv.sst_memory_overhead_ratio" not in cluster.cluster_params
 
-    def test_planner_merges_named_sst_memory_buffer(self, sst_memory_desires):
-        """The namespace buffer survives merging with model defaults."""
+    def test_planner_uses_memory_component_after_buffer_name_changes(
+        self, sst_memory_desires
+    ):
+        """The WFS-generated buffer name is not part of the planning contract."""
         desires = sst_memory_desires.model_copy(deep=True)
         desires.buffers = Buffers(
             desired={
-                SST_MEMORY_BUFFER_NAME: Buffer(
+                "renamed_by_wfs_conversion": Buffer(
                     ratio=1.2, components=[BufferComponent.memory]
                 )
             }
@@ -766,27 +764,8 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
         )[0]
 
         cluster = plan.candidate_clusters.regional[0]
-        assert (
-            cluster.cluster_params["read-only-kv.sst_memory_buffer"]
-            == SST_MEMORY_BUFFER_NAME
-        )
+        assert cluster.cluster_params["read-only-kv.sst_memory_placement_enabled"]
         assert cluster.cluster_params["read-only-kv.memory_buffer_ratio"] == 1.2
-
-    def test_named_sst_memory_buffer_requires_memory_component(
-        self, sst_memory_desires
-    ):
-        desires = sst_memory_desires.model_copy(deep=True)
-        desires.buffers.desired[SST_MEMORY_BUFFER_NAME] = Buffer(
-            ratio=1.2, components=[BufferComponent.compute]
-        )
-
-        plan = _estimate_read_only_kv_cluster(
-            instance=shapes.instance("i3en.2xlarge"),
-            desires=desires,
-            args=NflxReadOnlyKVArguments(total_num_partitions=64),
-        )
-
-        assert plan is None
 
     def test_sst_memory_overhead_limits_partitions_per_node(self, sst_memory_desires):
         """SST index memory limits packing before local disk is full."""
@@ -867,11 +846,19 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
         assert plan is not None
 
     @pytest.mark.parametrize(
-        "component, expected_disk_limit",
-        [(BufferComponent.memory, 10), (BufferComponent.storage, 9)],
+        "component, expected_memory_ratio, expected_memory_limit, expected_disk_limit",
+        [
+            (BufferComponent.memory, 2.4, 2, 10),
+            (BufferComponent.storage, 1.2, 4, 9),
+        ],
     )
-    def test_memory_buffer_limits_partition_packing(
-        self, sst_memory_desires, component, expected_disk_limit
+    def test_only_memory_buffers_add_sst_memory_headroom(
+        self,
+        sst_memory_desires,
+        component,
+        expected_memory_ratio,
+        expected_memory_limit,
+        expected_disk_limit,
     ):
         desires = sst_memory_desires.model_copy(deep=True)
         desires.buffers.desired["sst-headroom"] = Buffer(
@@ -886,11 +873,13 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
 
         assert plan is not None
         cluster = plan.candidate_clusters.regional[0]
-        assert cluster.cluster_params["read-only-kv.memory_buffer_ratio"] == 2.4
-        assert cluster.cluster_params["read-only-kv.partitions_per_node"] == 2
+        assert (
+            cluster.cluster_params["read-only-kv.memory_buffer_ratio"]
+            == expected_memory_ratio
+        )
         assert (
             cluster.cluster_params["read-only-kv.max_partitions_per_node_by_memory"]
-            == 2
+            == expected_memory_limit
         )
         assert (
             cluster.cluster_params["read-only-kv.max_partitions_per_node_by_disk"]
