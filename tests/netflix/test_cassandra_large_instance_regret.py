@@ -1,9 +1,10 @@
-"""Tests for Cassandra large_instance_regret: prefer horizontal scaling.
+"""Tests for Cassandra large_instance_regret with doubling-based cluster sizing.
 
-AWS pricing rounding makes larger instances (16xlarge, 32xlarge) appear
-marginally cheaper than equivalent horizontal configurations (8xlarge x 2).
-The large_instance_regret penalty overrides this rounding artifact, ensuring
-the planner prefers more smaller nodes over fewer larger ones.
+When callers opt into doubling, AWS pricing rounding makes larger instances
+(16xlarge, 32xlarge) appear marginally cheaper than equivalent horizontal
+configurations (8xlarge x 2). The large_instance_regret penalty overrides this
+rounding artifact, ensuring the planner prefers more smaller nodes over fewer
+larger ones.
 
 The m6id family exhibits this inverted pricing in our catalog:
   4x m6id.32xlarge  < 8x m6id.16xlarge < 16x m6id.8xlarge  (by ~$8/yr)
@@ -50,7 +51,10 @@ def _get_m6id_size_order(extra_model_arguments):
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=PRODUCTION_DESIRES,
-        extra_model_arguments=extra_model_arguments,
+        extra_model_arguments={
+            "cluster_size_mode": "doubling",
+            **extra_model_arguments,
+        },
         instance_families=["m6id"],
         num_results=20,
         max_results_per_family=10,
@@ -90,7 +94,7 @@ class TestDefaultRegretFlipsOrdering:
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=PRODUCTION_DESIRES,
-            extra_model_arguments={},
+            extra_model_arguments={"cluster_size_mode": "doubling"},
             instance_families=["m6id"],
             num_results=5,
         )
