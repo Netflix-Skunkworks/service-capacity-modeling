@@ -1,4 +1,4 @@
-"""TimeSeries planning its Cassandra tier on EBS, and the bailouts off it.
+"""TimeSeries planning its Cassandra tier on EBS, and the cases that stay local.
 
 Every case plans a real TimeSeries namespace end to end, so what is asserted is
 the disk type the Cassandra tier actually lands on.
@@ -12,7 +12,6 @@ from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
-from service_capacity_modeling.models.org.netflix import time_series
 from service_capacity_modeling.models.org.netflix.time_series import (
     CASSANDRA_EBS_MAX_READ_PER_SECOND,
 )
@@ -151,8 +150,8 @@ def test_high_read_namespace_stays_on_local_disks(reads_per_second, on_ebs):
     ids=["amplifies_to_the_ceiling", "amplifies_over_the_ceiling"],
 )
 def test_read_amplification_counts_against_the_read_ceiling(reads_per_second, on_ebs):
-    # The bailout is about load landing on Cassandra, so a namespace well under
-    # the ceiling at its own front door can still be over it once amplified.
+    # The read ceiling is about load landing on Cassandra, so a namespace well
+    # under it at its own front door can still be over it once amplified.
     clusters = _cassandra_tier(
         _namespace(4_000, reads_per_second), AMPLIFYING_NAMESPACE
     )
@@ -165,26 +164,6 @@ def test_namespace_without_a_stated_size_stays_on_local_disks():
     unsized.data_shape = DataShape()
 
     _assert_on_local_disks(_cassandra_tier(unsized))
-
-
-def test_bailout_rules_are_extensible(monkeypatch):
-    # One tuple entry is the whole extension point: this namespace lands on EBS
-    # in test_large_low_read_namespace_lands_on_ebs, and a write ceiling sends
-    # it back to local disks without touching anything else.
-    monkeypatch.setattr(
-        time_series,
-        "CASSANDRA_EBS_BAILOUTS",
-        time_series.CASSANDRA_EBS_BAILOUTS
-        + (
-            (
-                "write_throughput",
-                lambda desires: desires.query_pattern.estimated_write_per_second.mid
-                > 10_000,
-            ),
-        ),
-    )
-
-    _assert_on_local_disks(_cassandra_tier(_namespace(4_000, 10_000)))
 
 
 def test_uncertain_plan_of_a_large_low_read_namespace_lands_on_ebs():

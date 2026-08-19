@@ -22,40 +22,10 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models import CapacityModel
 
 
-# These bailouts send the Cassandra tier back to regular local disk planning.
+# The Cassandra tier plans on EBS unless it is too read hot for attached disks
+# or the dataset is too small for decoupling storage from compute to pay off.
 CASSANDRA_EBS_MAX_READ_PER_SECOND = 200_000
 CASSANDRA_EBS_MIN_STATE_SIZE_GIB = 1024
-
-# Ordered bailout rules, each a (name, predicate over the Cassandra facing
-# desires) pair. The first rule that holds wins and names the reason we stayed
-# on local disks.
-CASSANDRA_EBS_BAILOUTS: Tuple[Tuple[str, Callable[[CapacityDesires], bool]], ...] = (
-    (
-        "read_throughput",
-        lambda desires: desires.query_pattern.estimated_read_per_second.mid
-        > CASSANDRA_EBS_MAX_READ_PER_SECOND,
-    ),
-    (
-        "state_size",
-        lambda desires: desires.data_shape.estimated_state_size_gib.mid
-        < CASSANDRA_EBS_MIN_STATE_SIZE_GIB,
-    ),
-)
-
-
-def cassandra_ebs_bailout(cassandra_desires: CapacityDesires) -> Optional[str]:
-    """Name of the first rule keeping the Cassandra tier on local disks.
-
-    Pass the desires Cassandra will actually be planned with, so after
-    TimeSeries read amplification: the read rule is about load landing on
-    Cassandra, not load landing on the TimeSeries tier. An unstated dataset
-    size reads as zero and therefore bails out to local disks. Returns None
-    when nothing bails out and the tier should plan on EBS.
-    """
-    for name, applies in CASSANDRA_EBS_BAILOUTS:
-        if applies(cassandra_desires):
-            return name
-    return None
 
 
 class NflxTimeSeriesCapacityModel(CapacityModel):
@@ -118,9 +88,19 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
             )
             return relaxed
 
-        # require_local_disks defaults true and on its own excuses every EBS-only
-        # instance, so asking for EBS has to clear it too.
-        if cassandra_ebs_bailout(_modify_cassandra_desires(user_desires)) is None:
+        # Decide on the desires Cassandra is actually planned with, so after
+        # TimeSeries read amplification: the read ceiling is about load landing
+        # on Cassandra, not load landing on the TimeSeries tier.
+        cassandra_desires = _modify_cassandra_desires(user_desires)
+        if (
+            cassandra_desires.query_pattern.estimated_read_per_second.mid
+            <= CASSANDRA_EBS_MAX_READ_PER_SECOND
+            and cassandra_desires.data_shape.estimated_state_size_gib.mid
+            >= CASSANDRA_EBS_MIN_STATE_SIZE_GIB
+        ):
+            # Allow EBS instances, then require them: without the first there
+            # are no EBS candidates, without the second local disks may win.
+            # We explicitly put higher premium on EBS due to ease of maintenance.
             extra_model_arguments["require_local_disks"] = False
             extra_model_arguments["require_attached_disks"] = True
 
