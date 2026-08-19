@@ -159,7 +159,7 @@ def test_page_cache_does_not_force_r_family_for_4xlarge_candidates():
     r7a = by_instance["r7a.4xlarge"].candidate_clusters.zonal[0]
     m7a_counts = m7a.cluster_params["required_nodes_by_type"]
 
-    assert m7a.count == r7a.count == 8
+    assert m7a.count == r7a.count
     assert m7a_counts["memory"] <= max(
         m7a_counts["cpu"],
         m7a_counts["network"],

@@ -1011,16 +1011,23 @@ SCENARIOS: dict[str, dict[str, Any]] = {
 }
 
 UNCERTAIN_SCENARIOS: dict[str, dict[str, Any]] = {
-    name: SCENARIOS[name]
-    for name in (
-        # Keep this list intentionally small: the pre-commit hook regenerates
-        # it on every run. These cover state-heavy Cassandra, Kafka throughput,
-        # and composed KV/cache uncertainty without turning the hook into a
-        # broad stochastic benchmark.
-        "cassandra_timeseries_ebs",
-        "kafka_100mib_throughput",
-        "kv_with_cache",
-    )
+    # Uncertain snapshots exercise sampling stability, not the default Cassandra
+    # cluster-size mode. Certain snapshots own the unrestricted topology changes.
+    "cassandra_timeseries_ebs": {
+        **SCENARIOS["cassandra_timeseries_ebs"],
+        "extra_args": {
+            **(SCENARIOS["cassandra_timeseries_ebs"]["extra_args"] or {}),
+            "cluster_size_mode": "doubling",
+        },
+    },
+    "kafka_100mib_throughput": SCENARIOS["kafka_100mib_throughput"],
+    "kv_with_cache": {
+        **SCENARIOS["kv_with_cache"],
+        "extra_args": {
+            **(SCENARIOS["kv_with_cache"]["extra_args"] or {}),
+            "cluster_size_mode": "doubling",
+        },
+    },
 }
 
 if __name__ == "__main__":
