@@ -577,7 +577,7 @@ def _get_current_capacity(desires: CapacityDesires) -> Optional[CurrentClusterCa
 
 
 def _get_cluster_size_lambda(
-    cluster_size_mode: CassandraClusterSizeMode = CassandraClusterSizeMode.doubling,
+    cluster_size_mode: CassandraClusterSizeMode = CassandraClusterSizeMode.unrestricted,
     current_cluster_size: int = 0,
     required_cluster_size: Optional[int] = None,
 ) -> Callable[[int], int]:
@@ -591,12 +591,6 @@ def _get_cluster_size_lambda(
         return lambda x: x
 
     return next_power_of_2
-
-
-def _default_cluster_size_mode(tier: int) -> CassandraClusterSizeMode:
-    if tier in CRITICAL_TIERS:
-        return CassandraClusterSizeMode.doubling
-    return CassandraClusterSizeMode.unrestricted
 
 
 def _compute_penalties(
@@ -651,7 +645,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     max_regional_size: int = 192,
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
-    cluster_size_mode: CassandraClusterSizeMode = CassandraClusterSizeMode.doubling,
+    cluster_size_mode: CassandraClusterSizeMode = CassandraClusterSizeMode.unrestricted,
     allow_ebs_volume_shrink: bool = False,
     large_instance_regret: float = 0.2,
     different_family_regret: float = 0.10,
@@ -926,7 +920,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             * math.ceil(read_io_per_sec / count),
             write_io_calibration_factor * write_io_per_sec / count,
         ),
-        # Critical C* clusters grow by doubling from the current cluster size.
+        # Doubling mode grows C* clusters by doubling from the current cluster size.
         cluster_size=cluster_size_lambda,
         min_count=min_count,
         reserve_memory=lambda x: x - memory_layout(x).page_cache_capacity_gib,
@@ -1308,13 +1302,12 @@ class NflxCassandraArguments(BaseModel):
         description="Compute success buffer for very large clusters (adaptive lower bound).",
     )
     cluster_size_mode: Optional[CassandraClusterSizeMode] = Field(
-        default=None,
+        default=CassandraClusterSizeMode.unrestricted,
         description="Optional override for zonal Cassandra cluster count rounding. "
-        "When unset, critical tiers use doubling-based counts and non-critical tiers "
-        "are unrestricted. 'doubling' rounds by repeatedly doubling from the "
-        "non-power-of-two current size, or by using the next power of two for new "
-        "clusters. It does not use required_cluster_size as the doubling base. "
-        "'unrestricted' disables cluster-size rounding for all tiers.",
+        "When unset, all tiers are unrestricted. 'doubling' rounds by repeatedly "
+        "doubling from the non-power-of-two current size, or by using the next power "
+        "of two for new clusters. It does not use required_cluster_size as the "
+        "doubling base. 'unrestricted' disables cluster-size rounding for all tiers.",
     )
     allow_ebs_volume_shrink: bool = Field(
         default=False,
@@ -1581,7 +1574,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_write_buffer_percent=max_write_buffer_percent,
             max_table_buffer_percent=max_table_buffer_percent,
             cluster_size_mode=args.cluster_size_mode
-            or _default_cluster_size_mode(desires.service_tier),
+            or CassandraClusterSizeMode.unrestricted,
             allow_ebs_volume_shrink=args.allow_ebs_volume_shrink,
             large_instance_regret=args.large_instance_regret,
             different_family_regret=args.different_family_regret,

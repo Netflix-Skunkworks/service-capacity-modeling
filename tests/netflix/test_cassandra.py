@@ -26,7 +26,6 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models.org.netflix.cassandra import (
     _cass_io_per_read,
-    _default_cluster_size_mode,
     _get_cluster_size_lambda,
     _get_min_count,
     CassandraClusterSizeMode,
@@ -47,10 +46,8 @@ EXTRA_MODEL_ARGS = {"require_local_disks": False}
 # See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
 PROPERTY_TEST_CONFIG = {
     "org.netflix.cassandra": {
-        # Cassandra critical tiers share the same default cluster-size policy.
-        # Non-critical tiers can pick a different local-disk shape with more raw
-        # capacity for the same workload, so the universal tier property should
-        # compare the critical tier boundary directly.
+        # Tiers can pick different local-disk shapes with different raw capacity
+        # for the same workload, so compare the critical tier boundary directly.
         "tier_range": (0, 1),
     },
 }
@@ -132,13 +129,14 @@ class TestCassandraCapacityPlanning:
         # Storage should be sufficient for the data (300 GiB with buffer)
         assert_minimum_storage_gib(high_writes_result, 400)
         assert_similar_compute(
-            shapes.instance("c7a.4xlarge"),
+            shapes.instance("c8a.4xlarge"),
             high_writes_result.instance,
-            expected_count=8,
+            expected_count=5,
             actual_count=high_writes_result.count,
             expected_attached_disk=simple_drive(
-                size_gib=100, read_io_per_s=3400, write_io_per_s=200
+                size_gib=100, read_io_per_s=5400, write_io_per_s=200
             ),
+            actual_attached_disk=high_writes_result.attached_drives[0],
         )
 
     def test_capacity_large_footprint(self):
@@ -427,7 +425,7 @@ class TestCassandraStorage:
         result = cap_plan.candidate_clusters.zonal[0]
 
         cores = result.count * result.instance.cpu
-        assert 64 <= cores <= 512
+        assert 32 <= cores <= 512
         # Should get attached storage since we explicitly requested it
         assert result.attached_drives, (
             "Expected attached drives with require_attached_disks=True"
@@ -804,7 +802,8 @@ class TestCassandraCurrentCapacity:
             },
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
-        assert result.count == 6
+        counts = result.cluster_params["required_nodes_by_type"]
+        assert result.count == counts["cluster_size"] == counts["cpu"] == 8
 
     def test_capacity_non_power_of_two_with_doubling_mode(self):
         cluster_capacity = CurrentZoneClusterCapacity(
@@ -830,6 +829,7 @@ class TestCassandraCurrentCapacity:
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
         counts = result.cluster_params["required_nodes_by_type"]
+        assert result.count == 6
         assert counts["min_count"] == 6
 
     def test_capacity_non_power_of_two_with_required_size(self):
@@ -909,9 +909,7 @@ class TestCassandraExtraModelArguments:
 
     @pytest.mark.parametrize("tier", [2, 3, 4])
     def test_non_critical_tiers_do_not_round_cluster_size(self, tier):
-        cluster_size = _get_cluster_size_lambda(
-            cluster_size_mode=_default_cluster_size_mode(tier),
-        )
+        cluster_size = _get_cluster_size_lambda()
 
         assert (
             _get_min_count(
@@ -924,29 +922,14 @@ class TestCassandraExtraModelArguments:
             == 3
         )
 
-    def test_cluster_size_lambda_defaults_to_doubling_mode(self):
+    def test_cluster_size_lambda_defaults_to_unrestricted_mode(self):
         cluster_size = _get_cluster_size_lambda()
 
-        assert cluster_size(3) == 4
-
-    @pytest.mark.parametrize(
-        "tier, expected_mode",
-        [
-            (0, CassandraClusterSizeMode.doubling),
-            (1, CassandraClusterSizeMode.doubling),
-            (2, CassandraClusterSizeMode.unrestricted),
-            (3, CassandraClusterSizeMode.unrestricted),
-            (4, CassandraClusterSizeMode.unrestricted),
-        ],
-    )
-    def test_default_cluster_size_mode_is_tier_based(self, tier, expected_mode):
-        assert _default_cluster_size_mode(tier) == expected_mode
+        assert cluster_size(3) == 3
 
     @pytest.mark.parametrize("tier", [2, 3, 4])
     def test_non_critical_tiers_do_not_round_above_required_cluster_size(self, tier):
-        cluster_size = _get_cluster_size_lambda(
-            cluster_size_mode=_default_cluster_size_mode(tier),
-        )
+        cluster_size = _get_cluster_size_lambda()
 
         assert (
             _get_min_count(
@@ -960,10 +943,8 @@ class TestCassandraExtraModelArguments:
         )
 
     @pytest.mark.parametrize("tier", [0, 1])
-    def test_critical_tiers_keep_doubling_cluster_size(self, tier):
-        cluster_size = _get_cluster_size_lambda(
-            cluster_size_mode=_default_cluster_size_mode(tier),
-        )
+    def test_critical_tiers_do_not_round_cluster_size_by_default(self, tier):
+        cluster_size = _get_cluster_size_lambda()
 
         assert (
             _get_min_count(
@@ -973,11 +954,11 @@ class TestCassandraExtraModelArguments:
                 disk_per_node_gib=1,
                 cluster_size_lambda=cluster_size,
             )
-            == 4
+            == 3
         )
 
-    @pytest.mark.parametrize("tier", [2, 3, 4])
-    def test_cluster_size_mode_can_force_doubling_for_non_critical_tiers(self, tier):
+    @pytest.mark.parametrize("tier", [0, 1, 2, 3, 4])
+    def test_cluster_size_mode_can_force_doubling_for_all_tiers(self, tier):
         cluster_size = _get_cluster_size_lambda(
             cluster_size_mode=CassandraClusterSizeMode.doubling,
         )
@@ -1119,7 +1100,7 @@ class TestCassandraExtraModelArguments:
 
         assert (
             NflxCassandraArguments.from_extra_model_arguments({}).cluster_size_mode
-            is None
+            == CassandraClusterSizeMode.unrestricted
         )
         assert (
             NflxCassandraArguments.from_extra_model_arguments(
