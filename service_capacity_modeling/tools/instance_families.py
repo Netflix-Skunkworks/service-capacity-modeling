@@ -22,6 +22,31 @@ MILAN_IPC = SKYLAKE_IPC * 1.15
 GENOA_IPC = MILAN_IPC * 1.13
 TURIN_IPC = 1.325  # GENOA_IPC * ~1.02 — frequency-driven gains, minimal IPC uplift
 
+# Schema for each entry in INSTANCE_TYPES, keyed by AWS instance family
+# (e.g. "m7a"). All fields are optional; auto_shape.py falls back to
+# per-family defaults (e.g. aws_iops_per_gib, AWS-reported clock speeds) for
+# any field that is omitted or None.
+#
+#   iops_per_gib: Optional[str]
+#       4k random (read, write) IOPS per GiB of ephemeral storage, formatted
+#       as "<read>/<write>" (e.g. "268.4/214.7"). Only meaningful for
+#       instance-store families; None for EBS-only families.
+#   io_latency_curve: Optional[str]
+#       Key into auto_shape.py's latency_curve_ms table (e.g. "6th-gen-ssd",
+#       "7th-gen-ephemeral", "ssd", "hdd"). None for EBS-only families.
+#   cpu_ipc_scale: Optional[float]
+#       Relative IPC vs. the Skylake baseline (SKYLAKE_IPC = 1.0). Usually one
+#       of the named *_IPC constants above. None lets auto_shape.py deduce it
+#       from vCPU/core counts instead (see deduce_cpu_ipc_scale).
+#   cpu_turbo_single_ghz: Optional[float]
+#       AWS-published single-core turbo clock speed in GHz, used when
+#       --cpu-freq-from nflx overrides AWS's reported sustained clock speed.
+#   cpu_turbo_all_ghz: Optional[float]
+#       AWS-published all-core turbo clock speed in GHz.
+#   lifecycle: Optional[str]
+#       One of "alpha", "beta", "stable", "deprecated", "end-of-life" (see
+#       Lifecycle in interface.py). Set to "alpha" for families whose
+#       hardware parameters above are still provisional/unbenchmarked.
 INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
     "c5": {
         "iops_per_gib": None,
@@ -236,6 +261,15 @@ INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
     "m8i": {
         "iops_per_gib": None,
         "io_latency_curve": None,
+        "cpu_ipc_scale": GRANITE_RAPIDS_IPC,
+        "cpu_turbo_single_ghz": 3.9,
+        "cpu_turbo_all_ghz": 3.9,
+    },
+    # m8id = m8i + local NVMe: same Granite Rapids CPU (GRANITE_RAPIDS_IPC, 3.9
+    # GHz), plus the 8th-gen-ssd ephemeral io-latency curve measured via fio.
+    "m8id": {
+        "iops_per_gib": None,
+        "io_latency_curve": "8th-gen-ssd",
         "cpu_ipc_scale": GRANITE_RAPIDS_IPC,
         "cpu_turbo_single_ghz": 3.9,
         "cpu_turbo_all_ghz": 3.9,

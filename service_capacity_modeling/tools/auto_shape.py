@@ -24,6 +24,14 @@ from service_capacity_modeling.interface import normalized_aws_size
 
 # Default latency curves from FIO testing per generation
 latency_curve_ms: Dict[str, FixedInterval] = {
+    "8th-gen-ssd": FixedInterval(
+        low=0.07,
+        mid=0.093,
+        high=0.105,
+        confidence=0.9,
+        minimum_value=0.03,
+        maximum_value=1.2,
+    ),
     "7th-gen-ephemeral": FixedInterval(
         low=0.071,
         mid=0.079,
@@ -89,6 +97,7 @@ aws_iops_per_gib: Dict[str, Tuple[float, float]] = {
     "6id": (303.5, 151.8),
     "6idn": (303.5, 151.8),
     "7gd": (303.5, 151.8),
+    "8id": (303.5, 151.8),
     # Compute has smaller IOPs
     "c5ad": (232.6, 101.5),
     "c5d": (430.1, 193.5),
