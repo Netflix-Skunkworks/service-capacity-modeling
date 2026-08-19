@@ -907,8 +907,8 @@ class TestCassandraExtraModelArguments:
                 tier, extra_model_arguments
             )
 
-    @pytest.mark.parametrize("tier", [2, 3, 4])
-    def test_non_critical_tiers_do_not_round_cluster_size(self, tier):
+    @pytest.mark.parametrize("tier", [0, 1, 2, 3, 4])
+    def test_all_tiers_do_not_round_cluster_size_by_default(self, tier):
         cluster_size = _get_cluster_size_lambda()
 
         assert (
@@ -921,11 +921,6 @@ class TestCassandraExtraModelArguments:
             )
             == 3
         )
-
-    def test_cluster_size_lambda_defaults_to_unrestricted_mode(self):
-        cluster_size = _get_cluster_size_lambda()
-
-        assert cluster_size(3) == 3
 
     @pytest.mark.parametrize("tier", [2, 3, 4])
     def test_non_critical_tiers_do_not_round_above_required_cluster_size(self, tier):
@@ -940,21 +935,6 @@ class TestCassandraExtraModelArguments:
                 cluster_size_lambda=cluster_size,
             )
             == 6
-        )
-
-    @pytest.mark.parametrize("tier", [0, 1])
-    def test_critical_tiers_do_not_round_cluster_size_by_default(self, tier):
-        cluster_size = _get_cluster_size_lambda()
-
-        assert (
-            _get_min_count(
-                tier=tier,
-                required_cluster_size=None,
-                needed_disk_gib=3,
-                disk_per_node_gib=1,
-                cluster_size_lambda=cluster_size,
-            )
-            == 3
         )
 
     @pytest.mark.parametrize("tier", [0, 1, 2, 3, 4])
@@ -1023,23 +1003,6 @@ class TestCassandraExtraModelArguments:
                 cluster_size_lambda=cluster_size,
             )
             == 12
-        )
-
-    @pytest.mark.parametrize("tier", [0, 1])
-    def test_cluster_size_mode_can_force_unrestricted_for_critical_tiers(self, tier):
-        cluster_size = _get_cluster_size_lambda(
-            cluster_size_mode=CassandraClusterSizeMode.unrestricted,
-        )
-
-        assert (
-            _get_min_count(
-                tier=tier,
-                required_cluster_size=None,
-                needed_disk_gib=3,
-                disk_per_node_gib=1,
-                cluster_size_lambda=cluster_size,
-            )
-            == 3
         )
 
     def test_page_cache_cap_default(self):
