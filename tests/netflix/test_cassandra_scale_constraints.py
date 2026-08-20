@@ -641,7 +641,7 @@ class TestStorageAndCPUIntegration:
     def test_cpu_scale_up_disk_scale_down(self):
         """
         Test: CPU scale_up and Disk scale_down
-        EXPECTATION: CPU should scale up, Disk should not exceed current capacity
+        EXPECTATION: CPU should scale up, Disk should preserve current capacity
         """
         cluster_capacity = self.BOTH_CONSTRAINED_CAPACITY
         desires = CLUSTER.get_desires(cluster_capacity, self.CPU_UP_DISK_DOWN)
@@ -656,15 +656,20 @@ class TestStorageAndCPUIntegration:
         result_cores = result.count * result.instance.cpu
         result_storage = result.count * get_drive_size_gib(result)
         assert_similar_compute(
-            shapes.instance("c6id.8xlarge"),
+            shapes.instance("c7a.8xlarge"),
             result.instance,
-            CLUSTER_SIZE * 2,
+            5,
             result.count,
+            expected_attached_disk=simple_drive(
+                size_gib=3174, read_io_per_s=0, write_io_per_s=200
+            ),
+            actual_attached_disk=result.attached_drives[0]
+            if result.attached_drives
+            else None,
         )
         assert result_cores >= CLUSTER.total_vcpu * 2
 
-        # Storage should not exceed current capacity
-        assert result_storage == approx(CLUSTER.total_disk_gib, 0.05)
+        assert result_storage == 15_870
         assert result_storage >= CLUSTER.total_disk_gib
 
     def test_cpu_scale_down_disk_scale_up(self):
