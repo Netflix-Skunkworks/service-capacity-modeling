@@ -258,8 +258,8 @@ def test_normalize_cores():
 
     # New generation should be higher
     assert 18 <= normalize_cores(16, m5xl, m6id) < 22
-    assert 23 <= normalize_cores(16, m6id, m7axl) < 27
-    assert 26 <= normalize_cores(16, m5xl, m7axl) < 30
+    assert 27 <= normalize_cores(16, m6id, m7axl) < 31
+    assert 36 <= normalize_cores(16, m5xl, m7axl) < 40
 
     # All of these computers are much faster than the reference
     for shape in (m5xl, r5xl, m6id, i4ixl):
@@ -275,7 +275,7 @@ def test_normalize_cores_6_7():
     m7axl = shapes.region("us-east-1").instances["m7a.xlarge"]
 
     assert 10 == normalize_cores(16, m6ixl, default_reference_shape)
-    assert 7 == normalize_cores(16, m7axl, default_reference_shape)
+    assert 6 == normalize_cores(16, m7axl, default_reference_shape)
 
 
 current_cluster = CurrentClusters(

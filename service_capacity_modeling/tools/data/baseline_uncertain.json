@@ -140,7 +140,7 @@
               },
               "required_nodes_by_type": {
                 "cluster_size": 64,
-                "cpu": 50,
+                "cpu": 39,
                 "disk_capacity": 63,
                 "disk_iops": 0,
                 "memory": 2,
@@ -173,7 +173,7 @@
               },
               "required_nodes_by_type": {
                 "cluster_size": 64,
-                "cpu": 50,
+                "cpu": 39,
                 "disk_capacity": 63,
                 "disk_iops": 0,
                 "memory": 2,
@@ -206,7 +206,7 @@
               },
               "required_nodes_by_type": {
                 "cluster_size": 64,
-                "cpu": 50,
+                "cpu": 39,
                 "disk_capacity": 63,
                 "disk_iops": 0,
                 "memory": 2,
@@ -365,7 +365,7 @@
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
-                  "cpu": 50,
+                  "cpu": 39,
                   "disk_capacity": 63,
                   "disk_iops": 0,
                   "memory": 2,
@@ -398,7 +398,7 @@
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
-                  "cpu": 50,
+                  "cpu": 39,
                   "disk_capacity": 63,
                   "disk_iops": 0,
                   "memory": 2,
@@ -431,7 +431,7 @@
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
-                  "cpu": 50,
+                  "cpu": 39,
                   "disk_capacity": 63,
                   "disk_iops": 0,
                   "memory": 2,
@@ -587,7 +587,7 @@
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
-                  "cpu": 50,
+                  "cpu": 39,
                   "disk_capacity": 63,
                   "disk_iops": 0,
                   "memory": 6,
@@ -620,7 +620,7 @@
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
-                  "cpu": 50,
+                  "cpu": 39,
                   "disk_capacity": 63,
                   "disk_iops": 0,
                   "memory": 6,
@@ -653,7 +653,7 @@
                 },
                 "required_nodes_by_type": {
                   "cluster_size": 64,
-                  "cpu": 50,
+                  "cpu": 39,
                   "disk_capacity": 63,
                   "disk_iops": 0,
                   "memory": 6,
@@ -1857,6 +1857,173 @@
           }
         ],
         "total_annual_cost": 305553.69
+      },
+      {
+        "annual_costs": {
+          "cassandra.backup.s3-standard": 9424.81,
+          "cassandra.net.inter.region": 38304.55,
+          "cassandra.net.intra.region": 38304.55,
+          "cassandra.zonal-clusters": 30828.0,
+          "evcache.zonal-clusters": 147024.09,
+          "nflx-java-app.regional-clusters": 83050.05
+        },
+        "clusters": [
+          {
+            "annual_cost": 49008.03,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 221,
+              "evcache.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 57,
+                "cpu": 57,
+                "disk_capacity": 3,
+                "disk_iops": 4,
+                "memory": 1,
+                "min_count": 3,
+                "network": 3
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "evcache",
+            "count": 57,
+            "deployment": "zonal",
+            "instance": "m8id.xlarge"
+          },
+          {
+            "annual_cost": 49008.03,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 221,
+              "evcache.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 57,
+                "cpu": 57,
+                "disk_capacity": 3,
+                "disk_iops": 4,
+                "memory": 1,
+                "min_count": 3,
+                "network": 3
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "evcache",
+            "count": 57,
+            "deployment": "zonal",
+            "instance": "m8id.xlarge"
+          },
+          {
+            "annual_cost": 49008.03,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 221,
+              "evcache.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 57,
+                "cpu": 57,
+                "disk_capacity": 3,
+                "disk_iops": 4,
+                "memory": 1,
+                "min_count": 3,
+                "network": 3
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "evcache",
+            "count": 57,
+            "deployment": "zonal",
+            "instance": "m8id.xlarge"
+          },
+          {
+            "annual_cost": 10276.0,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.38,
+              "cassandra.heap.gib": 15.0,
+              "cassandra.heap.table.percent": 0.11,
+              "cassandra.heap.write.percent": 0.25,
+              "cassandra.keyspace.rf": 3,
+              "cassandra.storage_buffer_ratio": 3.83,
+              "effective_disk_per_node_gib": 885,
+              "required_nodes_by_type": {
+                "cluster_size": 4,
+                "cpu": 4,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 3,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 4,
+            "deployment": "zonal",
+            "instance": "c6id.4xlarge"
+          },
+          {
+            "annual_cost": 10276.0,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.38,
+              "cassandra.heap.gib": 15.0,
+              "cassandra.heap.table.percent": 0.11,
+              "cassandra.heap.write.percent": 0.25,
+              "cassandra.keyspace.rf": 3,
+              "cassandra.storage_buffer_ratio": 3.83,
+              "effective_disk_per_node_gib": 885,
+              "required_nodes_by_type": {
+                "cluster_size": 4,
+                "cpu": 4,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 3,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 4,
+            "deployment": "zonal",
+            "instance": "c6id.4xlarge"
+          },
+          {
+            "annual_cost": 10276.0,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.38,
+              "cassandra.heap.gib": 15.0,
+              "cassandra.heap.table.percent": 0.11,
+              "cassandra.heap.write.percent": 0.25,
+              "cassandra.keyspace.rf": 3,
+              "cassandra.storage_buffer_ratio": 3.83,
+              "effective_disk_per_node_gib": 885,
+              "required_nodes_by_type": {
+                "cluster_size": 4,
+                "cpu": 4,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 3,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 4,
+            "deployment": "zonal",
+            "instance": "c6id.4xlarge"
+          },
+          {
+            "annual_cost": 83050.05,
+            "attached_drives": [
+              "gp2 : 20GB"
+            ],
+            "cluster_type": "dgwkv",
+            "count": 15,
+            "deployment": "regional",
+            "instance": "c7a.8xlarge"
+          }
+        ],
+        "total_annual_cost": 346936.04
       }
     ],
     "mean": [
@@ -2034,7 +2201,7 @@
           "cassandra.net.intra.region": 24746.11,
           "cassandra.zonal-clusters": 44260.02,
           "evcache.zonal-clusters": 150306.39,
-          "nflx-java-app.regional-clusters": 91143.72
+          "nflx-java-app.regional-clusters": 83050.05
         },
         "clusters": [
           {
@@ -2191,17 +2358,17 @@
             "instance": "c5d.12xlarge"
           },
           {
-            "annual_cost": 91143.72,
+            "annual_cost": 83050.05,
             "attached_drives": [
               "gp2 : 20GB"
             ],
             "cluster_type": "dgwkv",
-            "count": 9,
+            "count": 15,
             "deployment": "regional",
-            "instance": "m8a.12xlarge"
+            "instance": "c7a.8xlarge"
           }
         ],
-        "total_annual_cost": 341339.15
+        "total_annual_cost": 333245.48
       }
     ],
     "model": "org.netflix.key-value",
@@ -2382,7 +2549,7 @@
             "cassandra.net.intra.region": 19808.64,
             "cassandra.zonal-clusters": 37518.0,
             "evcache.zonal-clusters": 150306.39,
-            "nflx-java-app.regional-clusters": 90921.6
+            "nflx-java-app.regional-clusters": 79914.0
           },
           "clusters": [
             {
@@ -2530,17 +2697,17 @@
               "instance": "m6id.8xlarge"
             },
             {
-              "annual_cost": 90921.6,
+              "annual_cost": 79914.0,
               "attached_drives": [
                 "gp2 : 20GB"
               ],
               "cluster_type": "dgwkv",
-              "count": 105,
+              "count": 57,
               "deployment": "regional",
-              "instance": "m8a.xlarge"
+              "instance": "c7a.2xlarge"
             }
           ],
-          "total_annual_cost": 323363.46
+          "total_annual_cost": 312355.86
         }
       ],
       "50": [
@@ -2718,7 +2885,7 @@
             "cassandra.net.intra.region": 23903.6,
             "cassandra.zonal-clusters": 37518.0,
             "evcache.zonal-clusters": 150306.39,
-            "nflx-java-app.regional-clusters": 91143.72
+            "nflx-java-app.regional-clusters": 83050.05
           },
           "clusters": [
             {
@@ -2866,17 +3033,17 @@
               "instance": "m6id.8xlarge"
             },
             {
-              "annual_cost": 91143.72,
+              "annual_cost": 83050.05,
               "attached_drives": [
                 "gp2 : 20GB"
               ],
               "cluster_type": "dgwkv",
-              "count": 9,
+              "count": 15,
               "deployment": "regional",
-              "instance": "m8a.12xlarge"
+              "instance": "c7a.8xlarge"
             }
           ],
-          "total_annual_cost": 332709.68
+          "total_annual_cost": 324616.01
         }
       ],
       "95": [
@@ -3054,7 +3221,7 @@
             "cassandra.net.intra.region": 32269.87,
             "cassandra.zonal-clusters": 44260.02,
             "evcache.zonal-clusters": 150306.39,
-            "nflx-java-app.regional-clusters": 97347.45
+            "nflx-java-app.regional-clusters": 88326.0
           },
           "clusters": [
             {
@@ -3211,17 +3378,17 @@
               "instance": "c5d.12xlarge"
             },
             {
-              "annual_cost": 97347.45,
+              "annual_cost": 88326.0,
               "attached_drives": [
                 "gp2 : 20GB"
               ],
               "cluster_type": "dgwkv",
-              "count": 57,
+              "count": 63,
               "deployment": "regional",
-              "instance": "m8a.2xlarge"
+              "instance": "c7a.2xlarge"
             }
           ],
-          "total_annual_cost": 364372.24
+          "total_annual_cost": 355350.79
         }
       ]
     },
