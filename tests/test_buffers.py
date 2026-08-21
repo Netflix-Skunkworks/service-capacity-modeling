@@ -8,9 +8,11 @@ from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import BufferIntent
 from service_capacity_modeling.interface import Buffers
+from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import cpu_headroom_target
 from service_capacity_modeling.models.common import DerivedBuffers
+from service_capacity_modeling.models.common import with_effective_cpu
 
 
 def test_m5_same_headroom_as_r5():
@@ -37,6 +39,47 @@ def test_seventh_gen_instance_reflects_non_ht_boost():
     m7a4xl = cpu_headroom_target(planner.instance("m7a.4xlarge"))
     assert m7a4xl < m6i4xl
     assert m7a4xl == approx(0.16, rel=0.05)
+
+
+def test_with_effective_cpu_preserves_ht_ratio():
+    ht_instance = Instance(
+        name="test.ht", cpu=16, cpu_cores=8, cpu_ghz=3.0, ram_gib=32, net_mbps=1000
+    )
+    no_ht_instance = Instance(
+        name="test.no-ht", cpu=16, cpu_cores=16, cpu_ghz=3.0, ram_gib=32, net_mbps=1000
+    )
+
+    ht_resized = with_effective_cpu(ht_instance, 4)
+    no_ht_resized = with_effective_cpu(no_ht_instance, 4)
+
+    # HT ratio (cores/cpu) must survive the resize, not just the raw cpu count.
+    assert ht_resized.cpu == 4
+    assert ht_resized.cores == 2
+    assert ht_resized.cores < ht_resized.cpu
+
+    assert no_ht_resized.cpu == 4
+    assert no_ht_resized.cores == 4
+    assert no_ht_resized.cores == no_ht_resized.cpu
+
+    # cpu_headroom_target also scales with absolute cpu count (larger
+    # instances need less headroom), so compare against instances built
+    # directly at the resized cpu count rather than the pre-resize originals.
+    ht_reference = Instance(
+        name="test.ht-ref", cpu=4, cpu_cores=2, cpu_ghz=3.0, ram_gib=32, net_mbps=1000
+    )
+    no_ht_reference = Instance(
+        name="test.no-ht-ref",
+        cpu=4,
+        cpu_cores=4,
+        cpu_ghz=3.0,
+        ram_gib=32,
+        net_mbps=1000,
+    )
+    assert cpu_headroom_target(ht_resized) == cpu_headroom_target(ht_reference)
+    assert cpu_headroom_target(no_ht_resized) == cpu_headroom_target(no_ht_reference)
+    # Virtual (HT) threads don't get the physical-core boost, so they need
+    # more headroom reserved than real cores at the same vCPU count.
+    assert cpu_headroom_target(ht_resized) > cpu_headroom_target(no_ht_resized)
 
 
 def test_has_some_headroom():
