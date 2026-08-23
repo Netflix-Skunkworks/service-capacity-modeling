@@ -15,6 +15,9 @@ planner penalty. c6id is ~18% cheaper per-CPU than m6id. Combined:
   - disabled model penalty (0% + 15% planner = 15% total): c6id still wins
     (18% savings > 15% penalty)
   - high model penalty (25% + 15% = 40%): m6id wins decisively
+
+Ephemeral maintenance regret is disabled in these ordering checks so they
+continue to isolate family selection.
 """
 
 import pytest
@@ -73,7 +76,10 @@ def _first_family(desires, extra_model_arguments, families=None):
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=desires,
-        extra_model_arguments=extra_model_arguments,
+        extra_model_arguments={
+            "ephemeral_maintenance_regret": 0,
+            **extra_model_arguments,
+        },
         instance_families=families,
         num_results=20,
         max_results_per_family=10,
@@ -120,7 +126,10 @@ def test_combined_family_and_large_instance_penalties():
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=desires,
-        extra_model_arguments={"different_family_regret": 0.25},
+        extra_model_arguments={
+            "different_family_regret": 0.25,
+            "ephemeral_maintenance_regret": 0,
+        },
         instance_families=["m6id", "c6id"],
     )
     for p in plans:
@@ -145,7 +154,10 @@ def test_planner_arguments_zero_penalty_pure_cost():
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=desires,
-        extra_model_arguments={"different_family_regret": 0},
+        extra_model_arguments={
+            "different_family_regret": 0,
+            "ephemeral_maintenance_regret": 0,
+        },
         instance_families=["m6id", "c6id"],
         num_results=20,
         max_results_per_family=10,
@@ -156,6 +168,27 @@ def test_planner_arguments_zero_penalty_pure_cost():
         "With preferred_family_penalty=0 and different_family_regret=0, "
         "c6id should rank first as the cheaper option"
     )
+
+
+@pytest.mark.parametrize("family", ["i7i", "i7ie"])
+def test_current_storage_families_do_not_receive_preferred_family_penalty(family):
+    desires = _desires(None)
+    plan_args = {
+        "model_name": "org.netflix.cassandra",
+        "region": "us-east-1",
+        "desires": desires,
+        "extra_model_arguments": {"ephemeral_maintenance_regret": 0},
+        "instance_families": [family],
+        "num_results": 1,
+    }
+
+    default_plan = planner.plan_certain(**plan_args)[0]
+    unbiased_plan = planner.plan_certain(
+        **plan_args,
+        planner_arguments=PlannerArguments(preferred_family_penalty=0),
+    )[0]
+
+    assert default_plan.rank == unbiased_plan.rank
 
 
 def test_planner_arguments_max_results_per_family():

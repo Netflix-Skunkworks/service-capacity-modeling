@@ -2111,6 +2111,9 @@
               "cassandra.keyspace.rf": 3,
               "cassandra.storage_buffer_ratio": 3.83,
               "effective_disk_per_node_gib": 441,
+              "rank_penalties": {
+                "ephemeral_maintenance": 0.2
+              },
               "required_nodes_by_type": {
                 "cluster_size": 8,
                 "cpu": 6,
@@ -2138,6 +2141,9 @@
               "cassandra.keyspace.rf": 3,
               "cassandra.storage_buffer_ratio": 3.83,
               "effective_disk_per_node_gib": 441,
+              "rank_penalties": {
+                "ephemeral_maintenance": 0.2
+              },
               "required_nodes_by_type": {
                 "cluster_size": 8,
                 "cpu": 6,
@@ -2165,6 +2171,9 @@
               "cassandra.keyspace.rf": 3,
               "cassandra.storage_buffer_ratio": 3.83,
               "effective_disk_per_node_gib": 441,
+              "rank_penalties": {
+                "ephemeral_maintenance": 0.2
+              },
               "required_nodes_by_type": {
                 "cluster_size": 8,
                 "cpu": 6,
@@ -2279,6 +2288,7 @@
               "cassandra.storage_buffer_ratio": 3.83,
               "effective_disk_per_node_gib": 1676,
               "rank_penalties": {
+                "ephemeral_maintenance": 0.2,
                 "large_instance": 0.1
               },
               "required_nodes_by_type": {
@@ -2309,6 +2319,7 @@
               "cassandra.storage_buffer_ratio": 3.83,
               "effective_disk_per_node_gib": 1676,
               "rank_penalties": {
+                "ephemeral_maintenance": 0.2,
                 "large_instance": 0.1
               },
               "required_nodes_by_type": {
@@ -2339,6 +2350,7 @@
               "cassandra.storage_buffer_ratio": 3.83,
               "effective_disk_per_node_gib": 1676,
               "rank_penalties": {
+                "ephemeral_maintenance": 0.2,
                 "large_instance": 0.1
               },
               "required_nodes_by_type": {
@@ -2459,6 +2471,9 @@
                 "cassandra.keyspace.rf": 3,
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 885,
+                "rank_penalties": {
+                  "ephemeral_maintenance": 0.2
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 4,
                   "cpu": 4,
@@ -2486,6 +2501,9 @@
                 "cassandra.keyspace.rf": 3,
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 885,
+                "rank_penalties": {
+                  "ephemeral_maintenance": 0.2
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 4,
                   "cpu": 4,
@@ -2513,6 +2531,9 @@
                 "cassandra.keyspace.rf": 3,
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 885,
+                "rank_penalties": {
+                  "ephemeral_maintenance": 0.2
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 4,
                   "cpu": 4,
@@ -2626,6 +2647,9 @@
                 "cassandra.keyspace.rf": 3,
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 1770,
+                "rank_penalties": {
+                  "ephemeral_maintenance": 0.2
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 2,
                   "cpu": 2,
@@ -2653,6 +2677,9 @@
                 "cassandra.keyspace.rf": 3,
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 1770,
+                "rank_penalties": {
+                  "ephemeral_maintenance": 0.2
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 2,
                   "cpu": 2,
@@ -2680,6 +2707,9 @@
                 "cassandra.keyspace.rf": 3,
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 1770,
+                "rank_penalties": {
+                  "ephemeral_maintenance": 0.2
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 2,
                   "cpu": 2,
@@ -2795,6 +2825,9 @@
                 "cassandra.keyspace.rf": 3,
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 885,
+                "rank_penalties": {
+                  "ephemeral_maintenance": 0.2
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 4,
                   "cpu": 4,
@@ -2822,6 +2855,9 @@
                 "cassandra.keyspace.rf": 3,
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 885,
+                "rank_penalties": {
+                  "ephemeral_maintenance": 0.2
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 4,
                   "cpu": 4,
@@ -2849,6 +2885,9 @@
                 "cassandra.keyspace.rf": 3,
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 885,
+                "rank_penalties": {
+                  "ephemeral_maintenance": 0.2
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 4,
                   "cpu": 4,
@@ -2962,6 +3001,9 @@
                 "cassandra.keyspace.rf": 3,
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 1770,
+                "rank_penalties": {
+                  "ephemeral_maintenance": 0.2
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 2,
                   "cpu": 2,
@@ -2989,6 +3031,9 @@
                 "cassandra.keyspace.rf": 3,
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 1770,
+                "rank_penalties": {
+                  "ephemeral_maintenance": 0.2
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 2,
                   "cpu": 2,
@@ -3016,6 +3061,9 @@
                 "cassandra.keyspace.rf": 3,
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 1770,
+                "rank_penalties": {
+                  "ephemeral_maintenance": 0.2
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 2,
                   "cpu": 2,
@@ -3131,6 +3179,9 @@
                 "cassandra.keyspace.rf": 3,
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 441,
+                "rank_penalties": {
+                  "ephemeral_maintenance": 0.2
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 8,
                   "cpu": 7,
@@ -3158,6 +3209,9 @@
                 "cassandra.keyspace.rf": 3,
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 441,
+                "rank_penalties": {
+                  "ephemeral_maintenance": 0.2
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 8,
                   "cpu": 7,
@@ -3185,6 +3239,9 @@
                 "cassandra.keyspace.rf": 3,
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 441,
+                "rank_penalties": {
+                  "ephemeral_maintenance": 0.2
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 8,
                   "cpu": 7,
@@ -3299,6 +3356,7 @@
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 1676,
                 "rank_penalties": {
+                  "ephemeral_maintenance": 0.2,
                   "large_instance": 0.1
                 },
                 "required_nodes_by_type": {
@@ -3329,6 +3387,7 @@
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 1676,
                 "rank_penalties": {
+                  "ephemeral_maintenance": 0.2,
                   "large_instance": 0.1
                 },
                 "required_nodes_by_type": {
@@ -3359,6 +3418,7 @@
                 "cassandra.storage_buffer_ratio": 3.83,
                 "effective_disk_per_node_gib": 1676,
                 "rank_penalties": {
+                  "ephemeral_maintenance": 0.2,
                   "large_instance": 0.1
                 },
                 "required_nodes_by_type": {

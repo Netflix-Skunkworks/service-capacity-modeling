@@ -64,10 +64,10 @@ class TestCassandraFamilyGraph:
         for fam in explained_plans.family_graph.traits:
             assert fam in STATEFUL_DATASTORE_FAMILIES
 
-    def test_stateful_datastore_families_constant(self):
+    @pytest.mark.parametrize("family", ["i4i", "i7i", "i7ie", "r6a"])
+    def test_stateful_datastore_families_constant(self, family):
         assert len(STATEFUL_DATASTORE_FAMILIES) > 0
-        assert "i4i" in STATEFUL_DATASTORE_FAMILIES
-        assert "r6a" in STATEFUL_DATASTORE_FAMILIES
+        assert family in STATEFUL_DATASTORE_FAMILIES
 
     def test_traits_are_derived(self, explained_plans):
         traits = explained_plans.family_graph.traits

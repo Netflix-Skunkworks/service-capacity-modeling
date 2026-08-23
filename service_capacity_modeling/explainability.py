@@ -301,6 +301,8 @@ STATEFUL_DATASTORE_FAMILIES: FrozenSet[str] = frozenset(
         "r5d",
         "r6id",  # memory-optimized local NVMe (~7.6–8.0 GiB/vCPU)
         "i4i",
+        "i7i",
+        "i7ie",
         "i3en",  # storage-optimized local NVMe
     }
 )

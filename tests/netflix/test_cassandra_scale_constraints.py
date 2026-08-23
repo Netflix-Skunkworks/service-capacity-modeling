@@ -19,10 +19,11 @@ from tests.util import assert_similar_compute
 from tests.util import get_drive_size_gib
 from tests.util import simple_drive
 
-# TODO(homatthew): This is a workaround since EBS is disabled broadly for new
-# provisionings (require_local_disks=True by default), but we still want to test
-# with both local and attached disks in unit tests.
-EXTRA_MODEL_ARGS = {"require_local_disks": False}
+# Exercise scaling constraints independently of storage-type ranking policy.
+EXTRA_MODEL_ARGS = {
+    "require_local_disks": False,
+    "ephemeral_maintenance_regret": 0,
+}
 
 
 def get_ideal_cpu_for_instance(instance_name: str) -> float:
