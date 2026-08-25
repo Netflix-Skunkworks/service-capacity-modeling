@@ -273,6 +273,8 @@ INSTANCE_TYPES: Dict[str, Dict[str, Any]] = {
         "cpu_ipc_scale": GRANITE_RAPIDS_IPC,
         "cpu_turbo_single_ghz": 3.9,
         "cpu_turbo_all_ghz": 3.9,
+        # Keep this family opt-in while availability remains limited.
+        "lifecycle": "alpha",
     },
     # "mac2-m2pro": {
     #     'iops_per_gib': None,

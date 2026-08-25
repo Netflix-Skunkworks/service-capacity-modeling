@@ -70,6 +70,42 @@ def test_generate_scenarios_limit_family():
         assert instance.family == "m5"
 
 
+def test_generate_scenarios_m8id_is_explicit_only():
+    planner = CapacityPlanner()
+    model = Mock()
+    model.allowed_platforms.return_value = {Platform.amd64}
+    model.allowed_cloud_drives.return_value = {}
+    model.run_hardware_simulation.return_value = True
+    desires = CapacityDesires()
+
+    automatic = list(
+        planner.generate_scenarios(
+            model,
+            "us-east-1",
+            desires,
+            3,
+            [Lifecycle.stable, Lifecycle.beta],
+            [],
+            [],
+        )
+    )
+    explicit = list(
+        planner.generate_scenarios(
+            model,
+            "us-east-1",
+            desires,
+            3,
+            [Lifecycle.stable, Lifecycle.beta],
+            ["m8id"],
+            [],
+        )
+    )
+
+    assert all(instance.family != "m8id" for instance, _, _ in automatic)
+    assert explicit
+    assert {instance.family for instance, _, _ in explicit} == {"m8id"}
+
+
 def test_generate_scenarios_desire_resources():
     # Create a CapacityPlanner instance
     planner = CapacityPlanner()
