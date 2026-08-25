@@ -22,7 +22,8 @@
           "minimum_value": 0.03,
           "maximum_value": 1.2
         }
-      }
+      },
+      "lifecycle": "alpha"
     },
     "m8id.xlarge": {
       "name": "m8id.xlarge",
@@ -46,7 +47,8 @@
           "minimum_value": 0.03,
           "maximum_value": 1.2
         }
-      }
+      },
+      "lifecycle": "alpha"
     },
     "m8id.2xlarge": {
       "name": "m8id.2xlarge",
@@ -70,7 +72,8 @@
           "minimum_value": 0.03,
           "maximum_value": 1.2
         }
-      }
+      },
+      "lifecycle": "alpha"
     },
     "m8id.4xlarge": {
       "name": "m8id.4xlarge",
@@ -94,7 +97,8 @@
           "minimum_value": 0.03,
           "maximum_value": 1.2
         }
-      }
+      },
+      "lifecycle": "alpha"
     },
     "m8id.8xlarge": {
       "name": "m8id.8xlarge",
@@ -118,7 +122,8 @@
           "minimum_value": 0.03,
           "maximum_value": 1.2
         }
-      }
+      },
+      "lifecycle": "alpha"
     },
     "m8id.12xlarge": {
       "name": "m8id.12xlarge",
@@ -142,7 +147,8 @@
           "minimum_value": 0.03,
           "maximum_value": 1.2
         }
-      }
+      },
+      "lifecycle": "alpha"
     },
     "m8id.16xlarge": {
       "name": "m8id.16xlarge",
@@ -166,7 +172,8 @@
           "minimum_value": 0.03,
           "maximum_value": 1.2
         }
-      }
+      },
+      "lifecycle": "alpha"
     },
     "m8id.24xlarge": {
       "name": "m8id.24xlarge",
@@ -190,7 +197,8 @@
           "minimum_value": 0.03,
           "maximum_value": 1.2
         }
-      }
+      },
+      "lifecycle": "alpha"
     },
     "m8id.32xlarge": {
       "name": "m8id.32xlarge",
@@ -214,7 +222,8 @@
           "minimum_value": 0.03,
           "maximum_value": 1.2
         }
-      }
+      },
+      "lifecycle": "alpha"
     },
     "m8id.48xlarge": {
       "name": "m8id.48xlarge",
@@ -238,7 +247,8 @@
           "minimum_value": 0.03,
           "maximum_value": 1.2
         }
-      }
+      },
+      "lifecycle": "alpha"
     },
     "m8id.96xlarge": {
       "name": "m8id.96xlarge",
@@ -262,7 +272,8 @@
           "minimum_value": 0.03,
           "maximum_value": 1.2
         }
-      }
+      },
+      "lifecycle": "alpha"
     }
   }
 }
