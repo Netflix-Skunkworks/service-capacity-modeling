@@ -29,6 +29,7 @@ from service_capacity_modeling.models.org.netflix.cassandra import (
     _get_cluster_size_lambda,
     _get_min_count,
     CassandraClusterSizeMode,
+    CassandraPlacementCost,
     NflxCassandraCapacityModel,
 )
 from tests.util import assert_minimum_storage_gib
@@ -1124,14 +1125,20 @@ class TestCassandraServiceCosts:
         *,
         num_regions=4,
         backup_retention_days=None,
+        placement_costs=None,
+        state_size_gib=300,
+        writes_per_second=100,
+        copies_per_region=None,
     ):
         hardware = shapes.region("us-east-1")
         desires = CapacityDesires(
             query_pattern=QueryPattern(
-                estimated_write_per_second=certain_float(100),
+                estimated_write_per_second=certain_float(writes_per_second),
                 estimated_mean_write_size_bytes=certain_int(512),
             ),
-            data_shape=DataShape(estimated_state_size_gib=certain_float(300)),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_float(state_size_gib)
+            ),
         )
         return NflxCassandraCapacityModel.service_costs(
             "cassandra",
@@ -1143,6 +1150,8 @@ class TestCassandraServiceCosts:
             desires,
             {
                 "backup_retention_days": backup_retention_days,
+                "placement_costs": placement_costs,
+                "copies_per_region": copies_per_region,
             },
         )
 
@@ -1188,3 +1197,161 @@ class TestCassandraServiceCosts:
         assert "cassandra.backup.s3-standard" not in disabled
         assert "cassandra.net.inter.region" in disabled
         assert "cassandra.net.intra.region" in disabled
+
+    def test_placement_costs_equal_independently_modeled_service_costs(self):
+        placements = [
+            CassandraPlacementCost(
+                keyspaces=["rf1"],
+                copies_per_region=1,
+                num_regions=2,
+                logical_state_size_gib=90,
+                write_per_second=40,
+            ),
+            CassandraPlacementCost(
+                keyspaces=["rf3"],
+                copies_per_region=3,
+                num_regions=2,
+                logical_state_size_gib=210,
+                write_per_second=60,
+            ),
+        ]
+        combined = {
+            service.service_type: service
+            for service in self._services(num_regions=2, placement_costs=placements)
+        }
+        independent = [
+            {
+                service.service_type: service
+                for service in self._services(
+                    num_regions=placement.num_regions,
+                    backup_retention_days=0,
+                    state_size_gib=placement.logical_state_size_gib,
+                    writes_per_second=placement.write_per_second,
+                    copies_per_region=placement.copies_per_region,
+                )
+            }
+            for placement in placements
+        ]
+
+        for service_type in (
+            "cassandra.net.inter.region",
+            "cassandra.net.intra.region",
+        ):
+            assert combined[service_type].annual_cost == pytest.approx(
+                sum(services[service_type].annual_cost for services in independent)
+            )
+            assert [
+                (
+                    placement["keyspaces"],
+                    placement["copies_per_region"],
+                    placement["replicated_region_count"],
+                    placement["logical_state_size_gib"],
+                    placement["write_per_second"],
+                )
+                for placement in combined[service_type].service_params["placements"]
+            ] == [
+                (["rf1"], 1, 2, 90, 40),
+                (["rf3"], 3, 2, 210, 60),
+            ]
+
+        backup = combined["cassandra.backup.s3-standard"]
+        assert backup.service_params["snapshot_gib"] == 360
+        assert [
+            placement["snapshot_gib"]
+            for placement in backup.service_params["placements"]
+        ] == [45, 315]
+
+    def test_empty_placement_costs_explicitly_disable_service_costs(self):
+        services = self._services(placement_costs=[])
+
+        assert len(services) == 1
+        assert services[0].service_type == "cassandra.cost.placements"
+        assert services[0].annual_cost == 0
+        assert services[0].service_params == {
+            "contract_version": 1,
+            "placement_count": 0,
+        }
+
+    def test_placement_costs_accept_rf1_and_require_disjoint_keyspaces(self):
+        from service_capacity_modeling.models.org.netflix.cassandra import (
+            NflxCassandraArguments,
+        )
+
+        placement = CassandraPlacementCost(
+            keyspaces=["events"],
+            copies_per_region=1,
+            num_regions=1,
+            logical_state_size_gib=1,
+            write_per_second=1,
+        )
+
+        assert placement.copies_per_region == 1
+        with pytest.raises(ValueError, match="must not repeat keyspaces"):
+            NflxCassandraArguments(placement_costs=[placement, placement])
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf")])
+    def test_placement_cost_measurements_must_be_finite(self, value):
+        with pytest.raises(ValueError):
+            CassandraPlacementCost(
+                keyspaces=["events"],
+                copies_per_region=3,
+                num_regions=1,
+                logical_state_size_gib=value,
+                write_per_second=1,
+            )
+
+    def test_capacity_plan_preserves_placement_costs(self):
+        hardware = shapes.region("us-east-1")
+        current = CurrentZoneClusterCapacity(
+            cluster_instance_name="r7a.4xlarge",
+            cluster_instance_count=certain_int(64),
+            cluster_drive=simple_drive(size_gib=1200),
+            cpu_utilization=certain_float(20),
+            disk_utilization_gib=certain_float(900),
+            network_utilization_mbps=certain_float(100),
+        )
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(300_000),
+                estimated_write_per_second=certain_int(300_000),
+            ),
+            data_shape=DataShape(estimated_state_size_gib=certain_int(70_000)),
+            current_clusters=CurrentClusters(zonal=[current] * 3),
+        )
+        result = NflxCassandraCapacityModel.capacity_plan(
+            instance=hardware.instances["r7a.4xlarge"],
+            drive=hardware.drives["gp3"],
+            context=RegionContext(
+                zones_in_region=hardware.zones_in_region,
+                num_regions=4,
+                services=hardware.services,
+            ),
+            desires=desires,
+            extra_model_arguments={
+                "require_attached_disks": True,
+                "require_local_disks": False,
+                "cluster_size_mode": "unrestricted",
+                "max_regional_size": 600,
+                "placement_costs": [
+                    CassandraPlacementCost(
+                        keyspaces=["regional"],
+                        copies_per_region=3,
+                        num_regions=1,
+                        logical_state_size_gib=10,
+                        write_per_second=100,
+                    ).model_dump(mode="json")
+                ],
+            },
+        )
+
+        assert result is not None
+        assert not isinstance(result, Excuse)
+        services = {
+            service.service_type: service
+            for service in result.candidate_clusters.services
+        }
+        inter_region = services["cassandra.net.inter.region"]
+        assert inter_region.annual_cost == 0
+        assert inter_region.service_params["contract_version"] == 1
+        assert inter_region.service_params["placements"][0]["keyspaces"] == ["regional"]

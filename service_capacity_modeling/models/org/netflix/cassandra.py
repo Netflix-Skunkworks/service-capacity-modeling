@@ -8,8 +8,8 @@ from typing import Dict
 from typing import FrozenSet
 from typing import List
 from typing import Optional
-from typing import Tuple
 from typing import Set
+from typing import Tuple
 from typing import Union
 
 from pydantic import BaseModel
@@ -143,6 +143,22 @@ class CassandraClusterSizeMode(StrEnum):
     """Use the raw required cluster count without Cassandra cluster-size rounding."""
 
 
+class CassandraPlacementCost(BaseModel):
+    """Absolute cost inputs for keyspaces with one replication placement.
+
+    State is once-counted logical GiB before replication, writes are fleetwide
+    logical writes per second, and ``num_regions`` is the placement's total
+    region span. A caller includes the placement only in regional plans where
+    those keyspaces are placed.
+    """
+
+    keyspaces: List[str] = Field(min_length=1)
+    copies_per_region: int = Field(gt=0)
+    num_regions: int = Field(gt=0)
+    logical_state_size_gib: float = Field(ge=0, allow_inf_nan=False)
+    write_per_second: float = Field(ge=0, allow_inf_nan=False)
+
+
 # --- CRR network and backup cost helpers ---
 #
 # Empirically derived from billing validation against 10 production clusters.
@@ -257,17 +273,23 @@ def _get_cores_from_desires(desires: CapacityDesires, instance: Instance) -> int
     return needed_cores
 
 
-def _get_disk_from_desires(desires: CapacityDesires, copies_per_region: int) -> int:
+def _get_raw_disk_from_desires(
+    desires: CapacityDesires, copies_per_region: int
+) -> float:
     disk_buffer = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.disk]
     )
     # Do not add disk buffers now as memory calculation is done on the disk usage
-    return math.ceil(
+    return (
         (1.0 / desires.data_shape.estimated_compression_ratio.mid)
         * desires.data_shape.estimated_state_size_gib.mid
         * copies_per_region
         * disk_buffer.ratio
     )
+
+
+def _get_disk_from_desires(desires: CapacityDesires, copies_per_region: int) -> int:
+    return math.ceil(_get_raw_disk_from_desires(desires, copies_per_region))
 
 
 def _get_min_count(
@@ -651,6 +673,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     different_family_regret: float = 0.10,
     max_page_cache_gib: float = DEFAULT_MAX_PAGE_CACHE_GIB,
     backup_retention_days: Optional[float] = None,
+    placement_costs: Optional[List[CassandraPlacementCost]] = None,
     max_disk_utilization: float = CASSANDRA_MAX_DISK_UTILIZATION,
     min_instance_ram_gib_exclusive: float = 16.0,
     observed_ebs_read_io_per_read: Optional[float] = None,
@@ -1042,6 +1065,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         extra_model_arguments={
             "copies_per_region": copies_per_region,
             "backup_retention_days": backup_retention_days,
+            "placement_costs": placement_costs,
         },
     )
 
@@ -1094,7 +1118,7 @@ def _cass_io_per_read(node_size_gib: float, sstable_size_mb: int = 160) -> int:
 
 def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
     if user_copies is not None:
-        assert user_copies > 1
+        assert user_copies > 0
         return user_copies
 
     # Due to the relaxed durability and consistency requirements we can
@@ -1190,8 +1214,14 @@ class NflxCassandraArguments(BaseModel):
 
     copies_per_region: Optional[int] = Field(
         default=None,
+        gt=0,
         description="How many copies of the data will exist e.g. RF=3. If unsupplied"
         " this will be deduced from durability and consistency desires",
+    )
+    placement_costs: Optional[List[CassandraPlacementCost]] = Field(
+        default=None,
+        description="Absolute keyspace-placement inputs for network and backup cost. "
+        "None uses aggregate desires; an empty list explicitly prices no services.",
     )
     require_local_disks: bool = Field(
         default=True,
@@ -1359,6 +1389,23 @@ class NflxCassandraArguments(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _check_placement_cost_keyspaces_are_disjoint(
+        self,
+    ) -> "NflxCassandraArguments":
+        seen: Set[str] = set()
+        duplicates: Set[str] = set()
+        for placement in self.placement_costs or []:
+            for keyspace in placement.keyspaces:
+                if keyspace in seen:
+                    duplicates.add(keyspace)
+                seen.add(keyspace)
+        if duplicates:
+            raise ValueError(
+                f"placement_costs must not repeat keyspaces: {sorted(duplicates)!r}"
+            )
+        return self
+
     @classmethod
     def from_extra_model_arguments(
         cls, extra_model_arguments: Dict[str, Any]
@@ -1440,6 +1487,134 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         backup inclusion and retention; it does not affect network costs.
         """
         args = NflxCassandraArguments.from_extra_model_arguments(extra_model_arguments)
+        if args.placement_costs is not None:
+            if not args.placement_costs:
+                return [
+                    ServiceCapacity(
+                        service_type=f"{service_type}.cost.placements",
+                        annual_cost=0,
+                        service_params={"contract_version": 1, "placement_count": 0},
+                    )
+                ]
+
+            services_by_type: Dict[str, ServiceCapacity] = {}
+            blob = context.services.get("blob.standard")
+            charge_backup = (
+                args.backup_retention_days != 0
+                and desires.data_shape.durability_slo_order.mid >= 1000
+                and blob is not None
+            )
+            backup_snapshots_gib: List[float] = []
+            backup_daily_write_gib = 0.0
+            backup_placements: List[Dict[str, Any]] = []
+
+            for placement in args.placement_costs:
+                placement_params = {
+                    "keyspaces": placement.keyspaces,
+                    "copies_per_region": placement.copies_per_region,
+                    "replicated_region_count": placement.num_regions,
+                    "logical_state_size_gib": placement.logical_state_size_gib,
+                    "write_per_second": placement.write_per_second,
+                }
+                placement_desires = desires.model_copy(deep=True)
+                placement_desires.query_pattern.estimated_write_per_second = (
+                    certain_float(placement.write_per_second)
+                )
+                placement_desires.data_shape.estimated_state_size_gib = certain_float(
+                    placement.logical_state_size_gib
+                )
+                placement_context = context.model_copy(
+                    update={"num_regions": placement.num_regions}
+                )
+                placement_arguments = dict(extra_model_arguments)
+                placement_arguments.pop("placement_costs", None)
+                placement_arguments["copies_per_region"] = placement.copies_per_region
+                placement_arguments["backup_retention_days"] = 0
+
+                for service in NflxCassandraCapacityModel.service_costs(
+                    service_type,
+                    placement_context,
+                    placement_desires,
+                    placement_arguments,
+                ):
+                    aggregate = services_by_type.setdefault(
+                        service.service_type,
+                        ServiceCapacity(
+                            service_type=service.service_type,
+                            annual_cost=0,
+                            service_params={
+                                "contract_version": 1,
+                                "placement_count": len(args.placement_costs),
+                                "placements": [],
+                                "write_size_defaulted": service.service_params.get(
+                                    "write_size_defaulted", False
+                                ),
+                            },
+                        ),
+                    )
+                    aggregate.annual_cost += service.annual_cost
+                    aggregate.service_params["placements"].append(
+                        {
+                            **placement_params,
+                            "annual_cost": service.annual_cost,
+                            **service.service_params,
+                        }
+                    )
+
+                if charge_backup:
+                    placement_snapshot_gib = _get_raw_disk_from_desires(
+                        placement_desires, placement.copies_per_region
+                    )
+                    backup_snapshots_gib.append(placement_snapshot_gib)
+                    wire_write_size = _cassandra_wire_write_size(
+                        placement_desires.query_pattern.estimated_mean_write_size_bytes.mid
+                    )
+                    daily_write_gib = (
+                        placement.write_per_second * wire_write_size * 86400
+                    ) / ((1024**3) * placement.num_regions)
+                    backup_daily_write_gib += daily_write_gib
+                    backup_placements.append(
+                        {
+                            **placement_params,
+                            "snapshot_gib": (
+                                placement_snapshot_gib / context.zones_in_region
+                            ),
+                            "daily_write_gib": round(daily_write_gib, 1),
+                        }
+                    )
+
+            if charge_backup:
+                assert blob is not None
+                retention_days = (
+                    _DEFAULT_BACKUP_RETENTION_DAYS
+                    if args.backup_retention_days is None
+                    else args.backup_retention_days
+                )
+                snapshot_gib = max(
+                    1,
+                    math.ceil(math.fsum(backup_snapshots_gib))
+                    // context.zones_in_region,
+                )
+                backup_total_gib = (
+                    snapshot_gib + backup_daily_write_gib * retention_days
+                )
+                backup_type = f"{service_type}.backup.{blob.name}"
+                services_by_type[backup_type] = ServiceCapacity(
+                    service_type=backup_type,
+                    annual_cost=blob.annual_cost_gib(backup_total_gib),
+                    service_params={
+                        "contract_version": 1,
+                        "placement_count": len(args.placement_costs),
+                        "snapshot_gib": snapshot_gib,
+                        "daily_write_gib": round(backup_daily_write_gib, 1),
+                        "retention_days": retention_days,
+                        "write_size_defaulted": _is_write_size_defaulted(desires),
+                        "placements": backup_placements,
+                    },
+                )
+
+            return list(services_by_type.values())
+
         copies_per_region: int = _target_rf(
             desires, extra_model_arguments.get("copies_per_region")
         )
@@ -1580,6 +1755,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             different_family_regret=args.different_family_regret,
             max_page_cache_gib=args.max_page_cache_gib,
             backup_retention_days=args.backup_retention_days,
+            placement_costs=args.placement_costs,
             max_disk_utilization=args.max_disk_utilization,
             min_instance_ram_gib_exclusive=args.min_instance_ram_gib_exclusive,
             observed_ebs_read_io_per_read=args.observed_ebs_read_io_per_read,
