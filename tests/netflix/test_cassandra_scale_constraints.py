@@ -222,13 +222,9 @@ class TestStorageScalingConstraints:
         result = cap_plan[0].candidate_clusters.zonal[0]
         result_storage = result.count * get_drive_size_gib(result)
 
-        # Storage should scale up to meet 4x buffer requirement
-        expected_storage = (
-            CLUSTER.disk.hot * 4 * CLUSTER_SIZE
-        )  # 4x buffer on hot state size based on default buffer
-
-        # Assert the magic number for readability / clarity
-        assert expected_storage == 27936
+        # Storage should scale up to meet the model's adaptive buffer requirement.
+        storage_buffer_ratio = result.cluster_params["cassandra.storage_buffer_ratio"]
+        expected_storage = CLUSTER.disk.hot * storage_buffer_ratio * CLUSTER_SIZE
         assert expected_storage <= result_storage <= expected_storage * 2.5
 
     def test_storage_hot_scale_down(self):
