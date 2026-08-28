@@ -22,6 +22,12 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models import CapacityModel
 
 
+# The Cassandra tier plans on EBS unless it is too read hot for attached disks
+# or the dataset is too small for decoupling storage from compute to pay off.
+CASSANDRA_EBS_MAX_READ_PER_SECOND = 200_000
+CASSANDRA_EBS_MIN_STATE_SIZE_GIB = 1024
+
+
 class NflxTimeSeriesCapacityModel(CapacityModel):
     @staticmethod
     def capacity_plan(
@@ -64,8 +70,8 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
         # as well, e.g. if the latency SLO is reduced
         ts_config = TimeSeriesConfiguration(extra_model_arguments)
 
-        def _modify_cassandra_desires(user_desires: CapacityDesires) -> CapacityDesires:
-            modified = user_desires.model_copy(deep=True)
+        def _modify_cassandra_desires(desires: CapacityDesires) -> CapacityDesires:
+            modified = desires.model_copy(deep=True)
             modified.query_pattern.estimated_read_per_second = (
                 modified.query_pattern.estimated_read_per_second.scale(
                     ts_config.read_amplification
@@ -81,6 +87,22 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
                 AccessConsistency.eventual
             )
             return relaxed
+
+        # Decide on the desires Cassandra is actually planned with, so after
+        # TimeSeries read amplification: the read ceiling is about load landing
+        # on Cassandra, not load landing on the TimeSeries tier.
+        cassandra_desires = _modify_cassandra_desires(user_desires)
+        if (
+            cassandra_desires.query_pattern.estimated_read_per_second.mid
+            <= CASSANDRA_EBS_MAX_READ_PER_SECOND
+            and cassandra_desires.data_shape.estimated_state_size_gib.mid
+            >= CASSANDRA_EBS_MIN_STATE_SIZE_GIB
+        ):
+            # Allow EBS instances, then require them: without the first there
+            # are no EBS candidates, without the second local disks may win.
+            # We explicitly put higher premium on EBS due to ease of maintenance.
+            extra_model_arguments["require_local_disks"] = False
+            extra_model_arguments["require_attached_disks"] = True
 
         if ts_config.search_enabled:
             return (

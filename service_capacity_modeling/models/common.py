@@ -291,6 +291,21 @@ def _reserved_headroom(
     return strategy.calculate_reserved_headroom(effective_cpu)
 
 
+def with_effective_cpu(instance: Instance, effective_cpu: int) -> Instance:
+    """Return a copy of instance with its vCPU count adjusted, preserving HT ratio.
+
+    Callers that need to reason about a subset of an instance's vCPUs (for
+    example, penalizing a wide fan-out candidate down to a smaller effective
+    core count) must not change `cpu` without also scaling `cpu_cores` by the
+    same ratio: doing so silently flips the `cores < cpu` hyper-threading
+    signal that `cpu_headroom_target` relies on to pick the right headroom
+    multiplier.
+    """
+    ht_ratio = instance.cores / instance.cpu
+    new_cores = max(1, round(effective_cpu * ht_ratio))
+    return instance.model_copy(update={"cpu": effective_cpu, "cpu_cores": new_cores})
+
+
 def cpu_headroom_target(instance: Instance, buffers: Optional[Buffers] = None) -> float:
     """Determine an approximate headroom target for an instance.
 

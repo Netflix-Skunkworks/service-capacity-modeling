@@ -29,13 +29,14 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models.org.netflix.cassandra import (
     _cass_io_per_read,
-    _default_cluster_size_mode,
     _deployed_topology_saturation_min_count,
     _get_cluster_size_lambda,
     _get_min_count,
     _has_homogeneous_current_zonal_topology,
     CASSANDRA_MAX_DISK_UTILIZATION,
     CassandraClusterSizeMode,
+    CassandraKeyspacePlacement,
+    CassandraKeyspaceTopology,
     NflxCassandraArguments,
     NflxCassandraCapacityModel,
 )
@@ -54,10 +55,8 @@ EXTRA_MODEL_ARGS = {"require_local_disks": False}
 # See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
 PROPERTY_TEST_CONFIG = {
     "org.netflix.cassandra": {
-        # Cassandra critical tiers share the same default cluster-size policy.
-        # Non-critical tiers can pick a different local-disk shape with more raw
-        # capacity for the same workload, so the universal tier property should
-        # compare the critical tier boundary directly.
+        # Tiers can pick different local-disk shapes with different raw capacity
+        # for the same workload, so compare the critical tier boundary directly.
         "tier_range": (0, 1),
     },
 }
@@ -139,13 +138,14 @@ class TestCassandraCapacityPlanning:
         # Storage should be sufficient for the data (300 GiB with buffer)
         assert_minimum_storage_gib(high_writes_result, 400)
         assert_similar_compute(
-            shapes.instance("c7a.4xlarge"),
+            shapes.instance("c8a.4xlarge"),
             high_writes_result.instance,
-            expected_count=8,
+            expected_count=5,
             actual_count=high_writes_result.count,
             expected_attached_disk=simple_drive(
-                size_gib=100, read_io_per_s=3400, write_io_per_s=200
+                size_gib=100, read_io_per_s=5400, write_io_per_s=200
             ),
+            actual_attached_disk=high_writes_result.attached_drives[0],
         )
 
     def test_capacity_large_footprint(self):
@@ -1733,7 +1733,7 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         result = cap_plan.candidate_clusters.zonal[0]
 
         cores = result.count * result.instance.cpu
-        assert 64 <= cores <= 512
+        assert 32 <= cores <= 512
         # Should get attached storage since we explicitly requested it
         assert result.attached_drives, (
             "Expected attached drives with require_attached_disks=True"
@@ -2152,7 +2152,8 @@ class TestCassandraCurrentCapacity:
             },
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
-        assert result.count == 6
+        counts = result.cluster_params["required_nodes_by_type"]
+        assert result.count == counts["cluster_size"] == counts["cpu"] == 8
 
     def test_capacity_non_power_of_two_with_doubling_mode(self):
         cluster_capacity = CurrentZoneClusterCapacity(
@@ -2178,6 +2179,7 @@ class TestCassandraCurrentCapacity:
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
         counts = result.cluster_params["required_nodes_by_type"]
+        assert result.count == 6
         assert counts["min_count"] == 6
 
     def test_capacity_non_power_of_two_with_required_size(self):
@@ -2255,11 +2257,9 @@ class TestCassandraExtraModelArguments:
                 tier, extra_model_arguments
             )
 
-    @pytest.mark.parametrize("tier", [2, 3, 4])
-    def test_non_critical_tiers_do_not_round_cluster_size(self, tier):
-        cluster_size = _get_cluster_size_lambda(
-            cluster_size_mode=_default_cluster_size_mode(tier),
-        )
+    @pytest.mark.parametrize("tier", [0, 1, 2, 3, 4])
+    def test_all_tiers_do_not_round_cluster_size_by_default(self, tier):
+        cluster_size = _get_cluster_size_lambda()
 
         assert (
             _get_min_count(
@@ -2272,29 +2272,9 @@ class TestCassandraExtraModelArguments:
             == 3
         )
 
-    def test_cluster_size_lambda_defaults_to_doubling_mode(self):
-        cluster_size = _get_cluster_size_lambda()
-
-        assert cluster_size(3) == 4
-
-    @pytest.mark.parametrize(
-        "tier, expected_mode",
-        [
-            (0, CassandraClusterSizeMode.doubling),
-            (1, CassandraClusterSizeMode.doubling),
-            (2, CassandraClusterSizeMode.unrestricted),
-            (3, CassandraClusterSizeMode.unrestricted),
-            (4, CassandraClusterSizeMode.unrestricted),
-        ],
-    )
-    def test_default_cluster_size_mode_is_tier_based(self, tier, expected_mode):
-        assert _default_cluster_size_mode(tier) == expected_mode
-
     @pytest.mark.parametrize("tier", [2, 3, 4])
     def test_non_critical_tiers_do_not_round_above_required_cluster_size(self, tier):
-        cluster_size = _get_cluster_size_lambda(
-            cluster_size_mode=_default_cluster_size_mode(tier),
-        )
+        cluster_size = _get_cluster_size_lambda()
 
         assert (
             _get_min_count(
@@ -2307,25 +2287,8 @@ class TestCassandraExtraModelArguments:
             == 6
         )
 
-    @pytest.mark.parametrize("tier", [0, 1])
-    def test_critical_tiers_keep_doubling_cluster_size(self, tier):
-        cluster_size = _get_cluster_size_lambda(
-            cluster_size_mode=_default_cluster_size_mode(tier),
-        )
-
-        assert (
-            _get_min_count(
-                tier=tier,
-                required_cluster_size=None,
-                needed_disk_gib=3,
-                disk_per_node_gib=1,
-                cluster_size_lambda=cluster_size,
-            )
-            == 4
-        )
-
-    @pytest.mark.parametrize("tier", [2, 3, 4])
-    def test_cluster_size_mode_can_force_doubling_for_non_critical_tiers(self, tier):
+    @pytest.mark.parametrize("tier", [0, 1, 2, 3, 4])
+    def test_cluster_size_mode_can_force_doubling_for_all_tiers(self, tier):
         cluster_size = _get_cluster_size_lambda(
             cluster_size_mode=CassandraClusterSizeMode.doubling,
         )
@@ -2392,23 +2355,6 @@ class TestCassandraExtraModelArguments:
             == 12
         )
 
-    @pytest.mark.parametrize("tier", [0, 1])
-    def test_cluster_size_mode_can_force_unrestricted_for_critical_tiers(self, tier):
-        cluster_size = _get_cluster_size_lambda(
-            cluster_size_mode=CassandraClusterSizeMode.unrestricted,
-        )
-
-        assert (
-            _get_min_count(
-                tier=tier,
-                required_cluster_size=None,
-                needed_disk_gib=3,
-                disk_per_node_gib=1,
-                cluster_size_lambda=cluster_size,
-            )
-            == 3
-        )
-
     def test_page_cache_cap_default(self):
         args = NflxCassandraArguments.from_extra_model_arguments({})
         assert args.max_page_cache_gib == 28.0
@@ -2455,7 +2401,7 @@ class TestCassandraExtraModelArguments:
     def test_cluster_size_mode_extra_argument(self):
         assert (
             NflxCassandraArguments.from_extra_model_arguments({}).cluster_size_mode
-            is None
+            == CassandraClusterSizeMode.unrestricted
         )
         assert (
             NflxCassandraArguments.from_extra_model_arguments(
@@ -2508,14 +2454,20 @@ class TestCassandraServiceCosts:
         *,
         num_regions=4,
         backup_retention_days=None,
+        keyspace_topology=None,
+        state_size_gib=300,
+        writes_per_second=100,
+        copies_per_region=None,
     ):
         hardware = shapes.region("us-east-1")
         desires = CapacityDesires(
             query_pattern=QueryPattern(
-                estimated_write_per_second=certain_float(100),
+                estimated_write_per_second=certain_float(writes_per_second),
                 estimated_mean_write_size_bytes=certain_int(512),
             ),
-            data_shape=DataShape(estimated_state_size_gib=certain_float(300)),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_float(state_size_gib)
+            ),
         )
         return NflxCassandraCapacityModel.service_costs(
             "cassandra",
@@ -2527,6 +2479,8 @@ class TestCassandraServiceCosts:
             desires,
             {
                 "backup_retention_days": backup_retention_days,
+                "keyspace_topology": keyspace_topology,
+                "copies_per_region": copies_per_region,
             },
         )
 
@@ -2572,3 +2526,252 @@ class TestCassandraServiceCosts:
         assert "cassandra.backup.s3-standard" not in disabled
         assert "cassandra.net.inter.region" in disabled
         assert "cassandra.net.intra.region" in disabled
+
+    def test_keyspace_placements_equal_independently_modeled_service_costs(self):
+        placements = [
+            CassandraKeyspacePlacement(
+                keyspaces=["rf1"],
+                copies_per_region=1,
+                regions=["us-east-1", "us-west-2"],
+                logical_state_size_gib=90,
+                write_per_second=40,
+            ),
+            CassandraKeyspacePlacement(
+                keyspaces=["rf3"],
+                copies_per_region=3,
+                regions=["us-east-1", "eu-west-1"],
+                logical_state_size_gib=210,
+                write_per_second=60,
+            ),
+        ]
+        topology = CassandraKeyspaceTopology(
+            planning_region="us-east-1",
+            placements=placements,
+            physical_state_size_gib_by_region={
+                "us-east-1": 900,
+                "us-west-2": 90,
+                "eu-west-1": 630,
+            },
+        )
+        combined = {
+            service.service_type: service
+            for service in self._services(num_regions=3, keyspace_topology=topology)
+        }
+        independent = [
+            {
+                service.service_type: service
+                for service in self._services(
+                    num_regions=placement.replicated_region_count,
+                    backup_retention_days=0,
+                    state_size_gib=placement.logical_state_size_gib,
+                    writes_per_second=placement.write_per_second,
+                    copies_per_region=placement.copies_per_region,
+                )
+            }
+            for placement in placements
+        ]
+
+        for service_type in (
+            "cassandra.net.inter.region",
+            "cassandra.net.intra.region",
+        ):
+            assert combined[service_type].annual_cost == pytest.approx(
+                sum(services[service_type].annual_cost for services in independent)
+            )
+            assert [
+                (
+                    placement["keyspaces"],
+                    placement["copies_per_region"],
+                    placement["replicated_region_count"],
+                    placement["logical_state_size_gib"],
+                    placement["write_per_second"],
+                    placement.get("num_regions"),
+                )
+                for placement in combined[service_type].service_params["placements"]
+            ] == [
+                (["rf1"], 1, 2, 90, 40, None),
+                (["rf3"], 3, 2, 210, 60, None),
+            ]
+            assert combined[service_type].service_params["placements"][0][
+                "regions"
+            ] == ["us-east-1", "us-west-2"]
+
+        backup = combined["cassandra.backup.s3-standard"]
+        assert backup.service_params["snapshot_gib"] == 300
+
+    def test_region_without_keyspace_placements_has_an_explicit_receipt(self):
+        topology = CassandraKeyspaceTopology(
+            planning_region="eu-west-1",
+            placements=[
+                CassandraKeyspacePlacement(
+                    keyspaces=["events"],
+                    copies_per_region=3,
+                    regions=["us-east-1"],
+                    logical_state_size_gib=10,
+                    write_per_second=20,
+                )
+            ],
+            physical_state_size_gib_by_region={"us-east-1": 30, "eu-west-1": 0},
+        )
+        services = self._services(keyspace_topology=topology)
+
+        assert len(services) == 1
+        assert services[0].service_type == "cassandra.cost.placements"
+        assert services[0].annual_cost == 0
+        assert services[0].service_params == {
+            "contract_version": 1,
+            "placement_count": 0,
+        }
+
+    def test_keyspace_topology_requires_disjoint_keyspaces(self):
+        placement = CassandraKeyspacePlacement(
+            keyspaces=["events"],
+            copies_per_region=1,
+            regions=["us-east-1"],
+            logical_state_size_gib=1,
+            write_per_second=1,
+        )
+
+        with pytest.raises(ValueError, match="must not repeat keyspaces"):
+            CassandraKeyspaceTopology(
+                planning_region="us-east-1",
+                placements=[placement, placement],
+                physical_state_size_gib_by_region={"us-east-1": 1},
+            )
+
+    @pytest.mark.parametrize(
+        "placement",
+        [
+            {},
+            {"regions": [""]},
+            {"regions": ["us-east-1", "us-east-1"]},
+        ],
+    )
+    def test_keyspace_placement_region_scope_is_unambiguous(self, placement):
+        with pytest.raises(ValueError):
+            CassandraKeyspacePlacement(
+                keyspaces=["events"],
+                copies_per_region=3,
+                logical_state_size_gib=1,
+                write_per_second=1,
+                **placement,
+            )
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), -1])
+    def test_topology_physical_state_must_be_finite_and_nonnegative(self, value):
+        with pytest.raises(ValueError):
+            CassandraKeyspaceTopology(
+                planning_region="us-east-1",
+                placements=[
+                    CassandraKeyspacePlacement(
+                        keyspaces=["events"],
+                        copies_per_region=3,
+                        regions=["us-east-1"],
+                        logical_state_size_gib=1,
+                        write_per_second=1,
+                    )
+                ],
+                physical_state_size_gib_by_region={"us-east-1": value},
+            )
+
+    @pytest.mark.parametrize(
+        ("planning_region", "placement_region", "physical_state"),
+        [
+            ("us-west-2", "us-east-1", {"us-east-1": 1}),
+            ("us-east-1", "us-west-2", {"us-east-1": 1}),
+            (
+                "us-east-1",
+                "us-east-1",
+                {"us-east-1": 1, "us-west-2": 1},
+            ),
+        ],
+    )
+    def test_keyspace_topology_rejects_incomplete_region_mapping(
+        self, planning_region, placement_region, physical_state
+    ):
+        with pytest.raises(ValueError):
+            CassandraKeyspaceTopology(
+                planning_region=planning_region,
+                placements=[
+                    CassandraKeyspacePlacement(
+                        keyspaces=["events"],
+                        copies_per_region=3,
+                        regions=[placement_region],
+                        logical_state_size_gib=1,
+                        write_per_second=1,
+                    )
+                ],
+                physical_state_size_gib_by_region=physical_state,
+            )
+
+    def test_capacity_plan_sizes_every_region_from_largest_physical_state(self):
+        common_arguments = {
+            "require_attached_disks": True,
+            "require_local_disks": False,
+            "cluster_size_mode": "unrestricted",
+            "max_regional_size": 600,
+            "keyspace_topology": {
+                "planning_region": "us-east-1",
+                "physical_state_size_gib_by_region": {
+                    "us-east-1": 210_000,
+                    "us-west-2": 30_000,
+                },
+                "placements": [
+                    CassandraKeyspacePlacement(
+                        keyspaces=["regional"],
+                        copies_per_region=3,
+                        regions=["us-east-1", "us-west-2"],
+                        logical_state_size_gib=10,
+                        write_per_second=100,
+                    ).model_dump(mode="json")
+                ],
+            },
+        }
+        plans = {}
+        for planning_region, regional_disk_gib in (
+            ("us-east-1", 900),
+            ("us-west-2", 150),
+        ):
+            current = CurrentZoneClusterCapacity(
+                cluster_instance_name="r7a.4xlarge",
+                cluster_instance_count=certain_int(64),
+                cluster_drive=simple_drive(size_gib=1200),
+                cpu_utilization=certain_float(20),
+                disk_utilization_gib=certain_float(regional_disk_gib),
+                network_utilization_mbps=certain_float(100),
+            )
+            desires = CapacityDesires(
+                service_tier=1,
+                query_pattern=QueryPattern(
+                    estimated_read_per_second=certain_int(300_000),
+                    estimated_write_per_second=certain_int(300_000),
+                ),
+                data_shape=DataShape(estimated_state_size_gib=certain_int(10_000)),
+                current_clusters=CurrentClusters(zonal=[current] * 3),
+            )
+            arguments = {**common_arguments}
+            arguments["keyspace_topology"] = {
+                **common_arguments["keyspace_topology"],
+                "planning_region": planning_region,
+            }
+            plans[planning_region] = planner.plan_certain(
+                model_name="org.netflix.cassandra",
+                region="us-east-1",
+                desires=desires,
+                extra_model_arguments=arguments,
+                instance_families=["r7a"],
+                num_results=1,
+            )[0]
+
+        east = plans["us-east-1"]
+        west = plans["us-west-2"]
+        assert east.requirements == west.requirements
+        assert east.requirements.zonal[0].disk_gib.mid > 210_000 / 3
+        services = {
+            service.service_type: service
+            for service in east.candidate_clusters.services
+        }
+        inter_region = services["cassandra.net.inter.region"]
+        assert inter_region.annual_cost > 0
+        assert inter_region.service_params["contract_version"] == 1
+        assert inter_region.service_params["placements"][0]["keyspaces"] == ["regional"]

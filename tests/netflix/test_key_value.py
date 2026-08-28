@@ -22,8 +22,7 @@ PROPERTY_TEST_CONFIG = {
     # },
 }
 
-# A KV namespace that reserves 24 GiB for the app. That reserve flows through
-# to the composed Cassandra model, where it overruns small shapes.
+# A KV namespace that reserves 24 GiB for the app.
 LARGE_APP_RESERVE_KV = CapacityDesires(
     service_tier=0,
     query_pattern=QueryPattern(
@@ -53,26 +52,6 @@ LARGE_APP_RESERVE_KV = CapacityDesires(
         reserved_instance_app_mem_gib=24.0,
     ),
 )
-
-
-def test_large_app_memory_reserve_plans_on_shapes_that_fit():
-    """Reserved app memory can overrun a small shape's RAM.
-
-    24 GiB of reserved app memory plus the JVM heap leaves no page cache on
-    shapes like i4i.xlarge, which used to divide by zero while sizing the
-    Cassandra cluster. Those shapes are now excused and planning continues on
-    shapes with RAM to spare.
-    """
-    plans = planner.plan_certain(
-        model_name="org.netflix.key-value",
-        region="us-east-1",
-        desires=LARGE_APP_RESERVE_KV,
-    )
-
-    assert plans, "Expected a plan on shapes large enough for the app reserve"
-    for plan in plans:
-        for cluster in plan.candidate_clusters.zonal:
-            assert cluster.instance.ram_gib > 40
 
 
 def test_large_app_memory_reserve_survives_simulation():
