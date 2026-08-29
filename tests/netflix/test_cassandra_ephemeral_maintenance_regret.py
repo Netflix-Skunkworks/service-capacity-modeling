@@ -20,6 +20,7 @@ from service_capacity_modeling.models.org.netflix.cassandra import (
 
 
 DATA_PER_NODE_THRESHOLD_GIB = 300
+DATA_PER_NODE_CAP_GIB = 1024
 EPHEMERAL_REGRET = 0.2
 
 
@@ -92,6 +93,7 @@ def _penalties(
         data_per_node_gib=data_per_node_gib,
         ephemeral_maintenance_regret=regret,
         ephemeral_maintenance_threshold_gib_per_node=DATA_PER_NODE_THRESHOLD_GIB,
+        ephemeral_maintenance_cap_gib_per_node=DATA_PER_NODE_CAP_GIB,
         different_family_regret=0,
     )
 
@@ -108,22 +110,22 @@ def _penalties(
             {"ephemeral_maintenance": EPHEMERAL_REGRET},
         ),
         (
-            DATA_PER_NODE_THRESHOLD_GIB * 3 // 2,
+            (DATA_PER_NODE_THRESHOLD_GIB + DATA_PER_NODE_CAP_GIB) // 2,
+            {"ephemeral_maintenance": EPHEMERAL_REGRET * 1.25},
+        ),
+        (
+            DATA_PER_NODE_CAP_GIB,
             {"ephemeral_maintenance": EPHEMERAL_REGRET * 1.5},
         ),
         (
-            DATA_PER_NODE_THRESHOLD_GIB * 2,
-            {"ephemeral_maintenance": EPHEMERAL_REGRET * 2},
-        ),
-        (
-            DATA_PER_NODE_THRESHOLD_GIB * 3,
-            {"ephemeral_maintenance": EPHEMERAL_REGRET * 2},
+            DATA_PER_NODE_CAP_GIB * 2,
+            {"ephemeral_maintenance": EPHEMERAL_REGRET * 1.5},
         ),
     ],
     ids=[
         "below_threshold",
         "at_threshold",
-        "half_threshold_over",
+        "halfway_to_cap",
         "at_cap",
         "above_cap",
     ],
@@ -146,8 +148,8 @@ def test_ephemeral_maintenance_regret_prefers_ebs_by_default():
     plans = planner.plan_certain(
         model_name="org.netflix.cassandra",
         region="us-east-1",
-        desires=_desires(),
-        instance_families=["i3en", "r6a"],
+        desires=_desires(state_gib=1_000),
+        instance_families=["i3en", "m6a"],
         num_results=20,
         max_results_per_family=10,
     )
@@ -161,8 +163,8 @@ def test_disabling_ephemeral_maintenance_regret_restores_cost_ordering():
     plans = planner.plan_certain(
         model_name="org.netflix.cassandra",
         region="us-east-1",
-        desires=_desires(),
-        instance_families=["i3en", "r6a"],
+        desires=_desires(state_gib=1_000),
+        instance_families=["i3en", "m6a"],
         extra_model_arguments={"ephemeral_maintenance_regret": 0},
         num_results=20,
         max_results_per_family=10,
@@ -230,7 +232,7 @@ def test_regret_cap_preserves_large_i7ie_pricing_advantage():
     plans = planner.plan_certain(
         model_name="org.netflix.cassandra",
         region="us-east-1",
-        desires=_desires(state_gib=32_000),
+        desires=_desires(state_gib=128_000),
         instance_families=["i7ie", "m7a"],
         num_results=20,
         max_results_per_family=10,
@@ -239,8 +241,28 @@ def test_regret_cap_preserves_large_i7ie_pricing_advantage():
     cluster = _cluster(plans[0])
     assert cluster.instance.family == "i7ie"
     assert cluster.cluster_params[RANK_PENALTIES]["ephemeral_maintenance"] == (
-        EPHEMERAL_REGRET * 2
+        EPHEMERAL_REGRET * 1.5
     )
+
+
+def test_ephemeral_maintenance_density_bounds_must_increase():
+    with pytest.raises(
+        ValueError,
+        match="ephemeral_maintenance_cap_gib_per_node must be greater",
+    ):
+        NflxCassandraCapacityModel.default_desires(
+            _desires(),
+            {
+                "ephemeral_maintenance_threshold_gib_per_node": 1024,
+                "ephemeral_maintenance_cap_gib_per_node": 300,
+            },
+        )
+
+    with pytest.raises(ValueError, match="finite number"):
+        NflxCassandraCapacityModel.default_desires(
+            _desires(),
+            {"ephemeral_maintenance_cap_gib_per_node": float("inf")},
+        )
 
 
 def test_ephemeral_maintenance_regret_uses_compute_cost():

@@ -697,6 +697,7 @@ def _compute_penalties(
     data_per_node_gib: float,
     ephemeral_maintenance_regret: float,
     ephemeral_maintenance_threshold_gib_per_node: float,
+    ephemeral_maintenance_cap_gib_per_node: float,
     current_family: Optional[str] = None,
     different_family_regret: float = 0.10,  # Empirical; see NflxCassandraArguments
 ) -> Dict[str, float]:
@@ -718,15 +719,22 @@ def _compute_penalties(
     # Attached storage is easier to grow and replace independently of compute.
     # Local disks must provide meaningful savings even at low density, and the
     # required savings grow with data per node because replacement streams more
-    # data. Cap the premium at twice the baseline so a large local-NVMe pricing
-    # advantage can still win without exposing another tuning parameter.
+    # data. The gradual ramp keeps local NVMe competitive until a node owns about
+    # 1 TiB, where the premium caps at 1.5 times the baseline.
     if instance.drive is not None and ephemeral_maintenance_regret > 0:
-        penalties["ephemeral_maintenance"] = ephemeral_maintenance_regret * min(
-            2,
+        density_fraction = min(
+            1,
             max(
-                1,
-                data_per_node_gib / ephemeral_maintenance_threshold_gib_per_node,
+                0,
+                (data_per_node_gib - ephemeral_maintenance_threshold_gib_per_node)
+                / (
+                    ephemeral_maintenance_cap_gib_per_node
+                    - ephemeral_maintenance_threshold_gib_per_node
+                ),
             ),
+        )
+        penalties["ephemeral_maintenance"] = ephemeral_maintenance_regret * (
+            1 + 0.5 * density_fraction
         )
 
     # Penalize switching to a different instance family
@@ -765,6 +773,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     large_instance_regret: float = 0.2,
     ephemeral_maintenance_regret: float = 0.2,
     ephemeral_maintenance_threshold_gib_per_node: float = 300,
+    ephemeral_maintenance_cap_gib_per_node: float = 1024,
     different_family_regret: float = 0.10,
     max_page_cache_gib: float = DEFAULT_MAX_PAGE_CACHE_GIB,
     backup_retention_days: Optional[float] = None,
@@ -1095,6 +1104,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         ephemeral_maintenance_threshold_gib_per_node=(
             ephemeral_maintenance_threshold_gib_per_node
         ),
+        ephemeral_maintenance_cap_gib_per_node=(ephemeral_maintenance_cap_gib_per_node),
         current_family=current_family,
         different_family_regret=different_family_regret,
     )
@@ -1382,9 +1392,9 @@ class NflxCassandraArguments(BaseModel):
         default=0.2,
         ge=0,
         description="Baseline compute-cost penalty for local-disk plans and the "
-        "slope of its data-per-node growth. Attached storage can grow and be "
+        "start of its data-per-node growth. Attached storage can grow and be "
         "replaced independently of compute, so local disks must provide meaningful "
-        "savings to be preferred. The penalty caps at twice this value. Set to "
+        "savings to be preferred. The penalty caps at 1.5 times this value. Set to "
         "0 to disable.",
     )
     ephemeral_maintenance_threshold_gib_per_node: float = Field(
@@ -1393,6 +1403,14 @@ class NflxCassandraArguments(BaseModel):
         description="Modeled or observed on-disk data per Cassandra node in GiB "
         "above which ephemeral_maintenance_regret begins growing from its "
         "baseline.",
+    )
+    ephemeral_maintenance_cap_gib_per_node: float = Field(
+        default=1024,
+        gt=0,
+        allow_inf_nan=False,
+        description="Modeled or observed on-disk data per Cassandra node in GiB "
+        "where ephemeral_maintenance_regret reaches 1.5 times its baseline and "
+        "stops growing.",
     )
     different_family_regret: float = Field(
         default=0.10,
@@ -1494,6 +1512,18 @@ class NflxCassandraArguments(BaseModel):
         "For existing EBS clusters, calibrates the theoretical commitlog and "
         "compaction write-I/O estimate.",
     )
+
+    @model_validator(mode="after")
+    def _check_ephemeral_maintenance_bounds(self) -> "NflxCassandraArguments":
+        if (
+            self.ephemeral_maintenance_cap_gib_per_node
+            <= self.ephemeral_maintenance_threshold_gib_per_node
+        ):
+            raise ValueError(
+                "ephemeral_maintenance_cap_gib_per_node must be greater than "
+                "ephemeral_maintenance_threshold_gib_per_node"
+            )
+        return self
 
     @model_validator(mode="after")
     def _check_storage_buffer_bounds(self) -> "NflxCassandraArguments":
@@ -1866,6 +1896,9 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             ephemeral_maintenance_regret=args.ephemeral_maintenance_regret,
             ephemeral_maintenance_threshold_gib_per_node=(
                 args.ephemeral_maintenance_threshold_gib_per_node
+            ),
+            ephemeral_maintenance_cap_gib_per_node=(
+                args.ephemeral_maintenance_cap_gib_per_node
             ),
             different_family_regret=args.different_family_regret,
             max_page_cache_gib=args.max_page_cache_gib,
