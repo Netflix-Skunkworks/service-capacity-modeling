@@ -15,6 +15,9 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models.org.netflix.valkey import _valkey_ops_per_second
 from service_capacity_modeling.models.org.netflix.valkey import (
+    _valkey_item_overhead_bytes,
+)
+from service_capacity_modeling.models.org.netflix.valkey import (
     nflx_valkey_capacity_model,
 )
 from tests.util import shape
@@ -37,7 +40,7 @@ def _plan_for_shape(
     state_size_gib: Optional[int] = 1,
     value_size_bytes: int = 1024,
     durable: bool = True,
-    key_size_bytes: int = 64,
+    key_size_bytes: int = 16,
     ttl: str = "PT24H",
     lua_write_percent: float = 0,
 ):
@@ -117,6 +120,26 @@ def test_taller_instances_do_not_increase_throughput():
     )
 
 
+@pytest.mark.parametrize(
+    "engine_version,expected_overhead",
+    [("7.2", 84), ("8", 76), ("8.0", 76), ("8.1", 55)],
+)
+def test_item_memory_overhead_tracks_engine_curve(engine_version, expected_overhead):
+    assert _valkey_item_overhead_bytes(16, 64, engine_version) == expected_overhead
+
+
+def test_item_memory_overhead_jumps_at_allocator_boundary():
+    assert _valkey_item_overhead_bytes(16, 8, "8.1") == 39
+    assert _valkey_item_overhead_bytes(16, 9, "8.1") == 38
+    assert _valkey_item_overhead_bytes(16, 10, "8.1") == 45
+    assert _valkey_item_overhead_bytes(16, 31, "8.1") == 40
+    assert _valkey_item_overhead_bytes(16, 32, "8.1") == 47
+    assert _valkey_item_overhead_bytes(16, 124, "8.1") == 43
+    assert _valkey_item_overhead_bytes(16, 125, "8.1") == 74
+    assert _valkey_item_overhead_bytes(16, 1020, "8.1") == 43
+    assert _valkey_item_overhead_bytes(16, 1021, "8.1") == 298
+
+
 def test_memory_can_be_derived_from_key_value_wps_and_ttl():
     cluster = _cluster(
         _plan_for_shape(
@@ -130,12 +153,18 @@ def test_memory_can_be_derived_from_key_value_wps_and_ttl():
         )
     )
 
-    state_size_gib = 1024 * 100 * 10 / GIB_IN_BYTES
+    item_count = 100 * 10
+    state_size_gib = 1024 * item_count / GIB_IN_BYTES
+    overhead_gib = 111 * item_count / GIB_IN_BYTES
     assert cluster.cluster_params["valkey.estimated_state_size_gib"] == pytest.approx(
         state_size_gib
     )
+    assert cluster.cluster_params["valkey.item_memory_overhead_bytes"] == 111
+    assert cluster.cluster_params["valkey.memory_overhead_gib"] == pytest.approx(
+        overhead_gib
+    )
     assert cluster.cluster_params["valkey.required_memory_gib"] == pytest.approx(
-        state_size_gib / 0.75
+        (state_size_gib + overhead_gib) / 0.75
     )
 
 
@@ -144,8 +173,11 @@ def test_aws_memory_reservation_is_applied_to_upfront_state_size():
         _plan_for_shape("cache.r7g.large", state_size_gib=10, durable=False)
     )
 
+    item_count = 10 * GIB_IN_BYTES / (16 + 1024)
+    overhead_gib = item_count * 295 / GIB_IN_BYTES
+    assert cluster.cluster_params["valkey.item_memory_overhead_bytes"] == 295
     assert cluster.cluster_params["valkey.required_memory_gib"] == pytest.approx(
-        10 / 0.75
+        (10 + overhead_gib) / 0.75
     )
     assert cluster.cluster_params["valkey.usable_memory_per_node_gib"] == (
         pytest.approx(13.07 * 0.75)
@@ -261,7 +293,7 @@ def test_storage_and_throughput_dominated_shapes():
     storage_cluster = storage_plans[0].candidate_clusters.regional[0]
     throughput_cluster = throughput_plans[0].candidate_clusters.regional[0]
     assert storage_cluster.instance.name == "cache.r8g.2xlarge"
-    assert storage_cluster.cluster_params["valkey.shards"] == 7
+    assert storage_cluster.cluster_params["valkey.shards"] == 9
     assert throughput_cluster.instance.name == "cache.r7g.large"
     assert throughput_cluster.cluster_params["valkey.shards"] == 3
     assert throughput_cluster.count == 6
