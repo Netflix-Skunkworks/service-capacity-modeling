@@ -184,7 +184,7 @@ def test_cluster_shape_for_50k_lua_writes_and_500k_reads():
     assert cluster.cluster_params["valkey.shards"] == 1
     assert cluster.cluster_params["valkey.read_replicas_per_shard"] == 1
     assert cluster.cluster_params["valkey.cpu_capacity_units_required"] == (
-        pytest.approx(50_000 / 60_000 + 500_000 / 730_000)
+        pytest.approx(50_000 / 50_000 + 500_000 / 700_000)
     )
 
 
@@ -211,14 +211,14 @@ def test_read_replica_limit_forces_additional_shards():
     at_replica_limit = _cluster(
         _plan_for_shape(
             "cache.r7g.large",
-            read_ops_per_second=6 * 730_000,
+            read_ops_per_second=6 * 700_000,
             durable=True,
         )
     )
     beyond_replica_limit = _cluster(
         _plan_for_shape(
             "cache.r7g.large",
-            read_ops_per_second=6 * 730_000 + 1,
+            read_ops_per_second=6 * 700_000 + 1,
             durable=True,
         )
     )

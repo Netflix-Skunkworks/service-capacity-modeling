@@ -34,7 +34,7 @@ from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.org.netflix.iso_date_math import iso_to_seconds
 
 
-VALKEY_MIN_CPU_SPEED_GHZ = 2.5
+VALKEY_MIN_CPU_SPEED_GHZ = 2.6
 VALKEY_MAX_CPU_SPEED_GHZ = 3.5
 VALKEY_MIN_OPS_PER_SECOND = 700_000
 VALKEY_MAX_OPS_PER_SECOND = 1_000_000
