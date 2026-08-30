@@ -120,24 +120,20 @@ def test_taller_instances_do_not_increase_throughput():
     )
 
 
-@pytest.mark.parametrize(
-    "engine_version,expected_overhead",
-    [("7.2", 84), ("8", 76), ("8.0", 76), ("8.1", 55)],
-)
-def test_item_memory_overhead_tracks_engine_curve(engine_version, expected_overhead):
-    assert _valkey_item_overhead_bytes(16, 64, engine_version) == expected_overhead
+def test_item_memory_overhead_tracks_valkey_8_1_curve():
+    assert _valkey_item_overhead_bytes(16, 64) == 55
 
 
 def test_item_memory_overhead_jumps_at_allocator_boundary():
-    assert _valkey_item_overhead_bytes(16, 8, "8.1") == 39
-    assert _valkey_item_overhead_bytes(16, 9, "8.1") == 38
-    assert _valkey_item_overhead_bytes(16, 10, "8.1") == 45
-    assert _valkey_item_overhead_bytes(16, 31, "8.1") == 40
-    assert _valkey_item_overhead_bytes(16, 32, "8.1") == 47
-    assert _valkey_item_overhead_bytes(16, 124, "8.1") == 43
-    assert _valkey_item_overhead_bytes(16, 125, "8.1") == 74
-    assert _valkey_item_overhead_bytes(16, 1020, "8.1") == 43
-    assert _valkey_item_overhead_bytes(16, 1021, "8.1") == 298
+    assert _valkey_item_overhead_bytes(16, 8) == 39
+    assert _valkey_item_overhead_bytes(16, 9) == 38
+    assert _valkey_item_overhead_bytes(16, 10) == 45
+    assert _valkey_item_overhead_bytes(16, 31) == 40
+    assert _valkey_item_overhead_bytes(16, 32) == 47
+    assert _valkey_item_overhead_bytes(16, 124) == 43
+    assert _valkey_item_overhead_bytes(16, 125) == 74
+    assert _valkey_item_overhead_bytes(16, 1020) == 43
+    assert _valkey_item_overhead_bytes(16, 1021) == 298
 
 
 def test_memory_can_be_derived_from_key_value_wps_and_ttl():

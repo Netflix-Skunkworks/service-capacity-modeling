@@ -3,7 +3,6 @@ from decimal import Decimal
 from typing import Any
 from typing import Dict
 from typing import FrozenSet
-from typing import Literal
 from typing import Optional
 from typing import Tuple
 
@@ -44,13 +43,8 @@ VALKEY_MAX_LUA_OPS_PER_SECOND = 150_000
 VALKEY_DURABILITY_THRESHOLD = 1_000
 VALKEY_AWS_MEMORY_RESERVATION = 0.25
 VALKEY_MAX_READ_REPLICAS_PER_SHARD = 5
-VALKEY_ITEM_METADATA_BYTES = {
-    "7.2": 60,
-    "8": 52,
-    "8.0": 52,
-    "8.1": 31,
-}
-ValkeyEngineVersion = Literal["7.2", "8", "8.0", "8.1"]
+VALKEY_ENGINE_VERSION = "8.1"
+VALKEY_ITEM_METADATA_BYTES = 31
 
 
 def _valkey_ops_per_second(instance: Instance, use_lua: bool) -> int:
@@ -83,24 +77,27 @@ def _jemalloc_size_class(requested_bytes: int) -> int:
 def _valkey_item_overhead_bytes(
     key_size_bytes: int,
     value_size_bytes: int,
-    engine_version: ValkeyEngineVersion,
 ) -> int:
-    """Estimate metadata and allocator slack for one key/value item."""
-    metadata_bytes = VALKEY_ITEM_METADATA_BYTES[engine_version]
+    """Estimate Valkey 8.1 metadata and allocator slack for one item."""
     key_allocation = _jemalloc_size_class(key_size_bytes + 4)
     key_allocation_slack = key_allocation - key_size_bytes
-    if engine_version == "8.1" and value_size_bytes < 32:
+    if value_size_bytes < 32:
         # The 8.1 curve has a separate compact-value branch below 32 bytes.
         baseline_16_byte_key_slack = 8
         return (
-            metadata_bytes
+            VALKEY_ITEM_METADATA_BYTES
             + _jemalloc_size_class(value_size_bytes + 7)
             - value_size_bytes
             + key_allocation_slack
             - baseline_16_byte_key_slack
         )
     value_allocation = _jemalloc_size_class(value_size_bytes + 4)
-    return metadata_bytes + key_allocation_slack + value_allocation - value_size_bytes
+    return (
+        VALKEY_ITEM_METADATA_BYTES
+        + key_allocation_slack
+        + value_allocation
+        - value_size_bytes
+    )
 
 
 class NflxValkeyArguments(BaseModel):
@@ -120,11 +117,6 @@ class NflxValkeyArguments(BaseModel):
             "ISO-8601 key TTL. Used with key size, value size, and WPS when "
             "total state size is not supplied."
         ),
-    )
-    engine_version: ValkeyEngineVersion = Field(
-        alias="valkey.engine_version",
-        default="8.1",
-        description="Valkey engine version used for per-item memory overhead.",
     )
     lua_write_percent: float = Field(
         alias="valkey.lua_write_percent",
@@ -167,7 +159,6 @@ class NflxValkeyCapacityModel(CapacityModel):
         item_memory_overhead_bytes = _valkey_item_overhead_bytes(
             key_size_bytes=args.key_size_bytes,
             value_size_bytes=value_size_bytes,
-            engine_version=args.engine_version,
         )
         estimated_state_size_gib = desires.data_shape.estimated_state_size_gib.mid
         if estimated_state_size_gib > 0:
@@ -241,7 +232,7 @@ class NflxValkeyCapacityModel(CapacityModel):
             "valkey.simple_ops_per_second_per_node": simple_ops_per_second,
             "valkey.lua_ops_per_second_per_node": lua_ops_per_second,
             "valkey.cpu_capacity_units_required": total_cpu_units,
-            "valkey.engine_version": args.engine_version,
+            "valkey.engine_version": VALKEY_ENGINE_VERSION,
             "valkey.item_count": item_count,
             "valkey.item_payload_size_bytes": item_payload_size_bytes,
             "valkey.item_memory_overhead_bytes": item_memory_overhead_bytes,
