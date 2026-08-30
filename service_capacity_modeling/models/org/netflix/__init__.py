@@ -22,6 +22,7 @@ from .rds import nflx_rds_capacity_model
 from .search import nflx_search_capacity_model
 from .stateless_java import nflx_java_app_capacity_model
 from .time_series import nflx_time_series_capacity_model
+from .valkey import nflx_valkey_capacity_model
 from .wal import nflx_wal_capacity_model
 from .zookeeper import nflx_zookeeper_capacity_model
 
@@ -32,6 +33,7 @@ def models() -> Dict[str, Any]:
         "org.netflix.stateless-java": nflx_java_app_capacity_model,
         "org.netflix.key-value": nflx_key_value_capacity_model,
         "org.netflix.time-series": nflx_time_series_capacity_model,
+        "org.netflix.valkey": nflx_valkey_capacity_model,
         "org.netflix.counter": nflx_counter_capacity_model,
         "org.netflix.zookeeper": nflx_zookeeper_capacity_model,
         "org.netflix.evcache": nflx_evcache_capacity_model,

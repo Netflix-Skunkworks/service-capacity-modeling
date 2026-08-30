@@ -1,0 +1,186 @@
+{
+  "instances": {
+    "cache.r7g.large": {
+      "name": "cache.r7g.large",
+      "cpu": 2,
+      "cpu_cores": 2,
+      "cpu_ghz": 2.6,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 13.07,
+      "net_mbps": 937.0,
+      "drive": null,
+      "platforms": [
+        "Valkey"
+      ]
+    },
+    "cache.r7g.xlarge": {
+      "name": "cache.r7g.xlarge",
+      "cpu": 4,
+      "cpu_cores": 4,
+      "cpu_ghz": 2.6,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 26.32,
+      "net_mbps": 1876.0,
+      "drive": null,
+      "platforms": [
+        "Valkey"
+      ]
+    },
+    "cache.r7g.2xlarge": {
+      "name": "cache.r7g.2xlarge",
+      "cpu": 8,
+      "cpu_cores": 8,
+      "cpu_ghz": 2.6,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 52.82,
+      "net_mbps": 3750.0,
+      "drive": null,
+      "platforms": [
+        "Valkey"
+      ]
+    },
+    "cache.r7g.4xlarge": {
+      "name": "cache.r7g.4xlarge",
+      "cpu": 16,
+      "cpu_cores": 16,
+      "cpu_ghz": 2.6,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 105.81,
+      "net_mbps": 7500.0,
+      "drive": null,
+      "platforms": [
+        "Valkey"
+      ]
+    },
+    "cache.r7g.8xlarge": {
+      "name": "cache.r7g.8xlarge",
+      "cpu": 32,
+      "cpu_cores": 32,
+      "cpu_ghz": 2.6,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 209.55,
+      "net_mbps": 15000.0,
+      "drive": null,
+      "platforms": [
+        "Valkey"
+      ]
+    },
+    "cache.r7g.12xlarge": {
+      "name": "cache.r7g.12xlarge",
+      "cpu": 48,
+      "cpu_cores": 48,
+      "cpu_ghz": 2.6,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 317.77,
+      "net_mbps": 22500.0,
+      "drive": null,
+      "platforms": [
+        "Valkey"
+      ]
+    },
+    "cache.r7g.16xlarge": {
+      "name": "cache.r7g.16xlarge",
+      "cpu": 64,
+      "cpu_cores": 64,
+      "cpu_ghz": 2.6,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 419.09,
+      "net_mbps": 30000.0,
+      "drive": null,
+      "platforms": [
+        "Valkey"
+      ]
+    },
+    "cache.r8g.large": {
+      "name": "cache.r8g.large",
+      "cpu": 2,
+      "cpu_cores": 2,
+      "cpu_ghz": 2.8,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 14.18,
+      "net_mbps": 937.0,
+      "drive": null,
+      "platforms": [
+        "Valkey"
+      ]
+    },
+    "cache.r8g.xlarge": {
+      "name": "cache.r8g.xlarge",
+      "cpu": 4,
+      "cpu_cores": 4,
+      "cpu_ghz": 2.8,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 29.68,
+      "net_mbps": 1876.0,
+      "drive": null,
+      "platforms": [
+        "Valkey"
+      ]
+    },
+    "cache.r8g.2xlarge": {
+      "name": "cache.r8g.2xlarge",
+      "cpu": 8,
+      "cpu_cores": 8,
+      "cpu_ghz": 2.8,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 61.33,
+      "net_mbps": 3750.0,
+      "drive": null,
+      "platforms": [
+        "Valkey"
+      ]
+    },
+    "cache.r8g.4xlarge": {
+      "name": "cache.r8g.4xlarge",
+      "cpu": 16,
+      "cpu_cores": 16,
+      "cpu_ghz": 2.8,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 124.65,
+      "net_mbps": 7500.0,
+      "drive": null,
+      "platforms": [
+        "Valkey"
+      ]
+    },
+    "cache.r8g.8xlarge": {
+      "name": "cache.r8g.8xlarge",
+      "cpu": 32,
+      "cpu_cores": 32,
+      "cpu_ghz": 2.8,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 251.27,
+      "net_mbps": 15000.0,
+      "drive": null,
+      "platforms": [
+        "Valkey"
+      ]
+    },
+    "cache.r8g.12xlarge": {
+      "name": "cache.r8g.12xlarge",
+      "cpu": 48,
+      "cpu_cores": 48,
+      "cpu_ghz": 2.8,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 377.9,
+      "net_mbps": 22500.0,
+      "drive": null,
+      "platforms": [
+        "Valkey"
+      ]
+    },
+    "cache.r8g.16xlarge": {
+      "name": "cache.r8g.16xlarge",
+      "cpu": 64,
+      "cpu_cores": 64,
+      "cpu_ghz": 2.8,
+      "cpu_ipc_scale": 1.5,
+      "ram_gib": 504.52,
+      "net_mbps": 30000.0,
+      "drive": null,
+      "platforms": [
+        "Valkey"
+      ]
+    }
+  }
+}
