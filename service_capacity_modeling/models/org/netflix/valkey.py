@@ -382,8 +382,8 @@ class NflxValkeyCapacityModel(CapacityModel):
                         target_consistency=AccessConsistency.never,
                     ),
                 ),
-                estimated_mean_read_size_bytes=certain_int(1024),
-                estimated_mean_write_size_bytes=certain_int(1024),
+                estimated_mean_read_size_bytes=certain_int(50),
+                estimated_mean_write_size_bytes=certain_int(50),
                 estimated_mean_read_latency_ms=certain_float(1),
                 estimated_mean_write_latency_ms=certain_float(1),
                 read_latency_slo_ms=FixedInterval(

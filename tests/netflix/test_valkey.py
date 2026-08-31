@@ -38,7 +38,7 @@ def _plan_for_shape(
     read_ops_per_second: int = 0,
     write_ops_per_second: int = 0,
     state_size_gib: Optional[int] = 1,
-    value_size_bytes: int = 1024,
+    value_size_bytes: int = 50,
     durable: bool = True,
     key_size_bytes: int = 16,
     ttl: str = "PT24H",
@@ -49,6 +49,7 @@ def _plan_for_shape(
         query_pattern=QueryPattern(
             estimated_read_per_second=certain_int(read_ops_per_second),
             estimated_write_per_second=certain_int(write_ops_per_second),
+            estimated_mean_read_size_bytes=certain_int(value_size_bytes),
             estimated_mean_write_size_bytes=certain_int(value_size_bytes),
         ),
         data_shape=DataShape(
@@ -90,6 +91,13 @@ def test_only_seventh_and_eighth_generation_nodes_are_available():
         "cache.r7g",
         "cache.r8g",
     }
+
+
+def test_default_value_size_is_50_bytes():
+    defaults = nflx_valkey_capacity_model.default_desires(CapacityDesires(), {})
+
+    assert defaults.query_pattern.estimated_mean_read_size_bytes.mid == 50
+    assert defaults.query_pattern.estimated_mean_write_size_bytes.mid == 50
 
 
 def test_throughput_tracks_core_speed_within_benchmark_bounds():
@@ -169,9 +177,9 @@ def test_aws_memory_reservation_is_applied_to_upfront_state_size():
         _plan_for_shape("cache.r7g.large", state_size_gib=10, durable=False)
     )
 
-    item_count = 10 * GIB_IN_BYTES / (16 + 1024)
-    overhead_gib = item_count * 295 / GIB_IN_BYTES
-    assert cluster.cluster_params["valkey.item_memory_overhead_bytes"] == 295
+    item_count = 10 * GIB_IN_BYTES / (16 + 50)
+    overhead_gib = item_count * 45 / GIB_IN_BYTES
+    assert cluster.cluster_params["valkey.item_memory_overhead_bytes"] == 45
     assert cluster.cluster_params["valkey.required_memory_gib"] == pytest.approx(
         (10 + overhead_gib) / 0.75
     )
@@ -289,7 +297,7 @@ def test_storage_and_throughput_dominated_shapes():
     storage_cluster = storage_plans[0].candidate_clusters.regional[0]
     throughput_cluster = throughput_plans[0].candidate_clusters.regional[0]
     assert storage_cluster.instance.name == "cache.r8g.2xlarge"
-    assert storage_cluster.cluster_params["valkey.shards"] == 9
+    assert storage_cluster.cluster_params["valkey.shards"] == 11
     assert throughput_cluster.instance.name == "cache.r7g.large"
     assert throughput_cluster.cluster_params["valkey.shards"] == 3
     assert throughput_cluster.count == 6
