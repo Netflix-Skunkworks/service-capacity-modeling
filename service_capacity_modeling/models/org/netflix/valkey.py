@@ -9,6 +9,7 @@ from typing import Tuple
 
 from pydantic import BaseModel
 from pydantic import Field
+from pydantic import model_validator
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
@@ -46,6 +47,10 @@ VALKEY_AWS_MEMORY_RESERVATION = 0.25
 VALKEY_MAX_READ_REPLICAS_PER_SHARD = 5
 VALKEY_ENGINE_VERSION = "8.1"
 VALKEY_ITEM_METADATA_BYTES = 31
+VALKEY_DEFAULT_KEY_SIZE_BYTES = 16
+VALKEY_DEFAULT_VALUE_SIZE_BYTES = 50
+VALKEY_MAX_MEASURED_OVERHEAD_VALUE_BYTES = 128
+VALKEY_DEFAULT_MAX_NODES_PER_CLUSTER = 90
 
 
 def _valkey_ops_per_second(instance: Instance, use_lua: bool) -> int:
@@ -66,7 +71,7 @@ def _valkey_ops_per_second(instance: Instance, use_lua: bool) -> int:
 
 
 def _jemalloc_size_class(requested_bytes: int) -> int:
-    """Return the allocator size class for a key or value allocation."""
+    """Return the allocator size class, extrapolating beyond the measured curve."""
     quantum = 8
     upper_bound = 64
     while requested_bytes > upper_bound:
@@ -104,11 +109,10 @@ def _valkey_item_overhead_bytes(
 class NflxValkeyArguments(BaseModel):
     key_size_bytes: int = Field(
         alias="valkey.key_size_bytes",
-        default=16,
+        default=VALKEY_DEFAULT_KEY_SIZE_BYTES,
         ge=0,
         description=(
-            "Average key size. Used with value size, WPS, and TTL when total "
-            "state size is not supplied."
+            "Average key size within QueryPattern's total read/write item size."
         ),
     )
     ttl: str = Field(
@@ -129,12 +133,29 @@ class NflxValkeyArguments(BaseModel):
             "operations consume weighted shares of the same node CPU capacity."
         ),
     )
+    max_nodes_per_cluster: int = Field(
+        alias="valkey.max_nodes_per_cluster",
+        default=VALKEY_DEFAULT_MAX_NODES_PER_CLUSTER,
+        ge=1,
+        description=(
+            "Maximum nodes allowed in one ElastiCache cluster. Defaults to AWS's "
+            "standard 90-node cluster quota; increase only with an approved quota."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _check_ttl(self) -> "NflxValkeyArguments":
+        if iso_to_seconds(self.ttl) <= 0:
+            raise ValueError("valkey.ttl must be a positive, finite duration")
+        return self
 
 
 class _ValkeyMemoryRequirement(NamedTuple):
     item_count: float
+    value_size_bytes: int
     item_payload_size_bytes: int
     item_memory_overhead_bytes: int
+    item_overhead_extrapolated: bool
     estimated_state_size_gib: float
     memory_overhead_gib: float
     total_data_memory_gib: float
@@ -145,6 +166,8 @@ class _ValkeyCPURequirement(NamedTuple):
     lua_ops_per_second: int
     write_cpu_units: float
     total_cpu_units: float
+    write_network_mbps: float
+    total_network_mbps: float
 
 
 class _ValkeyTopology(NamedTuple):
@@ -157,26 +180,32 @@ def _estimate_valkey_memory(
     desires: CapacityDesires,
     args: NflxValkeyArguments,
 ) -> _ValkeyMemoryRequirement:
-    write_size_bytes = desires.query_pattern.estimated_mean_write_size_bytes.mid
+    item_size_bytes = desires.query_pattern.estimated_mean_write_size_bytes.mid
+    if item_size_bytes < args.key_size_bytes:
+        raise ValueError(
+            "Valkey total item size must be greater than or equal to key size"
+        )
     compression_ratio = max(1.0, desires.data_shape.estimated_compression_ratio.mid)
-    value_size_bytes = math.ceil(write_size_bytes / compression_ratio)
+    value_size_bytes = math.ceil(
+        (item_size_bytes - args.key_size_bytes) / compression_ratio
+    )
     item_payload_size_bytes = args.key_size_bytes + value_size_bytes
     item_memory_overhead_bytes = _valkey_item_overhead_bytes(
         key_size_bytes=args.key_size_bytes,
         value_size_bytes=value_size_bytes,
     )
 
+    requested_item_count = desires.data_shape.estimated_state_item_count
     estimated_state_size_gib = desires.data_shape.estimated_state_size_gib.mid
-    if estimated_state_size_gib > 0:
-        uncompressed_item_size_bytes = args.key_size_bytes + write_size_bytes
-        if uncompressed_item_size_bytes <= 0:
+    if requested_item_count is not None and requested_item_count.mid > 0:
+        item_count = requested_item_count.mid
+    elif estimated_state_size_gib > 0:
+        if item_size_bytes <= 0:
             raise ValueError(
-                "Valkey key size or value size must be positive when estimating "
-                "per-item overhead for explicit state"
+                "Valkey total item size must be positive when estimating per-item "
+                "overhead for explicit state"
             )
-        item_count = (
-            estimated_state_size_gib * GIB_IN_BYTES / uncompressed_item_size_bytes
-        )
+        item_count = estimated_state_size_gib * GIB_IN_BYTES / item_size_bytes
     else:
         item_count = (
             desires.query_pattern.estimated_write_per_second.mid
@@ -188,8 +217,12 @@ def _estimate_valkey_memory(
     total_data_memory_gib = estimated_state_size_gib + memory_overhead_gib
     return _ValkeyMemoryRequirement(
         item_count=item_count,
+        value_size_bytes=value_size_bytes,
         item_payload_size_bytes=item_payload_size_bytes,
         item_memory_overhead_bytes=item_memory_overhead_bytes,
+        item_overhead_extrapolated=(
+            value_size_bytes > VALKEY_MAX_MEASURED_OVERHEAD_VALUE_BYTES
+        ),
         estimated_state_size_gib=estimated_state_size_gib,
         memory_overhead_gib=memory_overhead_gib,
         total_data_memory_gib=total_data_memory_gib,
@@ -216,6 +249,13 @@ def _estimate_valkey_cpu(
         lua_ops_per_second=lua_ops_per_second,
         write_cpu_units=write_cpu_units,
         total_cpu_units=(write_cpu_units + read_ops_per_second / simple_ops_per_second),
+        write_network_mbps=(
+            write_ops_per_second
+            * desires.query_pattern.estimated_mean_write_size_bytes.mid
+            * 8
+            / 1_000_000
+        ),
+        total_network_mbps=simple_network_mbps(desires),
     )
 
 
@@ -224,11 +264,13 @@ def _select_valkey_topology(
     desires: CapacityDesires,
     memory: _ValkeyMemoryRequirement,
     cpu: _ValkeyCPURequirement,
-) -> _ValkeyTopology:
+    args: NflxValkeyArguments,
+) -> Optional[_ValkeyTopology]:
     usable_memory_per_node_gib = instance.ram_gib * (1 - VALKEY_AWS_MEMORY_RESERVATION)
     min_shards = max(
         1,
         math.ceil(cpu.write_cpu_units),
+        math.ceil(cpu.write_network_mbps / instance.net_mbps),
         math.ceil(memory.total_data_memory_gib / usable_memory_per_node_gib),
     )
     min_node_copies = (
@@ -236,12 +278,24 @@ def _select_valkey_topology(
         if desires.data_shape.durability_slo_order.mid >= VALKEY_DURABILITY_THRESHOLD
         else 1
     )
-    required_nodes = math.ceil(cpu.total_cpu_units)
+    required_nodes = max(
+        math.ceil(cpu.total_cpu_units),
+        math.ceil(cpu.total_network_mbps / instance.net_mbps),
+    )
+    if (
+        required_nodes > args.max_nodes_per_cluster
+        or min_shards * min_node_copies > args.max_nodes_per_cluster
+    ):
+        return None
 
-    # Extra shards and read replicas use the same node type and price. Evaluate
-    # the possible shard counts and retain the topology with the fewest nodes.
+    # Reads and keys are assumed uniform across shards, so every shard needs the
+    # same replica count. Evaluate complete uniform topologies by total node count.
     topology: Optional[_ValkeyTopology] = None
-    for shards in range(min_shards, max(min_shards, required_nodes) + 1):
+    max_shards = args.max_nodes_per_cluster // min_node_copies
+    for shards in range(
+        min_shards,
+        min(max_shards, max(min_shards, required_nodes)) + 1,
+    ):
         node_copies = max(
             min_node_copies,
             math.ceil(required_nodes / shards),
@@ -253,10 +307,11 @@ def _select_valkey_topology(
             shards=shards,
             node_copies=node_copies,
         )
+        if candidate.node_count > args.max_nodes_per_cluster:
+            continue
         if topology is None or candidate < topology:
             topology = candidate
 
-    assert topology is not None
     return topology
 
 
@@ -285,7 +340,10 @@ class NflxValkeyCapacityModel(CapacityModel):
             desires=desires,
             memory=memory,
             cpu=cpu,
+            args=args,
         )
+        if topology is None:
+            return None
         read_replicas_per_shard = topology.node_copies - 1
         cluster_params = {
             "valkey.shards": topology.shards,
@@ -295,10 +353,17 @@ class NflxValkeyCapacityModel(CapacityModel):
             "valkey.simple_ops_per_second_per_node": cpu.simple_ops_per_second,
             "valkey.lua_ops_per_second_per_node": cpu.lua_ops_per_second,
             "valkey.cpu_capacity_units_required": cpu.total_cpu_units,
+            "valkey.write_network_mbps_required": cpu.write_network_mbps,
+            "valkey.network_mbps_required": cpu.total_network_mbps,
+            "valkey.network_mbps_capacity": (topology.node_count * instance.net_mbps),
+            "valkey.max_nodes_per_cluster": args.max_nodes_per_cluster,
+            "valkey.assumes_uniform_key_distribution": True,
             "valkey.engine_version": VALKEY_ENGINE_VERSION,
             "valkey.item_count": memory.item_count,
+            "valkey.value_size_bytes": memory.value_size_bytes,
             "valkey.item_payload_size_bytes": memory.item_payload_size_bytes,
             "valkey.item_memory_overhead_bytes": memory.item_memory_overhead_bytes,
+            "valkey.item_overhead_extrapolated": memory.item_overhead_extrapolated,
             "valkey.estimated_state_size_gib": memory.estimated_state_size_gib,
             "valkey.memory_overhead_gib": memory.memory_overhead_gib,
             "valkey.total_data_memory_gib": memory.total_data_memory_gib,
@@ -331,7 +396,7 @@ class NflxValkeyCapacityModel(CapacityModel):
             reference_shape=instance,
             cpu_cores=certain_int(topology.node_count),
             mem_gib=certain_float(memory.total_data_memory_gib * topology.node_copies),
-            network_mbps=certain_float(simple_network_mbps(desires)),
+            network_mbps=certain_float(cpu.total_network_mbps),
             context=cluster_params,
         )
         return CapacityPlan(
@@ -367,6 +432,8 @@ class NflxValkeyCapacityModel(CapacityModel):
     def default_desires(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> CapacityDesires:
+        args = NflxValkeyArguments.model_validate(extra_model_arguments)
+        default_item_size_bytes = args.key_size_bytes + VALKEY_DEFAULT_VALUE_SIZE_BYTES
         return CapacityDesires(
             query_pattern=QueryPattern(
                 access_pattern=AccessPattern.latency,
@@ -378,8 +445,8 @@ class NflxValkeyCapacityModel(CapacityModel):
                         target_consistency=AccessConsistency.never,
                     ),
                 ),
-                estimated_mean_read_size_bytes=certain_int(50),
-                estimated_mean_write_size_bytes=certain_int(50),
+                estimated_mean_read_size_bytes=certain_int(default_item_size_bytes),
+                estimated_mean_write_size_bytes=certain_int(default_item_size_bytes),
                 estimated_mean_read_latency_ms=certain_float(1),
                 estimated_mean_write_latency_ms=certain_float(1),
                 read_latency_slo_ms=FixedInterval(

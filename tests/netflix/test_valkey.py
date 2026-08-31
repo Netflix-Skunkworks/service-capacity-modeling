@@ -38,7 +38,7 @@ def _plan_for_shape(
     read_ops_per_second: int = 0,
     write_ops_per_second: int = 0,
     state_size_gib: Optional[int] = 1,
-    value_size_bytes: int = 50,
+    item_size_bytes: int = 66,
     durable: bool = True,
     key_size_bytes: int = 16,
     ttl: str = "PT24H",
@@ -49,8 +49,8 @@ def _plan_for_shape(
         query_pattern=QueryPattern(
             estimated_read_per_second=certain_int(read_ops_per_second),
             estimated_write_per_second=certain_int(write_ops_per_second),
-            estimated_mean_read_size_bytes=certain_int(value_size_bytes),
-            estimated_mean_write_size_bytes=certain_int(value_size_bytes),
+            estimated_mean_read_size_bytes=certain_int(item_size_bytes),
+            estimated_mean_write_size_bytes=certain_int(item_size_bytes),
         ),
         data_shape=DataShape(
             estimated_state_size_gib=certain_int(state_size_gib or 0),
@@ -93,11 +93,11 @@ def test_only_seventh_and_eighth_generation_nodes_are_available():
     }
 
 
-def test_default_value_size_is_50_bytes():
+def test_default_value_size_is_50_bytes_plus_key():
     defaults = nflx_valkey_capacity_model.default_desires(CapacityDesires(), {})
 
-    assert defaults.query_pattern.estimated_mean_read_size_bytes.mid == 50
-    assert defaults.query_pattern.estimated_mean_write_size_bytes.mid == 50
+    assert defaults.query_pattern.estimated_mean_read_size_bytes.mid == 66
+    assert defaults.query_pattern.estimated_mean_write_size_bytes.mid == 66
 
 
 def test_throughput_tracks_core_speed_within_benchmark_bounds():
@@ -150,7 +150,7 @@ def test_memory_can_be_derived_from_key_value_wps_and_ttl():
             "cache.r7g.large",
             write_ops_per_second=100,
             state_size_gib=None,
-            value_size_bytes=960,
+            item_size_bytes=1024,
             key_size_bytes=64,
             ttl="PT10S",
             durable=False,
@@ -172,6 +172,44 @@ def test_memory_can_be_derived_from_key_value_wps_and_ttl():
     )
 
 
+def test_explicit_item_count_is_preserved():
+    item_count = 17_000_000
+    plans = planner.plan_certain(
+        model_name="org.netflix.valkey",
+        region="us-east-1",
+        desires=CapacityDesires(
+            query_pattern=QueryPattern(
+                estimated_mean_read_size_bytes=certain_int(53),
+                estimated_mean_write_size_bytes=certain_int(53),
+            ),
+            data_shape=DataShape(
+                estimated_state_item_count=certain_int(item_count),
+            ),
+        ),
+        extra_model_arguments={"valkey.key_size_bytes": 16},
+    )
+
+    params = plans[0].candidate_clusters.regional[0].cluster_params
+    assert params["valkey.item_count"] == item_count
+    assert params["valkey.estimated_state_size_gib"] == pytest.approx(
+        item_count * 53 / GIB_IN_BYTES
+    )
+    assert params["valkey.total_data_memory_gib"] == pytest.approx(
+        item_count * (53 + 50) / GIB_IN_BYTES
+    )
+
+
+@pytest.mark.parametrize("ttl", ["PT0S", "-PT1H", "unlimited"])
+def test_ttl_must_be_positive_and_finite(ttl):
+    with pytest.raises(ValueError, match="positive, finite"):
+        planner.plan_certain(
+            model_name="org.netflix.valkey",
+            region="us-east-1",
+            desires=CapacityDesires(),
+            extra_model_arguments={"valkey.ttl": ttl},
+        )
+
+
 def test_aws_memory_reservation_is_applied_to_upfront_state_size():
     cluster = _cluster(
         _plan_for_shape("cache.r7g.large", state_size_gib=10, durable=False)
@@ -187,6 +225,21 @@ def test_aws_memory_reservation_is_applied_to_upfront_state_size():
         pytest.approx(13.07 * 0.75)
     )
     assert cluster.cluster_params["valkey.shards"] == 2
+
+
+def test_item_overhead_extrapolation_is_reported():
+    cluster = _cluster(
+        _plan_for_shape(
+            "cache.r7g.large",
+            item_size_bytes=200,
+            state_size_gib=1,
+            durable=False,
+        )
+    )
+
+    assert cluster.cluster_params["valkey.value_size_bytes"] == 184
+    assert cluster.cluster_params["valkey.item_memory_overhead_bytes"] == 47
+    assert cluster.cluster_params["valkey.item_overhead_extrapolated"] is True
 
 
 @pytest.mark.parametrize("durable", [False, True])
@@ -265,6 +318,65 @@ def test_read_replica_limit_forces_additional_shards():
     assert beyond_replica_limit.count == 8
     assert beyond_replica_limit.cluster_params["valkey.shards"] == 2
     assert beyond_replica_limit.cluster_params["valkey.read_replicas_per_shard"] == 3
+
+
+def test_network_throughput_increases_topology_size():
+    cluster = _cluster(
+        _plan_for_shape(
+            "cache.r7g.large",
+            read_ops_per_second=1_000,
+            item_size_bytes=1_000_000,
+            state_size_gib=1,
+            durable=False,
+        )
+    )
+
+    assert cluster.count == 9
+    assert cluster.cluster_params["valkey.shards"] == 3
+    assert cluster.cluster_params["valkey.read_replicas_per_shard"] == 2
+    assert cluster.cluster_params["valkey.network_mbps_required"] == 8_000
+    assert cluster.cluster_params["valkey.network_mbps_capacity"] >= 8_000
+
+
+def test_uniform_reads_require_uniform_replica_layers():
+    cluster = _cluster(
+        _plan_for_shape(
+            "cache.r7g.large",
+            read_ops_per_second=3_400_000,
+            write_ops_per_second=1_500_000,
+            state_size_gib=1,
+            durable=True,
+        )
+    )
+
+    assert cluster.count == 8
+    assert cluster.cluster_params["valkey.shards"] == 4
+    assert cluster.cluster_params["valkey.read_replicas_per_shard"] == 1
+    assert cluster.cluster_params["valkey.assumes_uniform_key_distribution"] is True
+
+
+def test_default_node_quota_rejects_unprovisionable_cluster():
+    desires = CapacityDesires(
+        query_pattern=QueryPattern(
+            estimated_write_per_second=certain_int(35_000_000),
+        ),
+        data_shape=DataShape(estimated_state_size_gib=certain_int(1)),
+    )
+
+    assert not planner.plan_certain(
+        model_name="org.netflix.valkey",
+        region="us-east-1",
+        desires=desires,
+        instance_families=["cache.r7g"],
+    )
+    plans = planner.plan_certain(
+        model_name="org.netflix.valkey",
+        region="us-east-1",
+        desires=desires,
+        instance_families=["cache.r7g"],
+        extra_model_arguments={"valkey.max_nodes_per_cluster": 100},
+    )
+    assert plans[0].candidate_clusters.regional[0].count == 100
 
 
 def test_storage_and_throughput_dominated_shapes():
