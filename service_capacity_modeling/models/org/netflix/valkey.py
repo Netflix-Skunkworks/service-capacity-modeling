@@ -138,7 +138,6 @@ class _ValkeyMemoryRequirement(NamedTuple):
     estimated_state_size_gib: float
     memory_overhead_gib: float
     total_data_memory_gib: float
-    required_memory_gib: float
 
 
 class _ValkeyCPURequirement(NamedTuple):
@@ -194,9 +193,6 @@ def _estimate_valkey_memory(
         estimated_state_size_gib=estimated_state_size_gib,
         memory_overhead_gib=memory_overhead_gib,
         total_data_memory_gib=total_data_memory_gib,
-        required_memory_gib=(
-            total_data_memory_gib / (1 - VALKEY_AWS_MEMORY_RESERVATION)
-        ),
     )
 
 
@@ -229,10 +225,11 @@ def _select_valkey_topology(
     memory: _ValkeyMemoryRequirement,
     cpu: _ValkeyCPURequirement,
 ) -> _ValkeyTopology:
+    usable_memory_per_node_gib = instance.ram_gib * (1 - VALKEY_AWS_MEMORY_RESERVATION)
     min_shards = max(
         1,
         math.ceil(cpu.write_cpu_units),
-        math.ceil(memory.required_memory_gib / instance.ram_gib),
+        math.ceil(memory.total_data_memory_gib / usable_memory_per_node_gib),
     )
     min_node_copies = (
         2
@@ -305,7 +302,6 @@ class NflxValkeyCapacityModel(CapacityModel):
             "valkey.estimated_state_size_gib": memory.estimated_state_size_gib,
             "valkey.memory_overhead_gib": memory.memory_overhead_gib,
             "valkey.total_data_memory_gib": memory.total_data_memory_gib,
-            "valkey.required_memory_gib": memory.required_memory_gib,
             "valkey.aws_memory_reservation_percent": (VALKEY_AWS_MEMORY_RESERVATION),
             "valkey.usable_memory_per_node_gib": (
                 instance.ram_gib * (1 - VALKEY_AWS_MEMORY_RESERVATION)
@@ -334,7 +330,7 @@ class NflxValkeyCapacityModel(CapacityModel):
             requirement_type="valkey-regional",
             reference_shape=instance,
             cpu_cores=certain_int(topology.node_count),
-            mem_gib=certain_float(memory.required_memory_gib * topology.node_copies),
+            mem_gib=certain_float(memory.total_data_memory_gib * topology.node_copies),
             network_mbps=certain_float(simple_network_mbps(desires)),
             context=cluster_params,
         )

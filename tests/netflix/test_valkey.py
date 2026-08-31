@@ -167,8 +167,8 @@ def test_memory_can_be_derived_from_key_value_wps_and_ttl():
     assert cluster.cluster_params["valkey.memory_overhead_gib"] == pytest.approx(
         overhead_gib
     )
-    assert cluster.cluster_params["valkey.required_memory_gib"] == pytest.approx(
-        (state_size_gib + overhead_gib) / 0.75
+    assert cluster.cluster_params["valkey.total_data_memory_gib"] == pytest.approx(
+        state_size_gib + overhead_gib
     )
 
 
@@ -180,8 +180,8 @@ def test_aws_memory_reservation_is_applied_to_upfront_state_size():
     item_count = 10 * GIB_IN_BYTES / (16 + 50)
     overhead_gib = item_count * 45 / GIB_IN_BYTES
     assert cluster.cluster_params["valkey.item_memory_overhead_bytes"] == 45
-    assert cluster.cluster_params["valkey.required_memory_gib"] == pytest.approx(
-        (10 + overhead_gib) / 0.75
+    assert cluster.cluster_params["valkey.total_data_memory_gib"] == pytest.approx(
+        10 + overhead_gib
     )
     assert cluster.cluster_params["valkey.usable_memory_per_node_gib"] == (
         pytest.approx(13.07 * 0.75)
