@@ -46,7 +46,7 @@ VALKEY_DURABILITY_THRESHOLD = 1_000
 VALKEY_AWS_MEMORY_RESERVATION = 0.25
 VALKEY_MAX_READ_REPLICAS_PER_SHARD = 5
 VALKEY_ENGINE_VERSION = "8.1"
-VALKEY_ITEM_METADATA_BYTES = 31
+VALKEY_8_1_BENCHMARK_BASE_OVERHEAD_BYTES = 31
 VALKEY_DEFAULT_KEY_SIZE_BYTES = 16
 VALKEY_DEFAULT_VALUE_SIZE_BYTES = 50
 VALKEY_MAX_MEASURED_OVERHEAD_VALUE_BYTES = 128
@@ -70,8 +70,8 @@ def _valkey_ops_per_second(instance: Instance, use_lua: bool) -> int:
     return round(low + speed_ratio * (high - low))
 
 
-def _jemalloc_size_class(requested_bytes: int) -> int:
-    """Return the allocator size class, extrapolating beyond the measured curve."""
+def _valkey_8_1_benchmark_bucket_bytes(requested_bytes: int) -> int:
+    """Return a bucket from the fitted Valkey 8.1 overhead benchmark curve."""
     quantum = 8
     upper_bound = 64
     while requested_bytes > upper_bound:
@@ -84,24 +84,24 @@ def _valkey_item_overhead_bytes(
     key_size_bytes: int,
     value_size_bytes: int,
 ) -> int:
-    """Estimate Valkey 8.1 metadata and allocator slack for one item."""
-    key_allocation = _jemalloc_size_class(key_size_bytes + 4)
-    key_allocation_slack = key_allocation - key_size_bytes
+    """Estimate one item's overhead from the Valkey 8.1 benchmark curve."""
+    key_bucket = _valkey_8_1_benchmark_bucket_bytes(key_size_bytes + 4)
+    key_bucket_slack = key_bucket - key_size_bytes
     if value_size_bytes < 32:
-        # The 8.1 curve has a separate compact-value branch below 32 bytes.
+        # The benchmark curve has a separate branch below 32-byte values.
         baseline_16_byte_key_slack = 8
         return (
-            VALKEY_ITEM_METADATA_BYTES
-            + _jemalloc_size_class(value_size_bytes + 7)
+            VALKEY_8_1_BENCHMARK_BASE_OVERHEAD_BYTES
+            + _valkey_8_1_benchmark_bucket_bytes(value_size_bytes + 7)
             - value_size_bytes
-            + key_allocation_slack
+            + key_bucket_slack
             - baseline_16_byte_key_slack
         )
-    value_allocation = _jemalloc_size_class(value_size_bytes + 4)
+    value_bucket = _valkey_8_1_benchmark_bucket_bytes(value_size_bytes + 4)
     return (
-        VALKEY_ITEM_METADATA_BYTES
-        + key_allocation_slack
-        + value_allocation
+        VALKEY_8_1_BENCHMARK_BASE_OVERHEAD_BYTES
+        + key_bucket_slack
+        + value_bucket
         - value_size_bytes
     )
 

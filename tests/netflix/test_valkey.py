@@ -132,7 +132,7 @@ def test_item_memory_overhead_tracks_valkey_8_1_curve():
     assert _valkey_item_overhead_bytes(16, 64) == 55
 
 
-def test_item_memory_overhead_jumps_at_allocator_boundary():
+def test_item_memory_overhead_jumps_at_benchmark_boundary():
     assert _valkey_item_overhead_bytes(16, 8) == 39
     assert _valkey_item_overhead_bytes(16, 9) == 38
     assert _valkey_item_overhead_bytes(16, 10) == 45
