@@ -84,6 +84,8 @@ CRITICAL_TIERS: Set[int] = {0, 1}
 CRITICAL_TIER_MIN_CLUSTER_SIZE = 2
 EBS_HOTTER_BUFFER_RATIO = 0.5
 CASSANDRA_MAX_DISK_UTILIZATION = 0.55
+_EPHEMERAL_MAINTENANCE_THRESHOLD_GIB_PER_NODE = 300
+_EPHEMERAL_MAINTENANCE_CAP_GIB_PER_NODE = 1024
 
 
 def _with_disk_utilization_buffer(
@@ -696,8 +698,6 @@ def _compute_penalties(
     large_instance_regret: float,
     data_per_node_gib: float,
     ephemeral_maintenance_regret: float,
-    ephemeral_maintenance_threshold_gib_per_node: float,
-    ephemeral_maintenance_cap_gib_per_node: float,
     current_family: Optional[str] = None,
     different_family_regret: float = 0.10,  # Empirical; see NflxCassandraArguments
 ) -> Dict[str, float]:
@@ -726,10 +726,10 @@ def _compute_penalties(
             1,
             max(
                 0,
-                (data_per_node_gib - ephemeral_maintenance_threshold_gib_per_node)
+                (data_per_node_gib - _EPHEMERAL_MAINTENANCE_THRESHOLD_GIB_PER_NODE)
                 / (
-                    ephemeral_maintenance_cap_gib_per_node
-                    - ephemeral_maintenance_threshold_gib_per_node
+                    _EPHEMERAL_MAINTENANCE_CAP_GIB_PER_NODE
+                    - _EPHEMERAL_MAINTENANCE_THRESHOLD_GIB_PER_NODE
                 ),
             ),
         )
@@ -772,8 +772,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     allow_ebs_volume_shrink: bool = False,
     large_instance_regret: float = 0.2,
     ephemeral_maintenance_regret: float = 0.2,
-    ephemeral_maintenance_threshold_gib_per_node: float = 300,
-    ephemeral_maintenance_cap_gib_per_node: float = 1024,
     different_family_regret: float = 0.10,
     max_page_cache_gib: float = DEFAULT_MAX_PAGE_CACHE_GIB,
     backup_retention_days: Optional[float] = None,
@@ -1101,10 +1099,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         large_instance_regret=large_instance_regret,
         data_per_node_gib=requirement_estimate.disk_used_gib / cluster.count,
         ephemeral_maintenance_regret=ephemeral_maintenance_regret,
-        ephemeral_maintenance_threshold_gib_per_node=(
-            ephemeral_maintenance_threshold_gib_per_node
-        ),
-        ephemeral_maintenance_cap_gib_per_node=(ephemeral_maintenance_cap_gib_per_node),
         current_family=current_family,
         different_family_regret=different_family_regret,
     )
@@ -1397,21 +1391,6 @@ class NflxCassandraArguments(BaseModel):
         "savings to be preferred. The penalty caps at 1.5 times this value. Set to "
         "0 to disable.",
     )
-    ephemeral_maintenance_threshold_gib_per_node: float = Field(
-        default=300,
-        gt=0,
-        description="Modeled or observed on-disk data per Cassandra node in GiB "
-        "above which ephemeral_maintenance_regret begins growing from its "
-        "baseline.",
-    )
-    ephemeral_maintenance_cap_gib_per_node: float = Field(
-        default=1024,
-        gt=0,
-        allow_inf_nan=False,
-        description="Modeled or observed on-disk data per Cassandra node in GiB "
-        "where ephemeral_maintenance_regret reaches 1.5 times its baseline and "
-        "stops growing.",
-    )
     different_family_regret: float = Field(
         default=0.10,
         description="Minimum annual savings threshold to justify switching "
@@ -1512,18 +1491,6 @@ class NflxCassandraArguments(BaseModel):
         "For existing EBS clusters, calibrates the theoretical commitlog and "
         "compaction write-I/O estimate.",
     )
-
-    @model_validator(mode="after")
-    def _check_ephemeral_maintenance_bounds(self) -> "NflxCassandraArguments":
-        if (
-            self.ephemeral_maintenance_cap_gib_per_node
-            <= self.ephemeral_maintenance_threshold_gib_per_node
-        ):
-            raise ValueError(
-                "ephemeral_maintenance_cap_gib_per_node must be greater than "
-                "ephemeral_maintenance_threshold_gib_per_node"
-            )
-        return self
 
     @model_validator(mode="after")
     def _check_storage_buffer_bounds(self) -> "NflxCassandraArguments":
@@ -1894,12 +1861,6 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             allow_ebs_volume_shrink=args.allow_ebs_volume_shrink,
             large_instance_regret=args.large_instance_regret,
             ephemeral_maintenance_regret=args.ephemeral_maintenance_regret,
-            ephemeral_maintenance_threshold_gib_per_node=(
-                args.ephemeral_maintenance_threshold_gib_per_node
-            ),
-            ephemeral_maintenance_cap_gib_per_node=(
-                args.ephemeral_maintenance_cap_gib_per_node
-            ),
             different_family_regret=args.different_family_regret,
             max_page_cache_gib=args.max_page_cache_gib,
             backup_retention_days=args.backup_retention_days,

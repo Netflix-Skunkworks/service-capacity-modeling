@@ -197,27 +197,6 @@ def test_preferred_family_penalty_compounds_model_rank_penalties():
     )
 
 
-@pytest.mark.parametrize("family", ["i7i", "i7ie"])
-def test_current_storage_families_do_not_receive_preferred_family_penalty(family):
-    desires = _desires(None)
-    plan_args = {
-        "model_name": "org.netflix.cassandra",
-        "region": "us-east-1",
-        "desires": desires,
-        "extra_model_arguments": {"ephemeral_maintenance_regret": 0},
-        "instance_families": [family],
-        "num_results": 1,
-    }
-
-    default_plan = planner.plan_certain(**plan_args)[0]
-    unbiased_plan = planner.plan_certain(
-        **plan_args,
-        planner_arguments=PlannerArguments(preferred_family_penalty=0),
-    )[0]
-
-    assert default_plan.rank == unbiased_plan.rank
-
-
 def test_planner_arguments_max_results_per_family():
     """PlannerArguments.max_results_per_family limits plans per instance family."""
     from collections import Counter

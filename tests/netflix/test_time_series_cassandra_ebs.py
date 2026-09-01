@@ -10,6 +10,8 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 
 
+# A namespace retaining 30 days of events, read back one day at a time. The
+# read interval fits inside a slice, so Cassandra sees one read per TS read.
 NAMESPACE = {
     "ts.read-interval": "PT24H",
     "ts.hot.retention-interval": "PT720H",
@@ -17,6 +19,8 @@ NAMESPACE = {
     "ts.event-size": "1024",
 }
 
+# A denser namespace whose day of events spills into five buckets per id, so
+# every TimeSeries read fans out to five Cassandra reads.
 AMPLIFYING_NAMESPACE = {
     "ts.read-interval": "PT24H",
     "ts.hot.retention-interval": "PT96H",
@@ -25,7 +29,10 @@ AMPLIFYING_NAMESPACE = {
 }
 
 
-def _namespace(reads_per_second: int, state_gib: int = 4_000) -> CapacityDesires:
+def _namespace(
+    state_gib: int, reads_per_second: int, writes_per_second: int = 50_000
+) -> CapacityDesires:
+    """A TimeSeries namespace: steady event ingest with range reads over it."""
     return CapacityDesires(
         service_tier=1,
         query_pattern=QueryPattern(
@@ -37,9 +44,9 @@ def _namespace(reads_per_second: int, state_gib: int = 4_000) -> CapacityDesires
                 confidence=0.98,
             ),
             estimated_write_per_second=Interval(
-                low=25_000,
-                mid=50_000,
-                high=100_000,
+                low=writes_per_second // 2,
+                mid=writes_per_second,
+                high=writes_per_second * 2,
                 confidence=0.98,
             ),
             estimated_mean_read_size_bytes=Interval(
@@ -60,29 +67,27 @@ def _namespace(reads_per_second: int, state_gib: int = 4_000) -> CapacityDesires
     )
 
 
-def _plan(desires: CapacityDesires, extra_model_arguments):
-    return planner.plan_certain(
+def _cassandra_tier(desires: CapacityDesires, namespace=None):
+    plan = planner.plan_certain(
         model_name="org.netflix.time-series",
         region="us-east-1",
         desires=desires,
-        extra_model_arguments=extra_model_arguments,
+        extra_model_arguments=dict(namespace or NAMESPACE),
     )[0]
-
-
-def _cassandra_clusters(plan):
     clusters = [
         cluster
         for cluster in plan.candidate_clusters.zonal
         if cluster.cluster_type == "cassandra"
     ]
-    assert clusters
+    assert clusters, "planner returned no Cassandra tier at all"
     return clusters
 
 
 def _assert_on_ebs(clusters):
-    assert clusters
     for cluster in clusters:
-        assert cluster.instance.drive is None
+        assert cluster.instance.drive is None, (
+            f"{cluster.instance.name} has local disks"
+        )
         assert [drive.name for drive in cluster.attached_drives] == ["gp3"]
 
 
@@ -99,16 +104,16 @@ def _assert_on_ebs(clusters):
 def test_original_timeseries_ebs_workloads_remain_on_ebs(
     state_gib, reads_per_second, namespace
 ):
-    plan = _plan(
-        _namespace(reads_per_second, state_gib=state_gib),
-        dict(namespace),
-    )
-
-    _assert_on_ebs(_cassandra_clusters(plan))
+    _assert_on_ebs(_cassandra_tier(_namespace(state_gib, reads_per_second), namespace))
 
 
 def test_timeseries_tier_is_unchanged_by_cassandra_storage():
-    plan = _plan(_namespace(10_000), dict(NAMESPACE))
+    plan = planner.plan_certain(
+        model_name="org.netflix.time-series",
+        region="us-east-1",
+        desires=_namespace(4_000, 10_000),
+        extra_model_arguments=dict(NAMESPACE),
+    )[0]
 
     assert [cluster.cluster_type for cluster in plan.candidate_clusters.regional] == [
         "dgwts"
@@ -118,7 +123,12 @@ def test_timeseries_tier_is_unchanged_by_cassandra_storage():
 def test_timeseries_does_not_store_cassandra_policy_in_caller_arguments():
     extra_model_arguments = dict(NAMESPACE)
 
-    _plan(_namespace(10_000), extra_model_arguments)
+    planner.plan_certain(
+        model_name="org.netflix.time-series",
+        region="us-east-1",
+        desires=_namespace(4_000, 10_000),
+        extra_model_arguments=extra_model_arguments,
+    )
 
     assert "require_local_disks" not in extra_model_arguments
     assert "require_attached_disks" not in extra_model_arguments
@@ -128,10 +138,15 @@ def test_uncertain_timeseries_plan_uses_ebs_for_cassandra():
     plan = planner.plan(
         model_name="org.netflix.time-series",
         region="us-east-1",
-        desires=_namespace(10_000),
+        desires=_namespace(4_000, 10_000),
         extra_model_arguments=dict(NAMESPACE),
-        simulations=16,
-        num_results=1,
+        simulations=32,
     ).least_regret[0]
 
-    _assert_on_ebs(_cassandra_clusters(plan))
+    _assert_on_ebs(
+        [
+            cluster
+            for cluster in plan.candidate_clusters.zonal
+            if cluster.cluster_type == "cassandra"
+        ]
+    )

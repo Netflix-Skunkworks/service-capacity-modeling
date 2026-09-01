@@ -92,8 +92,6 @@ def _penalties(
         large_instance_regret=0,
         data_per_node_gib=data_per_node_gib,
         ephemeral_maintenance_regret=regret,
-        ephemeral_maintenance_threshold_gib_per_node=DATA_PER_NODE_THRESHOLD_GIB,
-        ephemeral_maintenance_cap_gib_per_node=DATA_PER_NODE_CAP_GIB,
         different_family_regret=0,
     )
 
@@ -243,26 +241,6 @@ def test_regret_cap_preserves_large_i7ie_pricing_advantage():
     assert cluster.cluster_params[RANK_PENALTIES]["ephemeral_maintenance"] == (
         EPHEMERAL_REGRET * 1.5
     )
-
-
-def test_ephemeral_maintenance_density_bounds_must_increase():
-    with pytest.raises(
-        ValueError,
-        match="ephemeral_maintenance_cap_gib_per_node must be greater",
-    ):
-        NflxCassandraCapacityModel.default_desires(
-            _desires(),
-            {
-                "ephemeral_maintenance_threshold_gib_per_node": 1024,
-                "ephemeral_maintenance_cap_gib_per_node": 300,
-            },
-        )
-
-    with pytest.raises(ValueError, match="finite number"):
-        NflxCassandraCapacityModel.default_desires(
-            _desires(),
-            {"ephemeral_maintenance_cap_gib_per_node": float("inf")},
-        )
 
 
 def test_ephemeral_maintenance_regret_uses_compute_cost():
