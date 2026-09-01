@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Optional
 
 import pytest
@@ -43,6 +44,7 @@ def _plan_for_shape(
     key_size_bytes: int = 16,
     ttl: str = "PT24H",
     lua_write_percent: float = 0,
+    sync_durability_surcharge: float = 0,
 ):
     durability = 10_000 if durable else 100
     desires = CapacityDesires(
@@ -70,6 +72,7 @@ def _plan_for_shape(
             "valkey.key_size_bytes": key_size_bytes,
             "valkey.ttl": ttl,
             "valkey.lua_write_percent": lua_write_percent,
+            "valkey.sync_durability_surcharge": sync_durability_surcharge,
         },
     )
 
@@ -294,6 +297,27 @@ def test_durable_clusters_have_at_least_one_read_replica():
 
     assert durable.cluster_params["valkey.read_replicas_per_shard"] == 1
     assert ephemeral.cluster_params["valkey.read_replicas_per_shard"] == 0
+
+
+def test_sync_durability_surcharge_applies_only_to_durable_clusters():
+    hourly_surcharge = 0.01
+    durable = _plan_for_shape(
+        "cache.r7g.large",
+        durable=True,
+        sync_durability_surcharge=hourly_surcharge,
+    )
+    ephemeral = _plan_for_shape(
+        "cache.r7g.large",
+        durable=False,
+        sync_durability_surcharge=hourly_surcharge,
+    )
+
+    assert durable is not None
+    assert ephemeral is not None
+    assert durable.candidate_clusters.annual_costs["valkey.sync-durability"] == Decimal(
+        "175.20"
+    )
+    assert "valkey.sync-durability" not in ephemeral.candidate_clusters.annual_costs
 
 
 def test_read_replica_limit_forces_additional_shards():

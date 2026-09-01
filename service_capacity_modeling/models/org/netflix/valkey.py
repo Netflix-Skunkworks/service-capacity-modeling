@@ -46,6 +46,7 @@ VALKEY_DURABILITY_THRESHOLD = 1_000
 VALKEY_AWS_MEMORY_RESERVATION = 0.25
 VALKEY_MAX_READ_REPLICAS_PER_SHARD = 5
 VALKEY_ENGINE_VERSION = "8.1"
+VALKEY_HOURS_PER_YEAR = 8760
 VALKEY_8_1_BENCHMARK_BASE_OVERHEAD_BYTES = 31
 VALKEY_DEFAULT_KEY_SIZE_BYTES = 16
 VALKEY_DEFAULT_VALUE_SIZE_BYTES = 50
@@ -140,6 +141,15 @@ class NflxValkeyArguments(BaseModel):
         description=(
             "Maximum nodes allowed in one ElastiCache cluster. Defaults to AWS's "
             "standard 90-node cluster quota; increase only with an approved quota."
+        ),
+    )
+    sync_durability_surcharge: float = Field(
+        alias="valkey.sync_durability_surcharge",
+        default=0,
+        ge=0,
+        description=(
+            "Hourly SyncDurability surcharge per Valkey node. Applied only when "
+            "the requested durability SLO requires synchronous durability."
         ),
     )
 
@@ -391,6 +401,16 @@ class NflxValkeyCapacityModel(CapacityModel):
             instance=instance,
             cluster_params=cluster_params,
         )
+        annual_costs = {"valkey.regional-clusters": Decimal(str(cluster.annual_cost))}
+        requires_sync_durability = (
+            desires.data_shape.durability_slo_order.mid >= VALKEY_DURABILITY_THRESHOLD
+        )
+        if requires_sync_durability and args.sync_durability_surcharge > 0:
+            annual_costs["valkey.sync-durability"] = (
+                Decimal(str(args.sync_durability_surcharge))
+                * topology.node_count
+                * VALKEY_HOURS_PER_YEAR
+            )
         requirement = CapacityRequirement(
             requirement_type="valkey-regional",
             reference_shape=instance,
@@ -405,9 +425,7 @@ class NflxValkeyCapacityModel(CapacityModel):
                 regrets=("spend", "mem"),
             ),
             candidate_clusters=Clusters(
-                annual_costs={
-                    "valkey.regional-clusters": Decimal(str(cluster.annual_cost))
-                },
+                annual_costs=annual_costs,
                 regional=[cluster],
             ),
         )
