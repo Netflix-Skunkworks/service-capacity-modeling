@@ -10,6 +10,7 @@ from typing import Tuple
 from pydantic import BaseModel
 from pydantic import Field
 from pydantic import model_validator
+from pydantic import NonNegativeFloat
 
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
@@ -143,13 +144,13 @@ class NflxValkeyArguments(BaseModel):
             "standard 90-node cluster quota; increase only with an approved quota."
         ),
     )
-    sync_durability_surcharge: float = Field(
+    sync_durability_surcharge: Dict[str, NonNegativeFloat] = Field(
         alias="valkey.sync_durability_surcharge",
-        default=0,
-        ge=0,
+        default_factory=dict,
         description=(
-            "Hourly SyncDurability surcharge per Valkey node. Applied only when "
-            "the requested durability SLO requires synchronous durability."
+            "Hourly SyncDurability surcharge per Valkey node, keyed by instance "
+            "type. Applied only when the requested durability SLO requires "
+            "synchronous durability."
         ),
     )
 
@@ -405,9 +406,10 @@ class NflxValkeyCapacityModel(CapacityModel):
         requires_sync_durability = (
             desires.data_shape.durability_slo_order.mid >= VALKEY_DURABILITY_THRESHOLD
         )
-        if requires_sync_durability and args.sync_durability_surcharge > 0:
+        sync_durability_surcharge = args.sync_durability_surcharge.get(instance.name, 0)
+        if requires_sync_durability and sync_durability_surcharge > 0:
             annual_costs["valkey.sync-durability"] = (
-                Decimal(str(args.sync_durability_surcharge))
+                Decimal(str(sync_durability_surcharge))
                 * topology.node_count
                 * VALKEY_HOURS_PER_YEAR
             )

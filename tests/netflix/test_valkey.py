@@ -44,7 +44,7 @@ def _plan_for_shape(
     key_size_bytes: int = 16,
     ttl: str = "PT24H",
     lua_write_percent: float = 0,
-    sync_durability_surcharge: float = 0,
+    sync_durability_surcharge: Optional[dict[str, float]] = None,
 ):
     durability = 10_000 if durable else 100
     desires = CapacityDesires(
@@ -72,7 +72,7 @@ def _plan_for_shape(
             "valkey.key_size_bytes": key_size_bytes,
             "valkey.ttl": ttl,
             "valkey.lua_write_percent": lua_write_percent,
-            "valkey.sync_durability_surcharge": sync_durability_surcharge,
+            "valkey.sync_durability_surcharge": sync_durability_surcharge or {},
         },
     )
 
@@ -300,7 +300,10 @@ def test_durable_clusters_have_at_least_one_read_replica():
 
 
 def test_sync_durability_surcharge_applies_only_to_durable_clusters():
-    hourly_surcharge = 0.01
+    hourly_surcharge = {
+        "cache.r7g.large": 0.01,
+        "cache.r7g.xlarge": 0.02,
+    }
     durable = _plan_for_shape(
         "cache.r7g.large",
         durable=True,
