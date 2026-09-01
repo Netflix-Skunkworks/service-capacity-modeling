@@ -193,10 +193,53 @@ def fetch_rds_pricing(pricing_client: Any) -> Dict[str, Dict[str, Union[float, s
     return instances
 
 
+def fetch_elasticache_pricing(
+    pricing_client: Any,
+) -> Dict[str, Dict[str, Union[float, str]]]:
+    paginator = pricing_client.get_paginator("get_products")
+    instances: Dict[str, Dict[str, Union[float, str]]] = {}
+    filter_params = {
+        "ServiceCode": "AmazonElastiCache",
+        "Filters": [
+            {
+                "Type": "TERM_MATCH",
+                "Field": "location",
+                "Value": "US East (N. Virginia)",
+            },
+            {"Type": "TERM_MATCH", "Field": "cacheEngine", "Value": "Valkey"},
+        ],
+    }
+
+    for page in paginator.paginate(**filter_params):
+        for price_item in page["PriceList"]:
+            price_data = json.loads(price_item)
+            attributes = price_data.get("product", {}).get("attributes", {})
+            instance_type = attributes.get("instanceType")
+            usage_type = str(attributes.get("usagetype", ""))
+            if (
+                not instance_type
+                or attributes.get("cacheEngine") != "Valkey"
+                or not str(instance_type).startswith(("cache.r7g.", "cache.r8g."))
+                or not usage_type.startswith("NodeUsage:")
+            ):
+                continue
+
+            on_demand_terms = (price_data.get("terms") or {}).get("OnDemand", {})
+            for term in on_demand_terms.values():
+                for dimension in term["priceDimensions"].values():
+                    if dimension["unit"] == "Hrs":
+                        hourly_cost = float(dimension["pricePerUnit"]["USD"])
+                        annual_cost = round(hourly_cost * HOURS_PER_YEAR, 2)
+                        instances[instance_type] = {"annual_cost": annual_cost}
+                        print(f"{instance_type} (on-demand): {annual_cost}")
+    return instances
+
+
 def fetch_pricing(region: str) -> None:
     pricing_client = boto3.client("pricing", region_name=region)
     ec2_instances = fetch_ec2_pricing(pricing_client)
     rds_instances = fetch_rds_pricing(pricing_client)
+    elasticache_instances = fetch_elasticache_pricing(pricing_client)
 
     # AWS no longer sells standard Reserved Instances for newer families
     # (e.g. i7ie), so their instance types have no RI price above. Fall back to
@@ -253,11 +296,31 @@ def fetch_pricing(region: str) -> None:
         json.dump(rds_output, f, indent=2, sort_keys=True)
         f.write("\n")
     print(f"RDS pricing data written to {rds_output_file}")
+    elasticache_output_file = os.path.join(
+        project_root,
+        "hardware",
+        "profiles",
+        "pricing",
+        "aws",
+        "3yr-reserved_elasticache-on-demand.json",
+    )
+    elasticache_output = {
+        "us-east-1": {
+            "instances": elasticache_instances,
+            "drives": {},
+            "services": {},
+            "zones_in_region": 3,
+        }
+    }
+    with open(elasticache_output_file, "w", encoding="utf-8") as f:
+        json.dump(elasticache_output, f, indent=2, sort_keys=True)
+        f.write("\n")
+    print(f"ElastiCache pricing data written to {elasticache_output_file}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Fetch EC2 and RDS Reserved Instance pricing data."
+        description="Fetch EC2, RDS, and ElastiCache reserved pricing data."
     )
     parser.add_argument(
         "--region",
