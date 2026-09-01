@@ -339,7 +339,7 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         assert (
             baseline.attached_drives[0].read_io_per_s,
             baseline.attached_drives[0].write_io_per_s,
-        ) == (11_400, 200)
+        ) == (12_600, 200)
         assert calibration["observed_read_io_per_read"] == 0.0002
         modeled_read_io_per_read = _cass_io_per_read(900) * 1_563 * 64 / 100_000
         assert calibration["modeled_read_io_per_read"] == pytest.approx(
@@ -426,15 +426,16 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
                 _cass_io_per_read(1500 * 64 * scale / candidate.count),
             )
             for candidate, scale in ((current_load, 1), (future_growth, 2))
-        ] == [(89, 2400, 10), (122, 2000, 12)]
+        ] == [(89, 2600, 10), (122, 2200, 12)]
 
-    def test_aligned_observed_iops_preserve_the_exact_deployed_topology(self):
-        observed_iops = 15_800
+    def test_aligned_observed_iops_include_disk_iops_buffer(self):
+        observed_iops = 14_000
         desires = self._existing_ebs_desires()
         explained = self._ebs_explained(
             desires,
             observed_iops=observed_iops,
             required_cluster_size=64,
+            max_regional_size=600,
             observed_ebs_read_io_per_read=20.0,
             observed_ebs_write_io_per_write=1.0,
         )
@@ -453,7 +454,52 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             calibration["current_topology_iops_governor"],
             drive.read_io_per_s,
             drive.write_io_per_s,
-        ) == (observed_iops, 768, "deployed_topology", 15_000, 800)
+        ) == (observed_iops, 768, "deployed_topology", 14_800, 1_000)
+        assert cluster.cluster_params["cassandra.disk_iops_buffer_ratio"] == 1.11
+        assert drive.read_io_per_s + drive.write_io_per_s >= observed_iops / 0.9
+        assert cluster.cluster_params["cassandra.disk_iops_headroom"] == {
+            "demand_source": "deployed_peak",
+            "expected_peak_iops_per_node": 14_000.0,
+            "target_utilization": 0.9,
+            "required_iops_before_rounding": 15_555.56,
+            "provisioned_iops_per_node": 15_800,
+            "buffer_iops_per_node": 1_800.0,
+            "planned_utilization": 0.8861,
+            "candidate_max_iops_per_node": 16_000,
+        }
+
+    def test_caller_disk_iops_buffer_adds_to_model_headroom(self):
+        desires = self._existing_ebs_desires()
+        desires.buffers = Buffers(
+            desired={
+                "caller-disk-iops": Buffer(
+                    ratio=1.25,
+                    components=[BufferComponent.disk_iops],
+                )
+            }
+        )
+
+        cluster = (
+            self._ebs_explained(
+                desires,
+                observed_iops=8_000,
+                required_cluster_size=64,
+                observed_ebs_read_io_per_read=20.0,
+            )
+            .plans[0]
+            .candidate_clusters.zonal[0]
+        )
+
+        assert cluster.cluster_params["cassandra.disk_iops_buffer_ratio"] == 1.39
+        assert (
+            sum(
+                (
+                    cluster.attached_drives[0].read_io_per_s,
+                    cluster.attached_drives[0].write_io_per_s,
+                )
+            )
+            == 11_400
+        )
 
     def test_deployed_evidence_rejects_heterogeneous_zonal_topology(self):
         desires = self._existing_ebs_desires()
@@ -751,10 +797,10 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         assert calibration["projected_max_total_iops_per_node"] is None
         current_drive = current_shape.attached_drives[0]
         assert current_shape.count > 64
-        assert current_drive.read_io_per_s + current_drive.write_io_per_s <= 15_800
+        assert current_drive.read_io_per_s + current_drive.write_io_per_s <= 16_000
         assert (
             current_drive.read_io_per_s + current_drive.write_io_per_s
-        ) * current_shape.count >= 16_000 * 64
+        ) * current_shape.count >= 16_000 * 64 * 1.1
         assert calibration["deployed_topology_iops_floor_per_node"] == 16_000
 
     def test_deployed_topology_rejects_observation_above_configured_limit(self):
@@ -806,7 +852,7 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         assert calibration["current_topology_iops_governor"] == governor
         if observed_iops == 16_000:
             assert current_shape.count > 64
-            assert drive.read_io_per_s + drive.write_io_per_s <= 15_800
+            assert drive.read_io_per_s + drive.write_io_per_s <= 16_000
         else:
             assert drive.read_io_per_s + drive.write_io_per_s >= observed_iops
 
@@ -872,8 +918,8 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         assert calibration["current_topology_iops_governor"] == (
             "candidate_model_observation_at_configured_limit"
         )
-        assert current_shape.count == 129
-        assert drive.read_io_per_s + drive.write_io_per_s <= 15_800
+        assert current_shape.count == 141
+        assert drive.read_io_per_s + drive.write_io_per_s <= 16_000
 
     def test_at_limit_evidence_prevents_unprojectable_preserve_downscale(self):
         desires = self._existing_ebs_desires().model_copy(
@@ -926,8 +972,8 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         drive = current_shape.attached_drives[0]
         calibration = current_shape.cluster_params["cassandra.ebs_io_calibration"]
         candidate_iops = drive.read_io_per_s + drive.write_io_per_s
-        assert current_shape.count == 68
-        assert 3_000 < candidate_iops <= 15_800
+        assert current_shape.count == 71
+        assert 3_000 < candidate_iops <= 16_000
         assert calibration["deployed_configured_iops_limit"] == 3_000
 
     @pytest.mark.parametrize(
@@ -1132,7 +1178,7 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             calibration["current_topology_iops_governor"],
             cluster.attached_drives[0].read_io_per_s
             + cluster.attached_drives[0].write_io_per_s,
-        ) == (1.12, pytest.approx(8_960), "deployed_topology_projected", 9_000)
+        ) == (1.12, pytest.approx(8_960), "deployed_topology_projected", 10_000)
 
     def test_deployed_topology_evidence_does_not_treat_desired_headroom_as_load(self):
         desires = self._existing_ebs_desires().model_copy(
@@ -1277,7 +1323,7 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
                     current_cluster.attached_drives[0].write_io_per_s,
                 )
             )
-            == 2_000
+            == 2_400
         )
 
     def test_deployed_topology_evidence_projects_across_larger_node_count(self):
@@ -1296,7 +1342,7 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         )
         drive = cluster.attached_drives[0]
         assert cluster.count == 96
-        assert drive.read_io_per_s + drive.write_io_per_s == 10_000
+        assert drive.read_io_per_s + drive.write_io_per_s == 11_400
 
     def test_deployed_topology_evidence_projects_directional_demand_growth(self):
         desires = self._existing_ebs_desires()
@@ -1535,15 +1581,16 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         assert "Deployed EBS IOPS evidence requires at least" in candidate_excuse.reason
 
     def test_saturation_floor_handles_drive_limit_at_iops_quantum(self):
-        assert _deployed_topology_saturation_min_count(64, 200, 200) == 65
+        assert _deployed_topology_saturation_min_count(64, 200, 200, 1.1) == 71
 
     def test_deployed_topology_evidence_falls_back_without_comparable_data(self):
         desires = self._existing_ebs_desires(disk_utilization_gib=0)
         explained = self._ebs_explained(
             desires,
-            required_cluster_size=64,
             observed_ebs_read_io_per_read=20.0,
             same_data_as_deployed=False,
+            max_regional_size=600,
+            num_results=20,
         )
 
         current_shape = next(
@@ -1562,14 +1609,14 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
     @pytest.mark.parametrize(
         "read_per_second,write_per_second,derived_scale,cluster_size_mode,expected",
         [
-            (300_000, 300_000, None, "unrestricted", (None, 12_000)),
-            (300_000, 300_000, 1.325, "unrestricted", (65, 15_800)),
-            (300_000, 300_000, 4 / 3, "unrestricted", (65, 15_800)),
-            (600_000, 600_000, None, "unrestricted", (98, 15_800)),
-            (300_000, 300_000, 2.0, "unrestricted", (98, 15_800)),
-            (150_000, 150_000, None, "unrestricted", (None, 12_000)),
-            (600_000, 150_000, None, "unrestricted", (98, 15_800)),
-            (300_000, 300_000, 2.0, "doubling", (128, 12_000)),
+            (300_000, 300_000, None, "unrestricted", (None, 13_600)),
+            (300_000, 300_000, 1.325, "unrestricted", (71, 16_000)),
+            (300_000, 300_000, 4 / 3, "unrestricted", (72, 16_000)),
+            (600_000, 600_000, None, "unrestricted", (108, 16_000)),
+            (300_000, 300_000, 2.0, "unrestricted", (107, 16_000)),
+            (150_000, 150_000, None, "unrestricted", (None, 13_600)),
+            (600_000, 150_000, None, "unrestricted", (107, 16_000)),
+            (300_000, 300_000, 2.0, "doubling", (128, 13_600)),
         ],
     )
     def test_deployed_topology_saturation_floors_count_and_models_larger_candidates(
