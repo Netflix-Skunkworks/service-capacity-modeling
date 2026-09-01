@@ -24,7 +24,7 @@ EXPECTED_KEYS = {
 
 
 @pytest.mark.parametrize("limit", [0, 100, float("nan"), float("inf")])
-def test_attached_drive_iops_limit_must_cover_one_sizing_quantum(limit):
+def test_attached_drive_iops_limit_must_cover_one_rounding_increment(limit):
     with pytest.raises(
         ValueError, match="max_attached_drive_io_per_s must be finite and at least 200"
     ):

@@ -53,7 +53,7 @@ SECONDS_IN_YEAR = 31556926
 
 EFFECTIVE_DISK_PER_NODE_GIB = "effective_disk_per_node_gib"
 _ATTACHED_DRIVE_MAX_ITERATIONS = 10
-ATTACHED_DRIVE_IOPS_QUANTUM = 200
+ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT = 200
 _ATTACHED_DRIVE_MAX_SEARCH_ITERATIONS = 64
 
 
@@ -607,11 +607,11 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
 ) -> ZoneClusterCapacity:
     if max_attached_drive_io_per_s is not None and (
         not math.isfinite(max_attached_drive_io_per_s)
-        or max_attached_drive_io_per_s < ATTACHED_DRIVE_IOPS_QUANTUM
+        or max_attached_drive_io_per_s < ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT
     ):
         raise ValueError(
             "max_attached_drive_io_per_s must be finite and at least "
-            f"{ATTACHED_DRIVE_IOPS_QUANTUM:g}"
+            f"{ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT:g}"
         )
 
     # CPU
@@ -856,8 +856,8 @@ def _attached_drive_plan(  # noqa: C901
         space_gib = max(1, math.ceil(needed_disk_gib / node_count))
         read_io, write_io = required_disk_ios(space_gib, node_count)
         read_io, write_io = (
-            utils.next_n(read_io, n=ATTACHED_DRIVE_IOPS_QUANTUM),
-            utils.next_n(write_io, n=ATTACHED_DRIVE_IOPS_QUANTUM),
+            utils.next_n(read_io, n=ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT),
+            utils.next_n(write_io, n=ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT),
         )
         io_gib = cloud_gib_for_io(drive, read_io + write_io, space_gib)
         required_drive_size_gib = max(1, io_gib, space_gib)

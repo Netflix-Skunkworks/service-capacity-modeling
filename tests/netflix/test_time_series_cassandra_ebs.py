@@ -215,18 +215,12 @@ def test_deployed_ebs_iops_evidence_flows_through_timeseries_composition():
             "num_regions": 3,
             "max_regional_size": 384,
             "required_cluster_size": 6,
-            "observed_ebs_max_total_iops_per_node": 6_000,
-            "observed_ebs_node_count_at_peak": 45,
-            "deployed_ebs_configured_iops_per_node": 16_000,
-            "observed_ebs_read_io_per_read": 0.2,
-            "observed_ebs_write_io_per_write": 1.0,
-            "ebs_planning_baseline_read_per_second": 30_000,
-            "ebs_planning_baseline_write_per_second": 150_000,
-            "ebs_planning_baseline_mean_read_size_bytes": 4096,
-            "ebs_planning_baseline_mean_write_size_bytes": 1024,
-            "ebs_planning_baseline_copies_per_region": 3,
-            "ebs_planning_baseline_zones_per_region": 3,
-            "ebs_planning_baseline_num_regions": 3,
+            "ebs_iops_evidence": {
+                "peak_iops_per_node": 6_000,
+                "configured_iops_per_node": 16_000,
+                "read_io_per_read": 0.2,
+                "write_io_per_write": 1.0,
+            },
         },
     )
 
@@ -251,13 +245,13 @@ def test_deployed_ebs_iops_evidence_flows_through_timeseries_composition():
     assert calibration["current_topology_iops_governor"] == "deployed_topology"
     assert cluster.count == 6
     assert headroom == {
-        "demand_source": "deployed_peak",
-        "expected_peak_iops_per_node": 5_000.0,
+        "demand_source": "calibrated_model",
+        "expected_peak_iops_per_node": 2_888.8,
         "target_utilization": 0.9,
-        "required_iops_before_rounding": 5_555.56,
-        "provisioned_iops_per_node": 5_600,
-        "buffer_iops_per_node": 600.0,
-        "planned_utilization": 0.8929,
+        "required_iops_before_rounding": 3_209.78,
+        "provisioned_iops_per_node": 3_400,
+        "buffer_iops_per_node": 511.2,
+        "planned_utilization": 0.8496,
         "candidate_max_iops_per_node": 16_000,
     }
 
