@@ -245,8 +245,13 @@ def test_item_overhead_extrapolation_is_reported():
     assert cluster.cluster_params["valkey.item_overhead_extrapolated"] is True
 
 
-@pytest.mark.parametrize("durable", [False, True])
-def test_cluster_shape_for_500k_writes_and_500k_reads(durable):
+@pytest.mark.parametrize(
+    "durable, expected_nodes, expected_shards",
+    [(False, 2, 1), (True, 10, 5)],
+)
+def test_cluster_shape_for_500k_writes_and_500k_reads(
+    durable, expected_nodes, expected_shards
+):
     cluster = _cluster(
         _plan_for_shape(
             "cache.r7g.large",
@@ -256,9 +261,60 @@ def test_cluster_shape_for_500k_writes_and_500k_reads(durable):
         )
     )
 
-    assert cluster.count == 2
-    assert cluster.cluster_params["valkey.shards"] == 1
+    assert cluster.count == expected_nodes
+    assert cluster.cluster_params["valkey.shards"] == expected_shards
     assert cluster.cluster_params["valkey.read_replicas_per_shard"] == 1
+
+
+@pytest.mark.parametrize(
+    "lua_write_percent, write_ops_per_second",
+    [(0, 100_000), (1, 50_000)],
+)
+def test_durable_write_throughput_limits(lua_write_percent, write_ops_per_second):
+    at_limit = _cluster(
+        _plan_for_shape(
+            "cache.r7g.large",
+            write_ops_per_second=write_ops_per_second,
+            durable=True,
+            lua_write_percent=lua_write_percent,
+        )
+    )
+    beyond_limit = _cluster(
+        _plan_for_shape(
+            "cache.r7g.large",
+            write_ops_per_second=write_ops_per_second + 1,
+            durable=True,
+            lua_write_percent=lua_write_percent,
+        )
+    )
+
+    assert at_limit.cluster_params["valkey.shards"] == 1
+    assert beyond_limit.cluster_params["valkey.shards"] == 2
+    assert at_limit.cluster_params["valkey.simple_ops_per_second_per_node"] == 100_000
+    assert at_limit.cluster_params["valkey.lua_ops_per_second_per_node"] == 50_000
+    assert (
+        at_limit.cluster_params["valkey.write_capacity_ops_per_second"]
+        == write_ops_per_second
+    )
+
+
+def test_read_throughput_is_not_affected_by_durability():
+    durable = _cluster(
+        _plan_for_shape("cache.r7g.large", read_ops_per_second=500_000, durable=True)
+    )
+    ephemeral = _cluster(
+        _plan_for_shape("cache.r7g.large", read_ops_per_second=500_000, durable=False)
+    )
+
+    assert durable.cluster_params["valkey.read_ops_per_second_per_node"] == 700_000
+    assert (
+        durable.cluster_params["valkey.read_ops_per_second_per_node"]
+        == ephemeral.cluster_params["valkey.read_ops_per_second_per_node"]
+    )
+    assert (
+        durable.cluster_params["valkey.cpu_capacity_units_required"]
+        == (ephemeral.cluster_params["valkey.cpu_capacity_units_required"])
+    )
 
 
 def test_cluster_shape_for_50k_lua_writes_and_500k_reads():
@@ -376,8 +432,8 @@ def test_uniform_reads_require_uniform_replica_layers():
         )
     )
 
-    assert cluster.count == 8
-    assert cluster.cluster_params["valkey.shards"] == 4
+    assert cluster.count == 30
+    assert cluster.cluster_params["valkey.shards"] == 15
     assert cluster.cluster_params["valkey.read_replicas_per_shard"] == 1
     assert cluster.cluster_params["valkey.assumes_uniform_key_distribution"] is True
 
@@ -385,7 +441,7 @@ def test_uniform_reads_require_uniform_replica_layers():
 def test_default_node_quota_rejects_unprovisionable_cluster():
     desires = CapacityDesires(
         query_pattern=QueryPattern(
-            estimated_write_per_second=certain_int(35_000_000),
+            estimated_write_per_second=certain_int(5_000_000),
         ),
         data_shape=DataShape(estimated_state_size_gib=certain_int(1)),
     )

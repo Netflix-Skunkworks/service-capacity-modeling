@@ -43,6 +43,8 @@ VALKEY_MIN_OPS_PER_SECOND = 700_000
 VALKEY_MAX_OPS_PER_SECOND = 1_000_000
 VALKEY_MIN_LUA_OPS_PER_SECOND = 50_000
 VALKEY_MAX_LUA_OPS_PER_SECOND = 150_000
+VALKEY_DURABLE_WRITE_OPS_PER_SECOND = 100_000
+VALKEY_DURABLE_LUA_WRITE_OPS_PER_SECOND = 50_000
 VALKEY_DURABILITY_THRESHOLD = 1_000
 VALKEY_AWS_MEMORY_RESERVATION = 0.25
 VALKEY_MAX_READ_REPLICAS_PER_SHARD = 5
@@ -173,6 +175,7 @@ class _ValkeyMemoryRequirement(NamedTuple):
 
 
 class _ValkeyCPURequirement(NamedTuple):
+    read_ops_per_second: int
     simple_ops_per_second: int
     lua_ops_per_second: int
     write_cpu_units: float
@@ -247,8 +250,13 @@ def _estimate_valkey_cpu(
 ) -> _ValkeyCPURequirement:
     read_ops_per_second = desires.query_pattern.estimated_read_per_second.mid
     write_ops_per_second = desires.query_pattern.estimated_write_per_second.mid
-    simple_ops_per_second = _valkey_ops_per_second(instance, use_lua=False)
-    lua_ops_per_second = _valkey_ops_per_second(instance, use_lua=True)
+    read_capacity_ops_per_second = _valkey_ops_per_second(instance, use_lua=False)
+    if desires.data_shape.durability_slo_order.mid >= VALKEY_DURABILITY_THRESHOLD:
+        simple_ops_per_second = VALKEY_DURABLE_WRITE_OPS_PER_SECOND
+        lua_ops_per_second = VALKEY_DURABLE_LUA_WRITE_OPS_PER_SECOND
+    else:
+        simple_ops_per_second = read_capacity_ops_per_second
+        lua_ops_per_second = _valkey_ops_per_second(instance, use_lua=True)
     lua_write_ops_per_second = write_ops_per_second * args.lua_write_percent
     simple_write_ops_per_second = write_ops_per_second - lua_write_ops_per_second
     write_cpu_units = (
@@ -256,10 +264,13 @@ def _estimate_valkey_cpu(
         + lua_write_ops_per_second / lua_ops_per_second
     )
     return _ValkeyCPURequirement(
+        read_ops_per_second=read_capacity_ops_per_second,
         simple_ops_per_second=simple_ops_per_second,
         lua_ops_per_second=lua_ops_per_second,
         write_cpu_units=write_cpu_units,
-        total_cpu_units=(write_cpu_units + read_ops_per_second / simple_ops_per_second),
+        total_cpu_units=(
+            write_cpu_units + read_ops_per_second / read_capacity_ops_per_second
+        ),
         write_network_mbps=(
             write_ops_per_second
             * desires.query_pattern.estimated_mean_write_size_bytes.mid
@@ -361,6 +372,7 @@ class NflxValkeyCapacityModel(CapacityModel):
             "valkey.read_replicas_per_shard": read_replicas_per_shard,
             "valkey.max_read_replicas_per_shard": (VALKEY_MAX_READ_REPLICAS_PER_SHARD),
             "valkey.lua_write_percent": args.lua_write_percent,
+            "valkey.read_ops_per_second_per_node": cpu.read_ops_per_second,
             "valkey.simple_ops_per_second_per_node": cpu.simple_ops_per_second,
             "valkey.lua_ops_per_second_per_node": cpu.lua_ops_per_second,
             "valkey.cpu_capacity_units_required": cpu.total_cpu_units,
@@ -384,7 +396,7 @@ class NflxValkeyCapacityModel(CapacityModel):
             ),
             "valkey.read_capacity_ops_per_second": round(
                 max(0, topology.node_count - cpu.write_cpu_units)
-                * cpu.simple_ops_per_second
+                * cpu.read_ops_per_second
             ),
             "valkey.write_capacity_ops_per_second": (
                 round(
