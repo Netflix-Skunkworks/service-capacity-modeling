@@ -498,7 +498,7 @@ def test_storage_and_throughput_dominated_shapes():
     assert throughput_cluster.count == 6
 
 
-def test_planner_uses_reserved_elasticache_instance_price():
+def test_planner_uses_on_demand_elasticache_instance_price():
     plans = planner.plan_certain(
         model_name="org.netflix.valkey",
         region="us-east-1",
@@ -516,5 +516,5 @@ def test_planner_uses_reserved_elasticache_instance_price():
     cluster = plans[0].candidate_clusters.regional[0]
     assert cluster.instance.name == "cache.r7g.large"
     assert cluster.count == 2
-    assert cluster.annual_cost == pytest.approx(2 * 690.64)
-    assert plans[0].candidate_clusters.total_annual_cost == pytest.approx(1381.28)
+    assert cluster.annual_cost == pytest.approx(2 * 1534.75)
+    assert plans[0].candidate_clusters.total_annual_cost == pytest.approx(3069.50)

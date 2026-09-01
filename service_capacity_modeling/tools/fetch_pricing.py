@@ -224,9 +224,14 @@ def fetch_elasticache_pricing(
             ):
                 continue
 
-            annual_cost = extract_3yr_upfront_price(price_data)
-            if annual_cost:
-                instances[instance_type] = {"annual_cost": annual_cost}
+            on_demand_terms = (price_data.get("terms") or {}).get("OnDemand", {})
+            for term in on_demand_terms.values():
+                for dimension in term["priceDimensions"].values():
+                    if dimension["unit"] == "Hrs":
+                        hourly_cost = float(dimension["pricePerUnit"]["USD"])
+                        annual_cost = round(hourly_cost * HOURS_PER_YEAR, 2)
+                        instances[instance_type] = {"annual_cost": annual_cost}
+                        print(f"{instance_type} (on-demand): {annual_cost}")
     return instances
 
 
@@ -297,7 +302,7 @@ def fetch_pricing(region: str) -> None:
         "profiles",
         "pricing",
         "aws",
-        "3yr-reserved_elasticache.json",
+        "3yr-reserved_elasticache-on-demand.json",
     )
     elasticache_output = {
         "us-east-1": {

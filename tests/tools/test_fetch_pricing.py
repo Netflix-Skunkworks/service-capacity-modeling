@@ -9,6 +9,7 @@ def _price_item(
     *,
     engine: str = "Valkey",
     usage_type: str = "NodeUsage:cache.r7g.large",
+    hourly_price: str = "0.1752",
     upfront_price: str = "2071.9152",
 ) -> str:
     return json.dumps(
@@ -21,6 +22,16 @@ def _price_item(
                 }
             },
             "terms": {
+                "OnDemand": {
+                    "term": {
+                        "priceDimensions": {
+                            "hourly": {
+                                "unit": "Hrs",
+                                "pricePerUnit": {"USD": hourly_price},
+                            }
+                        },
+                    }
+                },
                 "Reserved": {
                     "term": {
                         "termAttributes": {
@@ -35,13 +46,13 @@ def _price_item(
                             }
                         },
                     }
-                }
+                },
             },
         }
     )
 
 
-def test_fetch_elasticache_pricing_selects_standard_valkey_nodes():
+def test_fetch_elasticache_pricing_selects_on_demand_valkey_nodes():
     paginator = Mock()
     paginator.paginate.return_value = [
         {
@@ -60,7 +71,7 @@ def test_fetch_elasticache_pricing_selects_standard_valkey_nodes():
     pricing_client.get_paginator.return_value = paginator
 
     assert fetch_elasticache_pricing(pricing_client) == {
-        "cache.r7g.large": {"annual_cost": 690.64}
+        "cache.r7g.large": {"annual_cost": 1534.75}
     }
     paginator.paginate.assert_called_once_with(
         ServiceCode="AmazonElastiCache",
