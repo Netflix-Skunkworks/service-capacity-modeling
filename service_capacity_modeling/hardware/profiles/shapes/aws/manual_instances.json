@@ -12,6 +12,7 @@
       "name": "i3.xlarge",
       "cpu": 4,
       "cpu_ghz": 2.3,
+      "cpu_ipc_scale": 0.8925,
       "ram_gib": 30.65,
       "net_mbps": 1000,
       "drive": {
@@ -29,6 +30,7 @@
       "name": "i3.2xlarge",
       "cpu": 8,
       "cpu_ghz": 2.3,
+      "cpu_ipc_scale": 0.8925,
       "ram_gib": 61.39,
       "net_mbps": 2000,
       "drive": {
@@ -42,6 +44,7 @@
       "name": "i3.4xlarge",
       "cpu": 16,
       "cpu_ghz": 2.3,
+      "cpu_ipc_scale": 0.8925,
       "ram_gib": 122.86,
       "net_mbps": 4000,
       "drive": {
