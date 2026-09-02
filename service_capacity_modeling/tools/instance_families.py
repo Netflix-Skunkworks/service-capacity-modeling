@@ -9,6 +9,9 @@ from typing import Dict
 
 # Intel
 HASWELL_IPC = 0.85
+BROADWELL_IPC = (
+    HASWELL_IPC * 1.05
+)  # ~5% IPC uplift over Haswell (Intel tick refinement)
 SKYLAKE_IPC = 1.0
 CASCADE_LAKE_IPC = SKYLAKE_IPC
 ICELAKE_IPC = SKYLAKE_IPC * 1.15
