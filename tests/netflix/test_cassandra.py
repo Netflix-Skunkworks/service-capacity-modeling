@@ -39,9 +39,7 @@ from tests.util import get_total_storage_gib
 from tests.util import has_local_storage
 from tests.util import simple_drive
 
-# TODO(homatthew): This is a workaround since EBS is disabled broadly for new
-# provisionings (require_local_disks=True by default), but we still want to test
-# with both local and attached disks in unit tests.
+# Explicitly allow both storage types in tests that exercise their shared path.
 EXTRA_MODEL_ARGS = {"require_local_disks": False}
 
 # Property test configuration for Cassandra model.
@@ -801,6 +799,7 @@ class TestCassandraCurrentCapacity:
             desires=desires,
             extra_model_arguments={
                 "require_local_disks": True,
+                "ephemeral_maintenance_regret": 0,
             },
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
@@ -827,6 +826,7 @@ class TestCassandraCurrentCapacity:
             extra_model_arguments={
                 "require_local_disks": True,
                 "cluster_size_mode": "doubling",
+                "ephemeral_maintenance_regret": 0,
             },
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]

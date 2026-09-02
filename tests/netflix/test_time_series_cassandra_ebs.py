@@ -1,10 +1,4 @@
-"""TimeSeries planning its Cassandra tier on EBS, and the cases that stay local.
-
-Every case plans a real TimeSeries namespace end to end, so what is asserted is
-the disk type the Cassandra tier actually lands on.
-"""
-
-import pytest
+"""TimeSeries composes with Cassandra's attached-storage preference."""
 
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import AccessPattern
@@ -13,11 +7,12 @@ from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.org.netflix.time_series import (
-    CASSANDRA_EBS_MAX_READ_PER_SECOND,
+    NflxTimeSeriesCapacityModel,
 )
-from service_capacity_modeling.models.org.netflix.time_series import (
-    CASSANDRA_EBS_MIN_STATE_SIZE_GIB,
+from service_capacity_modeling.models.org.netflix.time_series_config import (
+    TimeSeriesConfiguration,
 )
+
 
 # A namespace retaining 30 days of events, read back one day at a time. The
 # read interval fits inside a slice, so Cassandra sees one read per TS read.
@@ -36,7 +31,6 @@ AMPLIFYING_NAMESPACE = {
     "ts.events-per-day-per-ts": "1000",
     "ts.event-size": "20000",
 }
-READ_AMPLIFICATION = 5
 
 
 def _namespace(
@@ -101,72 +95,53 @@ def _assert_on_ebs(clusters):
         assert [drive.name for drive in cluster.attached_drives] == ["gp3"]
 
 
-def _assert_on_local_disks(clusters):
-    for cluster in clusters:
-        assert cluster.instance.drive is not None, (
-            f"{cluster.instance.name} is EBS only"
-        )
-        assert not cluster.attached_drives
-
-
-def test_large_low_read_namespace_lands_on_ebs():
+def test_timeseries_uses_cassandra_default_storage_preference():
     _assert_on_ebs(_cassandra_tier(_namespace(4_000, 10_000)))
 
 
-@pytest.mark.parametrize(
-    "state_gib,on_ebs",
-    [
-        (CASSANDRA_EBS_MIN_STATE_SIZE_GIB, True),
-        (CASSANDRA_EBS_MIN_STATE_SIZE_GIB - 1, False),
-    ],
-    ids=["at_one_tib", "just_under_one_tib"],
-)
-def test_namespace_smaller_than_one_tib_stays_on_local_disks(state_gib, on_ebs):
-    clusters = _cassandra_tier(_namespace(state_gib, 10_000))
+def test_timeseries_applies_read_amplification_to_cassandra_desires():
+    desires = _namespace(4_000, 40_000)
+    ((child_model, modify_child_desires),) = NflxTimeSeriesCapacityModel.compose_with(
+        desires, dict(AMPLIFYING_NAMESPACE)
+    )
+    amplification = TimeSeriesConfiguration(AMPLIFYING_NAMESPACE).read_amplification
 
-    (_assert_on_ebs if on_ebs else _assert_on_local_disks)(clusters)
+    cassandra_desires = modify_child_desires(desires)
 
-
-@pytest.mark.parametrize(
-    "reads_per_second,on_ebs",
-    [
-        (CASSANDRA_EBS_MAX_READ_PER_SECOND, True),
-        (CASSANDRA_EBS_MAX_READ_PER_SECOND + 1, False),
-    ],
-    ids=["at_the_read_ceiling", "just_over_the_read_ceiling"],
-)
-def test_high_read_namespace_stays_on_local_disks(reads_per_second, on_ebs):
-    clusters = _cassandra_tier(_namespace(4_000, reads_per_second))
-
-    (_assert_on_ebs if on_ebs else _assert_on_local_disks)(clusters)
-
-
-@pytest.mark.parametrize(
-    "reads_per_second,on_ebs",
-    [
-        (CASSANDRA_EBS_MAX_READ_PER_SECOND // READ_AMPLIFICATION, True),
-        (CASSANDRA_EBS_MAX_READ_PER_SECOND // READ_AMPLIFICATION + 1, False),
-    ],
-    ids=["amplifies_to_the_ceiling", "amplifies_over_the_ceiling"],
-)
-def test_read_amplification_counts_against_the_read_ceiling(reads_per_second, on_ebs):
-    # The read ceiling is about load landing on Cassandra, so a namespace well
-    # under it at its own front door can still be over it once amplified.
-    clusters = _cassandra_tier(
-        _namespace(4_000, reads_per_second), AMPLIFYING_NAMESPACE
+    assert child_model == "org.netflix.cassandra"
+    assert cassandra_desires.query_pattern.estimated_read_per_second == (
+        desires.query_pattern.estimated_read_per_second.scale(amplification)
     )
 
-    (_assert_on_ebs if on_ebs else _assert_on_local_disks)(clusters)
+
+def test_timeseries_tier_is_unchanged_by_cassandra_storage():
+    plan = planner.plan_certain(
+        model_name="org.netflix.time-series",
+        region="us-east-1",
+        desires=_namespace(4_000, 10_000),
+        extra_model_arguments=dict(NAMESPACE),
+    )[0]
+
+    assert [cluster.cluster_type for cluster in plan.candidate_clusters.regional] == [
+        "dgwts"
+    ]
 
 
-def test_namespace_without_a_stated_size_stays_on_local_disks():
-    unsized = _namespace(4_000, 10_000)
-    unsized.data_shape = DataShape()
+def test_timeseries_does_not_store_cassandra_policy_in_caller_arguments():
+    extra_model_arguments = dict(NAMESPACE)
 
-    _assert_on_local_disks(_cassandra_tier(unsized))
+    planner.plan_certain(
+        model_name="org.netflix.time-series",
+        region="us-east-1",
+        desires=_namespace(4_000, 10_000),
+        extra_model_arguments=extra_model_arguments,
+    )
+
+    assert "require_local_disks" not in extra_model_arguments
+    assert "require_attached_disks" not in extra_model_arguments
 
 
-def test_uncertain_plan_of_a_large_low_read_namespace_lands_on_ebs():
+def test_uncertain_timeseries_plan_uses_ebs_for_cassandra():
     plan = planner.plan(
         model_name="org.netflix.time-series",
         region="us-east-1",
@@ -182,16 +157,3 @@ def test_uncertain_plan_of_a_large_low_read_namespace_lands_on_ebs():
             if cluster.cluster_type == "cassandra"
         ]
     )
-
-
-def test_timeseries_tier_is_unchanged_by_the_ebs_choice():
-    plan = planner.plan_certain(
-        model_name="org.netflix.time-series",
-        region="us-east-1",
-        desires=_namespace(4_000, 10_000),
-        extra_model_arguments=dict(NAMESPACE),
-    )[0]
-
-    assert [cluster.cluster_type for cluster in plan.candidate_clusters.regional] == [
-        "dgwts"
-    ]

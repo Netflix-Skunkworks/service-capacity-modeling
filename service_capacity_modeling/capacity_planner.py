@@ -91,7 +91,8 @@ class PlannerArguments(ExcludeUnsetModel):
         default=0.15,
         description="Rank inflation applied to plans using families outside "
         "model.preferred_families(). A non-preferred family must be this fraction "
-        "cheaper on compute cost to rank above a preferred alternative. "
+        "cheaper on penalty-adjusted compute cost to rank above a preferred "
+        "alternative. "
         "Set to 0.0 to evaluate all families by pure cost.",
     )
 
@@ -915,13 +916,11 @@ class CapacityPlanner:
                         service_cost = sum(
                             s.annual_cost for s in plan.candidate_clusters.services
                         )
-                        compute_cost = (
-                            plan.candidate_clusters.total_annual_cost - service_cost
-                        )
+                        ranked_compute_cost = plan.rank - service_cost
                         plan = plan.model_copy(
                             update={
                                 "rank": plan.rank
-                                + compute_cost * pargs.preferred_family_penalty
+                                + ranked_compute_cost * pargs.preferred_family_penalty
                             }
                         )
                     plans.append(plan)
