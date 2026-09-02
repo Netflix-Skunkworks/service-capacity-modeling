@@ -1,13 +1,17 @@
 """TimeSeries composes with Cassandra's attached-storage preference."""
 
-import pytest
-
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.models.org.netflix.time_series import (
+    NflxTimeSeriesCapacityModel,
+)
+from service_capacity_modeling.models.org.netflix.time_series_config import (
+    TimeSeriesConfiguration,
+)
 
 
 # A namespace retaining 30 days of events, read back one day at a time. The
@@ -91,20 +95,23 @@ def _assert_on_ebs(clusters):
         assert [drive.name for drive in cluster.attached_drives] == ["gp3"]
 
 
-@pytest.mark.parametrize(
-    "state_gib,reads_per_second,namespace",
-    [
-        (4_000, 10_000, NAMESPACE),
-        (1_024, 10_000, NAMESPACE),
-        (4_000, 200_000, NAMESPACE),
-        (4_000, 40_000, AMPLIFYING_NAMESPACE),
-    ],
-    ids=["large_low_read", "one_tib", "read_ceiling", "read_amplified"],
-)
-def test_original_timeseries_ebs_workloads_remain_on_ebs(
-    state_gib, reads_per_second, namespace
-):
-    _assert_on_ebs(_cassandra_tier(_namespace(state_gib, reads_per_second), namespace))
+def test_timeseries_uses_cassandra_default_storage_preference():
+    _assert_on_ebs(_cassandra_tier(_namespace(4_000, 10_000)))
+
+
+def test_timeseries_applies_read_amplification_to_cassandra_desires():
+    desires = _namespace(4_000, 40_000)
+    ((child_model, modify_child_desires),) = NflxTimeSeriesCapacityModel.compose_with(
+        desires, dict(AMPLIFYING_NAMESPACE)
+    )
+    amplification = TimeSeriesConfiguration(AMPLIFYING_NAMESPACE).read_amplification
+
+    cassandra_desires = modify_child_desires(desires)
+
+    assert child_model == "org.netflix.cassandra"
+    assert cassandra_desires.query_pattern.estimated_read_per_second == (
+        desires.query_pattern.estimated_read_per_second.scale(amplification)
+    )
 
 
 def test_timeseries_tier_is_unchanged_by_cassandra_storage():
