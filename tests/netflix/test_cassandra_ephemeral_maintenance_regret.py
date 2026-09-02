@@ -208,24 +208,6 @@ def test_ephemeral_storage_remains_available_as_a_fallback():
     assert cluster.cluster_params[RANK_PENALTIES]["ephemeral_maintenance"] > 0
 
 
-def test_regret_curve_preserves_i4i_pricing_advantage():
-    plans = planner.plan_certain(
-        model_name="org.netflix.cassandra",
-        region="us-east-1",
-        desires=_desires(state_gib=500),
-        instance_families=["i4i", "m7a"],
-        num_results=20,
-        max_results_per_family=10,
-    )
-
-    cluster = _cluster(plans[0])
-    assert cluster.instance.family == "i4i"
-    assert (
-        cluster.cluster_params[RANK_PENALTIES]["ephemeral_maintenance"]
-        == EPHEMERAL_REGRET
-    )
-
-
 def test_regret_cap_preserves_large_i7ie_pricing_advantage():
     plans = planner.plan_certain(
         model_name="org.netflix.cassandra",

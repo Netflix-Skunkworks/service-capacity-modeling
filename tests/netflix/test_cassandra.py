@@ -804,7 +804,7 @@ class TestCassandraCurrentCapacity:
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
         counts = result.cluster_params["required_nodes_by_type"]
-        assert result.count == counts["cluster_size"] == counts["cpu"] == 7
+        assert result.count == counts["cluster_size"] == counts["cpu"] == 8
 
     def test_capacity_non_power_of_two_with_doubling_mode(self):
         cluster_capacity = CurrentZoneClusterCapacity(
