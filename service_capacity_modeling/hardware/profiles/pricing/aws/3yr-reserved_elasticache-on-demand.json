@@ -1,0 +1,51 @@
+{
+  "us-east-1": {
+    "drives": {},
+    "instances": {
+      "cache.r7g.12xlarge": {
+        "annual_cost": 36686.88
+      },
+      "cache.r7g.16xlarge": {
+        "annual_cost": 48922.85
+      },
+      "cache.r7g.2xlarge": {
+        "annual_cost": 6117.98
+      },
+      "cache.r7g.4xlarge": {
+        "annual_cost": 12228.96
+      },
+      "cache.r7g.8xlarge": {
+        "annual_cost": 24464.93
+      },
+      "cache.r7g.large": {
+        "annual_cost": 1534.75
+      },
+      "cache.r7g.xlarge": {
+        "annual_cost": 3062.5
+      },
+      "cache.r8g.12xlarge": {
+        "annual_cost": 36907.63
+      },
+      "cache.r8g.16xlarge": {
+        "annual_cost": 49211.05
+      },
+      "cache.r8g.2xlarge": {
+        "annual_cost": 6151.27
+      },
+      "cache.r8g.4xlarge": {
+        "annual_cost": 12302.54
+      },
+      "cache.r8g.8xlarge": {
+        "annual_cost": 24605.09
+      },
+      "cache.r8g.large": {
+        "annual_cost": 1538.26
+      },
+      "cache.r8g.xlarge": {
+        "annual_cost": 3075.64
+      }
+    },
+    "services": {},
+    "zones_in_region": 3
+  }
+}

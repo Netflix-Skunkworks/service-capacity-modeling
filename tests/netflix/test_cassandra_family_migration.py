@@ -11,10 +11,13 @@ Two penalties interact:
 
 c6id is not in STATEFUL_DATASTORE_FAMILIES, so it always carries the 15%
 planner penalty. c6id is ~18% cheaper per-CPU than m6id. Combined:
-  - default (10% model + 15% planner = 25% total): m6id wins
+  - default ((1 + 10% model) * (1 + 15% planner)): m6id wins
   - disabled model penalty (0% + 15% planner = 15% total): c6id still wins
     (18% savings > 15% penalty)
-  - high model penalty (25% + 15% = 40%): m6id wins decisively
+  - high model penalty ((1 + 25%) * (1 + 15%)): m6id wins decisively
+
+Ephemeral maintenance regret is disabled in these ordering checks so they
+continue to isolate family selection.
 """
 
 import pytest
@@ -73,7 +76,10 @@ def _first_family(desires, extra_model_arguments, families=None):
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=desires,
-        extra_model_arguments=extra_model_arguments,
+        extra_model_arguments={
+            "ephemeral_maintenance_regret": 0,
+            **extra_model_arguments,
+        },
         instance_families=families,
         num_results=20,
         max_results_per_family=10,
@@ -120,7 +126,10 @@ def test_combined_family_and_large_instance_penalties():
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=desires,
-        extra_model_arguments={"different_family_regret": 0.25},
+        extra_model_arguments={
+            "different_family_regret": 0.25,
+            "ephemeral_maintenance_regret": 0,
+        },
         instance_families=["m6id", "c6id"],
     )
     for p in plans:
@@ -145,7 +154,10 @@ def test_planner_arguments_zero_penalty_pure_cost():
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=desires,
-        extra_model_arguments={"different_family_regret": 0},
+        extra_model_arguments={
+            "different_family_regret": 0,
+            "ephemeral_maintenance_regret": 0,
+        },
         instance_families=["m6id", "c6id"],
         num_results=20,
         max_results_per_family=10,
@@ -155,6 +167,33 @@ def test_planner_arguments_zero_penalty_pure_cost():
     assert plans[0].candidate_clusters.zonal[0].instance.family == "c6id", (
         "With preferred_family_penalty=0 and different_family_regret=0, "
         "c6id should rank first as the cheaper option"
+    )
+
+
+def test_preferred_family_penalty_compounds_model_rank_penalties():
+    desires = _desires("m6id.8xlarge")
+    plan_args = {
+        "model_name": "org.netflix.cassandra",
+        "region": "us-east-1",
+        "desires": desires,
+        "extra_model_arguments": {"ephemeral_maintenance_regret": 0.2},
+        "instance_families": ["c5d"],
+        "num_results": 1,
+    }
+
+    compounded = planner.plan_certain(**plan_args)[0]
+    model_ranked = planner.plan_certain(
+        **plan_args,
+        planner_arguments=PlannerArguments(preferred_family_penalty=0),
+    )[0]
+    service_cost = sum(
+        service.annual_cost for service in compounded.candidate_clusters.services
+    )
+
+    assert compounded.rank == pytest.approx(
+        model_ranked.rank
+        + (model_ranked.rank - service_cost)
+        * PlannerArguments().preferred_family_penalty
     )
 
 

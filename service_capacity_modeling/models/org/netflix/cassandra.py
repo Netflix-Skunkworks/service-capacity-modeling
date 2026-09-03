@@ -93,6 +93,8 @@ CASSANDRA_DISK_IOPS_TARGET_UTILIZATION = 0.90
 CASSANDRA_EBS_SATURATION_TOLERANCE_IOPS = 200
 _CURRENT_TOPOLOGY_DATA_REL_TOLERANCE = 0.05
 _CURRENT_TOPOLOGY_NODE_TOLERANCE = 1
+_EPHEMERAL_MAINTENANCE_THRESHOLD_GIB_PER_NODE = 300
+_EPHEMERAL_MAINTENANCE_CAP_GIB_PER_NODE = 1024
 
 
 def _deployed_topology_saturation_min_count(
@@ -778,6 +780,8 @@ def _get_cluster_size_lambda(
 def _compute_penalties(
     instance: Instance,
     large_instance_regret: float,
+    data_per_node_gib: float,
+    ephemeral_maintenance_regret: float,
     current_family: Optional[str] = None,
     different_family_regret: float = 0.10,  # Empirical; see NflxCassandraArguments
 ) -> Dict[str, float]:
@@ -795,6 +799,27 @@ def _compute_penalties(
     instance_size = float(normalized_aws_size(instance.name))
     if large_instance_regret > 0 and instance_size > 8:
         penalties["large_instance"] = large_instance_regret * (instance_size - 8) / 8
+
+    # Attached storage is easier to grow and replace independently of compute.
+    # Local disks must provide meaningful savings even at low density, and the
+    # required savings grow with data per node because replacement streams more
+    # data. The gradual ramp keeps local NVMe competitive until a node owns about
+    # 1 TiB, where the premium caps at 1.5 times the baseline.
+    if instance.drive is not None and ephemeral_maintenance_regret > 0:
+        density_fraction = min(
+            1,
+            max(
+                0,
+                (data_per_node_gib - _EPHEMERAL_MAINTENANCE_THRESHOLD_GIB_PER_NODE)
+                / (
+                    _EPHEMERAL_MAINTENANCE_CAP_GIB_PER_NODE
+                    - _EPHEMERAL_MAINTENANCE_THRESHOLD_GIB_PER_NODE
+                ),
+            ),
+        )
+        penalties["ephemeral_maintenance"] = ephemeral_maintenance_regret * (
+            1 + 0.5 * density_fraction
+        )
 
     # Penalize switching to a different instance family
     if (
@@ -830,6 +855,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     cluster_size_mode: CassandraClusterSizeMode = CassandraClusterSizeMode.unrestricted,
     allow_ebs_volume_shrink: bool = False,
     large_instance_regret: float = 0.2,
+    ephemeral_maintenance_regret: float = 0.2,
     different_family_regret: float = 0.10,
     max_page_cache_gib: float = DEFAULT_MAX_PAGE_CACHE_GIB,
     backup_retention_days: Optional[float] = None,
@@ -1347,6 +1373,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     penalties = _compute_penalties(
         instance=instance,
         large_instance_regret=large_instance_regret,
+        data_per_node_gib=requirement_estimate.disk_used_gib / cluster.count,
+        ephemeral_maintenance_regret=ephemeral_maintenance_regret,
         current_family=current_family,
         different_family_regret=different_family_regret,
     )
@@ -1616,8 +1644,9 @@ class NflxCassandraArguments(BaseModel):
         "placement membership controls regional network and backup costs.",
     )
     require_local_disks: bool = Field(
-        default=True,
-        description="If local (ephemeral) drives are required",
+        default=False,
+        description="If local (ephemeral) drives are required. When false, both "
+        "local and attached drives may be considered.",
     )
     require_attached_disks: bool = Field(
         default=False,
@@ -1661,6 +1690,15 @@ class NflxCassandraArguments(BaseModel):
         "Adds penalty * max(0, (normalized_size - 8) / 8) * cost to the "
         "effective sort cost. Prevents AWS pricing rounding from favoring "
         "larger instances. Set to 0 to disable.",
+    )
+    ephemeral_maintenance_regret: float = Field(
+        default=0.2,
+        ge=0,
+        description="Baseline compute-cost penalty for local-disk plans and the "
+        "start of its data-per-node growth. Attached storage can grow and be "
+        "replaced independently of compute, so local disks must provide meaningful "
+        "savings to be preferred. The penalty caps at 1.5 times this value. Set to "
+        "0 to disable.",
     )
     different_family_regret: float = Field(
         default=0.10,
@@ -2128,6 +2166,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             or CassandraClusterSizeMode.unrestricted,
             allow_ebs_volume_shrink=args.allow_ebs_volume_shrink,
             large_instance_regret=args.large_instance_regret,
+            ephemeral_maintenance_regret=args.ephemeral_maintenance_regret,
             different_family_regret=args.different_family_regret,
             max_page_cache_gib=args.max_page_cache_gib,
             backup_retention_days=args.backup_retention_days,
@@ -2147,20 +2186,25 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
     ) -> Dict[str, float]:
         regrets = CapacityModel.regret(regret_params, optimal_plan, proposed_plan)
 
-        # Large instance size is a pairwise property — choosing 32xlarge over
-        # 8xlarge has operational risk (fewer nodes, harder to scale) that
-        # varies by scenario. Family migration is not pairwise — it's a fixed
-        # switching cost independent of which plan is optimal, so it only
-        # needs the rank penalty to bias selection toward the current family.
+        # Large instances and local disks carry operational preferences in
+        # uncertain planning as well as deterministic rank. Dense local nodes
+        # carry an additional data-movement penalty.
+        # Family migration is a fixed switching cost independent of which plan
+        # is optimal, so it only biases deterministic candidate selection.
         if proposed_plan.candidate_clusters.zonal:
             params = proposed_plan.candidate_clusters.zonal[0].cluster_params
             penalties = params.get(RANK_PENALTIES, {})
-            if "large_instance" in penalties:
-                # Apply regret only to compute costs (same rationale as rank)
-                compute_cost = float(
-                    sum(c.annual_cost for c in proposed_plan.candidate_clusters.zonal)
-                )
-                regrets["large_instance"] = penalties["large_instance"] * compute_cost
+            compute_cost = float(
+                sum(c.annual_cost for c in proposed_plan.candidate_clusters.zonal)
+            )
+            for name in (
+                "large_instance",
+                "ephemeral_maintenance",
+            ):
+                if name not in penalties:
+                    continue
+                # Apply regret only to compute costs (same rationale as rank).
+                regrets[name] = penalties[name] * compute_cost
 
         return regrets
 

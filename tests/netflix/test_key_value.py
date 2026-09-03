@@ -111,6 +111,24 @@ def test_app_memory_reserve_stays_on_the_kv_tier():
     assert heavy["dgwkv"] != lean["dgwkv"]
 
 
+def test_cassandra_tier_uses_ebs_preference():
+    plan = planner.plan_certain(
+        model_name="org.netflix.key-value",
+        region="us-east-1",
+        desires=MEMORY_SENSITIVE_KV,
+    )[0]
+
+    cassandra = [
+        cluster
+        for cluster in plan.candidate_clusters.zonal
+        if cluster.cluster_type == "cassandra"
+    ]
+    assert cassandra
+    for cluster in cassandra:
+        assert cluster.instance.drive is None
+        assert [drive.name for drive in cluster.attached_drives] == ["gp3"]
+
+
 def test_evcache_also_gets_its_own_app_memory_reserve():
     """EVCache runs on its own shapes too, so the KV reserve stops at KV."""
     cached = LARGE_APP_RESERVE_KV.model_copy(deep=True)

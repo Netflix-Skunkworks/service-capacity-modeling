@@ -386,6 +386,9 @@ class Platform(StrEnum):
     aurora_postgres = "Aurora PostgreSQL"
     """AWS Aurora PostgreSQL-compatible managed database platform"""
 
+    valkey = "Valkey"
+    """AWS ElastiCache for Valkey managed cache platform"""
+
 
 class Instance(ExcludeUnsetModel):
     """Represents a cloud instance aka Hardware Shape
