@@ -9,7 +9,7 @@ from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
-from service_capacity_modeling.interface import UncertainCapacityPlan
+from service_capacity_modeling.interface import CapacityPlan
 
 # Property test configuration for Counter model.
 # See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
@@ -44,16 +44,15 @@ def test_eventual_counter_storage_targets():
         ),
     )
 
-    cap_plan = planner.plan(
+    cap_plan = planner.plan_certain(
         model_name="org.netflix.counter",
         region="us-east-1",
         desires=simple,
-        simulations=256,
         extra_model_arguments={
             "counter.mode": "eventual",
             "counter.cardinality": "high",
         },
-    )
+    )[0]
 
     assert extract_storage_types(cap_plan) == {"cassandra", "nflx-java-app"}
 
@@ -79,21 +78,20 @@ def test_best_eff_counter_storage_targets():
         ),
     )
 
-    cap_plan = planner.plan(
+    cap_plan = planner.plan_certain(
         model_name="org.netflix.counter",
         region="us-east-1",
         desires=simple,
-        simulations=256,
         extra_model_arguments={
             "counter.mode": "best-effort",
             "counter.cardinality": "high",
         },
-    )
+    )[0]
 
     assert extract_storage_types(cap_plan) == {"evcache", "nflx-java-app"}
 
 
-def extract_storage_types(cap_plan: UncertainCapacityPlan) -> Set[str]:
+def extract_storage_types(cap_plan: CapacityPlan) -> Set[str]:
     """Extract the set of storage types used in a capacity plan."""
     storage_types = set()
     for storage_target in cap_plan.requirements.zonal:
