@@ -98,8 +98,6 @@ def test_all_models_produce_valid_plans(model_name, data):
     # If we still get None, use assume() to filter it out
     assume(plan is not None)
 
-    # These are facets of one valid-plan contract. Sharing the generated plan
-    # preserves 20 examples per assertion without repeating catalog traversal.
     # Plans should have either clusters (EC2) or managed services
     # (like DynamoDB)
     assert (

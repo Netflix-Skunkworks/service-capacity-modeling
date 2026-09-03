@@ -22,9 +22,6 @@ PROPERTY_TEST_CONFIG = {
     },
 }
 
-# Counter mode chooses its composed storage targets before uncertainty sampling.
-# These tests isolate that routing contract with the deterministic planner.
-
 
 def test_eventual_counter_storage_targets():
     """Test that counter.mode='eventual' selects Cassandra storage."""

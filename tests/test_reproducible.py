@@ -74,8 +74,6 @@ def test_compositional():
     filtering across both regional and zonal dimensions, but that is a
     presentation concern - the underlying Cassandra planning must be identical.
     """
-    # Equality is the contract. Four deterministic samples exercise uncertain
-    # composition without paying for the production convergence default.
     direct_result = planner.plan(
         model_name="org.netflix.cassandra",
         region="us-east-1",
