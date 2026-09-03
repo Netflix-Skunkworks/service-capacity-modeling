@@ -54,7 +54,6 @@ from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import (
     ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT,
 )
-from service_capacity_modeling.models.common import AttachedDriveSizingError
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import DerivedBuffers
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
@@ -95,23 +94,6 @@ _CURRENT_TOPOLOGY_DATA_REL_TOLERANCE = 0.05
 _CURRENT_TOPOLOGY_NODE_TOLERANCE = 1
 _EPHEMERAL_MAINTENANCE_THRESHOLD_GIB_PER_NODE = 300
 _EPHEMERAL_MAINTENANCE_CAP_GIB_PER_NODE = 1024
-
-
-def _deployed_topology_saturation_min_count(
-    current_count: int,
-    projected_iops_per_node: float,
-    drive_iops_limit: int,
-    disk_iops_buffer_ratio: float,
-) -> int:
-    return max(
-        current_count + 1,
-        math.ceil(
-            current_count
-            * projected_iops_per_node
-            * disk_iops_buffer_ratio
-            / drive_iops_limit
-        ),
-    )
 
 
 def _with_disk_utilization_buffer(
@@ -259,15 +241,21 @@ class CassandraEbsIopsEvidence(BaseModel):
 
     peak_iops_per_node: float = Field(gt=0, allow_inf_nan=False)
     configured_iops_per_node: int = Field(gt=ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT)
-    read_io_per_read: float = Field(gt=0, allow_inf_nan=False)
-    write_io_per_write: float = Field(gt=0, allow_inf_nan=False)
+    regional_read_per_second: float = Field(ge=0, allow_inf_nan=False)
+    regional_write_per_second: float = Field(ge=0, allow_inf_nan=False)
+    mean_read_size_bytes: float = Field(gt=0, allow_inf_nan=False)
+    mean_write_size_bytes: float = Field(gt=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
-    def _check_peak_below_limit(self) -> "CassandraEbsIopsEvidence":
+    def _check_observation(self) -> "CassandraEbsIopsEvidence":
         if self.peak_iops_per_node > self.configured_iops_per_node:
             raise ValueError(
                 "peak_iops_per_node must be less than or equal to "
                 "configured_iops_per_node"
+            )
+        if self.regional_read_per_second + self.regional_write_per_second <= 0:
+            raise ValueError(
+                "EBS IOPS evidence requires observed read or write traffic"
             )
         return self
 
@@ -1072,123 +1060,125 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         if current_zonal
         else current_count
     )
-    read_io_calibration_factor = 1.0
-    read_io_calibrated = False
-    write_io_calibration_factor = 1.0
+    iops_calibration_factor = 1.0
+    iops_calibration_applied = False
     reported_io_calibration: Dict[str, Any] = {}
     current_topology_iops_governor: Optional[str] = None
     deployed_topology_iops_min_count: Optional[int] = None
-    deployed_topology_iops_floor_per_node: Optional[float] = None
-    max_attached_drive_io_per_s: Optional[float] = None
-    if is_ebs and current_cluster_size > 0:
+    if is_ebs and current_cluster_size > 0 and ebs_iops_evidence is not None:
         assert current_capacity is not None
-        if ebs_iops_evidence is not None and rps > 0 and current_data_per_node_gib > 0:
-            modeled_read_io_per_read = _cass_io_per_read(current_data_per_node_gib) * (
-                math.ceil(read_io_per_sec / current_count) * current_count / rps
+        current_drive = current_capacity.cluster_drive
+        homogeneous_deployed_zones = _has_homogeneous_current_zonal_topology(
+            desires,
+            current_capacity,
+            zones_per_region,
+        )
+        deployed_evidence_matches_current_cluster = (
+            homogeneous_deployed_zones
+            and current_data_per_node_gib > 0
+            and current_drive is not None
+            and current_drive.drive_type == DriveType.attached_ssd
+        )
+        same_deployed_topology = (
+            deployed_evidence_matches_current_cluster
+            and current_drive is not None
+            and instance.name == current_capacity.cluster_instance_name
+            and drive.name == current_drive.name
+            and drive.drive_type == current_drive.drive_type
+        )
+        observation_at_configured_limit = (
+            ebs_iops_evidence.peak_iops_per_node
+            > ebs_iops_evidence.configured_iops_per_node
+            - CASSANDRA_EBS_SATURATION_TOLERANCE_IOPS
+        )
+        modeled_current_iops_per_node: Optional[float] = None
+        raw_iops_calibration_factor: Optional[float] = None
+        if deployed_evidence_matches_current_cluster:
+            assert current_drive is not None
+            observed_current_count = min(
+                math.ceil(capacity.cluster_instance_count.mid)
+                for capacity in current_zonal
             )
-            read_io_calibration_factor = (
-                ebs_iops_evidence.read_io_per_read / modeled_read_io_per_read
+            observed_read_per_zone = (
+                ebs_iops_evidence.regional_read_per_second / zones_per_region
             )
-            read_io_calibrated = True
-            reported_io_calibration.update(
-                {
-                    "observed_read_io_per_read": ebs_iops_evidence.read_io_per_read,
-                    "modeled_read_io_per_read": modeled_read_io_per_read,
-                    "read_io_calibration_factor": read_io_calibration_factor,
-                }
+            observed_write_per_zone = (
+                ebs_iops_evidence.regional_write_per_second / zones_per_region
             )
-        if ebs_iops_evidence is not None:
-            current_drive = current_capacity.cluster_drive
-            homogeneous_deployed_zones = _has_homogeneous_current_zonal_topology(
-                desires,
-                current_capacity,
-                zones_per_region,
+            observed_read_bytes_per_second = (
+                observed_read_per_zone * ebs_iops_evidence.mean_read_size_bytes
             )
-            deployed_evidence_matches_current_cluster = (
-                homogeneous_deployed_zones
-                and current_drive is not None
-                and current_drive.drive_type == DriveType.attached_ssd
+            observed_write_bytes_per_second = round(
+                observed_write_per_zone * ebs_iops_evidence.mean_write_size_bytes
             )
-            same_deployed_topology = (
-                deployed_evidence_matches_current_cluster
-                and current_drive is not None
-                and instance.name == current_capacity.cluster_instance_name
-                and drive.name == current_drive.name
-                and drive.drive_type == current_drive.drive_type
+            observed_read_io_per_second = max(
+                observed_read_per_zone,
+                observed_read_bytes_per_second
+                // (current_drive.rand_io_size_kib * 1024),
             )
+            observed_write_io_per_second = 5 * max(
+                1,
+                observed_write_bytes_per_second
+                // (current_drive.seq_io_size_kib * 1024),
+            )
+            modeled_current_iops_per_node = (
+                _cass_io_per_read(hottest_current_data_per_node_gib)
+                * math.ceil(observed_read_io_per_second / observed_current_count)
+                + observed_write_io_per_second / observed_current_count
+            )
+            raw_iops_calibration_factor = (
+                ebs_iops_evidence.peak_iops_per_node / modeled_current_iops_per_node
+            )
+            iops_calibration_factor = (
+                max(1.0, raw_iops_calibration_factor)
+                if observation_at_configured_limit
+                else raw_iops_calibration_factor
+            )
+            iops_calibration_applied = True
             if same_deployed_topology:
                 deployed_topology_iops_min_count = deployed_zonal_count_floor
-            observation_at_configured_limit = (
-                ebs_iops_evidence.peak_iops_per_node
-                > ebs_iops_evidence.configured_iops_per_node
-                - CASSANDRA_EBS_SATURATION_TOLERANCE_IOPS
-            )
-            if not deployed_evidence_matches_current_cluster:
-                current_topology_iops_governor = "deployed_evidence_topology_mismatch"
-            elif observation_at_configured_limit:
+            if observation_at_configured_limit:
                 current_topology_iops_governor = (
                     "candidate_model_observation_at_configured_limit"
                 )
-                deployed_topology_iops_floor_per_node = (
-                    ebs_iops_evidence.peak_iops_per_node
-                )
-                candidate_drive_iops_limit = drive.max_io_per_s
-                if (
-                    deployed_topology_iops_floor_per_node * disk_iops_buffer_ratio
-                    > candidate_drive_iops_limit
-                ):
-                    deployed_topology_iops_min_count = (
-                        _deployed_topology_saturation_min_count(
-                            deployed_zonal_count_floor,
-                            deployed_topology_iops_floor_per_node,
-                            drive.max_io_per_s,
-                            disk_iops_buffer_ratio,
-                        )
-                    )
-                    reported_io_calibration[
-                        "deployed_topology_saturation_min_count"
-                    ] = deployed_topology_iops_min_count
-                # The deployed setting identifies censored evidence, but EBS
-                # IOPS can be raised independently for a candidate volume.
-                max_attached_drive_io_per_s = candidate_drive_iops_limit
-            elif not same_deployed_topology:
-                current_topology_iops_governor = "candidate_model_different_topology"
-            else:
+            elif same_deployed_topology:
                 current_topology_iops_governor = "deployed_topology"
-            reported_io_calibration.update(
-                {
-                    "observed_max_total_iops_per_node": (
-                        ebs_iops_evidence.peak_iops_per_node
-                    ),
-                    "candidate_drive_max_iops_per_node": drive.max_io_per_s,
-                    "deployed_configured_iops_limit": (
-                        ebs_iops_evidence.configured_iops_per_node
-                    ),
-                    "observation_at_configured_limit": observation_at_configured_limit,
-                    "current_topology_iops_governor": current_topology_iops_governor,
-                    "same_deployed_topology": same_deployed_topology,
-                    "deployed_evidence_matches_current_cluster": (
-                        deployed_evidence_matches_current_cluster
-                    ),
-                    "homogeneous_deployed_zones": homogeneous_deployed_zones,
-                }
-            )
-            if deployed_topology_iops_floor_per_node is not None:
-                reported_io_calibration["deployed_topology_iops_floor_per_node"] = (
-                    deployed_topology_iops_floor_per_node
-                )
-        if ebs_iops_evidence is not None and write_per_sec > 0:
-            modeled_write_io_per_write = write_io_per_sec / write_per_sec
-            write_io_calibration_factor = (
-                ebs_iops_evidence.write_io_per_write / modeled_write_io_per_write
-            )
-            reported_io_calibration.update(
-                {
-                    "observed_write_io_per_write": ebs_iops_evidence.write_io_per_write,
-                    "modeled_write_io_per_write": modeled_write_io_per_write,
-                    "write_io_calibration_factor": write_io_calibration_factor,
-                }
-            )
+            else:
+                current_topology_iops_governor = "candidate_model_different_topology"
+        else:
+            current_topology_iops_governor = "deployed_evidence_topology_mismatch"
+
+        reported_io_calibration.update(
+            {
+                "observed_max_total_iops_per_node": (
+                    ebs_iops_evidence.peak_iops_per_node
+                ),
+                "modeled_current_iops_per_node": modeled_current_iops_per_node,
+                "raw_iops_calibration_factor": raw_iops_calibration_factor,
+                "iops_calibration_factor": (
+                    iops_calibration_factor if iops_calibration_applied else None
+                ),
+                "regional_read_per_second": (
+                    ebs_iops_evidence.regional_read_per_second
+                ),
+                "regional_write_per_second": (
+                    ebs_iops_evidence.regional_write_per_second
+                ),
+                "mean_read_size_bytes": ebs_iops_evidence.mean_read_size_bytes,
+                "mean_write_size_bytes": ebs_iops_evidence.mean_write_size_bytes,
+                "candidate_drive_max_iops_per_node": drive.max_io_per_s,
+                "deployed_configured_iops_limit": (
+                    ebs_iops_evidence.configured_iops_per_node
+                ),
+                "observation_at_configured_limit": observation_at_configured_limit,
+                "current_topology_iops_governor": current_topology_iops_governor,
+                "same_deployed_topology": same_deployed_topology,
+                "deployed_evidence_matches_current_cluster": (
+                    deployed_evidence_matches_current_cluster
+                ),
+                "homogeneous_deployed_zones": homogeneous_deployed_zones,
+            }
+        )
     cluster_size_lambda = _get_cluster_size_lambda(
         cluster_size_mode,
         current_cluster_size=current_cluster_size,
@@ -1232,81 +1222,64 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     def max_node_disk(d: Drive) -> int:
         return max(math.ceil(d.max_size_gib / 3), ebs_disk_floor)
 
+    modeled_disk_iops_by_count: Dict[int, float] = {}
     unbuffered_disk_iops_by_count: Dict[int, float] = {}
 
     def required_disk_ios(_size: float, count: int) -> Tuple[float, float]:
-        modeled_read_iops = (
-            read_io_calibration_factor
-            * _cass_io_per_read(
-                max(1, requirement_estimate.disk_used_gib / count)
-                if read_io_calibrated
-                else _size
-            )
-            * math.ceil(read_io_per_sec / count)
+        modeled_read_iops = _cass_io_per_read(_size) * math.ceil(
+            read_io_per_sec / count
         )
-        modeled_write_iops = write_io_calibration_factor * write_io_per_sec / count
+        modeled_write_iops = write_io_per_sec / count
         modeled_total_iops = modeled_read_iops + modeled_write_iops
-        selected_read_iops = modeled_read_iops
-        selected_write_iops = modeled_write_iops
-        if (
-            current_topology_iops_governor
-            == "candidate_model_observation_at_configured_limit"
-            and deployed_topology_iops_floor_per_node is not None
-        ):
-            evidence_total_iops = (
-                deployed_topology_iops_floor_per_node
-                * deployed_zonal_count_floor
-                / count
-            )
-            if modeled_total_iops < evidence_total_iops:
-                read_fraction = (
-                    modeled_read_iops / modeled_total_iops
-                    if modeled_total_iops > 0
-                    else 1.0
-                )
-                selected_read_iops = (
-                    math.floor(
-                        evidence_total_iops
-                        * read_fraction
-                        / ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT
-                    )
-                    * ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT
-                )
-                selected_write_iops = evidence_total_iops - selected_read_iops
+        selected_read_iops = modeled_read_iops * iops_calibration_factor
+        selected_write_iops = modeled_write_iops * iops_calibration_factor
+        modeled_disk_iops_by_count[count] = modeled_total_iops
         unbuffered_disk_iops_by_count[count] = selected_read_iops + selected_write_iops
+        if iops_calibration_applied:
+            # gp3 exposes one shared IOPS setting. Round that total once, then
+            # split it into 200-IOPS read/write quanta for the drive contract.
+            selected_total_iops = selected_read_iops + selected_write_iops
+            buffered_total_iops = (
+                math.ceil(
+                    selected_total_iops
+                    * disk_iops_buffer_ratio
+                    / ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT
+                )
+                * ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT
+            )
+            buffered_read_iops = (
+                math.floor(
+                    buffered_total_iops
+                    * selected_read_iops
+                    / selected_total_iops
+                    / ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT
+                )
+                * ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT
+            )
+            return buffered_read_iops, buffered_total_iops - buffered_read_iops
         return (
             selected_read_iops * disk_iops_buffer_ratio,
             selected_write_iops * disk_iops_buffer_ratio,
         )
 
-    try:
-        cluster = compute_stateful_zone(
-            instance=instance,
-            drive=drive,
-            needed_cores=int(requirement.cpu_cores.mid),
-            needed_disk_gib=needed_disk_gib,
-            needed_memory_gib=int(requirement.mem_gib.mid),
-            needed_network_mbps=requirement.network_mbps.mid,
-            # Take into account the reads per read
-            # from the per node dataset using leveled compaction
-            required_disk_ios=required_disk_ios,
-            # Critical C* clusters grow by doubling from the current cluster size.
-            cluster_size=cluster_size_lambda,
-            min_count=min_count,
-            reserve_memory=lambda x: x - memory_layout(x).page_cache_capacity_gib,
-            write_buffer=lambda x: heap_fn(x) * max_write_buffer_percent * 0.25,
-            required_write_buffer_gib=requirement_estimate.write_buffer_gib,
-            max_node_disk_gib=max_node_disk,
-            max_attached_drive_io_per_s=max_attached_drive_io_per_s,
-        )
-    except AttachedDriveSizingError as error:
-        return Excuse(
-            instance=instance.name,
-            drive=drive_name,
-            reason=str(error),
-            context={"ebs_io_calibration": reported_io_calibration},
-            bottleneck=Bottleneck.disk_iops,
-        )
+    cluster = compute_stateful_zone(
+        instance=instance,
+        drive=drive,
+        needed_cores=int(requirement.cpu_cores.mid),
+        needed_disk_gib=needed_disk_gib,
+        needed_memory_gib=int(requirement.mem_gib.mid),
+        needed_network_mbps=requirement.network_mbps.mid,
+        # Take into account the reads per read
+        # from the per node dataset using leveled compaction
+        required_disk_ios=required_disk_ios,
+        # Critical C* clusters grow by doubling from the current cluster size.
+        cluster_size=cluster_size_lambda,
+        min_count=min_count,
+        reserve_memory=lambda x: x - memory_layout(x).page_cache_capacity_gib,
+        write_buffer=lambda x: heap_fn(x) * max_write_buffer_percent * 0.25,
+        required_write_buffer_gib=requirement_estimate.write_buffer_gib,
+        max_node_disk_gib=max_node_disk,
+    )
     if ebs_disk_floor and cluster.attached_drives:
         for attached_drive in cluster.attached_drives:
             attached_drive.size_gib = max(attached_drive.size_gib, ebs_disk_floor)
@@ -1338,16 +1311,19 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         assert attached_drive.read_io_per_s is not None
         assert attached_drive.write_io_per_s is not None
         provisioned_iops = attached_drive.read_io_per_s + attached_drive.write_io_per_s
-        if current_topology_iops_governor == (
+        if not iops_calibration_applied:
+            demand_source = "modeled"
+        elif current_topology_iops_governor == (
             "candidate_model_observation_at_configured_limit"
         ):
             demand_source = "deployed_peak_lower_bound"
-        elif ebs_iops_evidence is not None:
-            demand_source = "calibrated_model"
         else:
-            demand_source = "modeled"
+            demand_source = "calibrated_model"
         params["cassandra.disk_iops_headroom"] = {
             "demand_source": demand_source,
+            "modeled_candidate_iops_per_node": round(
+                modeled_disk_iops_by_count[cluster.count], 2
+            ),
             "expected_peak_iops_per_node": round(expected_peak_iops, 2),
             "target_utilization": CASSANDRA_DISK_IOPS_TARGET_UTILIZATION,
             "required_iops_before_rounding": round(

@@ -243,15 +243,19 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         *,
         peak_iops_per_node: float = 12_000,
         configured_iops_per_node: int = 16_000,
-        read_io_per_read: float = 0.1,
-        write_io_per_write: float = 1.0,
+        regional_read_per_second: float = 300_000,
+        regional_write_per_second: float = 300_000,
+        mean_read_size_bytes: float = 1024,
+        mean_write_size_bytes: float = 256,
     ):
         return {
             "ebs_iops_evidence": {
                 "peak_iops_per_node": peak_iops_per_node,
                 "configured_iops_per_node": configured_iops_per_node,
-                "read_io_per_read": read_io_per_read,
-                "write_io_per_write": write_io_per_write,
+                "regional_read_per_second": regional_read_per_second,
+                "regional_write_per_second": regional_write_per_second,
+                "mean_read_size_bytes": mean_read_size_bytes,
+                "mean_write_size_bytes": mean_write_size_bytes,
             }
         }
 
@@ -261,8 +265,10 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         *,
         peak_iops_per_node=12_000,
         configured_iops_per_node=16_000,
-        read_io_per_read=0.1,
-        write_io_per_write=1.0,
+        regional_read_per_second=300_000,
+        regional_write_per_second=300_000,
+        mean_read_size_bytes=1024,
+        mean_write_size_bytes=256,
         num_results=1,
         **extra_model_arguments,
     ):
@@ -278,8 +284,10 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
                 **self._ebs_iops_evidence(
                     peak_iops_per_node=peak_iops_per_node,
                     configured_iops_per_node=configured_iops_per_node,
-                    read_io_per_read=read_io_per_read,
-                    write_io_per_write=write_io_per_write,
+                    regional_read_per_second=regional_read_per_second,
+                    regional_write_per_second=regional_write_per_second,
+                    mean_read_size_bytes=mean_read_size_bytes,
+                    mean_write_size_bytes=mean_write_size_bytes,
                 ),
                 **extra_model_arguments,
             },
@@ -287,31 +295,38 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             num_results=num_results,
         )
 
-    def test_ebs_evidence_calibrates_directional_demand(self):
-        desires = self._existing_ebs_desires()
-        baseline = self._ebs_plan(desires)
-        calibrated = self._ebs_plan(
-            desires,
-            **self._ebs_iops_evidence(
-                read_io_per_read=0.0002,
-                write_io_per_write=1.0,
-            ),
+    def test_ebs_evidence_calibrates_total_iops_demand(self):
+        cluster = (
+            self._ebs_explained(
+                self._existing_ebs_desires(),
+                peak_iops_per_node=8_000,
+                required_cluster_size=64,
+            )
+            .plans[0]
+            .candidate_clusters.zonal[0]
         )
 
-        calibration = calibrated.cluster_params["cassandra.ebs_io_calibration"]
-        assert calibration["observed_read_io_per_read"] == 0.0002
-        assert calibration["observed_write_io_per_write"] == 1.0
-        assert sum(
-            d.read_io_per_s + d.write_io_per_s for d in calibrated.attached_drives
-        ) < sum(d.read_io_per_s + d.write_io_per_s for d in baseline.attached_drives)
+        calibration = cluster.cluster_params["cassandra.ebs_io_calibration"]
+        headroom = cluster.cluster_params["cassandra.disk_iops_headroom"]
+        assert calibration["iops_calibration_factor"] == pytest.approx(
+            8_000 / calibration["modeled_current_iops_per_node"]
+        )
+        assert calibration["iops_calibration_factor"] < 1
+        assert headroom["expected_peak_iops_per_node"] == pytest.approx(
+            headroom["modeled_candidate_iops_per_node"]
+            * calibration["iops_calibration_factor"],
+            abs=0.02,
+        )
 
     @pytest.mark.parametrize(
         ("field", "value"),
         [
             ("peak_iops_per_node", 0),
             ("configured_iops_per_node", 200),
-            ("read_io_per_read", float("nan")),
-            ("write_io_per_write", float("inf")),
+            ("regional_read_per_second", float("nan")),
+            ("regional_write_per_second", float("inf")),
+            ("mean_read_size_bytes", 0),
+            ("mean_write_size_bytes", float("inf")),
         ],
     )
     def test_ebs_iops_evidence_validates_measurements(self, field, value):
@@ -321,6 +336,15 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         with pytest.raises(ValueError):
             NflxCassandraArguments.from_extra_model_arguments(
                 {"ebs_iops_evidence": evidence}
+            )
+
+    def test_ebs_iops_evidence_requires_observed_traffic(self):
+        with pytest.raises(ValueError, match="requires observed read or write traffic"):
+            NflxCassandraArguments.from_extra_model_arguments(
+                self._ebs_iops_evidence(
+                    regional_read_per_second=0,
+                    regional_write_per_second=0,
+                )
             )
 
     def test_ebs_iops_evidence_rejects_peak_above_configured_limit(self):
@@ -340,7 +364,6 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             self._ebs_explained(
                 self._existing_ebs_desires(),
                 peak_iops_per_node=8_000,
-                read_io_per_read=0.1,
                 required_cluster_size=64,
             )
             .plans[0]
@@ -370,7 +393,6 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             self._ebs_explained(
                 desires,
                 peak_iops_per_node=8_000,
-                read_io_per_read=0.1,
                 required_cluster_size=64,
             )
             .plans[0]
@@ -385,8 +407,8 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
                 self._existing_ebs_desires(),
                 peak_iops_per_node=16_000,
                 configured_iops_per_node=16_000,
-                read_io_per_read=0.0002,
-                write_io_per_write=0.0002,
+                regional_read_per_second=600_000,
+                regional_write_per_second=600_000,
                 num_results=20,
                 max_regional_size=600,
             )
@@ -399,6 +421,8 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         assert calibration["current_topology_iops_governor"] == (
             "candidate_model_observation_at_configured_limit"
         )
+        assert calibration["raw_iops_calibration_factor"] < 1
+        assert calibration["iops_calibration_factor"] == 1
         assert cluster.count > 64
         assert headroom["demand_source"] == "deployed_peak_lower_bound"
         assert headroom["planned_utilization"] <= 0.9
@@ -428,6 +452,15 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             == "deployed_evidence_topology_mismatch"
             for calibration in calibrations
         )
+        assert all(
+            calibration["iops_calibration_factor"] is None
+            for calibration in calibrations
+        )
+
+        baseline = self._ebs_plan(desires)
+        rejected = self._ebs_plan(desires, **self._ebs_iops_evidence())
+        assert rejected.count == baseline.count
+        assert rejected.attached_drives == baseline.attached_drives
 
     def test_ebs_iops_evidence_requires_current_cluster(self):
         with pytest.raises(
@@ -584,30 +617,6 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
 
         assert result.attached_drives[0].size_gib >= int(
             5000 / CASSANDRA_MAX_DISK_UTILIZATION
-        )
-
-    def test_hottest_zone_volume_floor_does_not_change_anchor_read_calibration(self):
-        baseline_desires = self._existing_ebs_desires(disk_utilization_gib=100)
-        hotter_zone_desires = baseline_desires.model_copy(deep=True)
-        hotter_zone_desires.current_clusters.zonal[
-            1
-        ].disk_utilization_gib = certain_float(5000)
-
-        baseline = self._ebs_plan(
-            baseline_desires,
-            **self._ebs_iops_evidence(read_io_per_read=20.0),
-        )
-        hotter_zone = self._ebs_plan(
-            hotter_zone_desires,
-            **self._ebs_iops_evidence(read_io_per_read=20.0),
-        )
-
-        baseline_calibration = baseline.cluster_params["cassandra.ebs_io_calibration"]
-        hotter_zone_calibration = hotter_zone.cluster_params[
-            "cassandra.ebs_io_calibration"
-        ]
-        assert hotter_zone_calibration["read_io_calibration_factor"] == pytest.approx(
-            baseline_calibration["read_io_calibration_factor"]
         )
 
     def test_existing_ebs_volume_floor_uses_largest_reported_zone_volume(self):

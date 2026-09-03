@@ -54,11 +54,6 @@ SECONDS_IN_YEAR = 31556926
 EFFECTIVE_DISK_PER_NODE_GIB = "effective_disk_per_node_gib"
 _ATTACHED_DRIVE_MAX_ITERATIONS = 10
 ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT = 200
-_ATTACHED_DRIVE_MAX_SEARCH_ITERATIONS = 64
-
-
-class AttachedDriveSizingError(ValueError):
-    """Attached-drive constraints have no bounded convergent sizing result."""
 
 
 def upsert_params(cluster: ClusterCapacity, params: Dict[str, Any]) -> None:
@@ -603,17 +598,7 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     # Maximum EBS volume size per node. Default caps at 1/3 max to leave
     # growth headroom. Models can override for clusters with known disk needs.
     max_node_disk_gib: Callable[[Drive], int] = lambda d: math.ceil(d.max_size_gib / 3),
-    max_attached_drive_io_per_s: Optional[float] = None,
 ) -> ZoneClusterCapacity:
-    if max_attached_drive_io_per_s is not None and (
-        not math.isfinite(max_attached_drive_io_per_s)
-        or max_attached_drive_io_per_s < ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT
-    ):
-        raise ValueError(
-            "max_attached_drive_io_per_s must be finite and at least "
-            f"{ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT:g}"
-        )
-
     # CPU
     count_cpu = math.ceil(needed_cores / instance.cpu)
 
@@ -660,7 +645,6 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
             min_count=min_count,
             required_disk_ios=required_disk_ios,
             max_node_disk_gib=max_node_disk_gib,
-            max_attached_drive_io_per_s=max_attached_drive_io_per_s,
         )
         count_disk_capacity = attached_drive_plan.count_disk_capacity
         count_disk_iops = attached_drive_plan.count_disk_iops
@@ -746,89 +730,7 @@ class _AttachedDrivePlanResult(NamedTuple):
     attached_drives: List[Drive]
 
 
-class _AttachedDriveSizing(NamedTuple):
-    count_disk_capacity: int
-    count_disk_iops: int
-    drive_size_gib: int
-    read_io: float
-    write_io: float
-    next_count: int
-
-
-def _smallest_valid_attached_drive_count(
-    *,
-    initial_count: int,
-    final_count: int,
-    min_count: int,
-    cluster_size: Callable[[int], int],
-    sizing_for_count: Callable[[int], _AttachedDriveSizing],
-    count_source: Optional[str],
-) -> Tuple[int, _AttachedDriveSizing, Optional[str]]:
-    """Find the smallest valid rounded count without enumerating the range.
-
-    ``sizing_for_count`` must be monotone: after one count satisfies its returned
-    ``next_count``, every larger rounded count must also satisfy it.
-    """
-    best_count = final_count
-    best_sizing = sizing_for_count(final_count)
-    low_raw_count = initial_count
-    high_raw_count = final_count
-    for _ in range(_ATTACHED_DRIVE_MAX_SEARCH_ITERATIONS):
-        if low_raw_count > high_raw_count:
-            break
-        raw_count = (low_raw_count + high_raw_count) // 2
-        candidate_count = int(math.ceil(max(cluster_size(raw_count), min_count)))
-        if candidate_count > final_count:
-            high_raw_count = raw_count - 1
-            continue
-        candidate_sizing = sizing_for_count(candidate_count)
-        if candidate_sizing.next_count <= candidate_count:
-            if candidate_count < best_count:
-                best_count = candidate_count
-                best_sizing = candidate_sizing
-            high_raw_count = raw_count - 1
-            continue
-        count_source = (
-            "disk_iops"
-            if candidate_sizing.count_disk_iops >= candidate_sizing.count_disk_capacity
-            else "disk_capacity"
-        )
-        low_raw_count = raw_count + 1
-    return best_count, best_sizing, count_source
-
-
-def _smallest_valid_attached_drive_count_legacy(
-    *,
-    initial_count: int,
-    final_count: int,
-    min_count: int,
-    cluster_size: Callable[[int], int],
-    sizing_for_count: Callable[[int], _AttachedDriveSizing],
-    count_source: Optional[str],
-) -> Tuple[int, _AttachedDriveSizing, Optional[str]]:
-    """Preserve the exhaustive search contract for unrestricted callers."""
-    final_sizing = sizing_for_count(final_count)
-    candidate_counts = sorted(
-        count
-        for count in {
-            int(math.ceil(max(cluster_size(raw_count), min_count)))
-            for raw_count in range(initial_count, final_count + 1)
-        }
-        if count <= final_count
-    )
-    for candidate_count in candidate_counts:
-        candidate_sizing = sizing_for_count(candidate_count)
-        if candidate_sizing.next_count <= candidate_count:
-            return candidate_count, candidate_sizing, count_source
-        count_source = (
-            "disk_iops"
-            if candidate_sizing.count_disk_iops >= candidate_sizing.count_disk_capacity
-            else "disk_capacity"
-        )
-    return final_count, final_sizing, count_source
-
-
-def _attached_drive_plan(  # noqa: C901
+def _attached_drive_plan(
     *,
     drive: Drive,
     needed_disk_gib: float,
@@ -839,20 +741,21 @@ def _attached_drive_plan(  # noqa: C901
     min_count: int,
     required_disk_ios: Callable[[float, int], Tuple[float, float]],
     max_node_disk_gib: Callable[[Drive], int],
-    max_attached_drive_io_per_s: Optional[float],
 ) -> _AttachedDrivePlanResult:
     preliminary_resource_count = max(count_cpu, count_memory, count_network)
     min_count = int(math.ceil(min_count))
     initial_count = max(cluster_size(preliminary_resource_count), min_count)
     max_size_gib = max_node_disk_gib(drive)
-    attached_drive_io_limit = min(
-        drive.max_io_per_s,
-        max_attached_drive_io_per_s
-        if max_attached_drive_io_per_s is not None
-        else drive.max_io_per_s,
-    )
 
-    def sizing_for_count(node_count: int) -> _AttachedDriveSizing:
+    class AttachedDriveSizing(NamedTuple):
+        count_disk_capacity: int
+        count_disk_iops: int
+        drive_size_gib: int
+        read_io: float
+        write_io: float
+        next_count: int
+
+    def sizing_for_count(node_count: int) -> AttachedDriveSizing:
         space_gib = max(1, math.ceil(needed_disk_gib / node_count))
         read_io, write_io = required_disk_ios(space_gib, node_count)
         read_io, write_io = (
@@ -860,26 +763,20 @@ def _attached_drive_plan(  # noqa: C901
             utils.next_n(write_io, n=ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT),
         )
         io_gib = cloud_gib_for_io(drive, read_io + write_io, space_gib)
-        required_drive_size_gib = max(1, io_gib, space_gib)
-        drive_size_gib = utils.next_n(required_drive_size_gib, n=100)
+        drive_size_gib = utils.next_n(max(1, io_gib, space_gib), n=100)
 
         count_disk_capacity = 0
         if max_size_gib > 0:
-            capacity_drive_size_gib = (
-                required_drive_size_gib
-                if max_attached_drive_io_per_s is not None
-                else drive_size_gib
-            )
-            drive_size_gib = min(drive_size_gib, int(max_size_gib))
             count_disk_capacity = max(
                 math.ceil(needed_disk_gib / max_size_gib),
-                math.ceil(node_count * capacity_drive_size_gib / max_size_gib),
+                math.ceil(node_count * drive_size_gib / max_size_gib),
             )
+            drive_size_gib = min(drive_size_gib, int(max_size_gib))
 
         count_disk_iops = 0
-        if (read_io + write_io) > attached_drive_io_limit:
+        if (read_io + write_io) > drive.max_io_per_s:
             count_disk_iops = math.ceil(
-                node_count * ((read_io + write_io) / attached_drive_io_limit)
+                node_count * ((read_io + write_io) / drive.max_io_per_s)
             )
 
         next_count = int(
@@ -896,7 +793,7 @@ def _attached_drive_plan(  # noqa: C901
                 )
             )
         )
-        return _AttachedDriveSizing(
+        return AttachedDriveSizing(
             count_disk_capacity=count_disk_capacity,
             count_disk_iops=count_disk_iops,
             drive_size_gib=drive_size_gib,
@@ -907,7 +804,7 @@ def _attached_drive_plan(  # noqa: C901
 
     effective_count = initial_count
     final_count = effective_count
-    final_sizing: _AttachedDriveSizing
+    final_sizing: AttachedDriveSizing
     final_count_source: Optional[str] = None
 
     for _ in range(_ATTACHED_DRIVE_MAX_ITERATIONS):
@@ -923,50 +820,25 @@ def _attached_drive_plan(  # noqa: C901
             else "disk_capacity"
         )
         effective_count = sizing.next_count
-    else:
-        # Preserve the historical best-effort behavior for callers that did
-        # not request a stricter IOPS ceiling. The typed failure is part of the
-        # new explicit-limit contract used by Cassandra evidence planning.
-        if max_attached_drive_io_per_s is None:
-            # The historical scan included the count advanced by the tenth
-            # rejected candidate. Evaluate that boundary before best effort.
-            final_count = effective_count
-            final_sizing = sizing_for_count(final_count)
-        else:
-            unresolved_iops = sizing.read_io + sizing.write_io > attached_drive_io_limit
-            if not unresolved_iops:
-                raise AttachedDriveSizingError(
-                    "attached drive sizing did not converge within "
-                    f"{_ATTACHED_DRIVE_MAX_ITERATIONS} iterations; disk capacity or "
-                    "cluster-size rounding did not reach a fixed point"
-                )
-            raise AttachedDriveSizingError(
-                "attached drive sizing did not converge within "
-                f"{_ATTACHED_DRIVE_MAX_ITERATIONS} iterations; required rounded IOPS "
-                f"remain above the {attached_drive_io_limit:g} IOPS limit"
-            )
 
-    if max_attached_drive_io_per_s is None:
-        final_count, final_sizing, final_count_source = (
-            _smallest_valid_attached_drive_count_legacy(
-                initial_count=initial_count,
-                final_count=final_count,
-                min_count=min_count,
-                cluster_size=cluster_size,
-                sizing_for_count=sizing_for_count,
-                count_source=final_count_source,
-            )
-        )
-    else:
-        final_count, final_sizing, final_count_source = (
-            _smallest_valid_attached_drive_count(
-                initial_count=initial_count,
-                final_count=final_count,
-                min_count=min_count,
-                cluster_size=cluster_size,
-                sizing_for_count=sizing_for_count,
-                count_source=final_count_source,
-            )
+    candidate_counts = sorted(
+        count
+        for count in {
+            int(math.ceil(max(cluster_size(raw_count), min_count)))
+            for raw_count in range(initial_count, effective_count + 1)
+        }
+        if count <= effective_count
+    )
+    for candidate_count in candidate_counts:
+        candidate_sizing = sizing_for_count(candidate_count)
+        if candidate_sizing.next_count <= candidate_count:
+            final_count = candidate_count
+            final_sizing = candidate_sizing
+            break
+        final_count_source = (
+            "disk_iops"
+            if candidate_sizing.count_disk_iops >= candidate_sizing.count_disk_capacity
+            else "disk_capacity"
         )
 
     count_disk_capacity = final_sizing.count_disk_capacity

@@ -193,8 +193,10 @@ def test_deployed_ebs_iops_evidence_flows_through_timeseries_composition():
             "ebs_iops_evidence": {
                 "peak_iops_per_node": 6_000,
                 "configured_iops_per_node": 16_000,
-                "read_io_per_read": 0.2,
-                "write_io_per_write": 1.0,
+                "regional_read_per_second": 10_000,
+                "regional_write_per_second": 50_000,
+                "mean_read_size_bytes": 4096,
+                "mean_write_size_bytes": 1024,
             },
         },
     )
@@ -221,12 +223,13 @@ def test_deployed_ebs_iops_evidence_flows_through_timeseries_composition():
     assert cluster.count == 6
     assert headroom == {
         "demand_source": "calibrated_model",
-        "expected_peak_iops_per_node": 2_888.8,
+        "modeled_candidate_iops_per_node": 5_614.17,
+        "expected_peak_iops_per_node": 5_001.48,
         "target_utilization": 0.9,
-        "required_iops_before_rounding": 3_209.78,
-        "provisioned_iops_per_node": 3_400,
-        "buffer_iops_per_node": 511.2,
-        "planned_utilization": 0.8496,
+        "required_iops_before_rounding": 5_557.21,
+        "provisioned_iops_per_node": 5_600,
+        "buffer_iops_per_node": 598.52,
+        "planned_utilization": 0.8931,
         "candidate_max_iops_per_node": 16_000,
     }
 
