@@ -97,7 +97,6 @@ def _with_disk_utilization_buffer(
     The default target leaves margin below the previous cap. Callers may make
     this stricter but not looser.
     """
-    capped_desires = desires.model_copy(deep=True)
     target_disk_buffer_ratio = 1 / max_disk_utilization
     existing_disk_buffer = buffer_for_components(
         buffers=desires.buffers,
@@ -112,24 +111,31 @@ def _with_disk_utilization_buffer(
         ratio=disk_utilization_ratio,
         components=[BufferComponent.disk],
     )
-    capped_desires.buffers.desired = {
-        **capped_desires.buffers.desired,
-        CASSANDRA_DISK_UTILIZATION_LIMIT: disk_utilization_buffer,
-    }
-    return capped_desires
+    buffers = desires.buffers.model_copy(
+        update={
+            "desired": {
+                **desires.buffers.desired,
+                CASSANDRA_DISK_UTILIZATION_LIMIT: disk_utilization_buffer,
+            }
+        }
+    )
+    return desires.model_copy(update={"buffers": buffers})
 
 
 def _with_ebs_hotter_buffer(desires: CapacityDesires) -> CapacityDesires:
-    ebs_desires = desires.model_copy(deep=True)
     ebs_hotter_buffer = Buffer(
         ratio=EBS_HOTTER_BUFFER_RATIO,
         components=[BufferComponent.disk],
     )
-    ebs_desires.buffers.desired = {
-        **ebs_desires.buffers.desired,
-        EBS_HOTTER: ebs_hotter_buffer,
-    }
-    return ebs_desires
+    buffers = desires.buffers.model_copy(
+        update={
+            "desired": {
+                **desires.buffers.desired,
+                EBS_HOTTER: ebs_hotter_buffer,
+            }
+        }
+    )
+    return desires.model_copy(update={"buffers": buffers})
 
 
 @enum_docstrings
@@ -1733,10 +1739,10 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         # We copy desires rather than modifying the shared function in common.py,
         # since the overhead is Cassandra-specific (other models use
         # network_services() with their own wire formats).
-        adjusted_desires = desires.model_copy(deep=True)
-        adjusted_desires.query_pattern.estimated_mean_write_size_bytes = certain_int(
-            wire_write_size
+        query_pattern = desires.query_pattern.model_copy(
+            update={"estimated_mean_write_size_bytes": certain_int(wire_write_size)}
         )
+        adjusted_desires = desires.model_copy(update={"query_pattern": query_pattern})
 
         services: List[ServiceCapacity] = []
 

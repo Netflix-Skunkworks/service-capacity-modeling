@@ -474,20 +474,6 @@ def assert_compute_optimized(plan, cluster_type=None):
     )
 
 
-def assert_deterministic_planning(model_name, desires, **extra_args):
-    """Assert that planning is deterministic (same input = same output)."""
-    plan1 = plan_model(model_name, desires, **extra_args)
-    plan2 = plan_model(model_name, desires, **extra_args)
-
-    assert plan1 is not None
-    assert plan2 is not None
-    assert plan1.model_dump_json() == plan2.model_dump_json(), (
-        f"{model_name}: Planning should be deterministic\n"
-        f"First plan:\n{plan_summary(plan1)}\n"
-        f"Second plan:\n{plan_summary(plan2)}"
-    )
-
-
 # ============================================================================
 # Model Categories (for organizing tests)
 # ============================================================================
