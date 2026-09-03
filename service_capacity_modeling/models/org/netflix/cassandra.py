@@ -87,6 +87,9 @@ CASSANDRA_MAX_DISK_UTILIZATION = 0.55
 _EPHEMERAL_MAINTENANCE_THRESHOLD_GIB_PER_NODE = 300
 _EPHEMERAL_MAINTENANCE_CAP_GIB_PER_NODE = 1024
 
+# These transformations run once per hardware candidate. Copy only the nested
+# mutation path so candidates remain isolated without cloning invariant desires.
+
 
 def _with_disk_utilization_buffer(
     desires: CapacityDesires,
@@ -1736,9 +1739,8 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
         write_size_defaulted = _is_write_size_defaulted(desires)
 
         # Adjust desires to use wire write size for network cost calculation.
-        # We copy desires rather than modifying the shared function in common.py,
-        # since the overhead is Cassandra-specific (other models use
-        # network_services() with their own wire formats).
+        # Cassandra alone adds replication overhead to the shared wire format.
+        # Copy only the query pattern because this runs for every viable candidate.
         query_pattern = desires.query_pattern.model_copy(
             update={"estimated_mean_write_size_bytes": certain_int(wire_write_size)}
         )
