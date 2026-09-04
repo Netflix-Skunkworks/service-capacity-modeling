@@ -236,15 +236,31 @@ class CassandraKeyspaceTopology(BaseModel):
         return self
 
 
+class CassandraObservedWorkload(BaseModel):
+    """Regional workload observed with a deployed Cassandra measurement."""
+
+    read_per_second: float = Field(ge=0, allow_inf_nan=False)
+    write_per_second: float = Field(ge=0, allow_inf_nan=False)
+    mean_read_size_bytes: Optional[float] = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    mean_write_size_bytes: Optional[float] = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+
+    @model_validator(mode="after")
+    def _check_traffic(self) -> "CassandraObservedWorkload":
+        if self.read_per_second + self.write_per_second <= 0:
+            raise ValueError("observed workload requires read or write traffic")
+        return self
+
+
 class CassandraEbsIopsEvidence(BaseModel):
-    """Aligned EBS measurements for the current Cassandra deployment."""
+    """EBS observation for the current deployment in the planning region."""
 
     peak_iops_per_node: float = Field(gt=0, allow_inf_nan=False)
     configured_iops_per_node: int = Field(gt=ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT)
-    regional_read_per_second: float = Field(ge=0, allow_inf_nan=False)
-    regional_write_per_second: float = Field(ge=0, allow_inf_nan=False)
-    mean_read_size_bytes: float = Field(gt=0, allow_inf_nan=False)
-    mean_write_size_bytes: float = Field(gt=0, allow_inf_nan=False)
+    observed_workload: CassandraObservedWorkload
 
     @model_validator(mode="after")
     def _check_observation(self) -> "CassandraEbsIopsEvidence":
@@ -252,10 +268,6 @@ class CassandraEbsIopsEvidence(BaseModel):
             raise ValueError(
                 "peak_iops_per_node must be less than or equal to "
                 "configured_iops_per_node"
-            )
-        if self.regional_read_per_second + self.regional_write_per_second <= 0:
-            raise ValueError(
-                "EBS IOPS evidence requires observed read or write traffic"
             )
         return self
 
@@ -1068,6 +1080,21 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     if is_ebs and current_cluster_size > 0 and ebs_iops_evidence is not None:
         assert current_capacity is not None
         current_drive = current_capacity.cluster_drive
+        observed_workload = ebs_iops_evidence.observed_workload
+        observed_mean_read_size_bytes = observed_workload.mean_read_size_bytes
+        observed_mean_read_size_source = "observed_workload"
+        if observed_mean_read_size_bytes is None:
+            observed_mean_read_size_bytes = (
+                desires.query_pattern.estimated_mean_read_size_bytes.mid
+            )
+            observed_mean_read_size_source = "planning_query_pattern"
+        observed_mean_write_size_bytes = observed_workload.mean_write_size_bytes
+        observed_mean_write_size_source = "observed_workload"
+        if observed_mean_write_size_bytes is None:
+            observed_mean_write_size_bytes = (
+                desires.query_pattern.estimated_mean_write_size_bytes.mid
+            )
+            observed_mean_write_size_source = "planning_query_pattern"
         homogeneous_deployed_zones = _has_homogeneous_current_zonal_topology(
             desires,
             current_capacity,
@@ -1100,16 +1127,16 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 for capacity in current_zonal
             )
             observed_read_per_zone = (
-                ebs_iops_evidence.regional_read_per_second / zones_per_region
+                observed_workload.read_per_second / zones_per_region
             )
             observed_write_per_zone = (
-                ebs_iops_evidence.regional_write_per_second / zones_per_region
+                observed_workload.write_per_second / zones_per_region
             )
             observed_read_bytes_per_second = (
-                observed_read_per_zone * ebs_iops_evidence.mean_read_size_bytes
+                observed_read_per_zone * observed_mean_read_size_bytes
             )
             observed_write_bytes_per_second = round(
-                observed_write_per_zone * ebs_iops_evidence.mean_write_size_bytes
+                observed_write_per_zone * observed_mean_write_size_bytes
             )
             observed_read_io_per_second = max(
                 observed_read_per_zone,
@@ -1158,14 +1185,14 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 "iops_calibration_factor": (
                     iops_calibration_factor if iops_calibration_applied else None
                 ),
-                "regional_read_per_second": (
-                    ebs_iops_evidence.regional_read_per_second
-                ),
-                "regional_write_per_second": (
-                    ebs_iops_evidence.regional_write_per_second
-                ),
-                "mean_read_size_bytes": ebs_iops_evidence.mean_read_size_bytes,
-                "mean_write_size_bytes": ebs_iops_evidence.mean_write_size_bytes,
+                "calibration_workload": {
+                    "read_per_second": observed_workload.read_per_second,
+                    "write_per_second": observed_workload.write_per_second,
+                    "mean_read_size_bytes": observed_mean_read_size_bytes,
+                    "mean_write_size_bytes": observed_mean_write_size_bytes,
+                    "mean_read_size_source": observed_mean_read_size_source,
+                    "mean_write_size_source": observed_mean_write_size_source,
+                },
                 "candidate_drive_max_iops_per_node": drive.max_io_per_s,
                 "deployed_configured_iops_limit": (
                     ebs_iops_evidence.configured_iops_per_node
@@ -1762,9 +1789,11 @@ class NflxCassandraArguments(BaseModel):
     )
     ebs_iops_evidence: Optional[CassandraEbsIopsEvidence] = Field(
         default=None,
-        description="Aligned EBS measurements for the current deployment. The "
-        "planner derives its instance, drive, node count, and topology from "
-        "current_clusters and uses query_pattern for the traffic being planned.",
+        description="EBS observation for the current deployment in the planning "
+        "region. The nested workload must cover the same measurement window as "
+        "peak_iops_per_node. Mean request sizes are optional and fall back to the "
+        "planning query pattern. The planner derives instance, drive, node count, "
+        "region, and topology from current_clusters and planner context.",
     )
 
     @model_validator(mode="after")

@@ -252,10 +252,12 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             "ebs_iops_evidence": {
                 "peak_iops_per_node": peak_iops_per_node,
                 "configured_iops_per_node": configured_iops_per_node,
-                "regional_read_per_second": regional_read_per_second,
-                "regional_write_per_second": regional_write_per_second,
-                "mean_read_size_bytes": mean_read_size_bytes,
-                "mean_write_size_bytes": mean_write_size_bytes,
+                "observed_workload": {
+                    "read_per_second": regional_read_per_second,
+                    "write_per_second": regional_write_per_second,
+                    "mean_read_size_bytes": mean_read_size_bytes,
+                    "mean_write_size_bytes": mean_write_size_bytes,
+                },
             }
         }
 
@@ -318,20 +320,53 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             abs=0.02,
         )
 
+    def test_ebs_evidence_uses_planning_sizes_when_observation_omits_them(self):
+        desires = self._existing_ebs_desires()
+        desires.query_pattern.estimated_mean_read_size_bytes = certain_int(2048)
+        desires.query_pattern.estimated_mean_write_size_bytes = certain_int(4096)
+        evidence = self._ebs_iops_evidence()["ebs_iops_evidence"]
+        evidence["observed_workload"].pop("mean_read_size_bytes")
+        evidence["observed_workload"].pop("mean_write_size_bytes")
+
+        cluster = (
+            self._ebs_explained(
+                desires,
+                required_cluster_size=64,
+                ebs_iops_evidence=evidence,
+            )
+            .plans[0]
+            .candidate_clusters.zonal[0]
+        )
+
+        workload = cluster.cluster_params["cassandra.ebs_io_calibration"][
+            "calibration_workload"
+        ]
+        assert workload["mean_read_size_bytes"] == (
+            desires.query_pattern.estimated_mean_read_size_bytes.mid
+        )
+        assert workload["mean_write_size_bytes"] == (
+            desires.query_pattern.estimated_mean_write_size_bytes.mid
+        )
+        assert workload["mean_read_size_source"] == "planning_query_pattern"
+        assert workload["mean_write_size_source"] == "planning_query_pattern"
+
     @pytest.mark.parametrize(
         ("field", "value"),
         [
             ("peak_iops_per_node", 0),
             ("configured_iops_per_node", 200),
-            ("regional_read_per_second", float("nan")),
-            ("regional_write_per_second", float("inf")),
+            ("read_per_second", float("nan")),
+            ("write_per_second", float("inf")),
             ("mean_read_size_bytes", 0),
             ("mean_write_size_bytes", float("inf")),
         ],
     )
     def test_ebs_iops_evidence_validates_measurements(self, field, value):
         evidence = self._ebs_iops_evidence()["ebs_iops_evidence"]
-        evidence[field] = value
+        if field in evidence:
+            evidence[field] = value
+        else:
+            evidence["observed_workload"][field] = value
 
         with pytest.raises(ValueError):
             NflxCassandraArguments.from_extra_model_arguments(
@@ -339,7 +374,7 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             )
 
     def test_ebs_iops_evidence_requires_observed_traffic(self):
-        with pytest.raises(ValueError, match="requires observed read or write traffic"):
+        with pytest.raises(ValueError, match="requires read or write traffic"):
             NflxCassandraArguments.from_extra_model_arguments(
                 self._ebs_iops_evidence(
                     regional_read_per_second=0,
