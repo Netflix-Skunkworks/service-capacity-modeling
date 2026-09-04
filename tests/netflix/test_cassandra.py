@@ -252,7 +252,7 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             "ebs_iops_evidence": {
                 "peak_iops_per_node": peak_iops_per_node,
                 "configured_iops_per_node": configured_iops_per_node,
-                "observed_workload": {
+                "observed_regional_workload": {
                     "read_per_second": regional_read_per_second,
                     "write_per_second": regional_write_per_second,
                     "mean_read_size_bytes": mean_read_size_bytes,
@@ -325,8 +325,8 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         desires.query_pattern.estimated_mean_read_size_bytes = certain_int(2048)
         desires.query_pattern.estimated_mean_write_size_bytes = certain_int(4096)
         evidence = self._ebs_iops_evidence()["ebs_iops_evidence"]
-        evidence["observed_workload"].pop("mean_read_size_bytes")
-        evidence["observed_workload"].pop("mean_write_size_bytes")
+        evidence["observed_regional_workload"].pop("mean_read_size_bytes")
+        evidence["observed_regional_workload"].pop("mean_write_size_bytes")
 
         cluster = (
             self._ebs_explained(
@@ -366,7 +366,7 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         if field in evidence:
             evidence[field] = value
         else:
-            evidence["observed_workload"][field] = value
+            evidence["observed_regional_workload"][field] = value
 
         with pytest.raises(ValueError):
             NflxCassandraArguments.from_extra_model_arguments(

@@ -193,7 +193,7 @@ def test_deployed_ebs_iops_evidence_flows_through_timeseries_composition():
             "ebs_iops_evidence": {
                 "peak_iops_per_node": 6_000,
                 "configured_iops_per_node": 16_000,
-                "observed_workload": {
+                "observed_regional_workload": {
                     "read_per_second": 10_000,
                     "write_per_second": 50_000,
                     "mean_read_size_bytes": 4096,
