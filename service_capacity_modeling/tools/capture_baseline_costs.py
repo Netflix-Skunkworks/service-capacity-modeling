@@ -665,6 +665,9 @@ scenarios.append(
         cassandra_timeseries_ebs,
         {
             "require_local_disks": False,
+            # The current fleet already has 64 nodes per zone. Leave room for
+            # IOPS headroom to recommend growth instead of suppressing the plan.
+            "max_regional_size": 384,
         },
         "cassandra_timeseries_ebs",
     )

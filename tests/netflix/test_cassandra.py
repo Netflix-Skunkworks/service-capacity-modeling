@@ -17,6 +17,8 @@ from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import DriveType
 from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import fixed_float
 from service_capacity_modeling.interface import FixedInterval
@@ -25,12 +27,13 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models.org.netflix.cassandra import (
-    _cass_io_per_read,
     _get_cluster_size_lambda,
     _get_min_count,
+    CASSANDRA_MAX_DISK_UTILIZATION,
     CassandraClusterSizeMode,
     CassandraKeyspacePlacement,
     CassandraKeyspaceTopology,
+    NflxCassandraArguments,
     NflxCassandraCapacityModel,
 )
 from tests.util import assert_minimum_storage_gib
@@ -188,7 +191,7 @@ class TestCassandraCapacityPlanning:
         assert result.instance.name.startswith("i")
 
 
-class TestCassandraStorage:
+class TestCassandraStorage:  # pylint: disable=too-many-public-methods
     """Test storage-related scenarios."""
 
     @staticmethod
@@ -198,7 +201,9 @@ class TestCassandraStorage:
         current = CurrentZoneClusterCapacity(
             cluster_instance_name="r7a.4xlarge",
             cluster_instance_count=certain_int(64),
-            cluster_drive=simple_drive(size_gib=max(1200, disk_utilization_gib)),
+            cluster_drive=simple_drive(
+                size_gib=max(1200, disk_utilization_gib),
+            ),
             cpu_utilization=certain_float(20),
             disk_utilization_gib=certain_float(disk_utilization_gib),
             network_utilization_mbps=certain_float(100),
@@ -210,7 +215,9 @@ class TestCassandraStorage:
                 estimated_write_per_second=certain_int(300_000),
             ),
             data_shape=DataShape(estimated_state_size_gib=certain_int(70_000)),
-            current_clusters=CurrentClusters(zonal=[current] * 3),
+            current_clusters=CurrentClusters(
+                zonal=[current.model_copy(deep=True) for _ in range(3)]
+            ),
         )
 
     @staticmethod
@@ -231,141 +238,280 @@ class TestCassandraStorage:
         )[0]
         return plan.candidate_clusters.zonal[0]
 
-    def test_ebs_io_per_request_calibrates_candidate_iops(self):
-        desires = self._existing_ebs_desires()
-        baseline = self._ebs_plan(desires)
-        calibrated = self._ebs_plan(
-            desires,
-            observed_ebs_read_io_per_read=0.0002,
-            observed_ebs_write_io_per_write=1.0,
-        )
-
-        calibration = calibrated.cluster_params["cassandra.ebs_io_calibration"]
-        assert "cassandra.ebs_io_calibration" not in baseline.cluster_params
-        assert (
-            baseline.attached_drives[0].read_io_per_s,
-            baseline.attached_drives[0].write_io_per_s,
-        ) == (11_400, 200)
-        assert calibration["observed_read_io_per_read"] == 0.0002
-        modeled_read_io_per_read = _cass_io_per_read(900) * 1_563 * 64 / 100_000
-        assert calibration["modeled_read_io_per_read"] == pytest.approx(
-            modeled_read_io_per_read
-        )
-        assert calibration["read_io_calibration_factor"] == pytest.approx(
-            0.0002 / modeled_read_io_per_read
-        )
-        assert calibration["observed_write_io_per_write"] == 1.0
-        assert (
-            calibrated.attached_drives[0].read_io_per_s
-            < baseline.attached_drives[0].read_io_per_s
-        )
-        assert (
-            calibrated.attached_drives[0].write_io_per_s
-            > baseline.attached_drives[0].write_io_per_s
-        )
-
-    @pytest.mark.parametrize(
-        "field",
-        ["observed_ebs_read_io_per_read", "observed_ebs_write_io_per_write"],
-    )
-    @pytest.mark.parametrize("value", [0, float("nan"), float("inf")])
-    def test_ebs_io_per_request_must_be_positive_and_finite(self, field, value):
-        with pytest.raises(ValueError):
-            self._ebs_plan(self._existing_ebs_desires(), **{field: value})
-
-    def test_ebs_read_calibration_requires_current_disk_utilization(self):
-        desires = self._existing_ebs_desires(disk_utilization_gib=0)
-        baseline = self._ebs_plan(desires)
-        calibrated = self._ebs_plan(
-            desires,
-            observed_ebs_read_io_per_read=2.0,
-            observed_ebs_write_io_per_write=1.0,
-        )
-
-        calibration = calibrated.cluster_params["cassandra.ebs_io_calibration"]
-        assert set(calibration) == {
-            "observed_write_io_per_write",
-            "modeled_write_io_per_write",
-            "write_io_calibration_factor",
+    @staticmethod
+    def _ebs_iops_evidence(
+        *,
+        peak_iops_per_node: float = 12_000,
+        configured_iops_per_node: int = 16_000,
+        regional_read_per_second: float = 300_000,
+        regional_write_per_second: float = 300_000,
+        mean_read_size_bytes: float = 1024,
+        mean_write_size_bytes: float = 256,
+    ):
+        return {
+            "ebs_iops_evidence": {
+                "peak_iops_per_node": peak_iops_per_node,
+                "configured_iops_per_node": configured_iops_per_node,
+                "observed_regional_workload": {
+                    "read_per_second": regional_read_per_second,
+                    "write_per_second": regional_write_per_second,
+                    "mean_read_size_bytes": mean_read_size_bytes,
+                    "mean_write_size_bytes": mean_write_size_bytes,
+                },
+            }
         }
-        baseline_drive = baseline.attached_drives[0]
-        calibrated_drive = calibrated.attached_drives[0]
-        assert calibrated_drive.read_io_per_s == baseline_drive.read_io_per_s
-        assert calibrated_drive.write_io_per_s > baseline_drive.write_io_per_s
 
-    def test_ebs_read_calibration_uses_current_data_not_future_storage_scale(self):
-        def candidate(storage_scale: float):
-            desires = self._existing_ebs_desires(disk_utilization_gib=1500)
-            desires.buffers = Buffers(
-                derived={
-                    BufferIntent.scale: Buffer(
-                        ratio=storage_scale,
-                        intent=BufferIntent.scale,
-                        components=[BufferComponent.storage],
-                    )
-                }
-            )
-            return self._ebs_plan(
-                desires,
-                max_disk_utilization=1.0,
-                max_regional_size=3000,
-                observed_ebs_read_io_per_read=2.0,
-            )
-
-        current_load = candidate(1.0)
-        future_growth = candidate(2.0)
-        current_calibration = current_load.cluster_params[
-            "cassandra.ebs_io_calibration"
-        ]
-        future_calibration = future_growth.cluster_params[
-            "cassandra.ebs_io_calibration"
-        ]
-
-        assert (
-            current_calibration["read_io_calibration_factor"]
-            == future_calibration["read_io_calibration_factor"]
-        )
-        assert [
-            (
-                candidate.count,
-                candidate.attached_drives[0].read_io_per_s,
-                _cass_io_per_read(1500 * 64 * scale / candidate.count),
-            )
-            for candidate, scale in ((current_load, 1), (future_growth, 2))
-        ] == [(89, 2400, 10), (122, 2000, 12)]
-
-    @pytest.mark.parametrize(
-        "constraint",
-        [{"required_cluster_size": 64}, {"max_regional_size": 3}],
-    )
-    def test_ebs_calibration_is_in_no_plan_excuse_context(self, constraint):
-        explained = planner.plan_certain_explained(
+    def _ebs_explained(
+        self,
+        desires,
+        *,
+        peak_iops_per_node=12_000,
+        configured_iops_per_node=16_000,
+        regional_read_per_second=300_000,
+        regional_write_per_second=300_000,
+        mean_read_size_bytes=1024,
+        mean_write_size_bytes=256,
+        num_results=1,
+        **extra_model_arguments,
+    ):
+        return planner.plan_certain_explained(
             model_name="org.netflix.cassandra",
             region="us-east-1",
-            desires=self._existing_ebs_desires(),
+            desires=desires,
             extra_model_arguments={
                 "require_attached_disks": True,
                 "require_local_disks": False,
                 "cluster_size_mode": "unrestricted",
                 "max_regional_size": 600,
-                "observed_ebs_read_io_per_read": 20.0,
-                **constraint,
+                **self._ebs_iops_evidence(
+                    peak_iops_per_node=peak_iops_per_node,
+                    configured_iops_per_node=configured_iops_per_node,
+                    regional_read_per_second=regional_read_per_second,
+                    regional_write_per_second=regional_write_per_second,
+                    mean_read_size_bytes=mean_read_size_bytes,
+                    mean_write_size_bytes=mean_write_size_bytes,
+                ),
+                **extra_model_arguments,
             },
             instance_families=["r7a"],
-            num_results=1,
+            num_results=num_results,
         )
-        calibrated_excuses = [
-            excuse
-            for excuses in explained.excuses_by_model.values()
-            for excuse in excuses
+
+    def test_ebs_evidence_calibrates_total_iops_demand(self):
+        cluster = (
+            self._ebs_explained(
+                self._existing_ebs_desires(),
+                peak_iops_per_node=8_000,
+                required_cluster_size=64,
+            )
+            .plans[0]
+            .candidate_clusters.zonal[0]
+        )
+
+        calibration = cluster.cluster_params["cassandra.ebs_io_calibration"]
+        headroom = cluster.cluster_params["cassandra.disk_iops_headroom"]
+        assert calibration["iops_calibration_factor"] == pytest.approx(
+            8_000 / calibration["modeled_current_iops_per_node"]
+        )
+        assert calibration["iops_calibration_factor"] < 1
+        assert headroom["expected_peak_iops_per_node"] == pytest.approx(
+            headroom["modeled_candidate_iops_per_node"]
+            * calibration["iops_calibration_factor"],
+            abs=0.02,
+        )
+
+    def test_ebs_evidence_uses_planning_sizes_when_observation_omits_them(self):
+        desires = self._existing_ebs_desires()
+        desires.query_pattern.estimated_mean_read_size_bytes = certain_int(2048)
+        desires.query_pattern.estimated_mean_write_size_bytes = certain_int(4096)
+        evidence = self._ebs_iops_evidence()["ebs_iops_evidence"]
+        evidence["observed_regional_workload"].pop("mean_read_size_bytes")
+        evidence["observed_regional_workload"].pop("mean_write_size_bytes")
+
+        cluster = (
+            self._ebs_explained(
+                desires,
+                required_cluster_size=64,
+                ebs_iops_evidence=evidence,
+            )
+            .plans[0]
+            .candidate_clusters.zonal[0]
+        )
+
+        workload = cluster.cluster_params["cassandra.ebs_io_calibration"][
+            "calibration_workload"
+        ]
+        assert workload["mean_read_size_bytes"] == (
+            desires.query_pattern.estimated_mean_read_size_bytes.mid
+        )
+        assert workload["mean_write_size_bytes"] == (
+            desires.query_pattern.estimated_mean_write_size_bytes.mid
+        )
+        assert workload["mean_read_size_source"] == "planning_query_pattern"
+        assert workload["mean_write_size_source"] == "planning_query_pattern"
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("peak_iops_per_node", 0),
+            ("configured_iops_per_node", 200),
+            ("read_per_second", float("nan")),
+            ("write_per_second", float("inf")),
+            ("mean_read_size_bytes", 0),
+            ("mean_write_size_bytes", float("inf")),
+        ],
+    )
+    def test_ebs_iops_evidence_validates_measurements(self, field, value):
+        evidence = self._ebs_iops_evidence()["ebs_iops_evidence"]
+        if field in evidence:
+            evidence[field] = value
+        else:
+            evidence["observed_regional_workload"][field] = value
+
+        with pytest.raises(ValueError):
+            NflxCassandraArguments.from_extra_model_arguments(
+                {"ebs_iops_evidence": evidence}
+            )
+
+    def test_ebs_iops_evidence_requires_observed_traffic(self):
+        with pytest.raises(ValueError, match="requires read or write traffic"):
+            NflxCassandraArguments.from_extra_model_arguments(
+                self._ebs_iops_evidence(
+                    regional_read_per_second=0,
+                    regional_write_per_second=0,
+                )
+            )
+
+    def test_ebs_iops_evidence_rejects_peak_above_configured_limit(self):
+        with pytest.raises(
+            ValueError,
+            match="peak_iops_per_node must be less than or equal to",
+        ):
+            NflxCassandraArguments.from_extra_model_arguments(
+                self._ebs_iops_evidence(
+                    peak_iops_per_node=16_001,
+                    configured_iops_per_node=16_000,
+                )
+            )
+
+    def test_comfortable_evidence_uses_calibrated_model_with_disk_iops_buffer(self):
+        cluster = (
+            self._ebs_explained(
+                self._existing_ebs_desires(),
+                peak_iops_per_node=8_000,
+                required_cluster_size=64,
+            )
+            .plans[0]
+            .candidate_clusters.zonal[0]
+        )
+
+        calibration = cluster.cluster_params["cassandra.ebs_io_calibration"]
+        headroom = cluster.cluster_params["cassandra.disk_iops_headroom"]
+        assert calibration["current_topology_iops_governor"] == "deployed_topology"
+        assert calibration["observation_at_configured_limit"] is False
+        assert headroom["demand_source"] == "calibrated_model"
+        assert headroom["target_utilization"] == 0.9
+        assert headroom["planned_utilization"] <= 0.9
+
+    def test_caller_disk_iops_buffer_composes_with_model_policy(self):
+        desires = self._existing_ebs_desires()
+        desires.buffers = Buffers(
+            desired={
+                "caller-disk-iops": Buffer(
+                    ratio=1.25,
+                    components=[BufferComponent.disk_iops],
+                )
+            }
+        )
+
+        cluster = (
+            self._ebs_explained(
+                desires,
+                peak_iops_per_node=8_000,
+                required_cluster_size=64,
+            )
+            .plans[0]
+            .candidate_clusters.zonal[0]
+        )
+
+        assert cluster.cluster_params["cassandra.disk_iops_buffer_ratio"] == 1.39
+
+    def test_at_limit_evidence_is_a_lower_bound_and_can_add_nodes(self):
+        cluster = (
+            self._ebs_explained(
+                self._existing_ebs_desires(),
+                peak_iops_per_node=16_000,
+                configured_iops_per_node=16_000,
+                regional_read_per_second=600_000,
+                regional_write_per_second=600_000,
+                num_results=20,
+                max_regional_size=600,
+            )
+            .plans[0]
+            .candidate_clusters.zonal[0]
+        )
+
+        calibration = cluster.cluster_params["cassandra.ebs_io_calibration"]
+        headroom = cluster.cluster_params["cassandra.disk_iops_headroom"]
+        assert calibration["current_topology_iops_governor"] == (
+            "candidate_model_observation_at_configured_limit"
+        )
+        assert calibration["raw_iops_calibration_factor"] < 1
+        assert calibration["iops_calibration_factor"] == 1
+        assert cluster.count > 64
+        assert headroom["demand_source"] == "deployed_peak_lower_bound"
+        assert headroom["planned_utilization"] <= 0.9
+
+    def test_evidence_topology_is_derived_from_current_clusters(self):
+        desires = self._existing_ebs_desires()
+        desires.current_clusters.zonal[1].cluster_drive = Drive(
+            name="gp2",
+            drive_type=DriveType.attached_ssd,
+            size_gib=1200,
+        )
+
+        explained = self._ebs_explained(desires, num_results=20)
+        calibrations = [
+            plan.candidate_clusters.zonal[0].cluster_params[
+                "cassandra.ebs_io_calibration"
+            ]
+            for plan in explained.plans
+        ] + [
+            excuse.context["ebs_io_calibration"]
+            for excuse in explained.excuses_by_model["org.netflix.cassandra"]
             if "ebs_io_calibration" in excuse.context
         ]
+        assert calibrations
+        assert all(
+            calibration["current_topology_iops_governor"]
+            == "deployed_evidence_topology_mismatch"
+            for calibration in calibrations
+        )
+        assert all(
+            calibration["iops_calibration_factor"] is None
+            for calibration in calibrations
+        )
 
-        assert not explained.plans
-        assert calibrated_excuses
-        calibration = calibrated_excuses[0].context["ebs_io_calibration"]
-        assert calibration["observed_read_io_per_read"] == 20.0
-        assert calibration["read_io_calibration_factor"] > 1
+        baseline = self._ebs_plan(desires)
+        rejected = self._ebs_plan(desires, **self._ebs_iops_evidence())
+        assert rejected.count == baseline.count
+        assert rejected.attached_drives == baseline.attached_drives
+
+    def test_ebs_iops_evidence_requires_current_cluster(self):
+        with pytest.raises(
+            ValueError,
+            match="requires a current deployed cluster",
+        ):
+            planner.plan_certain(
+                model_name="org.netflix.cassandra",
+                region="us-east-1",
+                desires=large_footprint,
+                extra_model_arguments={
+                    "require_attached_disks": True,
+                    "require_local_disks": False,
+                    **self._ebs_iops_evidence(),
+                },
+            )
 
     def test_ebs_high_reads(self):
         cap_plan = planner.plan_certain(
@@ -497,6 +643,24 @@ class TestCassandraStorage:
 
         assert default_result.attached_drives[0].size_gib >= current_drive_size_gib
         assert shrink_result.attached_drives[0].size_gib < current_drive_size_gib
+
+    def test_existing_ebs_volume_floor_uses_hottest_reported_zone(self):
+        desires = self._existing_ebs_desires(disk_utilization_gib=100)
+        desires.current_clusters.zonal[1].disk_utilization_gib = certain_float(5000)
+
+        result = self._ebs_plan(desires)
+
+        assert result.attached_drives[0].size_gib >= int(
+            5000 / CASSANDRA_MAX_DISK_UTILIZATION
+        )
+
+    def test_existing_ebs_volume_floor_uses_largest_reported_zone_volume(self):
+        desires = self._existing_ebs_desires(disk_utilization_gib=100)
+        desires.current_clusters.zonal[1].cluster_drive.size_gib = 5000
+
+        result = self._ebs_plan(desires)
+
+        assert result.attached_drives[0].size_gib >= 5000
 
 
 class TestCassandraThroughput:
@@ -1008,18 +1172,10 @@ class TestCassandraExtraModelArguments:
         )
 
     def test_page_cache_cap_default(self):
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
-        )
-
         args = NflxCassandraArguments.from_extra_model_arguments({})
         assert args.max_page_cache_gib == 28.0
 
     def test_min_instance_ram_gib_exclusive_default(self):
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
-        )
-
         args = NflxCassandraArguments.from_extra_model_arguments({})
         assert args.min_instance_ram_gib_exclusive == 16.0
 
@@ -1059,10 +1215,6 @@ class TestCassandraExtraModelArguments:
         assert result.candidate_clusters.zonal[0].instance.name == "m6id.xlarge"
 
     def test_cluster_size_mode_extra_argument(self):
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
-        )
-
         assert (
             NflxCassandraArguments.from_extra_model_arguments({}).cluster_size_mode
             == CassandraClusterSizeMode.unrestricted
@@ -1081,10 +1233,6 @@ class TestCassandraExtraModelArguments:
         )
 
     def test_allow_ebs_volume_shrink_extra_argument(self):
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
-        )
-
         assert (
             NflxCassandraArguments.from_extra_model_arguments(
                 {}
@@ -1099,10 +1247,6 @@ class TestCassandraExtraModelArguments:
         )
 
     def test_cluster_size_mode_schema_exposes_enum_docstrings(self):
-        from service_capacity_modeling.models.org.netflix.cassandra import (
-            NflxCassandraArguments,
-        )
-
         schema = NflxCassandraArguments.model_json_schema()
         cluster_size_mode = schema["$defs"]["CassandraClusterSizeMode"]
 
