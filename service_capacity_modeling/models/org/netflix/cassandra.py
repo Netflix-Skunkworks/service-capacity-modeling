@@ -243,6 +243,11 @@ class CassandraObservedRegionalWorkload(BaseModel):
     ``peak_iops_per_node``. It is distinct from ``CapacityDesires.query_pattern``,
     which describes the target workload being planned. The two are commonly equal
     for status-quo planning, but differ when planning for a forecasted workload.
+
+    This model-specific input is the initial integration point. If aligned runtime
+    workload evidence becomes useful to other capacity models, promote an optional
+    generalized form into the shared current-deployment interface rather than
+    introducing parallel model-specific representations.
     """
 
     read_per_second: float = Field(ge=0, allow_inf_nan=False)
