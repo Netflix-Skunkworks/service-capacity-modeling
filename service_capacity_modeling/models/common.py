@@ -53,6 +53,7 @@ SECONDS_IN_YEAR = 31556926
 
 EFFECTIVE_DISK_PER_NODE_GIB = "effective_disk_per_node_gib"
 _ATTACHED_DRIVE_MAX_ITERATIONS = 10
+ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT = 200
 
 
 def upsert_params(cluster: ClusterCapacity, params: Dict[str, Any]) -> None:
@@ -758,8 +759,8 @@ def _attached_drive_plan(
         space_gib = max(1, math.ceil(needed_disk_gib / node_count))
         read_io, write_io = required_disk_ios(space_gib, node_count)
         read_io, write_io = (
-            utils.next_n(read_io, n=200),
-            utils.next_n(write_io, n=200),
+            utils.next_n(read_io, n=ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT),
+            utils.next_n(write_io, n=ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT),
         )
         io_gib = cloud_gib_for_io(drive, read_io + write_io, space_gib)
         drive_size_gib = utils.next_n(max(1, io_gib, space_gib), n=100)

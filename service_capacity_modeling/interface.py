@@ -903,6 +903,9 @@ class BufferComponent(StrEnum):
     disk = "disk"
     """Resource specific component - Disk"""
 
+    disk_iops = "disk_iops"
+    """Resource specific component - Disk I/O operations"""
+
     memory = "memory"
     """Resource specific component - Memory"""
 

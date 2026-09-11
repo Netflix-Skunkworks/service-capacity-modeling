@@ -178,6 +178,9 @@ def test_precise_buffers():
             "custom-cpu": Buffer(ratio=2.0, components=[BufferComponent.cpu]),
             "custom-network": Buffer(ratio=2.5, components=[BufferComponent.network]),
             "custom-disk": Buffer(ratio=3.0, components=[BufferComponent.disk]),
+            "custom-disk-iops": Buffer(
+                ratio=1.1, components=[BufferComponent.disk_iops]
+            ),
             "custom-memory": Buffer(ratio=3.5, components=[BufferComponent.memory]),
         }
     )
@@ -196,6 +199,11 @@ def test_precise_buffers():
         ratio=3.0,
         components=["disk", "storage"],
         sources={"custom-disk": buffers.desired["custom-disk"]},
+    )
+    assert buffer_for_components(buffers, [BufferComponent.disk_iops]) == Buffer(
+        ratio=1.1,
+        components=["disk_iops"],
+        sources={"custom-disk-iops": buffers.desired["custom-disk-iops"]},
     )
     assert buffer_for_components(buffers, [BufferComponent.memory]) == Buffer(
         ratio=3.5,
