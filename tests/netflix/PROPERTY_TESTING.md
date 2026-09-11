@@ -97,11 +97,14 @@ PROPERTY_TEST_CONFIG = {
 
 Universal property tests verify:
 - **Determinism**: Same input → same output
-- **Feasibility**: Valid input → at least one plan
-- **QPS Monotonicity**: Higher QPS → more CPU (or equal)
+- **Plan validity**: Valid input → at least one positive-cost plan whose clusters
+  have positive instance counts
+- **Cost monotonicity**: Higher QPS → equal or greater cost
 - **Tier Capacity**: Tier 0 ≥ Tier 2 in at least one dimension (CPU/RAM/storage/cost)
-- **Cost Positivity**: All plans have positive annual cost
-- **Instance Count Positivity**: All clusters have at least one instance
+
+Installed CPU is intentionally not a universal monotonic property. The planner
+may satisfy a larger workload with fewer normalized cores by changing instance
+family, storage type, or another constrained resource.
 
 ## When to Write Model-Specific Tests
 

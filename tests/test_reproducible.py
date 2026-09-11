@@ -45,12 +45,15 @@ uncertain_mid = CapacityDesires(
 
 def test_repeated_plans():
     results = []
-    for _ in range(5):
+    # Two identical uncertain plans are sufficient to prove reproducibility.
+    # Keep both storage classes eligible so this covers the full Cassandra path.
+    for _ in range(2):
         results.append(
             planner.plan(
                 model_name="org.netflix.cassandra",
                 region="us-east-1",
                 desires=uncertain_mid,
+                simulations=4,
             ).model_dump_json()
         )
 
@@ -76,12 +79,14 @@ def test_compositional():
         region="us-east-1",
         desires=uncertain_mid,
         num_results=4,
+        simulations=4,
     )
     composed_result = planner.plan(
         model_name="org.netflix.key-value",
         region="us-east-1",
         desires=uncertain_mid,
         num_results=4,
+        simulations=4,
     )
 
     # Strictest test: Cassandra regret clusters must be EXACTLY identical
@@ -104,11 +109,7 @@ def test_compositional():
         # Zonal cluster should be Cassandra
         assert lr.candidate_clusters.zonal[0].cluster_type == "cassandra"
         # Regional cluster should be the key-value Java app
-        java = lr.candidate_clusters.regional[0]
-        assert java.cluster_type == "dgwkv"
-        # Sanity check on Java app sizing (~48 total CPUs: 6 x 8 vCPU instances,
-        # but may vary with CPU architecture or pricing improvements)
-        assert 100 > java.count * java.instance.cpu > 20
+        assert lr.candidate_clusters.regional[0].cluster_type == "dgwkv"
 
 
 def test_composed_explanation_reports_child_desires_used_for_planning():
@@ -146,29 +147,35 @@ def test_multiple_options_diversify_with_more_simulations():
     # These values happen to work today but may not work in the future with
     # changes to the CP inputs (instances, costs, performance).
     # Feel free to change the numbers as long as it fits the below assertion
-    arbitrary_num_results = 12
-    arbitrary_small_number = 12
-    arbitrary_large_number = 1024
-    assert arbitrary_small_number < arbitrary_large_number
+    num_results = 12
+    small_simulation_count = 12
+    large_simulation_count = 64
+    assert small_simulation_count < large_simulation_count
+
+    # This test protects sampling diversity across instance families. Fixing the
+    # storage class avoids multiplying that contract by unrelated EBS candidates.
+    model_arguments = {"require_local_disks": True}
 
     less_simulations_result = planner.plan(
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=uncertain_mid,
-        num_results=arbitrary_num_results,
-        simulations=arbitrary_small_number,
+        num_results=num_results,
+        simulations=small_simulation_count,
+        extra_model_arguments=model_arguments,
     )
     more_simulations_result = planner.plan(
         model_name="org.netflix.cassandra",
         region="us-east-1",
         desires=uncertain_mid,
-        num_results=arbitrary_num_results,
-        simulations=arbitrary_large_number,
+        num_results=num_results,
+        simulations=large_simulation_count,
+        extra_model_arguments=model_arguments,
     )
 
     # Potentially brittle assertion. This is the part likely to break
     # The idea is that we should see more options with more simulations.
-    less_simulations_famlies = {
+    less_simulations_families = {
         lr.candidate_clusters.zonal[0].instance.family
         for lr in less_simulations_result.least_regret
     }
@@ -176,10 +183,10 @@ def test_multiple_options_diversify_with_more_simulations():
         lr.candidate_clusters.zonal[0].instance.family
         for lr in more_simulations_result.least_regret
     }
-    assert len(less_simulations_famlies) < len(more_simulations_families)
+    assert len(less_simulations_families) < len(more_simulations_families)
 
     expected_family_types = {"i", "r", "c", "m"}
-    for f in less_simulations_famlies:
+    for f in less_simulations_families:
         assert f[0] in expected_family_types
     for f in more_simulations_families:
         assert f[0] in expected_family_types

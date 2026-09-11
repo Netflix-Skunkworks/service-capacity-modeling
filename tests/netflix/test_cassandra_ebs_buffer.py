@@ -12,6 +12,9 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.org.netflix.cassandra import (
+    CASSANDRA_DISK_UTILIZATION_LIMIT,
+)
+from service_capacity_modeling.models.org.netflix.cassandra import (
     _with_disk_utilization_buffer,
 )
 from service_capacity_modeling.models.org.netflix.cassandra import (
@@ -106,7 +109,8 @@ def test_ebs_hotter_buffer_respects_disk_utilization_cap_with_adaptive_storage()
 
 
 def test_disk_utilization_cap_does_not_weaken_default_buffer_fallback():
-    desires = _with_disk_utilization_buffer(_ebs_desires(), max_disk_utilization=0.55)
+    original = _ebs_desires()
+    desires = _with_disk_utilization_buffer(original, max_disk_utilization=0.55)
 
     disk_buffer = buffer_for_components(
         buffers=desires.buffers,
@@ -114,6 +118,7 @@ def test_disk_utilization_cap_does_not_weaken_default_buffer_fallback():
     )
 
     assert disk_buffer.ratio == pytest.approx(1 / 0.55, abs=0.01)
+    assert CASSANDRA_DISK_UTILIZATION_LIMIT not in original.buffers.desired
 
 
 def test_max_disk_utilization_must_be_positive():
