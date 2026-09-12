@@ -777,7 +777,9 @@ class TestCassandraThroughput:
             "r6a",
             "r7a",
         }
-        assert high_writes_result.count >= 32
+        required_nodes = high_writes_result.cluster_params["required_nodes_by_type"]
+        assert high_writes_result.count == required_nodes["cpu"]
+        assert required_nodes["disk_capacity"] <= high_writes_result.count
 
         # Should have attached storage since we explicitly requested it
         assert high_writes_result.attached_drives, (

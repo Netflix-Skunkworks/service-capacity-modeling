@@ -90,6 +90,7 @@ EBS_HOTTER_BUFFER_RATIO = 0.5
 CASSANDRA_MAX_DISK_UTILIZATION = 0.55
 CASSANDRA_DISK_IOPS_TARGET_UTILIZATION = 0.90
 CASSANDRA_EBS_SATURATION_TOLERANCE_IOPS = 200
+CASSANDRA_MAX_ATTACHED_DATA_PER_NODE_GIB = 1536
 # With the default 90% target, 1.8 modeled IOs provision the same two IOs per
 # level as the previous cache-miss baseline. This makes ranking less pessimistic
 # without consuming the provisioned IOPS safety margin.
@@ -876,7 +877,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     required_cluster_size: Optional[int] = None,
     max_rps_to_disk: int = 500,
     max_local_data_per_node_gib: int = 1280,
-    max_attached_data_per_node_gib: int = 1024,
+    max_attached_data_per_node_gib: int = CASSANDRA_MAX_ATTACHED_DATA_PER_NODE_GIB,
     max_regional_size: int = 192,
     max_write_buffer_percent: float = 0.25,
     max_table_buffer_percent: float = 0.11,
@@ -1091,6 +1092,17 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         max_local_data_per_node_gib=max_local_data_per_node_gib,
         max_attached_data_per_node_gib=max_attached_data_per_node_gib,
     )
+    # Preserve the exact default density for node-count sizing while retaining
+    # legacy rounding behavior for explicit density overrides.
+    sizing_disk_per_node_gib = effective_disk_per_node_gib
+    if (
+        is_ebs
+        and max_attached_data_per_node_gib == CASSANDRA_MAX_ATTACHED_DATA_PER_NODE_GIB
+    ):
+        sizing_disk_per_node_gib = min(
+            sizing_disk_per_node_gib,
+            max_attached_data_per_node_gib * disk_buffer_ratio,
+        )
 
     current_cluster_size = _get_current_cluster_size(desires)
     current_count = math.ceil(current_cluster_size)
@@ -1249,7 +1261,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         tier=desires.service_tier,
         required_cluster_size=required_cluster_size,
         needed_disk_gib=needed_disk_gib,
-        disk_per_node_gib=effective_disk_per_node_gib,
+        disk_per_node_gib=sizing_disk_per_node_gib,
         cluster_size_lambda=cluster_size_lambda,
     )
     if deployed_topology_iops_min_count is not None:
@@ -1712,8 +1724,9 @@ class NflxCassandraArguments(BaseModel):
         description="Maximum data per node for local disk instances (GiB)",
     )
     max_attached_data_per_node_gib: int = Field(
-        default=1024,
-        description="Maximum data per node for attached disk instances (GiB)",
+        default=CASSANDRA_MAX_ATTACHED_DATA_PER_NODE_GIB,
+        description="Maximum data per node for attached disk instances (GiB). "
+        "Provisioned volume size still includes the disk-utilization buffer.",
     )
     max_write_buffer_percent: float = Field(
         default=0.25,
