@@ -224,7 +224,7 @@
           "cassandra.keyspace.rf": 2,
           "cassandra.read_io_per_lcs_level": 1.8,
           "cassandra.storage_buffer_ratio": 1.96,
-          "effective_disk_per_node_gib": 2100,
+          "effective_disk_per_node_gib": 3100,
           "required_nodes_by_type": {
             "cluster_size": 5,
             "cpu": 5,
@@ -256,7 +256,7 @@
           "cassandra.keyspace.rf": 2,
           "cassandra.read_io_per_lcs_level": 1.8,
           "cassandra.storage_buffer_ratio": 1.96,
-          "effective_disk_per_node_gib": 2100,
+          "effective_disk_per_node_gib": 3100,
           "required_nodes_by_type": {
             "cluster_size": 5,
             "cpu": 5,
@@ -288,7 +288,7 @@
           "cassandra.keyspace.rf": 2,
           "cassandra.read_io_per_lcs_level": 1.8,
           "cassandra.storage_buffer_ratio": 1.96,
-          "effective_disk_per_node_gib": 2100,
+          "effective_disk_per_node_gib": 3100,
           "required_nodes_by_type": {
             "cluster_size": 5,
             "cpu": 5,
@@ -674,14 +674,14 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.read_io_per_lcs_level": 1.8,
           "cassandra.storage_buffer_ratio": 1.82,
-          "effective_disk_per_node_gib": 2200,
+          "effective_disk_per_node_gib": 2800,
           "required_nodes_by_type": {
             "cluster_size": 22,
             "cpu": 18,
             "disk_capacity": 6,
             "disk_iops": 22,
             "memory": 1,
-            "min_count": 14,
+            "min_count": 11,
             "network": 1
           },
           "resource_bottleneck": "disk_iops"
@@ -706,14 +706,14 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.read_io_per_lcs_level": 1.8,
           "cassandra.storage_buffer_ratio": 1.82,
-          "effective_disk_per_node_gib": 2200,
+          "effective_disk_per_node_gib": 2800,
           "required_nodes_by_type": {
             "cluster_size": 22,
             "cpu": 18,
             "disk_capacity": 6,
             "disk_iops": 22,
             "memory": 1,
-            "min_count": 14,
+            "min_count": 11,
             "network": 1
           },
           "resource_bottleneck": "disk_iops"
@@ -738,14 +738,14 @@
           "cassandra.keyspace.rf": 3,
           "cassandra.read_io_per_lcs_level": 1.8,
           "cassandra.storage_buffer_ratio": 1.82,
-          "effective_disk_per_node_gib": 2200,
+          "effective_disk_per_node_gib": 2800,
           "required_nodes_by_type": {
             "cluster_size": 22,
             "cpu": 18,
             "disk_capacity": 6,
             "disk_iops": 22,
             "memory": 1,
-            "min_count": 14,
+            "min_count": 11,
             "network": 1
           },
           "resource_bottleneck": "disk_iops"

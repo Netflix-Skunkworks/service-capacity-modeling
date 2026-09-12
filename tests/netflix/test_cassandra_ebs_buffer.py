@@ -15,6 +15,9 @@ from service_capacity_modeling.models.org.netflix.cassandra import (
     CASSANDRA_DISK_UTILIZATION_LIMIT,
 )
 from service_capacity_modeling.models.org.netflix.cassandra import (
+    CASSANDRA_MAX_ATTACHED_DATA_PER_NODE_GIB,
+)
+from service_capacity_modeling.models.org.netflix.cassandra import (
     _with_disk_utilization_buffer,
 )
 from service_capacity_modeling.models.org.netflix.cassandra import (
@@ -22,7 +25,9 @@ from service_capacity_modeling.models.org.netflix.cassandra import (
 )
 
 
-def _ebs_desires(buffers: Buffers | None = None) -> CapacityDesires:
+def _ebs_desires(
+    buffers: Buffers | None = None, state_gib: int = 20_000
+) -> CapacityDesires:
     return CapacityDesires(
         service_tier=1,
         query_pattern=QueryPattern(
@@ -32,7 +37,7 @@ def _ebs_desires(buffers: Buffers | None = None) -> CapacityDesires:
             estimated_mean_write_latency_ms=certain_float(1),
         ),
         data_shape=DataShape(
-            estimated_state_size_gib=certain_int(20_000),
+            estimated_state_size_gib=certain_int(state_gib),
             estimated_compression_ratio=certain_float(1.0),
         ),
         buffers=buffers or Buffers(),
@@ -58,10 +63,40 @@ def _plan_ebs(desires: CapacityDesires, **extra_model_arguments):
 def test_ebs_applies_attached_disk_buffer_multiplier():
     result = _plan_ebs(_ebs_desires(), max_storage_buffer_ratio=4.0)
 
-    assert result.count == 20
-    assert result.attached_drives[0].size_gib == 2000
-    assert result.cluster_params[EFFECTIVE_DISK_PER_NODE_GIB] == 2100
+    assert result.count == 14
+    assert result.attached_drives[0].size_gib == 2900
+    assert result.cluster_params[EFFECTIVE_DISK_PER_NODE_GIB] == 3100
     assert result.cluster_params["cassandra.storage_buffer_ratio"] == 2.0
+
+
+def test_ebs_default_allows_1_5_tib_data_without_heating_disk_utilization():
+    args = NflxCassandraArguments.from_extra_model_arguments({})
+    result = _plan_ebs(
+        _ebs_desires(state_gib=15_360),
+        adaptive_storage_buffer=True,
+    )
+
+    assert args.max_attached_data_per_node_gib == 1536
+    assert CASSANDRA_MAX_ATTACHED_DATA_PER_NODE_GIB == 1536
+    assert result.count == 10
+    assert result.cluster_params[EFFECTIVE_DISK_PER_NODE_GIB] == 2800
+    assert result.cluster_params["cassandra.storage_buffer_ratio"] == pytest.approx(
+        1 / 0.55,
+        abs=0.01,
+    )
+    data_per_node_gib = 15_360 / result.count
+    assert data_per_node_gib == CASSANDRA_MAX_ATTACHED_DATA_PER_NODE_GIB
+    assert data_per_node_gib / result.attached_drives[0].size_gib < 0.55
+
+
+def test_ebs_default_density_limit_is_strict():
+    result = _plan_ebs(
+        _ebs_desires(state_gib=15_361),
+        adaptive_storage_buffer=True,
+    )
+
+    assert result.count == 11
+    assert 15_361 / result.count < CASSANDRA_MAX_ATTACHED_DATA_PER_NODE_GIB
 
 
 def test_ebs_multiplies_explicit_storage_buffer():
@@ -78,8 +113,9 @@ def test_ebs_multiplies_explicit_storage_buffer():
         )
     )
 
-    assert result.attached_drives[0].size_gib == 1900
-    assert result.cluster_params[EFFECTIVE_DISK_PER_NODE_GIB] == 1900
+    assert result.count == 14
+    assert result.attached_drives[0].size_gib == 2600
+    assert result.cluster_params[EFFECTIVE_DISK_PER_NODE_GIB] == 2800
     assert result.cluster_params["cassandra.storage_buffer_ratio"] == pytest.approx(
         1 / 0.55,
         abs=0.01,
@@ -101,11 +137,12 @@ def test_ebs_hotter_buffer_respects_disk_utilization_cap_with_adaptive_storage()
         1 / 0.55,
         abs=0.01,
     )
-    assert result.cluster_params[EFFECTIVE_DISK_PER_NODE_GIB] == 1900
+    assert result.cluster_params[EFFECTIVE_DISK_PER_NODE_GIB] == 2800
     assert stricter.cluster_params["cassandra.storage_buffer_ratio"] == pytest.approx(
         1 / 0.50,
         abs=0.01,
     )
+    assert stricter.cluster_params[EFFECTIVE_DISK_PER_NODE_GIB] == 3100
 
 
 def test_disk_utilization_cap_does_not_weaken_default_buffer_fallback():
