@@ -90,6 +90,11 @@ EBS_HOTTER_BUFFER_RATIO = 0.5
 CASSANDRA_MAX_DISK_UTILIZATION = 0.55
 CASSANDRA_DISK_IOPS_TARGET_UTILIZATION = 0.90
 CASSANDRA_EBS_SATURATION_TOLERANCE_IOPS = 200
+# With the default 90% target, 1.8 modeled IOs provision the same two IOs per
+# level as the previous cache-miss baseline. This makes ranking less pessimistic
+# without consuming the provisioned IOPS safety margin.
+CASSANDRA_READ_IO_PER_LCS_LEVEL = 1.8
+_CASSANDRA_WORKING_SET_READ_IO_PER_LCS_LEVEL = 2.0
 _CURRENT_TOPOLOGY_DATA_REL_TOLERANCE = 0.05
 _CURRENT_TOPOLOGY_NODE_TOLERANCE = 1
 _EPHEMERAL_MAINTENANCE_THRESHOLD_GIB_PER_NODE = 300
@@ -638,7 +643,8 @@ def _estimate_cassandra_requirement(
     # budget.
     instance_rps = max(1, reads_per_second // estimated_cores_per_region)
     disk_rps = instance_rps * _cass_io_per_read(
-        max(1, (disk_used_gib * zones_per_region) // estimated_cores_per_region)
+        max(1, (disk_used_gib * zones_per_region) // estimated_cores_per_region),
+        read_io_per_lcs_level=_CASSANDRA_WORKING_SET_READ_IO_PER_LCS_LEVEL,
     )
     rps_working_set = min(1.0, disk_rps / max_rps_to_disk)
 
@@ -885,6 +891,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     max_disk_utilization: float = CASSANDRA_MAX_DISK_UTILIZATION,
     min_instance_ram_gib_exclusive: float = 16.0,
     ebs_iops_evidence: Optional[CassandraEbsIopsEvidence] = None,
+    read_io_per_lcs_level: float = CASSANDRA_READ_IO_PER_LCS_LEVEL,
 ) -> Union[CapacityPlan, Excuse, None]:
     drive_name = drive.name
 
@@ -1173,7 +1180,10 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 // (current_drive.seq_io_size_kib * 1024),
             )
             modeled_current_iops_per_node = (
-                _cass_io_per_read(hottest_current_data_per_node_gib)
+                _cass_io_per_read(
+                    hottest_current_data_per_node_gib,
+                    read_io_per_lcs_level=read_io_per_lcs_level,
+                )
                 * math.ceil(observed_read_io_per_second / observed_current_count)
                 + observed_write_io_per_second / observed_current_count
             )
@@ -1277,9 +1287,9 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     unbuffered_disk_iops_by_count: Dict[int, float] = {}
 
     def required_disk_ios(_size: float, count: int) -> Tuple[float, float]:
-        modeled_read_iops = _cass_io_per_read(_size) * math.ceil(
-            read_io_per_sec / count
-        )
+        modeled_read_iops = _cass_io_per_read(
+            _size, read_io_per_lcs_level=read_io_per_lcs_level
+        ) * math.ceil(read_io_per_sec / count)
         modeled_write_iops = write_io_per_sec / count
         modeled_total_iops = modeled_read_iops + modeled_write_iops
         selected_read_iops = modeled_read_iops * iops_calibration_factor
@@ -1352,6 +1362,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             getattr(desires.buffers.desired.get("compute"), "ratio", 1.5),
             2,
         ),
+        "cassandra.read_io_per_lcs_level": read_io_per_lcs_level,
     }
     if is_ebs:
         params["cassandra.disk_iops_buffer_ratio"] = round(disk_iops_buffer_ratio, 2)
@@ -1552,14 +1563,19 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
 
 
 # C* LCS has 160 MiB sstables by default and 10 sstables per level
-def _cass_io_per_read(node_size_gib: float, sstable_size_mb: int = 160) -> int:
+def _cass_io_per_read(
+    node_size_gib: float,
+    sstable_size_mb: int = 160,
+    read_io_per_lcs_level: float = CASSANDRA_READ_IO_PER_LCS_LEVEL,
+) -> float:
     gb = node_size_gib * 1024
     sstables = max(1, gb // sstable_size_mb)
     # 10 sstables per level, plus 1 for L0 (avg)
     levels = 1 + int(math.ceil(math.log(sstables, 10)))
-    # One disk IO per data read and one per index read (assume we miss
-    # the key cache)
-    return 2 * levels
+    # Index summaries, Bloom filters, and key-cache hits avoid a second disk
+    # operation on some level probes. Model that as an average while retaining
+    # one data read per level as the lower bound.
+    return read_io_per_lcs_level * levels
 
 
 def _target_rf(desires: CapacityDesires, user_copies: Optional[int]) -> int:
@@ -1810,6 +1826,16 @@ class NflxCassandraArguments(BaseModel):
         f"clusters. Defaults to {CASSANDRA_MAX_DISK_UTILIZATION:.0%}. "
         "Lower values are more conservative; higher values allow denser current "
         "shape planning.",
+    )
+    read_io_per_lcs_level: float = Field(
+        default=CASSANDRA_READ_IO_PER_LCS_LEVEL,
+        ge=1.0,
+        allow_inf_nan=False,
+        description="Average physical read I/Os per LCS level probe. The default "
+        "assumes index summaries, Bloom filters, and key-cache hits avoid some "
+        "index reads while retaining one data read per level as a lower bound. "
+        "At the default 90% IOPS target, 1.8 modeled I/Os still provision two "
+        "I/Os per level.",
     )
     ebs_iops_evidence: Optional[CassandraEbsIopsEvidence] = Field(
         default=None,
@@ -2204,6 +2230,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_disk_utilization=args.max_disk_utilization,
             min_instance_ram_gib_exclusive=args.min_instance_ram_gib_exclusive,
             ebs_iops_evidence=args.ebs_iops_evidence,
+            read_io_per_lcs_level=args.read_io_per_lcs_level,
         )
 
         return result

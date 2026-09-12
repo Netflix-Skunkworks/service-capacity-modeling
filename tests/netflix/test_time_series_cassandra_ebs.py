@@ -225,10 +225,10 @@ def test_deployed_ebs_iops_evidence_flows_through_timeseries_composition():
     assert cluster.count == 6
     assert headroom == {
         "demand_source": "calibrated_model",
-        "modeled_candidate_iops_per_node": 5_614.17,
+        "modeled_candidate_iops_per_node": 5_058.17,
         "expected_peak_iops_per_node": 5_001.48,
         "target_utilization": 0.9,
-        "required_iops_before_rounding": 5_557.21,
+        "required_iops_before_rounding": 5_557.2,
         "provisioned_iops_per_node": 5_600,
         "buffer_iops_per_node": 598.52,
         "planned_utilization": 0.8931,

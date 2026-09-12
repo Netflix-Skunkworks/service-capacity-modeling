@@ -27,6 +27,7 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models.org.netflix.cassandra import (
+    _cass_io_per_read,
     _get_cluster_size_lambda,
     _get_min_count,
     CASSANDRA_MAX_DISK_UTILIZATION,
@@ -514,25 +515,36 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             )
 
     def test_ebs_high_reads(self):
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(100_000),
+                estimated_write_per_second=certain_int(1_000),
+            ),
+            data_shape=DataShape(
+                estimated_state_size_gib=certain_int(1_000),
+            ),
+        )
         cap_plan = planner.plan_certain(
             model_name="org.netflix.cassandra",
             region="us-east-1",
-            desires=CapacityDesires(
-                service_tier=1,
-                query_pattern=QueryPattern(
-                    estimated_read_per_second=certain_int(100_000),
-                    estimated_write_per_second=certain_int(1_000),
-                ),
-                data_shape=DataShape(
-                    estimated_state_size_gib=certain_int(1_000),
-                ),
-            ),
+            desires=desires,
             extra_model_arguments={
                 "require_attached_disks": True,
                 "require_local_disks": False,
             },
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
+        conservative_result = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_attached_disks": True,
+                "require_local_disks": False,
+                "read_io_per_lcs_level": 2.0,
+            },
+        )[0].candidate_clusters.zonal[0]
 
         cores = result.count * result.instance.cpu
         assert 64 <= cores <= 128
@@ -540,6 +552,13 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         assert result.attached_drives, (
             "Expected attached drives with require_attached_disks=True"
         )
+        assert result.attached_drives[0].read_io_per_s is not None
+        assert conservative_result.attached_drives[0].read_io_per_s is not None
+        assert (
+            result.attached_drives[0].read_io_per_s
+            < conservative_result.attached_drives[0].read_io_per_s
+        )
+        assert result.cluster_params["cassandra.read_io_per_lcs_level"] == 1.8
         assert result.attached_drives[0].name == "gp3"
         # 1TiB / ~32 nodes
         assert result.attached_drives[0].read_io_per_s is not None
@@ -547,6 +566,29 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         # Each zone is handling ~33k reads per second, so total disk ios should be < 3x
         # that 3 from each level
         assert 100_000 < ios < 400_000
+
+    def test_read_io_per_lcs_level_defaults_to_partial_index_cache_hits(self):
+        args = NflxCassandraArguments.from_extra_model_arguments({})
+
+        assert args.read_io_per_lcs_level == 1.8
+        assert _cass_io_per_read(1_000) == 9
+
+    def test_read_io_per_lcs_level_can_restore_conservative_baseline(self):
+        args = NflxCassandraArguments.from_extra_model_arguments(
+            {"read_io_per_lcs_level": 2.0}
+        )
+
+        assert args.read_io_per_lcs_level == 2.0
+        assert (
+            _cass_io_per_read(1_000, read_io_per_lcs_level=args.read_io_per_lcs_level)
+            == 10
+        )
+
+    def test_read_io_per_lcs_level_rejects_less_than_one_data_read(self):
+        with pytest.raises(ValueError):
+            NflxCassandraArguments.from_extra_model_arguments(
+                {"read_io_per_lcs_level": 0.99}
+            )
 
     def test_ebs_high_writes(self):
         cap_plan = planner.plan_certain(
