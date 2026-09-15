@@ -18,8 +18,7 @@ from service_capacity_modeling.models.plan_comparison import ResourceType
     [
         "c5.2xlarge",  # hyperthreaded, EBS only
         "c7a.2xlarge",  # non-hyperthreaded
-        "i3.2xlarge",  # local disk, cpu_cores unset
-        "m5d.2xlarge",  # cpu_ipc_scale unset (defaults to 1.0)
+        "i3.2xlarge",  # local disk, cpu_cores unset but cpu_ipc_scale curated
     ],
 )
 def test_identity_is_exactly_one(name: str) -> None:
@@ -36,14 +35,19 @@ def test_hyperthreaded_to_physical_cores() -> None:
 
     cpu_ipc_scale already folds in both the architectural IPC uplift and the
     1.5x non-SMT factor, so the compute factor must come from
-    vCPU x GHz x cpu_ipc_scale (11.83 -> 25.10, i.e. ~0.471).
+    vCPU x GHz x cpu_ipc_scale, not cores x cpu_ipc_scale.
+
+    The bound is intentionally wide rather than pinned to today's exact ratio:
+    the GENOA_IPC-derived constant behind c7a's cpu_ipc_scale
+    (tools/instance_families.py) gets retuned as better benchmarks arrive, and
+    this test should survive that. It still catches both failure directions:
+    cores x cpu_ipc_scale would double-count SMT and drop clock frequency,
+    landing near 0.256 (below the lower bound); compute mattering not at all
+    would land near 1.0 (above the upper bound).
     """
     compute = scale_factors("c5.2xlarge", "c7a.2xlarge").compute
 
-    assert compute.factor == pytest.approx(0.471, rel=0.05)
-    # Regression guard: cores x cpu_ipc_scale would double-count SMT and drop
-    # clock frequency, landing near 0.256 -- 1.8x optimistic, the unsafe way.
-    assert compute.factor > 0.4
+    assert 0.35 <= compute.factor <= 0.65
 
 
 def test_memory_binds_rather_than_compute() -> None:
@@ -110,26 +114,28 @@ def test_no_local_disk_omits_the_dimension() -> None:
     assert ResourceType.disk_gib not in factors.dimensions
 
 
-def test_uncurated_ipc_scale_is_flagged_not_raised() -> None:
-    """m5d.* ships no cpu_ipc_scale, so compute rests on the 1.0 default.
+def test_missing_cpu_ipc_scale_raises() -> None:
+    """m5d.* ships no cpu_ipc_scale, so compute would rest on the 1.0 default.
 
-    It happens to be right (Skylake is the 1.0 baseline), but it is un-asserted
-    data, so it is surfaced rather than silently folded in -- and rather than
-    raising, which would refuse a swap whose factor is in fact correct.
+    It happens to be right for m5d (Skylake is the 1.0 baseline), but this is
+    un-asserted data: silently trusting a default that's correct by
+    coincidence is exactly the failure mode that should page someone instead
+    of shipping a number nobody verified.
     """
-    factors = scale_factors("m5d.2xlarge", "m7i.2xlarge")
-
-    assert not factors.compute.curated
-    assert factors.uncurated == [factors.compute]
-    assert factors.memory.curated
-    assert factors.network.curated
+    with pytest.raises(ValueError, match="m5d.2xlarge"):
+        scale_factors("m5d.2xlarge", "m7i.2xlarge")
 
 
-def test_curated_shapes_report_nothing_uncurated() -> None:
-    factors = scale_factors("c5.2xlarge", "c7a.2xlarge")
+def test_missing_cpu_ipc_scale_raises_regardless_of_argument_order() -> None:
+    with pytest.raises(ValueError, match="m5d.2xlarge"):
+        scale_factors("m7i.2xlarge", "m5d.2xlarge")
 
-    assert factors.compute.curated
-    assert factors.uncurated == []
+
+def test_missing_cpu_ipc_scale_raises_even_for_identity() -> None:
+    """Not special-cased: raising is unconditional, even though an identity
+    swap's compute ratio would mathematically cancel any shared default."""
+    with pytest.raises(ValueError, match="m5d.2xlarge"):
+        scale_factors("m5d.2xlarge", "m5d.2xlarge")
 
 
 def _synthetic(name: str, **overrides: float) -> Instance:
@@ -215,9 +221,6 @@ def test_serializes_with_limiting_answer() -> None:
 
     assert dumped["limiting_resource"] == ResourceType.mem_gib
     assert dumped["limiting_factor"] == 1.0
-    assert dumped["dimensions"][ResourceType.cpu]["factor"] == pytest.approx(
-        0.471, rel=0.05
-    )
 
 
 def test_which_dimension_binds_is_not_serialized_per_dimension() -> None:

@@ -19,6 +19,12 @@
     all of that. If you want a capacity recommendation, use
     ``planner.plan_certain``.
 
+    It also does not detect a cross-architecture swap (e.g. Graviton to x86).
+    ``Instance.platforms`` does not reliably encode CPU architecture today --
+    some managed-service families use it to tag their database/cache engine
+    instead. Treat a cross-architecture swap's compute factor with extra
+    scrutiny; it is not flagged.
+
 Example usage::
 
     import math
@@ -49,7 +55,6 @@ its ASG minimums and whether a partial node means anything.
 
 import math
 from typing import Dict
-from typing import List
 from typing import Optional
 from typing import Tuple
 from typing import Union
@@ -86,14 +91,6 @@ class DimensionScale(ExcludeUnsetModel):
     to_capacity: float
     """Per-instance capacity of the shape being migrated to"""
 
-    curated: bool = True
-    """Whether every shape value feeding this dimension was explicitly set.
-
-    False means at least one side fell back to a pydantic default rather than a
-    curated value, so the factor may be wrong in a way that looks right. Today
-    this only ever happens for compute, via an unset ``cpu_ipc_scale``.
-    """
-
     @computed_field(return_type=float)  # type: ignore
     @property
     def factor(self) -> float:
@@ -127,8 +124,6 @@ class DimensionScale(ExcludeUnsetModel):
                 f"{self.resource.value}: {self.factor:.3f}x "
                 f"({self.from_capacity:.2f} -> {self.to_capacity:.2f})"
             )
-        if not self.curated:
-            detail += " [uncurated shape data]"
         return detail
 
 
@@ -210,15 +205,6 @@ class InstanceScaleFactors(ExcludeUnsetModel):
         """Local instance storage, or None if the ``from`` shape has none."""
         return self.dimensions.get(ResourceType.disk_gib)
 
-    @property
-    def uncurated(self) -> List[DimensionScale]:
-        """Dimensions computed from at least one defaulted shape value."""
-        return [
-            self.dimensions[r]
-            for r in _DIMENSION_ORDER
-            if r in self.dimensions and not self.dimensions[r].curated
-        ]
-
     def explain(self) -> str:
         if math.isfinite(self.limiting_factor):
             headline = (
@@ -243,11 +229,6 @@ class InstanceScaleFactors(ExcludeUnsetModel):
             dimension = self.dimensions[resource]
             marker = " [limiting]" if self.is_limiting(dimension) else ""
             lines.append(f"  {dimension}{marker}")
-        if self.uncurated:
-            lines.append(
-                "  Uncurated shape data on: "
-                + ", ".join(d.resource.value for d in self.uncurated)
-            )
         return "\n".join(lines)
 
     def __str__(self) -> str:
@@ -275,6 +256,11 @@ def scale_factors(
     Instance specs do not vary by region in SCM's data -- regions differ only in
     pricing and lifecycle -- so there is no region argument. Names are resolved
     through the global shape catalog and raise ``KeyError`` if unknown.
+
+    Raises ``ValueError`` if either shape has no curated ``cpu_ipc_scale``: an
+    unset value silently defaults to 1.0, which computes as "no IPC
+    difference" and would look like a right answer. Better to fail loudly here
+    than hand back a compute factor nobody can trust.
     """
     frm = (
         shapes.instance(from_instance)
@@ -282,6 +268,20 @@ def scale_factors(
         else from_instance
     )
     to = shapes.instance(to_instance) if isinstance(to_instance, str) else to_instance
+
+    uncurated = [
+        instance.name
+        for instance in (frm, to)
+        if "cpu_ipc_scale" not in instance.model_fields_set
+    ]
+    if uncurated:
+        raise ValueError(
+            f"No curated cpu_ipc_scale for: {', '.join(uncurated)}. "
+            "An unset value silently defaults to 1.0, which would compute as "
+            "'no IPC difference' whether or not that's true. Add an explicit "
+            "cpu_ipc_scale to the shape data before comparing compute for "
+            "these instances."
+        )
 
     # Effective compute, not vCPU count. cpu_ipc_scale already folds in both the
     # per-core IPC uplift and the hyperthreading factor (1.5x for non-SMT shapes,
@@ -293,12 +293,6 @@ def scale_factors(
             resource=ResourceType.cpu,
             from_capacity=to_reference_cores(frm.cpu, frm),
             to_capacity=to_reference_cores(to.cpu, to),
-            # An unset cpu_ipc_scale silently defaults to 1.0, which computes as
-            # "no IPC difference" and would look like a right answer.
-            curated=(
-                "cpu_ipc_scale" in frm.model_fields_set
-                and "cpu_ipc_scale" in to.model_fields_set
-            ),
         ),
         ResourceType.mem_gib: DimensionScale(
             resource=ResourceType.mem_gib,
