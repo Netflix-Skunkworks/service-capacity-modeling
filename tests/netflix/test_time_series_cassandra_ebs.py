@@ -104,6 +104,26 @@ def test_timeseries_uses_cassandra_default_storage_preference():
     _assert_on_ebs(_cassandra_tier(_namespace(4_000, 10_000)))
 
 
+def test_new_timeseries_ebs_plan_uses_fleet_iops_fallback():
+    desires = _namespace(4_000, 40_000)
+    cluster = _cassandra_tier(desires)[0]
+    kv_baseline_cluster = _cassandra_tier(
+        desires, {**NAMESPACE, "read_io_per_lcs_level": 1.8}
+    )[0]
+
+    assert cluster.cluster_params["cassandra.read_io_per_lcs_level"] == 1.0
+    provisioned_iops = sum(
+        drive.read_io_per_s + drive.write_io_per_s for drive in cluster.attached_drives
+    )
+    kv_baseline_iops = sum(
+        drive.read_io_per_s + drive.write_io_per_s
+        for drive in kv_baseline_cluster.attached_drives
+    )
+    assert provisioned_iops * cluster.count < (
+        kv_baseline_iops * kv_baseline_cluster.count
+    )
+
+
 def test_timeseries_applies_read_amplification_to_cassandra_desires():
     desires = _namespace(4_000, 40_000)
     ((child_model, modify_child_desires),) = NflxTimeSeriesCapacityModel.compose_with(
@@ -225,12 +245,12 @@ def test_deployed_ebs_iops_evidence_flows_through_timeseries_composition():
     assert cluster.count == 6
     assert headroom == {
         "demand_source": "calibrated_model",
-        "modeled_candidate_iops_per_node": 5_058.17,
-        "expected_peak_iops_per_node": 5_001.48,
+        "modeled_candidate_iops_per_node": 2_834.17,
+        "expected_peak_iops_per_node": 5_001.47,
         "target_utilization": 0.9,
-        "required_iops_before_rounding": 5_557.2,
+        "required_iops_before_rounding": 5_557.19,
         "provisioned_iops_per_node": 5_600,
-        "buffer_iops_per_node": 598.52,
+        "buffer_iops_per_node": 598.53,
         "planned_utilization": 0.8931,
         "candidate_max_iops_per_node": 16_000,
     }
