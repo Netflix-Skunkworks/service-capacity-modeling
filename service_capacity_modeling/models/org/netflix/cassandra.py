@@ -1913,10 +1913,6 @@ class NflxCassandraArguments(BaseModel):
         if "max_local_data_per_node_gib" not in args and "max_local_disk_gib" in args:
             args["max_local_data_per_node_gib"] = args["max_local_disk_gib"]
 
-        if "iops_workload_profile" not in args and any(
-            key.startswith("ts.") for key in args
-        ):
-            args["iops_workload_profile"] = CassandraIopsWorkloadProfile.ts
         if (
             "read_io_per_lcs_level" not in args
             and args.get("iops_workload_profile") == CassandraIopsWorkloadProfile.ts

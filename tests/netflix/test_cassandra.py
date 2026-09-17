@@ -582,14 +582,6 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         assert args.iops_workload_profile.value == "ts"
         assert args.read_io_per_lcs_level == 1.0
 
-    def test_time_series_namespace_selects_time_series_iops_profile(self):
-        args = NflxCassandraArguments.from_extra_model_arguments(
-            {"ts.hot.retention-interval": "PT720H"}
-        )
-
-        assert args.iops_workload_profile.value == "ts"
-        assert args.read_io_per_lcs_level == 1.0
-
     def test_explicit_read_iops_baseline_overrides_workload_profile(self):
         args = NflxCassandraArguments.from_extra_model_arguments(
             {
