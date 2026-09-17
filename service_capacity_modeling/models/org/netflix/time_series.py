@@ -62,6 +62,7 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
     ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
         # In the future depending on the user desire we might need EVCache
         # as well, e.g. if the latency SLO is reduced
+        extra_model_arguments.setdefault("iops_workload_profile", "time_series")
         ts_config = TimeSeriesConfiguration(extra_model_arguments)
 
         def _modify_cassandra_desires(desires: CapacityDesires) -> CapacityDesires:

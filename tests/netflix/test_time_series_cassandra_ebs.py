@@ -81,7 +81,7 @@ def _cassandra_tier(desires: CapacityDesires, namespace=None):
         model_name="org.netflix.time-series",
         region="us-east-1",
         desires=desires,
-        extra_model_arguments=dict(namespace or NAMESPACE),
+        extra_model_arguments=dict(NAMESPACE if namespace is None else namespace),
     )[0]
     clusters = [
         cluster
@@ -122,6 +122,20 @@ def test_new_timeseries_ebs_plan_uses_fleet_iops_fallback():
     assert provisioned_iops * cluster.count < (
         kv_baseline_iops * kv_baseline_cluster.count
     )
+
+
+def test_timeseries_composition_sets_iops_profile_without_namespace_arguments():
+    cluster = _cassandra_tier(_namespace(4_000, 40_000), {})[0]
+
+    assert cluster.cluster_params["cassandra.read_io_per_lcs_level"] == 1.0
+
+
+def test_timeseries_composition_labels_cassandra_iops_workload():
+    arguments = {}
+
+    NflxTimeSeriesCapacityModel.compose_with(_namespace(4_000, 40_000), arguments)
+
+    assert arguments["iops_workload_profile"] == "time_series"
 
 
 def test_timeseries_applies_read_amplification_to_cassandra_desires():
