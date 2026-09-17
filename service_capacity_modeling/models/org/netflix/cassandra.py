@@ -95,6 +95,7 @@ CASSANDRA_MAX_ATTACHED_DATA_PER_NODE_GIB = 1536
 # level as the previous cache-miss baseline. This makes ranking less pessimistic
 # without consuming the provisioned IOPS safety margin.
 CASSANDRA_READ_IO_PER_LCS_LEVEL = 1.8
+CASSANDRA_TIME_SERIES_READ_IO_PER_LCS_LEVEL = 1.0
 _CASSANDRA_WORKING_SET_READ_IO_PER_LCS_LEVEL = 2.0
 _CURRENT_TOPOLOGY_DATA_REL_TOLERANCE = 0.05
 _CURRENT_TOPOLOGY_NODE_TOLERANCE = 1
@@ -163,6 +164,17 @@ class CassandraClusterSizeMode(StrEnum):
 
     unrestricted = "unrestricted"
     """Use the raw required cluster count without Cassandra cluster-size rounding."""
+
+
+@enum_docstrings
+class CassandraIopsWorkloadProfile(StrEnum):
+    """Fleet fallback used to estimate IOPS without deployment evidence."""
+
+    kv = "kv"
+    """Use the fleet fallback for KeyValue workloads."""
+
+    ts = "ts"
+    """Use the fleet fallback for TimeSeries workloads."""
 
 
 class CassandraKeyspacePlacement(BaseModel):
@@ -1850,6 +1862,12 @@ class NflxCassandraArguments(BaseModel):
         "At the default 90% IOPS target, 1.8 modeled I/Os still provision two "
         "I/Os per level.",
     )
+    iops_workload_profile: CassandraIopsWorkloadProfile = Field(
+        default=CassandraIopsWorkloadProfile.kv,
+        description="Workload family used to select the attached-storage IOPS "
+        "fallback before deployment telemetry exists. An explicit "
+        "read_io_per_lcs_level always wins.",
+    )
     ebs_iops_evidence: Optional[CassandraEbsIopsEvidence] = Field(
         default=None,
         description="EBS observation for the current deployment in the planning "
@@ -1894,6 +1912,12 @@ class NflxCassandraArguments(BaseModel):
         args = dict(extra_model_arguments)
         if "max_local_data_per_node_gib" not in args and "max_local_disk_gib" in args:
             args["max_local_data_per_node_gib"] = args["max_local_disk_gib"]
+
+        if (
+            "read_io_per_lcs_level" not in args
+            and args.get("iops_workload_profile") == CassandraIopsWorkloadProfile.ts
+        ):
+            args["read_io_per_lcs_level"] = CASSANDRA_TIME_SERIES_READ_IO_PER_LCS_LEVEL
 
         # Pydantic will use defaults for any missing fields
         return cls.model_validate(args)

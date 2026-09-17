@@ -571,7 +571,26 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         args = NflxCassandraArguments.from_extra_model_arguments({})
 
         assert args.read_io_per_lcs_level == 1.8
+        assert args.iops_workload_profile.value == "kv"
         assert _cass_io_per_read(1_000) == 9
+
+    def test_time_series_iops_profile_uses_fleet_fallback_without_evidence(self):
+        args = NflxCassandraArguments.from_extra_model_arguments(
+            {"iops_workload_profile": "ts"}
+        )
+
+        assert args.iops_workload_profile.value == "ts"
+        assert args.read_io_per_lcs_level == 1.0
+
+    def test_explicit_read_iops_baseline_overrides_workload_profile(self):
+        args = NflxCassandraArguments.from_extra_model_arguments(
+            {
+                "iops_workload_profile": "ts",
+                "read_io_per_lcs_level": 1.4,
+            }
+        )
+
+        assert args.read_io_per_lcs_level == 1.4
 
     def test_read_io_per_lcs_level_can_restore_conservative_baseline(self):
         args = NflxCassandraArguments.from_extra_model_arguments(

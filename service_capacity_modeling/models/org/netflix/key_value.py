@@ -87,6 +87,7 @@ class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
     def compose_with(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
+        extra_model_arguments.setdefault("iops_workload_profile", "kv")
         query_pattern = user_desires.query_pattern
         target_consistency = (
             query_pattern.access_consistency.same_region.target_consistency

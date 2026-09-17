@@ -13,6 +13,9 @@ from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.models.org.netflix.key_value import (
+    NflxKeyValueCapacityModel,
+)
 
 # Property test configuration for KeyValue model.
 # See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
@@ -127,6 +130,15 @@ def test_cassandra_tier_uses_ebs_preference():
     for cluster in cassandra:
         assert cluster.instance.drive is None
         assert [drive.name for drive in cluster.attached_drives] == ["gp3"]
+        assert cluster.cluster_params["cassandra.read_io_per_lcs_level"] == 1.8
+
+
+def test_key_value_composition_labels_cassandra_iops_workload():
+    arguments = {}
+
+    NflxKeyValueCapacityModel.compose_with(MEMORY_SENSITIVE_KV, arguments)
+
+    assert arguments["iops_workload_profile"] == "kv"
 
 
 def test_evcache_also_gets_its_own_app_memory_reserve():

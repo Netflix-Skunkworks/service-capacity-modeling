@@ -813,7 +813,7 @@ class CapacityPlanner:
 
         desires = desires.model_copy(deep=True)
         _resolve_cluster_instances(desires)
-        extra_model_arguments = extra_model_arguments or {}
+        extra_model_arguments = dict(extra_model_arguments or {})
         lifecycles = lifecycles or self._default_lifecycles
 
         all_plans: List[Sequence[CapacityPlan]] = []
@@ -1020,7 +1020,7 @@ class CapacityPlanner:
             ValueError: If model_name not found or current_clusters invalid
             AttributeError: If model doesn't have CostAwareModel mixin
         """
-        extra_model_arguments = extra_model_arguments or {}
+        extra_model_arguments = dict(extra_model_arguments or {})
         if model_name not in self._models:
             raise ValueError(
                 f"model_name={model_name} does not exist. "
@@ -1296,7 +1296,7 @@ class CapacityPlanner:
         planner_arguments: Optional[PlannerArguments] = None,
         instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]] = None,
     ) -> _UncertainResult:
-        extra_model_arguments = extra_model_arguments or {}
+        extra_model_arguments = dict(extra_model_arguments or {})
         pargs = planner_arguments or PlannerArguments(
             max_results_per_family=max_results_per_family
         )

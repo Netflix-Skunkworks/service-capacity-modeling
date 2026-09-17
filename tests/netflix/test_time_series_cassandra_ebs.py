@@ -81,7 +81,7 @@ def _cassandra_tier(desires: CapacityDesires, namespace=None):
         model_name="org.netflix.time-series",
         region="us-east-1",
         desires=desires,
-        extra_model_arguments=dict(namespace or NAMESPACE),
+        extra_model_arguments=dict(NAMESPACE if namespace is None else namespace),
     )[0]
     clusters = [
         cluster
@@ -102,6 +102,40 @@ def _assert_on_ebs(clusters):
 
 def test_timeseries_uses_cassandra_default_storage_preference():
     _assert_on_ebs(_cassandra_tier(_namespace(4_000, 10_000)))
+
+
+def test_new_timeseries_ebs_plan_uses_fleet_iops_fallback():
+    desires = _namespace(4_000, 40_000)
+    cluster = _cassandra_tier(desires)[0]
+    kv_baseline_cluster = _cassandra_tier(
+        desires, {**NAMESPACE, "read_io_per_lcs_level": 1.8}
+    )[0]
+
+    assert cluster.cluster_params["cassandra.read_io_per_lcs_level"] == 1.0
+    provisioned_iops = sum(
+        drive.read_io_per_s + drive.write_io_per_s for drive in cluster.attached_drives
+    )
+    kv_baseline_iops = sum(
+        drive.read_io_per_s + drive.write_io_per_s
+        for drive in kv_baseline_cluster.attached_drives
+    )
+    assert provisioned_iops * cluster.count < (
+        kv_baseline_iops * kv_baseline_cluster.count
+    )
+
+
+def test_timeseries_composition_sets_iops_profile_without_namespace_arguments():
+    cluster = _cassandra_tier(_namespace(4_000, 40_000), {})[0]
+
+    assert cluster.cluster_params["cassandra.read_io_per_lcs_level"] == 1.0
+
+
+def test_timeseries_composition_labels_cassandra_iops_workload():
+    arguments = {}
+
+    NflxTimeSeriesCapacityModel.compose_with(_namespace(4_000, 40_000), arguments)
+
+    assert arguments["iops_workload_profile"] == "ts"
 
 
 def test_timeseries_applies_read_amplification_to_cassandra_desires():
@@ -144,24 +178,49 @@ def test_timeseries_does_not_store_cassandra_policy_in_caller_arguments():
 
     assert "require_local_disks" not in extra_model_arguments
     assert "require_attached_disks" not in extra_model_arguments
+    assert "iops_workload_profile" not in extra_model_arguments
+
+
+def test_explicit_caller_iops_profile_overrides_timeseries_default():
+    cluster = _cassandra_tier(
+        _namespace(4_000, 40_000),
+        {**NAMESPACE, "iops_workload_profile": "kv"},
+    )[0]
+
+    assert cluster.cluster_params["cassandra.read_io_per_lcs_level"] == 1.8
 
 
 def test_uncertain_timeseries_plan_uses_ebs_for_cassandra():
-    plan = planner.plan(
+    result = planner.plan(
         model_name="org.netflix.time-series",
         region="us-east-1",
         desires=_namespace(4_000, 10_000),
         extra_model_arguments=dict(NAMESPACE),
         simulations=32,
-    ).least_regret[0]
+    )
 
     _assert_on_ebs(
         [
             cluster
-            for cluster in plan.candidate_clusters.zonal
+            for cluster in result.least_regret[0].candidate_clusters.zonal
             if cluster.cluster_type == "cassandra"
         ]
     )
+
+    for plan in (
+        result.least_regret[0],
+        result.mean[0],
+        *(plans[0] for plans in result.percentiles.values()),
+    ):
+        cassandra = [
+            cluster
+            for cluster in plan.candidate_clusters.zonal
+            if cluster.cluster_type == "cassandra"
+        ]
+        assert {
+            cluster.cluster_params["cassandra.read_io_per_lcs_level"]
+            for cluster in cassandra
+        } == {1.0}
 
 
 def test_deployed_ebs_iops_evidence_flows_through_timeseries_composition():
@@ -225,12 +284,12 @@ def test_deployed_ebs_iops_evidence_flows_through_timeseries_composition():
     assert cluster.count == 6
     assert headroom == {
         "demand_source": "calibrated_model",
-        "modeled_candidate_iops_per_node": 5_058.17,
-        "expected_peak_iops_per_node": 5_001.48,
+        "modeled_candidate_iops_per_node": 2_834.17,
+        "expected_peak_iops_per_node": 5_001.47,
         "target_utilization": 0.9,
-        "required_iops_before_rounding": 5_557.2,
+        "required_iops_before_rounding": 5_557.19,
         "provisioned_iops_per_node": 5_600,
-        "buffer_iops_per_node": 598.52,
+        "buffer_iops_per_node": 598.53,
         "planned_utilization": 0.8931,
         "candidate_max_iops_per_node": 16_000,
     }
