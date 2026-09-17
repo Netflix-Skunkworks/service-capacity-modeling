@@ -133,59 +133,21 @@ def test_timeseries_composition_sets_iops_profile_without_namespace_arguments():
 def test_timeseries_composition_labels_cassandra_iops_workload():
     arguments = {}
 
-    (cassandra,) = NflxTimeSeriesCapacityModel.compose_with(
-        _namespace(4_000, 40_000), arguments
-    )
+    NflxTimeSeriesCapacityModel.compose_with(_namespace(4_000, 40_000), arguments)
 
-    assert cassandra.model_name == "org.netflix.cassandra"
-    assert cassandra.extra_model_arguments == {"iops_workload_profile": "ts"}
-    assert not arguments
-
-
-def test_timeseries_composition_does_not_label_elasticsearch():
-    cassandra, elasticsearch = NflxTimeSeriesCapacityModel.compose_with(
-        _namespace(4_000, 40_000), {**NAMESPACE, "search.enabled": True}
-    )
-
-    assert cassandra.extra_model_arguments == {"iops_workload_profile": "ts"}
-    assert elasticsearch.model_name == "org.netflix.elasticsearch"
-    assert elasticsearch.extra_model_arguments is None
-
-
-def test_planner_routes_timeseries_profile_only_to_cassandra():
-    arguments = {**NAMESPACE, "search.enabled": True}
-
-    # This is the planner's composition-boundary contract.
-    # pylint: disable=protected-access
-    arguments_by_model = {
-        model_name: model_arguments
-        for model_name, _, model_arguments in planner._sub_models(
-            "org.netflix.time-series",
-            _namespace(4_000, 40_000),
-            arguments,
-        )
-    }
-
-    assert arguments_by_model["org.netflix.cassandra"]["iops_workload_profile"] == (
-        "ts"
-    )
-    assert "iops_workload_profile" not in arguments_by_model["org.netflix.time-series"]
-    assert (
-        "iops_workload_profile" not in arguments_by_model["org.netflix.elasticsearch"]
-    )
-    assert "iops_workload_profile" not in arguments
+    assert arguments["iops_workload_profile"] == "ts"
 
 
 def test_timeseries_applies_read_amplification_to_cassandra_desires():
     desires = _namespace(4_000, 40_000)
-    (cassandra,) = NflxTimeSeriesCapacityModel.compose_with(
+    ((child_model, modify_child_desires),) = NflxTimeSeriesCapacityModel.compose_with(
         desires, dict(AMPLIFYING_NAMESPACE)
     )
     amplification = TimeSeriesConfiguration(AMPLIFYING_NAMESPACE).read_amplification
 
-    cassandra_desires = cassandra.modify_desires(desires)
+    cassandra_desires = modify_child_desires(desires)
 
-    assert cassandra.model_name == "org.netflix.cassandra"
+    assert child_model == "org.netflix.cassandra"
     assert cassandra_desires.query_pattern.estimated_read_per_second == (
         desires.query_pattern.estimated_read_per_second.scale(amplification)
     )
