@@ -1,5 +1,4 @@
 from typing import Any
-from typing import Callable
 from typing import Dict
 from typing import List
 from typing import Optional
@@ -27,6 +26,7 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import ComposedModel
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import cluster_infra_cost
 
@@ -86,8 +86,7 @@ class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
     @staticmethod
     def compose_with(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
-    ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
-        extra_model_arguments.setdefault("iops_workload_profile", "kv")
+    ) -> Tuple[ComposedModel, ...]:
         query_pattern = user_desires.query_pattern
         target_consistency = (
             query_pattern.access_consistency.same_region.target_consistency
@@ -146,11 +145,21 @@ class NflxKeyValueCapacityModel(CapacityModel, CostAwareModel):
                 return relaxed
 
             return (
-                ("org.netflix.cassandra", _modify_cassandra_desires),
-                ("org.netflix.evcache", _modify_evcache_desires),
+                ComposedModel(
+                    "org.netflix.cassandra",
+                    _modify_cassandra_desires,
+                    {"iops_workload_profile": "kv"},
+                ),
+                ComposedModel("org.netflix.evcache", _modify_evcache_desires),
             )
         else:
-            return (("org.netflix.cassandra", lambda x: x),)
+            return (
+                ComposedModel(
+                    "org.netflix.cassandra",
+                    lambda x: x,
+                    {"iops_workload_profile": "kv"},
+                ),
+            )
 
     @staticmethod
     def default_desires(

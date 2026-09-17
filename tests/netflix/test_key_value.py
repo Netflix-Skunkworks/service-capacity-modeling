@@ -136,9 +136,29 @@ def test_cassandra_tier_uses_ebs_preference():
 def test_key_value_composition_labels_cassandra_iops_workload():
     arguments = {}
 
-    NflxKeyValueCapacityModel.compose_with(MEMORY_SENSITIVE_KV, arguments)
+    (cassandra,) = NflxKeyValueCapacityModel.compose_with(
+        MEMORY_SENSITIVE_KV, arguments
+    )
 
-    assert arguments["iops_workload_profile"] == "kv"
+    assert cassandra.model_name == "org.netflix.cassandra"
+    assert cassandra.extra_model_arguments == {"iops_workload_profile": "kv"}
+    assert not arguments
+
+
+def test_key_value_composition_does_not_label_evcache():
+    cached = MEMORY_SENSITIVE_KV.model_copy(deep=True)
+    cached.query_pattern.access_consistency.same_region.target_consistency = (
+        AccessConsistency.eventual
+    )
+    cached.query_pattern.estimated_read_per_second = Interval(
+        low=30_000, mid=300_000, high=3_000_000, confidence=0.98
+    )
+
+    cassandra, evcache = NflxKeyValueCapacityModel.compose_with(cached, {})
+
+    assert cassandra.extra_model_arguments == {"iops_workload_profile": "kv"}
+    assert evcache.model_name == "org.netflix.evcache"
+    assert evcache.extra_model_arguments is None
 
 
 def test_evcache_also_gets_its_own_app_memory_reserve():

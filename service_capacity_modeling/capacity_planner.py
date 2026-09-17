@@ -61,6 +61,7 @@ from service_capacity_modeling.interface import SampleRef
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import ChildDesiresConfig
+from service_capacity_modeling.models import ComposedModel
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.common import merge_plan
@@ -621,12 +622,13 @@ class CapacityPlanner:
         lifecycles = lifecycles or self._default_lifecycles
 
         model_mean_desires: Dict[str, CapacityDesires] = {}
+        model_arguments_by_model: Dict[str, Dict[str, Any]] = {}
         sorted_percentiles = sorted(percentiles)
         model_percentile_desires: List[Dict[str, CapacityDesires]] = []
         for _ in sorted_percentiles:
             model_percentile_desires.append({})
 
-        for sub_model, sub_desires in self._sub_models(
+        for sub_model, sub_desires, sub_model_arguments in self._sub_models(
             model_name=model_name,
             desires=desires,
             extra_model_arguments=extra_model_arguments,
@@ -635,6 +637,7 @@ class CapacityPlanner:
                 desires=sub_desires, percentiles=sorted_percentiles
             )
             model_mean_desires[sub_model] = mean_desires
+            model_arguments_by_model[sub_model] = sub_model_arguments
             index = 0
             for percentile_input in percentile_inputs:
                 model_percentile_desires[index][sub_model] = percentile_input
@@ -642,7 +645,7 @@ class CapacityPlanner:
 
         mean_plan = self._mean_plan(
             drives,
-            extra_model_arguments,
+            model_arguments_by_model,
             instance_families,
             instance_filters_by_model,
             lifecycles,
@@ -653,7 +656,7 @@ class CapacityPlanner:
         )
         percentile_plans = self._group_plans_by_percentile(
             drives,
-            extra_model_arguments,
+            model_arguments_by_model,
             instance_families,
             instance_filters_by_model,
             lifecycles,
@@ -669,7 +672,7 @@ class CapacityPlanner:
     def _group_plans_by_percentile(  # pylint: disable=too-many-positional-arguments
         self,
         drives: Optional[Sequence[str]],
-        extra_model_arguments: Dict[str, Any],
+        model_arguments_by_model: Dict[str, Dict[str, Any]],
         instance_families: Optional[Sequence[str]],
         instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]],
         lifecycles: Sequence[Lifecycle],
@@ -697,7 +700,9 @@ class CapacityPlanner:
                     desires=percentile_sub_desire,
                     num_results=num_results,
                     num_regions=num_regions,
-                    extra_model_arguments=extra_model_arguments,
+                    extra_model_arguments=model_arguments_by_model[
+                        percentile_sub_model
+                    ],
                     lifecycles=lifecycles,
                     instance_families=percentile_sub_instance_families,
                     drives=drives,
@@ -717,7 +722,7 @@ class CapacityPlanner:
     def _mean_plan(  # pylint: disable=too-many-positional-arguments
         self,
         drives: Optional[Sequence[str]],
-        extra_model_arguments: Dict[str, Any],
+        model_arguments_by_model: Dict[str, Dict[str, Any]],
         instance_families: Optional[Sequence[str]],
         instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]],
         lifecycles: Sequence[Lifecycle],
@@ -740,7 +745,7 @@ class CapacityPlanner:
                 desires=mean_sub_desire,
                 num_results=num_results,
                 num_regions=num_regions,
-                extra_model_arguments=extra_model_arguments,
+                extra_model_arguments=model_arguments_by_model[mean_sub_model],
                 lifecycles=lifecycles,
                 instance_families=mean_sub_instance_families,
                 drives=drives,
@@ -819,7 +824,7 @@ class CapacityPlanner:
         all_plans: List[Sequence[CapacityPlan]] = []
         raw_excuses_by_model: Dict[str, List[Excuse]] = {}
 
-        for sub_model, sub_desires in self._sub_models(
+        for sub_model, sub_desires, sub_model_arguments in self._sub_models(
             model_name=model_name,
             desires=desires,
             extra_model_arguments=extra_model_arguments,
@@ -836,7 +841,7 @@ class CapacityPlanner:
                 desires=sub_desires,
                 num_results=num_results,
                 num_regions=num_regions,
-                extra_model_arguments=extra_model_arguments,
+                extra_model_arguments=sub_model_arguments,
                 lifecycles=lifecycles,
                 instance_families=sub_instance_families,
                 drives=drives,
@@ -957,7 +962,7 @@ class CapacityPlanner:
         costs: Dict[str, float] = {}
         services: List[ServiceCapacity] = []
 
-        for sub_model_name, sub_desires in self._sub_models(
+        for sub_model_name, sub_desires, sub_model_arguments in self._sub_models(
             model_name, desires, extra_model_arguments
         ):
             sub_model = self._models[sub_model_name]
@@ -978,7 +983,7 @@ class CapacityPlanner:
                 service_type=sub_model.service_name,
                 context=context,
                 desires=sub_desires,
-                extra_model_arguments=extra_model_arguments,
+                extra_model_arguments=sub_model_arguments,
             )
             for svc in model_services:
                 costs[svc.service_type] = svc.annual_cost
@@ -1406,13 +1411,15 @@ class CapacityPlanner:
         planner_arguments: PlannerArguments,
         instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]],
     ) -> _UncertainSampleData:
-        base_desires_by_model = dict(
-            self._sub_models(
-                model_name=model_name,
-                desires=desires,
-                extra_model_arguments=extra_model_arguments,
-            )
-        )
+        base_desires_by_model: Dict[str, CapacityDesires] = {}
+        extra_model_arguments_by_model: Dict[str, Dict[str, Any]] = {}
+        for sub_model, sub_desires, sub_model_arguments in self._sub_models(
+            model_name=model_name,
+            desires=desires,
+            extra_model_arguments=extra_model_arguments,
+        ):
+            base_desires_by_model[sub_model] = sub_desires
+            extra_model_arguments_by_model[sub_model] = sub_model_arguments
         regret_details_by_model: Dict[str, Sequence[RegretCandidate]] = {}
         excuses_by_model: Dict[str, List[Excuse]] = {
             model: [] for model in base_desires_by_model
@@ -1441,7 +1448,7 @@ class CapacityPlanner:
                     desires=sim_desires,
                     num_results=1,
                     num_regions=num_regions,
-                    extra_model_arguments=extra_model_arguments,
+                    extra_model_arguments=extra_model_arguments_by_model[sub_model],
                     lifecycles=lifecycles,
                     instance_families=sub_instance_families,
                     drives=drives,
@@ -1485,12 +1492,14 @@ class CapacityPlanner:
         model_name: str,
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
-    ) -> Generator[Tuple[str, CapacityDesires], None, None]:
-        queue: List[Tuple[CapacityDesires, str]] = [(desires, model_name)]
+    ) -> Generator[Tuple[str, CapacityDesires, Dict[str, Any]], None, None]:
+        queue: List[Tuple[CapacityDesires, str, Dict[str, Any]]] = [
+            (desires, model_name, dict(extra_model_arguments))
+        ]
         models_used = []
 
         while queue:
-            parent_desires, sub_model = queue.pop()
+            parent_desires, sub_model, sub_model_arguments = queue.pop()
             # prevent infinite loop of models for now
             if sub_model in models_used:
                 continue
@@ -1498,7 +1507,7 @@ class CapacityPlanner:
 
             sub_desires = parent_desires.merge_with(
                 self._models[sub_model].default_desires(
-                    parent_desires, extra_model_arguments
+                    parent_desires, sub_model_arguments
                 )
             )
 
@@ -1509,14 +1518,29 @@ class CapacityPlanner:
             # instances. It is applied before the per-child transform so a
             # transform that sets something deliberately still wins.
             parent_model = self._models[sub_model]
-            for child_model, modify_child_desires in parent_model.compose_with(
-                parent_desires, extra_model_arguments
+            for composed_model in parent_model.compose_with(
+                parent_desires, sub_model_arguments
             ):
+                if isinstance(composed_model, ComposedModel):
+                    child_model = composed_model.model_name
+                    modify_child_desires = composed_model.modify_desires
+                    child_defaults = composed_model.extra_model_arguments or {}
+                else:
+                    child_model, modify_child_desires = composed_model
+                    child_defaults = {}
                 config = parent_model.child_desires_config(child_model)
                 child_desires = _configure_child_desires(parent_desires, config)
-                queue.append((modify_child_desires(child_desires), child_model))
+                child_arguments = dict(child_defaults)
+                child_arguments.update(sub_model_arguments)
+                queue.append(
+                    (
+                        modify_child_desires(child_desires),
+                        child_model,
+                        child_arguments,
+                    )
+                )
 
-            yield sub_model, sub_desires
+            yield sub_model, sub_desires, sub_model_arguments
 
 
 planner = CapacityPlanner()

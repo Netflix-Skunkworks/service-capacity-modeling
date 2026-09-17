@@ -3,6 +3,7 @@ from typing import Callable
 from typing import Dict
 from typing import FrozenSet
 from typing import List
+from typing import NamedTuple
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
@@ -43,6 +44,7 @@ __all__ = [
     "CapacityPlan",
     "CapacityRegretParameters",
     "ChildDesiresConfig",
+    "ComposedModel",
     "certain_float",
     "Consistency",
     "DataShape",
@@ -75,6 +77,18 @@ class ChildDesiresConfig(BaseModel):
     written for. Turn it on for a child that runs on the parent's own
     instances, such as a model that only splits one service into node roles.
     """
+
+
+class ComposedModel(NamedTuple):
+    """One child in a model composition tree.
+
+    ``extra_model_arguments`` are private defaults for this edge. Caller-supplied
+    values remain authoritative, and sibling models do not receive them.
+    """
+
+    model_name: str
+    modify_desires: Callable[[CapacityDesires], CapacityDesires]
+    extra_model_arguments: Optional[Dict[str, Any]] = None
 
 
 def _disk_regret(  # noqa: C901
@@ -373,13 +387,19 @@ class CapacityModel:
     def compose_with(
         user_desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
-    ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
+    ) -> Tuple[
+        Union[
+            Tuple[str, Callable[[CapacityDesires], CapacityDesires]],
+            ComposedModel,
+        ],
+        ...,
+    ]:
         """Return additional model names to compose with this one
 
-        The second element of the tuple is a capacity desire transform that
-        takes the desires accumulated for this parent and modifies them for
-        the composed child model. The planner applies child_desires_config
-        before this transform.
+        Existing models may return a ``(model_name, modify_desires)`` pair.
+        ``ComposedModel`` additionally supplies private argument defaults for
+        one child. The planner applies ``child_desires_config`` before the
+        desire transform.
 
         (("model1", lambda x: x),
          ("model2", lambda x: transform(x)))

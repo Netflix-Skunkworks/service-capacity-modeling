@@ -133,21 +133,59 @@ def test_timeseries_composition_sets_iops_profile_without_namespace_arguments():
 def test_timeseries_composition_labels_cassandra_iops_workload():
     arguments = {}
 
-    NflxTimeSeriesCapacityModel.compose_with(_namespace(4_000, 40_000), arguments)
+    (cassandra,) = NflxTimeSeriesCapacityModel.compose_with(
+        _namespace(4_000, 40_000), arguments
+    )
 
-    assert arguments["iops_workload_profile"] == "ts"
+    assert cassandra.model_name == "org.netflix.cassandra"
+    assert cassandra.extra_model_arguments == {"iops_workload_profile": "ts"}
+    assert not arguments
+
+
+def test_timeseries_composition_does_not_label_elasticsearch():
+    cassandra, elasticsearch = NflxTimeSeriesCapacityModel.compose_with(
+        _namespace(4_000, 40_000), {**NAMESPACE, "search.enabled": True}
+    )
+
+    assert cassandra.extra_model_arguments == {"iops_workload_profile": "ts"}
+    assert elasticsearch.model_name == "org.netflix.elasticsearch"
+    assert elasticsearch.extra_model_arguments is None
+
+
+def test_planner_routes_timeseries_profile_only_to_cassandra():
+    arguments = {**NAMESPACE, "search.enabled": True}
+
+    # This is the planner's composition-boundary contract.
+    # pylint: disable=protected-access
+    arguments_by_model = {
+        model_name: model_arguments
+        for model_name, _, model_arguments in planner._sub_models(
+            "org.netflix.time-series",
+            _namespace(4_000, 40_000),
+            arguments,
+        )
+    }
+
+    assert arguments_by_model["org.netflix.cassandra"]["iops_workload_profile"] == (
+        "ts"
+    )
+    assert "iops_workload_profile" not in arguments_by_model["org.netflix.time-series"]
+    assert (
+        "iops_workload_profile" not in arguments_by_model["org.netflix.elasticsearch"]
+    )
+    assert "iops_workload_profile" not in arguments
 
 
 def test_timeseries_applies_read_amplification_to_cassandra_desires():
     desires = _namespace(4_000, 40_000)
-    ((child_model, modify_child_desires),) = NflxTimeSeriesCapacityModel.compose_with(
+    (cassandra,) = NflxTimeSeriesCapacityModel.compose_with(
         desires, dict(AMPLIFYING_NAMESPACE)
     )
     amplification = TimeSeriesConfiguration(AMPLIFYING_NAMESPACE).read_amplification
 
-    cassandra_desires = modify_child_desires(desires)
+    cassandra_desires = cassandra.modify_desires(desires)
 
-    assert child_model == "org.netflix.cassandra"
+    assert cassandra.model_name == "org.netflix.cassandra"
     assert cassandra_desires.query_pattern.estimated_read_per_second == (
         desires.query_pattern.estimated_read_per_second.scale(amplification)
     )
@@ -178,24 +216,49 @@ def test_timeseries_does_not_store_cassandra_policy_in_caller_arguments():
 
     assert "require_local_disks" not in extra_model_arguments
     assert "require_attached_disks" not in extra_model_arguments
+    assert "iops_workload_profile" not in extra_model_arguments
+
+
+def test_explicit_caller_iops_profile_overrides_timeseries_default():
+    cluster = _cassandra_tier(
+        _namespace(4_000, 40_000),
+        {**NAMESPACE, "iops_workload_profile": "kv"},
+    )[0]
+
+    assert cluster.cluster_params["cassandra.read_io_per_lcs_level"] == 1.8
 
 
 def test_uncertain_timeseries_plan_uses_ebs_for_cassandra():
-    plan = planner.plan(
+    result = planner.plan(
         model_name="org.netflix.time-series",
         region="us-east-1",
         desires=_namespace(4_000, 10_000),
         extra_model_arguments=dict(NAMESPACE),
         simulations=32,
-    ).least_regret[0]
+    )
 
     _assert_on_ebs(
         [
             cluster
-            for cluster in plan.candidate_clusters.zonal
+            for cluster in result.least_regret[0].candidate_clusters.zonal
             if cluster.cluster_type == "cassandra"
         ]
     )
+
+    for plan in (
+        result.least_regret[0],
+        result.mean[0],
+        *(plans[0] for plans in result.percentiles.values()),
+    ):
+        cassandra = [
+            cluster
+            for cluster in plan.candidate_clusters.zonal
+            if cluster.cluster_type == "cassandra"
+        ]
+        assert {
+            cluster.cluster_params["cassandra.read_io_per_lcs_level"]
+            for cluster in cassandra
+        } == {1.0}
 
 
 def test_deployed_ebs_iops_evidence_flows_through_timeseries_composition():

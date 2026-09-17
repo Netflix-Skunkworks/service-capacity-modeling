@@ -1,5 +1,4 @@
 from typing import Any
-from typing import Callable
 from typing import Dict
 from typing import Optional
 from typing import Tuple
@@ -20,6 +19,7 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.models import CapacityModel
+from service_capacity_modeling.models import ComposedModel
 
 
 class NflxTimeSeriesCapacityModel(CapacityModel):
@@ -59,10 +59,9 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
     @staticmethod
     def compose_with(
         user_desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
-    ) -> Tuple[Tuple[str, Callable[[CapacityDesires], CapacityDesires]], ...]:
+    ) -> Tuple[ComposedModel, ...]:
         # In the future depending on the user desire we might need EVCache
         # as well, e.g. if the latency SLO is reduced
-        extra_model_arguments.setdefault("iops_workload_profile", "ts")
         ts_config = TimeSeriesConfiguration(extra_model_arguments)
 
         def _modify_cassandra_desires(desires: CapacityDesires) -> CapacityDesires:
@@ -85,11 +84,23 @@ class NflxTimeSeriesCapacityModel(CapacityModel):
 
         if ts_config.search_enabled:
             return (
-                ("org.netflix.cassandra", _modify_cassandra_desires),
-                ("org.netflix.elasticsearch", _modify_elasticsearch_desires),
+                ComposedModel(
+                    "org.netflix.cassandra",
+                    _modify_cassandra_desires,
+                    {"iops_workload_profile": "ts"},
+                ),
+                ComposedModel(
+                    "org.netflix.elasticsearch", _modify_elasticsearch_desires
+                ),
             )
         else:
-            return (("org.netflix.cassandra", _modify_cassandra_desires),)
+            return (
+                ComposedModel(
+                    "org.netflix.cassandra",
+                    _modify_cassandra_desires,
+                    {"iops_workload_profile": "ts"},
+                ),
+            )
 
     @staticmethod
     def default_desires(
