@@ -135,7 +135,7 @@ def test_timeseries_composition_labels_cassandra_iops_workload():
 
     NflxTimeSeriesCapacityModel.compose_with(_namespace(4_000, 40_000), arguments)
 
-    assert arguments["iops_workload_profile"] == "time_series"
+    assert arguments["iops_workload_profile"] == "ts"
 
 
 def test_timeseries_applies_read_amplification_to_cassandra_desires():

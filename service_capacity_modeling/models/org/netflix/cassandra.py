@@ -171,10 +171,10 @@ class CassandraIopsWorkloadProfile(StrEnum):
     """Fleet fallback used to estimate IOPS without deployment evidence."""
 
     kv = "kv"
-    """Use the general Cassandra fallback calibrated from DGW KV clusters."""
+    """Use the fleet fallback for KeyValue workloads."""
 
-    time_series = "time_series"
-    """Use the read fallback calibrated from DGW TimeSeries clusters."""
+    ts = "ts"
+    """Use the fleet fallback for TimeSeries workloads."""
 
 
 class CassandraKeyspacePlacement(BaseModel):
@@ -1864,9 +1864,8 @@ class NflxCassandraArguments(BaseModel):
     )
     iops_workload_profile: CassandraIopsWorkloadProfile = Field(
         default=CassandraIopsWorkloadProfile.kv,
-        description="Fleet fallback used to estimate attached-storage IOPS before "
-        "deployment telemetry exists. KV retains the general 1.8 read-I/O "
-        "baseline; TimeSeries uses one physical read per LCS level. An explicit "
+        description="Workload family used to select the attached-storage IOPS "
+        "fallback before deployment telemetry exists. An explicit "
         "read_io_per_lcs_level always wins.",
     )
     ebs_iops_evidence: Optional[CassandraEbsIopsEvidence] = Field(
@@ -1917,11 +1916,10 @@ class NflxCassandraArguments(BaseModel):
         if "iops_workload_profile" not in args and any(
             key.startswith("ts.") for key in args
         ):
-            args["iops_workload_profile"] = CassandraIopsWorkloadProfile.time_series
+            args["iops_workload_profile"] = CassandraIopsWorkloadProfile.ts
         if (
             "read_io_per_lcs_level" not in args
-            and args.get("iops_workload_profile")
-            == CassandraIopsWorkloadProfile.time_series
+            and args.get("iops_workload_profile") == CassandraIopsWorkloadProfile.ts
         ):
             args["read_io_per_lcs_level"] = CASSANDRA_TIME_SERIES_READ_IO_PER_LCS_LEVEL
 

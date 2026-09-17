@@ -576,10 +576,10 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
 
     def test_time_series_iops_profile_uses_fleet_fallback_without_evidence(self):
         args = NflxCassandraArguments.from_extra_model_arguments(
-            {"iops_workload_profile": "time_series"}
+            {"iops_workload_profile": "ts"}
         )
 
-        assert args.iops_workload_profile.value == "time_series"
+        assert args.iops_workload_profile.value == "ts"
         assert args.read_io_per_lcs_level == 1.0
 
     def test_time_series_namespace_selects_time_series_iops_profile(self):
@@ -587,13 +587,13 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             {"ts.hot.retention-interval": "PT720H"}
         )
 
-        assert args.iops_workload_profile.value == "time_series"
+        assert args.iops_workload_profile.value == "ts"
         assert args.read_io_per_lcs_level == 1.0
 
     def test_explicit_read_iops_baseline_overrides_workload_profile(self):
         args = NflxCassandraArguments.from_extra_model_arguments(
             {
-                "iops_workload_profile": "time_series",
+                "iops_workload_profile": "ts",
                 "read_io_per_lcs_level": 1.4,
             }
         )
