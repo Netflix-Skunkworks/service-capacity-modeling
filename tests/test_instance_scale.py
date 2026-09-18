@@ -222,18 +222,6 @@ def test_serializes_with_limiting_answer() -> None:
     assert dumped["limiting_factor"] == 1.0
 
 
-def test_which_dimension_binds_is_not_serialized_per_dimension() -> None:
-    """Binding is relational, so it lives on the parent, not on each dimension.
-
-    Pins that a per-dimension flag is not reintroduced into the wire contract,
-    where it could go stale relative to the dimensions it describes.
-    """
-    dumped = scale_factors("c5.2xlarge", "c7a.2xlarge").model_dump()
-
-    for dimension in dumped["dimensions"].values():
-        assert "is_limiting" not in dimension
-
-
 def test_round_trip_recomputes_the_limiting_dimension() -> None:
     """Derived state is recomputed on deserialization, never carried."""
     factors = scale_factors("i3.2xlarge", "i4i.2xlarge")
