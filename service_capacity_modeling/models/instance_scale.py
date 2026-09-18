@@ -257,10 +257,10 @@ def scale_factors(
     pricing and lifecycle -- so there is no region argument. Names are resolved
     through the global shape catalog and raise ``KeyError`` if unknown.
 
-    Raises ``ValueError`` if either shape has no curated ``cpu_ipc_scale``: an
-    unset value silently defaults to 1.0, which computes as "no IPC
-    difference" and would look like a right answer. Better to fail loudly here
-    than hand back a compute factor nobody can trust.
+    Raises ``ValueError`` if either shape has no curated ``cpu_ipc_scale``,
+    ``ram_gib``, or ``net_mbps``. Only ``cpu_ipc_scale`` has a default today,
+    but all three are checked so a future default added to ``Instance``
+    can't silently slip through here unnoticed.
     """
     frm = (
         shapes.instance(from_instance)
@@ -269,18 +269,18 @@ def scale_factors(
     )
     to = shapes.instance(to_instance) if isinstance(to_instance, str) else to_instance
 
-    uncurated = [
-        instance.name
+    # drive is intentionally not checked here: None means "no local disk",
+    # a real value, not missing data.
+    missing = [
+        f"{instance.name}.{field}"
         for instance in (frm, to)
-        if "cpu_ipc_scale" not in instance.model_fields_set
+        for field in ("cpu_ipc_scale", "ram_gib", "net_mbps")
+        if field not in instance.model_fields_set
     ]
-    if uncurated:
+    if missing:
         raise ValueError(
-            f"No curated cpu_ipc_scale for: {', '.join(uncurated)}. "
-            "An unset value silently defaults to 1.0, which would compute as "
-            "'no IPC difference' whether or not that's true. Add an explicit "
-            "cpu_ipc_scale to the shape data before comparing compute for "
-            "these instances."
+            f"No curated value for: {', '.join(missing)}. An unset field "
+            "silently defaults, which could look like a real answer."
         )
 
     # Effective compute, not vCPU count. cpu_ipc_scale already folds in both the

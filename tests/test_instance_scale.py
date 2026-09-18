@@ -137,6 +137,26 @@ def test_missing_cpu_ipc_scale_raises_even_for_identity() -> None:
         scale_factors("m5d.2xlarge", "m5d.2xlarge")
 
 
+@pytest.mark.parametrize("missing_field", ["ram_gib", "net_mbps"])
+def test_missing_other_curated_fields_also_raises(missing_field: str) -> None:
+    """ram_gib and net_mbps are required today, so this can't fire through
+    normal shape loading. It's checked anyway so a future default added to
+    Instance can't silently slip past this same guard unnoticed."""
+    fields = {
+        "name": "synth.incomplete",
+        "cpu": 8,
+        "cpu_ghz": 2.3,
+        "cpu_ipc_scale": 1.0,
+        "ram_gib": 32.0,
+        "net_mbps": 2000.0,
+    }
+    del fields[missing_field]
+    incomplete = Instance.model_construct(**fields)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match=f"synth.incomplete.{missing_field}"):
+        scale_factors(incomplete, shapes.instance("c7a.2xlarge"))
+
+
 def _synthetic(name: str, **overrides: float) -> Instance:
     params = {
         "name": name,
