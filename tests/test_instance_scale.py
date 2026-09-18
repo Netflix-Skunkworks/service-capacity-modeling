@@ -117,10 +117,9 @@ def test_no_local_disk_omits_the_dimension() -> None:
 def test_missing_cpu_ipc_scale_raises() -> None:
     """m5d.* ships no cpu_ipc_scale, so compute would rest on the 1.0 default.
 
-    It happens to be right for m5d (Skylake is the 1.0 baseline), but this is
-    un-asserted data: silently trusting a default that's correct by
-    coincidence is exactly the failure mode that should page someone instead
-    of shipping a number nobody verified.
+    It happens to be right for m5d but silently trusting a default that's
+    correct by coincidence is exactly the failure mode that should page
+    someone instead of shipping a number nobody verified.
     """
     with pytest.raises(ValueError, match="m5d.2xlarge"):
         scale_factors("m5d.2xlarge", "m7i.2xlarge")
