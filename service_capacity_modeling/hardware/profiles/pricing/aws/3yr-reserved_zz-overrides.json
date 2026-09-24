@@ -14,8 +14,13 @@
       },
       "gp3": {
         "annual_cost_per_gib": 0.96,
-        "annual_cost_per_read_io": [[3000, 0], [16000, 0.06]],
-        "annual_cost_per_write_io": [[3000, 0], [16000, 0.06]]
+        "annual_cost_per_io": [[3000, 0], [80000, 0.06]],
+        "annual_cost_per_throughput": [[125, 0], [2000, 0.48]],
+        "annual_cost_per_read_io": [],
+        "annual_cost_per_write_io": [],
+        "pricing_source": "public",
+        "pricing_region": "us-east-1",
+        "pricing_as_of": "2026-09-24"
       },
       "aurora": {
         "annual_cost_per_gib": 1.2,

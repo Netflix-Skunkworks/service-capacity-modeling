@@ -291,7 +291,7 @@ def test_deployed_ebs_iops_evidence_flows_through_timeseries_composition():
         "provisioned_iops_per_node": 5_600,
         "buffer_iops_per_node": 598.53,
         "planned_utilization": 0.8931,
-        "candidate_max_iops_per_node": 16_000,
+        "candidate_max_iops_per_node": 80_000,
     }
 
 

@@ -223,7 +223,7 @@ def _drive(
     )
 
 
-def pull_family(  # pylint: disable=too-many-positional-arguments,too-many-locals
+def pull_family(  # pylint: disable=too-many-positional-arguments,too-many-locals,too-many-branches
     ec2_client: Any,
     family: str,
     cpu_perf: Optional[CPUPerformance] = None,
@@ -354,6 +354,20 @@ def pull_family(  # pylint: disable=too-many-positional-arguments,too-many-local
             "net_mbps": aggregate_network_mbps(data["NetworkInfo"]),
             "drive": drive,
         }
+        ebs_optimized = data.get("EbsInfo", {}).get("EbsOptimizedInfo", {})
+        if ebs_optimized:
+            shape_kwargs.update(
+                {
+                    "ebs_baseline_iops": ebs_optimized.get("BaselineIops"),
+                    "ebs_max_iops": ebs_optimized.get("MaximumIops"),
+                    "ebs_baseline_throughput_mib_per_s": ebs_optimized.get(
+                        "BaselineThroughputInMBps"
+                    ),
+                    "ebs_max_throughput_mib_per_s": ebs_optimized.get(
+                        "MaximumThroughputInMBps"
+                    ),
+                }
+            )
         if lifecycle is not None:
             shape_kwargs["lifecycle"] = lifecycle
         results.append(Instance(**shape_kwargs))

@@ -1,6 +1,7 @@
 from fractions import Fraction
 
 from service_capacity_modeling.hardware import shapes
+from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import DriveType
 from service_capacity_modeling.interface import normalized_aws_size
 
@@ -17,7 +18,62 @@ def test_services():
 def test_drives():
     gp3 = shapes.region("us-east-1").drives["gp3"]
     assert gp3.drive_type == DriveType.attached_ssd
-    assert gp3.max_scale_size_gib == 16384
+    assert gp3.max_scale_size_gib == 65536
+    assert gp3.max_scale_io_per_s == 80000
+    assert gp3.max_scale_io_per_s_per_gib == 500
+    assert gp3.max_scale_throughput == 2000
+    assert gp3.max_scale_throughput_per_io == 0.25
+    assert gp3.pricing_source == "public"
+    assert gp3.pricing_region == "us-east-1"
+
+
+def test_gp3_prices_shared_iops_and_throughput_once():
+    gp3 = shapes.region("us-east-1").price_drive(
+        Drive(
+            name="gp3",
+            size_gib=1000,
+            read_io_per_s=10000,
+            write_io_per_s=6000,
+            provisioned_io_per_s=16000,
+            throughput=1000,
+        )
+    )
+
+    assert gp3.provisioned_io_per_s == 16000
+    assert gp3.throughput == 1000
+    assert gp3.annual_cost == 2160
+    assert gp3.annual_cost_components == {
+        "capacity": 960,
+        "iops": 780,
+        "throughput": 420,
+        "read_iops": 0,
+        "write_iops": 0,
+    }
+
+
+def test_directional_drive_pricing_remains_supported():
+    drive = Drive(
+        name="legacy",
+        size_gib=10,
+        read_io_per_s=4000,
+        write_io_per_s=5000,
+        annual_cost_per_gib=1,
+        annual_cost_per_read_io=[(3000, 0), (10000, 1)],
+        annual_cost_per_write_io=[(3000, 0), (10000, 2)],
+    )
+
+    assert drive.annual_cost == 5010
+
+
+def test_shared_iops_pricing_accepts_legacy_directional_current_drive():
+    gp3 = shapes.region("us-east-1").price_drive(
+        Drive(name="gp3", size_gib=1000, read_io_per_s=10_000, write_io_per_s=6_000)
+    )
+
+    assert gp3.provisioned_io_per_s == 16_000
+    assert gp3.annual_cost_components["iops"] == 780
+    assert gp3.annual_cost_components["read_iops"] == 0
+    assert gp3.annual_cost_components["write_iops"] == 0
 
 
 def test_loaded_from_ec2_and_overrides():

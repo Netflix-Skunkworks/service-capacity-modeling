@@ -114,6 +114,47 @@ def test_attached_drive_iops_overflow_recalculates_per_node_iops():
     assert attached_drive.read_io_per_s < attached_drive.max_io_per_s
 
 
+def test_attached_drive_sets_shared_provisioned_iops_for_pricing():
+    cluster = compute_stateful_zone(
+        instance=M5_4XL,
+        drive=Drive(
+            name="shared-iops",
+            max_scale_size_gib=1_000,
+            max_scale_io_per_s=80_000,
+            annual_cost_per_io=[(3_000, 0), (80_000, 1)],
+        ),
+        needed_cores=4,
+        needed_disk_gib=100,
+        needed_memory_gib=10,
+        needed_network_mbps=100,
+        required_disk_ios=lambda _size, _count: (10_000, 6_000),
+    )
+
+    attached_drive = cluster.attached_drives[0]
+    assert attached_drive.provisioned_io_per_s == 16_000
+
+
+def test_attached_drive_respects_provisioned_iops_per_gib_limit():
+    cluster = compute_stateful_zone(
+        instance=M5_4XL,
+        drive=Drive(
+            name="density-limited-ebs",
+            max_scale_size_gib=1_000,
+            max_scale_io_per_s=80_000,
+            max_scale_io_per_s_per_gib=500,
+        ),
+        needed_cores=4,
+        needed_disk_gib=100,
+        needed_memory_gib=10,
+        needed_network_mbps=100,
+        required_disk_ios=lambda _size, _count: (60_000, 0),
+    )
+
+    attached_drive = cluster.attached_drives[0]
+    assert attached_drive.size_gib == 200
+    assert attached_drive.read_io_per_s <= 500 * attached_drive.size_gib
+
+
 def test_attached_drive_capacity_overflow_recalculates_per_node_ios():
     cluster = compute_stateful_zone(
         instance=M5_4XL,

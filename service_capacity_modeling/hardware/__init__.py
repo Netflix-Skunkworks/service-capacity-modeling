@@ -55,12 +55,19 @@ def price_hardware(hardware: Hardware, pricing: Pricing) -> GlobalHardware:
                 continue
             priced_drives[drive] = hardware.drives[drive].model_copy()
             priced_drives[drive].annual_cost_per_gib = dprice.annual_cost_per_gib
+            priced_drives[drive].annual_cost_per_io = dprice.annual_cost_per_io
+            priced_drives[
+                drive
+            ].annual_cost_per_throughput = dprice.annual_cost_per_throughput
             priced_drives[
                 drive
             ].annual_cost_per_read_io = dprice.annual_cost_per_read_io
             priced_drives[
                 drive
             ].annual_cost_per_write_io = dprice.annual_cost_per_write_io
+            priced_drives[drive].pricing_source = dprice.pricing_source
+            priced_drives[drive].pricing_region = dprice.pricing_region or region
+            priced_drives[drive].pricing_as_of = dprice.pricing_as_of
 
         for svc, svc_price in region_pricing.services.items():
             if svc not in hardware.services:
