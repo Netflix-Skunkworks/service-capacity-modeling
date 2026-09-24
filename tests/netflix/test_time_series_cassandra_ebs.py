@@ -106,22 +106,24 @@ def test_timeseries_uses_cassandra_default_storage_preference():
 
 def test_new_timeseries_ebs_plan_uses_fleet_iops_fallback():
     desires = _namespace(4_000, 40_000)
-    cluster = _cassandra_tier(desires)[0]
+    attached = {
+        **NAMESPACE,
+        "require_attached_disks": True,
+        "require_local_disks": False,
+    }
+    cluster = _cassandra_tier(desires, attached)[0]
     kv_baseline_cluster = _cassandra_tier(
-        desires, {**NAMESPACE, "read_io_per_lcs_level": 1.8}
+        desires, {**attached, "read_io_per_lcs_level": 1.8}
     )[0]
 
     assert cluster.cluster_params["cassandra.read_io_per_lcs_level"] == 1.0
-    provisioned_iops = sum(
-        drive.read_io_per_s + drive.write_io_per_s for drive in cluster.attached_drives
-    )
-    kv_baseline_iops = sum(
-        drive.read_io_per_s + drive.write_io_per_s
-        for drive in kv_baseline_cluster.attached_drives
-    )
-    assert provisioned_iops * cluster.count < (
-        kv_baseline_iops * kv_baseline_cluster.count
-    )
+    modeled_iops = cluster.cluster_params["cassandra.ebs_performance"][
+        "modeled_iops_per_node"
+    ]
+    kv_modeled_iops = kv_baseline_cluster.cluster_params["cassandra.ebs_performance"][
+        "modeled_iops_per_node"
+    ]
+    assert modeled_iops * cluster.count < (kv_modeled_iops * kv_baseline_cluster.count)
 
 
 def test_timeseries_composition_sets_iops_profile_without_namespace_arguments():
@@ -252,6 +254,14 @@ def test_deployed_ebs_iops_evidence_flows_through_timeseries_composition():
             "ebs_iops_evidence": {
                 "peak_iops_per_node": 6_000,
                 "configured_iops_per_node": 16_000,
+                "peak_throughput_mib_per_s_per_node": 400,
+                "configured_throughput_mib_per_s_per_node": 1_000,
+                "throughput_observed_regional_workload": {
+                    "read_per_second": 8_000,
+                    "write_per_second": 40_000,
+                    "mean_read_size_bytes": 4_096,
+                    "mean_write_size_bytes": 1_024,
+                },
                 "observed_regional_workload": {
                     "read_per_second": 10_000,
                     "write_per_second": 50_000,
@@ -282,17 +292,14 @@ def test_deployed_ebs_iops_evidence_flows_through_timeseries_composition():
     assert calibration["same_deployed_topology"] is True
     assert calibration["current_topology_iops_governor"] == "deployed_topology"
     assert cluster.count == 6
-    assert headroom == {
-        "demand_source": "calibrated_model",
-        "modeled_candidate_iops_per_node": 2_834.17,
-        "expected_peak_iops_per_node": 5_001.47,
-        "target_utilization": 0.9,
-        "required_iops_before_rounding": 5_557.19,
-        "provisioned_iops_per_node": 5_600,
-        "buffer_iops_per_node": 598.53,
-        "planned_utilization": 0.8931,
-        "candidate_max_iops_per_node": 80_000,
-    }
+    assert headroom["demand_source"] == "calibrated_model"
+    assert headroom["modeled_candidate_iops_per_node"] == 2_834.17
+    assert headroom["expected_peak_iops_per_node"] == 5_001.47
+    assert headroom["provisioned_iops_per_node"] == 16_000
+    performance = cluster.cluster_params["cassandra.ebs_performance"]
+    assert performance["selected_plan"]["throughput_mib_per_s_per_node"] == 1_000
+    assert performance["same_topology_rightsizing"]["status"] == "realizable"
+    assert calibration["throughput_calibration_workload"]["read_per_second"] == 8_000
 
 
 def test_timeseries_tier_is_unchanged_by_the_ebs_choice():

@@ -58,6 +58,8 @@ def simple_drive(
     read_io_per_s: int = 3000,
     write_io_per_s: int = 3000,
     region: str = "us-east-1",
+    *,
+    throughput_mib_per_s: Optional[int] = None,
 ) -> Drive:
     """Create a drive instance with specific size and IOPS for testing.
 
@@ -70,6 +72,7 @@ def simple_drive(
         size_gib: Drive size in GiB (default: 100)
         read_io_per_s: Read IOPS (default: 3000)
         write_io_per_s: Write IOPS (default: 3000)
+        throughput_mib_per_s: Provisioned throughput, when applicable
         region: AWS region (default: "us-east-1")
 
     Returns:
@@ -88,6 +91,9 @@ def simple_drive(
     drive_instance.size_gib = size_gib
     drive_instance.read_io_per_s = read_io_per_s
     drive_instance.write_io_per_s = write_io_per_s
+    if drive_instance.annual_cost_per_io:
+        drive_instance.provisioned_io_per_s = read_io_per_s + write_io_per_s
+    drive_instance.throughput = throughput_mib_per_s
     return drive_instance
 
 

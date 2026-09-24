@@ -1,5 +1,7 @@
 # pylint: disable=too-many-lines
 
+from typing import Optional
+
 import pytest
 
 from service_capacity_modeling.capacity_planner import planner
@@ -133,12 +135,15 @@ class TestCassandraCapacityPlanning:
         # Storage should be sufficient for the data (300 GiB with buffer)
         assert_minimum_storage_gib(high_writes_result, 400)
         assert_similar_compute(
-            shapes.instance("c8a.4xlarge"),
+            shapes.instance("c7a.4xlarge"),
             high_writes_result.instance,
             expected_count=5,
             actual_count=high_writes_result.count,
             expected_attached_disk=simple_drive(
-                size_gib=100, read_io_per_s=5400, write_io_per_s=200
+                size_gib=100,
+                read_io_per_s=15_400,
+                write_io_per_s=600,
+                throughput_mib_per_s=1_000,
             ),
             actual_attached_disk=high_writes_result.attached_drives[0],
         )
@@ -244,22 +249,33 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         *,
         peak_iops_per_node: float = 12_000,
         configured_iops_per_node: int = 16_000,
+        peak_throughput_mib_per_s_per_node: Optional[float] = None,
+        configured_throughput_mib_per_s_per_node: Optional[int] = None,
         regional_read_per_second: float = 300_000,
         regional_write_per_second: float = 300_000,
         mean_read_size_bytes: float = 1024,
         mean_write_size_bytes: float = 256,
     ):
+        evidence = {
+            "peak_iops_per_node": peak_iops_per_node,
+            "configured_iops_per_node": configured_iops_per_node,
+            "observed_regional_workload": {
+                "read_per_second": regional_read_per_second,
+                "write_per_second": regional_write_per_second,
+                "mean_read_size_bytes": mean_read_size_bytes,
+                "mean_write_size_bytes": mean_write_size_bytes,
+            },
+        }
+        if peak_throughput_mib_per_s_per_node is not None:
+            evidence["peak_throughput_mib_per_s_per_node"] = (
+                peak_throughput_mib_per_s_per_node
+            )
+        if configured_throughput_mib_per_s_per_node is not None:
+            evidence["configured_throughput_mib_per_s_per_node"] = (
+                configured_throughput_mib_per_s_per_node
+            )
         return {
-            "ebs_iops_evidence": {
-                "peak_iops_per_node": peak_iops_per_node,
-                "configured_iops_per_node": configured_iops_per_node,
-                "observed_regional_workload": {
-                    "read_per_second": regional_read_per_second,
-                    "write_per_second": regional_write_per_second,
-                    "mean_read_size_bytes": mean_read_size_bytes,
-                    "mean_write_size_bytes": mean_write_size_bytes,
-                },
-            }
+            "ebs_iops_evidence": evidence,
         }
 
     def _ebs_explained(
@@ -268,6 +284,8 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         *,
         peak_iops_per_node=12_000,
         configured_iops_per_node=16_000,
+        peak_throughput_mib_per_s_per_node=None,
+        configured_throughput_mib_per_s_per_node=None,
         regional_read_per_second=300_000,
         regional_write_per_second=300_000,
         mean_read_size_bytes=1024,
@@ -287,6 +305,12 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
                 **self._ebs_iops_evidence(
                     peak_iops_per_node=peak_iops_per_node,
                     configured_iops_per_node=configured_iops_per_node,
+                    peak_throughput_mib_per_s_per_node=(
+                        peak_throughput_mib_per_s_per_node
+                    ),
+                    configured_throughput_mib_per_s_per_node=(
+                        configured_throughput_mib_per_s_per_node
+                    ),
                     regional_read_per_second=regional_read_per_second,
                     regional_write_per_second=regional_write_per_second,
                     mean_read_size_bytes=mean_read_size_bytes,
@@ -394,6 +418,220 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
                     configured_iops_per_node=16_000,
                 )
             )
+
+    def test_ebs_evidence_requires_complete_throughput_pair(self):
+        with pytest.raises(
+            ValueError, match="peak and configured throughput must be provided together"
+        ):
+            NflxCassandraArguments.from_extra_model_arguments(
+                self._ebs_iops_evidence(
+                    peak_throughput_mib_per_s_per_node=400,
+                )
+            )
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            {"min_ebs_iops_per_node": 16_200, "max_ebs_iops_per_node": 16_000},
+            {
+                "min_ebs_throughput_mib_per_s": 1_001,
+                "max_ebs_throughput_mib_per_s": 1_000,
+            },
+        ],
+    )
+    def test_ebs_performance_bounds_require_ordered_ranges(self, arguments):
+        with pytest.raises(ValueError, match="must be <="):
+            NflxCassandraArguments.from_extra_model_arguments(arguments)
+
+    def test_production_bounds_pin_new_ebs_plans_to_16k_and_1k(self):
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(100_000),
+                estimated_write_per_second=certain_int(1_000),
+            ),
+            data_shape=DataShape(estimated_state_size_gib=certain_int(1_000)),
+        )
+
+        cluster = self._ebs_plan(desires)
+        selected = cluster.cluster_params["cassandra.ebs_performance"]["selected_plan"]
+
+        assert selected["iops_per_node"] == 16_000
+        assert selected["throughput_mib_per_s_per_node"] == 1_000
+
+    def test_expanded_bounds_choose_paid_performance_when_cheaper_than_a_node(self):
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(100_000),
+                estimated_write_per_second=certain_int(1_000),
+                estimated_mean_read_size_bytes=certain_int(4_096),
+                estimated_mean_write_size_bytes=certain_int(1_024),
+            ),
+            data_shape=DataShape(estimated_state_size_gib=certain_int(1_000)),
+        )
+
+        cluster = self._ebs_plan(
+            desires,
+            max_ebs_iops_per_node=80_000,
+            max_ebs_throughput_mib_per_s=2_000,
+        )
+        performance = cluster.cluster_params["cassandra.ebs_performance"]
+        selected = performance["selected_plan"]
+        alternative = performance["nearest_alternative"]
+
+        assert selected["iops_per_node"] > 16_000
+        assert selected["throughput_mib_per_s_per_node"] == 1_000
+        assert alternative["nodes_per_zone"] > selected["nodes_per_zone"]
+        assert (
+            alternative["annual_regional_infrastructure_cost"]
+            > selected["annual_regional_infrastructure_cost"]
+        )
+
+    def test_expanded_bounds_make_throughput_a_priced_planning_dimension(self):
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(1_000_000),
+                estimated_write_per_second=certain_int(1_000_000),
+                estimated_mean_read_size_bytes=certain_int(4_096),
+                estimated_mean_write_size_bytes=certain_int(1_024),
+            ),
+            data_shape=DataShape(estimated_state_size_gib=certain_int(10_000)),
+        )
+
+        cluster = self._ebs_plan(
+            desires,
+            max_ebs_iops_per_node=80_000,
+            max_ebs_throughput_mib_per_s=2_000,
+        )
+        selected = cluster.cluster_params["cassandra.ebs_performance"]["selected_plan"]
+
+        assert selected["iops_per_node"] > 16_000
+        assert selected["throughput_mib_per_s_per_node"] > 1_000
+
+    def test_pinned_topology_reports_throughput_limit(self):
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(100_000),
+                estimated_write_per_second=certain_int(1_000),
+                estimated_mean_read_size_bytes=certain_int(262_144),
+                estimated_mean_write_size_bytes=certain_int(1_024),
+            ),
+            data_shape=DataShape(estimated_state_size_gib=certain_int(1_000)),
+        )
+
+        explained = planner.plan_certain_explained(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_attached_disks": True,
+                "require_local_disks": False,
+                "required_cluster_size": 3,
+                "max_regional_size": 600,
+                "max_ebs_iops_per_node": 80_000,
+                "max_ebs_throughput_mib_per_s": 1_000,
+            },
+            instance_families=["r7a"],
+            num_results=20,
+        )
+
+        assert not explained.plans
+        assert any(
+            excuse.reason == "Required cluster size exceeds the EBS throughput limit"
+            for excuse in explained.excuses_by_model["org.netflix.cassandra"]
+        )
+
+    def test_complete_unsaturated_evidence_reports_same_topology_savings(self):
+        cluster = (
+            self._ebs_explained(
+                self._existing_ebs_desires(),
+                peak_iops_per_node=12_000,
+                configured_iops_per_node=80_000,
+                peak_throughput_mib_per_s_per_node=400,
+                configured_throughput_mib_per_s_per_node=2_000,
+                required_cluster_size=64,
+                max_ebs_iops_per_node=80_000,
+                max_ebs_throughput_mib_per_s=2_000,
+            )
+            .plans[0]
+            .candidate_clusters.zonal[0]
+        )
+
+        rightsizing = cluster.cluster_params["cassandra.ebs_performance"][
+            "same_topology_rightsizing"
+        ]
+        assert rightsizing["status"] == "realizable"
+        assert rightsizing["annual_savings"] > 0
+
+    def test_saturated_evidence_never_claims_same_topology_savings(self):
+        cluster = (
+            self._ebs_explained(
+                self._existing_ebs_desires(),
+                peak_iops_per_node=15_950,
+                configured_iops_per_node=16_000,
+                peak_throughput_mib_per_s_per_node=400,
+                configured_throughput_mib_per_s_per_node=1_000,
+                required_cluster_size=64,
+                max_ebs_iops_per_node=80_000,
+                max_ebs_throughput_mib_per_s=2_000,
+            )
+            .plans[0]
+            .candidate_clusters.zonal[0]
+        )
+
+        rightsizing = cluster.cluster_params["cassandra.ebs_performance"][
+            "same_topology_rightsizing"
+        ]
+        assert rightsizing["status"] == "blocked_by_evidence"
+        assert rightsizing["annual_savings"] is None
+
+    def test_throughput_saturation_blocks_same_topology_savings(self):
+        cluster = (
+            self._ebs_explained(
+                self._existing_ebs_desires(),
+                peak_iops_per_node=12_000,
+                configured_iops_per_node=80_000,
+                peak_throughput_mib_per_s_per_node=995,
+                configured_throughput_mib_per_s_per_node=1_000,
+                required_cluster_size=64,
+                max_ebs_iops_per_node=80_000,
+                max_ebs_throughput_mib_per_s=2_000,
+            )
+            .plans[0]
+            .candidate_clusters.zonal[0]
+        )
+
+        rightsizing = cluster.cluster_params["cassandra.ebs_performance"][
+            "same_topology_rightsizing"
+        ]
+        assert rightsizing["status"] == "blocked_by_evidence"
+        assert rightsizing["annual_savings"] is None
+
+    def test_rightsizing_reports_added_cost_separately_from_savings(self):
+        cluster = (
+            self._ebs_explained(
+                self._existing_ebs_desires(),
+                peak_iops_per_node=6_000,
+                configured_iops_per_node=8_000,
+                peak_throughput_mib_per_s_per_node=300,
+                configured_throughput_mib_per_s_per_node=1_000,
+                required_cluster_size=64,
+                max_ebs_iops_per_node=80_000,
+                max_ebs_throughput_mib_per_s=2_000,
+            )
+            .plans[0]
+            .candidate_clusters.zonal[0]
+        )
+
+        rightsizing = cluster.cluster_params["cassandra.ebs_performance"][
+            "same_topology_rightsizing"
+        ]
+        assert rightsizing["status"] == "realizable"
+        assert rightsizing["annual_savings"] == 0
+        assert rightsizing["annual_added_cost"] > 0
 
     def test_comfortable_evidence_uses_calibrated_model_with_disk_iops_buffer(self):
         cluster = (
@@ -552,12 +790,15 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         assert result.attached_drives, (
             "Expected attached drives with require_attached_disks=True"
         )
-        assert result.attached_drives[0].read_io_per_s is not None
-        assert conservative_result.attached_drives[0].read_io_per_s is not None
-        assert (
-            result.attached_drives[0].read_io_per_s
-            < conservative_result.attached_drives[0].read_io_per_s
+        demand = result.cluster_params["cassandra.ebs_performance"]
+        conservative_demand = conservative_result.cluster_params[
+            "cassandra.ebs_performance"
+        ]
+        assert demand["modeled_iops_per_node"] * result.count < (
+            conservative_demand["modeled_iops_per_node"] * conservative_result.count
         )
+        assert result.attached_drives[0].provisioned_io_per_s == 16_000
+        assert conservative_result.attached_drives[0].provisioned_io_per_s == 16_000
         assert result.cluster_params["cassandra.read_io_per_lcs_level"] == 1.8
         assert result.attached_drives[0].name == "gp3"
         # 1TiB / ~32 nodes

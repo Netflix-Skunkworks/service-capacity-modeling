@@ -114,7 +114,7 @@ def test_app_memory_reserve_stays_on_the_kv_tier():
     assert heavy["dgwkv"] != lean["dgwkv"]
 
 
-def test_cassandra_tier_uses_ebs_preference():
+def test_cassandra_tier_uses_kv_iops_profile_with_public_performance_pricing():
     plan = planner.plan_certain(
         model_name="org.netflix.key-value",
         region="us-east-1",
@@ -128,9 +128,9 @@ def test_cassandra_tier_uses_ebs_preference():
     ]
     assert cassandra
     for cluster in cassandra:
-        assert cluster.instance.drive is None
-        assert [drive.name for drive in cluster.attached_drives] == ["gp3"]
         assert cluster.cluster_params["cassandra.read_io_per_lcs_level"] == 1.8
+        assert cluster.instance.drive is not None
+        assert cluster.attached_drives == []
 
 
 def test_key_value_composition_labels_cassandra_iops_workload():

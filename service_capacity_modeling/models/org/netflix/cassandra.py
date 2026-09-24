@@ -47,6 +47,7 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
+from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models import RANK_PENALTIES
@@ -96,6 +97,11 @@ CASSANDRA_MAX_ATTACHED_DATA_PER_NODE_GIB = 1536
 # without consuming the provisioned IOPS safety margin.
 CASSANDRA_READ_IO_PER_LCS_LEVEL = 1.8
 CASSANDRA_TIME_SERIES_READ_IO_PER_LCS_LEVEL = 1.0
+CASSANDRA_MIN_EBS_IOPS_PER_NODE = 16_000
+CASSANDRA_MAX_EBS_IOPS_PER_NODE = 16_000
+CASSANDRA_MIN_EBS_THROUGHPUT_MIB_PER_S = 1_000
+CASSANDRA_MAX_EBS_THROUGHPUT_MIB_PER_S = 1_000
+CASSANDRA_EBS_SATURATION_TOLERANCE_THROUGHPUT_MIB_PER_S = 10
 _CASSANDRA_WORKING_SET_READ_IO_PER_LCS_LEVEL = 2.0
 _CURRENT_TOPOLOGY_DATA_REL_TOLERANCE = 0.05
 _CURRENT_TOPOLOGY_NODE_TOLERANCE = 1
@@ -300,7 +306,14 @@ class CassandraEbsIopsEvidence(BaseModel):
 
     peak_iops_per_node: float = Field(gt=0, allow_inf_nan=False)
     configured_iops_per_node: int = Field(gt=ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT)
+    peak_throughput_mib_per_s_per_node: Optional[float] = Field(
+        default=None, gt=0, allow_inf_nan=False
+    )
+    configured_throughput_mib_per_s_per_node: Optional[int] = Field(default=None, gt=0)
     observed_regional_workload: CassandraObservedRegionalWorkload
+    throughput_observed_regional_workload: Optional[
+        CassandraObservedRegionalWorkload
+    ] = None
 
     @model_validator(mode="after")
     def _check_observation(self) -> "CassandraEbsIopsEvidence":
@@ -308,6 +321,20 @@ class CassandraEbsIopsEvidence(BaseModel):
             raise ValueError(
                 "peak_iops_per_node must be less than or equal to "
                 "configured_iops_per_node"
+            )
+        throughput_values = (
+            self.peak_throughput_mib_per_s_per_node,
+            self.configured_throughput_mib_per_s_per_node,
+        )
+        if (throughput_values[0] is None) != (throughput_values[1] is None):
+            raise ValueError("peak and configured throughput must be provided together")
+        if (
+            throughput_values[0] is not None
+            and throughput_values[1] is not None
+            and throughput_values[0] > throughput_values[1]
+        ):
+            raise ValueError(
+                "peak throughput must be less than or equal to configured throughput"
             )
         return self
 
@@ -905,6 +932,10 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     min_instance_ram_gib_exclusive: float = 16.0,
     ebs_iops_evidence: Optional[CassandraEbsIopsEvidence] = None,
     read_io_per_lcs_level: float = CASSANDRA_READ_IO_PER_LCS_LEVEL,
+    min_ebs_iops_per_node: int = CASSANDRA_MIN_EBS_IOPS_PER_NODE,
+    max_ebs_iops_per_node: int = CASSANDRA_MAX_EBS_IOPS_PER_NODE,
+    min_ebs_throughput_mib_per_s: int = CASSANDRA_MIN_EBS_THROUGHPUT_MIB_PER_S,
+    max_ebs_throughput_mib_per_s: int = CASSANDRA_MAX_EBS_THROUGHPUT_MIB_PER_S,
 ) -> Union[CapacityPlan, Excuse, None]:
     drive_name = drive.name
 
@@ -1026,6 +1057,47 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     ).mid
 
     is_ebs = instance.drive is None
+    effective_max_iops_per_node = min(max_ebs_iops_per_node, drive.max_io_per_s)
+    if instance.ebs_baseline_iops is not None:
+        effective_max_iops_per_node = min(
+            effective_max_iops_per_node, instance.ebs_baseline_iops
+        )
+    effective_max_throughput_mib_per_s: float = min(
+        max_ebs_throughput_mib_per_s, drive.max_throughput
+    )
+    if instance.ebs_baseline_throughput_mib_per_s is not None:
+        effective_max_throughput_mib_per_s = min(
+            effective_max_throughput_mib_per_s,
+            instance.ebs_baseline_throughput_mib_per_s,
+        )
+    if is_ebs:
+        drive = drive.model_copy(deep=True)
+        drive.max_scale_io_per_s = effective_max_iops_per_node
+        drive.max_scale_throughput = int(effective_max_throughput_mib_per_s)
+        if min_ebs_iops_per_node > effective_max_iops_per_node:
+            return Excuse(
+                instance=instance.name,
+                drive=drive_name,
+                reason="EBS IOPS floor exceeds the instance or volume limit",
+                context={
+                    "minimum_iops_per_node": min_ebs_iops_per_node,
+                    "effective_max_iops_per_node": effective_max_iops_per_node,
+                },
+                bottleneck=Bottleneck.disk_iops,
+            )
+        if min_ebs_throughput_mib_per_s > effective_max_throughput_mib_per_s:
+            return Excuse(
+                instance=instance.name,
+                drive=drive_name,
+                reason="EBS throughput floor exceeds the instance or volume limit",
+                context={
+                    "minimum_throughput_mib_per_s": (min_ebs_throughput_mib_per_s),
+                    "effective_max_throughput_mib_per_s": (
+                        effective_max_throughput_mib_per_s
+                    ),
+                },
+                bottleneck=Bottleneck.disk_iops,
+            )
     capacity_desires = _with_ebs_hotter_buffer(desires) if is_ebs else desires
     capacity_desires = _with_disk_utilization_buffer(
         capacity_desires,
@@ -1127,6 +1199,9 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     )
     iops_calibration_factor = 1.0
     iops_calibration_applied = False
+    throughput_calibration_factor = 1.0
+    throughput_calibration_applied = False
+    throughput_observation_at_configured_limit = False
     reported_io_calibration: Dict[str, Any] = {}
     current_topology_iops_governor: Optional[str] = None
     deployed_topology_iops_min_count: Optional[int] = None
@@ -1175,6 +1250,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         )
         modeled_current_iops_per_node: Optional[float] = None
         raw_iops_calibration_factor: Optional[float] = None
+        modeled_current_throughput_mib_per_s: Optional[float] = None
+        raw_throughput_calibration_factor: Optional[float] = None
         if deployed_evidence_matches_current_cluster:
             assert current_drive is not None
             observed_current_count = min(
@@ -1211,6 +1288,17 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 * math.ceil(observed_read_io_per_second / observed_current_count)
                 + observed_write_io_per_second / observed_current_count
             )
+            modeled_current_read_iops_per_node = _cass_io_per_read(
+                hottest_current_data_per_node_gib,
+                read_io_per_lcs_level=read_io_per_lcs_level,
+            ) * math.ceil(observed_read_io_per_second / observed_current_count)
+            modeled_current_write_iops_per_node = (
+                observed_write_io_per_second / observed_current_count
+            )
+            modeled_current_throughput_mib_per_s = (
+                modeled_current_read_iops_per_node * current_drive.rand_io_size_kib
+                + modeled_current_write_iops_per_node * current_drive.seq_io_size_kib
+            ) / 1024
             raw_iops_calibration_factor = (
                 ebs_iops_evidence.peak_iops_per_node / modeled_current_iops_per_node
             )
@@ -1220,6 +1308,69 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 else raw_iops_calibration_factor
             )
             iops_calibration_applied = True
+            if (
+                ebs_iops_evidence.peak_throughput_mib_per_s_per_node is not None
+                and ebs_iops_evidence.configured_throughput_mib_per_s_per_node
+                is not None
+            ):
+                throughput_workload = (
+                    ebs_iops_evidence.throughput_observed_regional_workload
+                    or observed_regional_workload
+                )
+                throughput_read_size_bytes = (
+                    throughput_workload.mean_read_size_bytes
+                    or desires.query_pattern.estimated_mean_read_size_bytes.mid
+                )
+                throughput_write_size_bytes = (
+                    throughput_workload.mean_write_size_bytes
+                    or desires.query_pattern.estimated_mean_write_size_bytes.mid
+                )
+                throughput_read_per_zone = (
+                    throughput_workload.read_per_second / zones_per_region
+                )
+                throughput_write_per_zone = (
+                    throughput_workload.write_per_second / zones_per_region
+                )
+                throughput_read_io_per_second = max(
+                    throughput_read_per_zone,
+                    throughput_read_per_zone
+                    * throughput_read_size_bytes
+                    // (current_drive.rand_io_size_kib * 1024),
+                )
+                throughput_write_io_per_second = 5 * max(
+                    1,
+                    throughput_write_per_zone
+                    * throughput_write_size_bytes
+                    // (current_drive.seq_io_size_kib * 1024),
+                )
+                throughput_modeled_read_iops_per_node = _cass_io_per_read(
+                    hottest_current_data_per_node_gib,
+                    read_io_per_lcs_level=read_io_per_lcs_level,
+                ) * math.ceil(throughput_read_io_per_second / observed_current_count)
+                throughput_modeled_write_iops_per_node = (
+                    throughput_write_io_per_second / observed_current_count
+                )
+                modeled_current_throughput_mib_per_s = (
+                    throughput_modeled_read_iops_per_node
+                    * current_drive.rand_io_size_kib
+                    + throughput_modeled_write_iops_per_node
+                    * current_drive.seq_io_size_kib
+                ) / 1024
+                throughput_observation_at_configured_limit = (
+                    ebs_iops_evidence.peak_throughput_mib_per_s_per_node
+                    > ebs_iops_evidence.configured_throughput_mib_per_s_per_node
+                    - CASSANDRA_EBS_SATURATION_TOLERANCE_THROUGHPUT_MIB_PER_S
+                )
+                raw_throughput_calibration_factor = (
+                    ebs_iops_evidence.peak_throughput_mib_per_s_per_node
+                    / modeled_current_throughput_mib_per_s
+                )
+                throughput_calibration_factor = (
+                    max(1.0, raw_throughput_calibration_factor)
+                    if throughput_observation_at_configured_limit
+                    else raw_throughput_calibration_factor
+                )
+                throughput_calibration_applied = True
             if same_deployed_topology:
                 deployed_topology_iops_min_count = deployed_zonal_count_floor
             if observation_at_configured_limit:
@@ -1242,6 +1393,34 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 "raw_iops_calibration_factor": raw_iops_calibration_factor,
                 "iops_calibration_factor": (
                     iops_calibration_factor if iops_calibration_applied else None
+                ),
+                "observed_max_throughput_mib_per_s_per_node": (
+                    ebs_iops_evidence.peak_throughput_mib_per_s_per_node
+                ),
+                "modeled_current_throughput_mib_per_s": (
+                    modeled_current_throughput_mib_per_s
+                ),
+                "raw_throughput_calibration_factor": (
+                    raw_throughput_calibration_factor
+                ),
+                "throughput_calibration_factor": (
+                    throughput_calibration_factor
+                    if throughput_calibration_applied
+                    else None
+                ),
+                "deployed_configured_throughput_mib_per_s": (
+                    ebs_iops_evidence.configured_throughput_mib_per_s_per_node
+                ),
+                "throughput_observation_at_configured_limit": (
+                    throughput_observation_at_configured_limit
+                ),
+                "throughput_calibration_workload": (
+                    (
+                        ebs_iops_evidence.throughput_observed_regional_workload
+                        or observed_regional_workload
+                    ).model_dump(mode="json")
+                    if throughput_calibration_applied
+                    else None
                 ),
                 "calibration_workload": {
                     "read_per_second": observed_regional_workload.read_per_second,
@@ -1305,29 +1484,72 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         return memory_layout(ram_gib).heap_gib
 
     def max_node_disk(d: Drive) -> int:
-        return max(math.ceil(d.max_size_gib / 3), ebs_disk_floor)
+        return max(
+            min(
+                math.ceil(d.max_size_gib / 3),
+                math.ceil(effective_disk_per_node_gib),
+            ),
+            ebs_disk_floor,
+        )
 
     modeled_disk_iops_by_count: Dict[int, float] = {}
     unbuffered_disk_iops_by_count: Dict[int, float] = {}
+    modeled_throughput_by_count: Dict[int, float] = {}
+    expected_throughput_by_count: Dict[int, float] = {}
+    provisioned_throughput_by_count: Dict[int, int] = {}
 
-    def required_disk_ios(_size: float, count: int) -> Tuple[float, float]:
+    def required_disk_ios(
+        _size: float,
+        count: int,
+        *,
+        record: bool = True,
+        details: Optional[Dict[str, float]] = None,
+    ) -> Tuple[float, float]:
         modeled_read_iops = _cass_io_per_read(
             _size, read_io_per_lcs_level=read_io_per_lcs_level
         ) * math.ceil(read_io_per_sec / count)
         modeled_write_iops = write_io_per_sec / count
         modeled_total_iops = modeled_read_iops + modeled_write_iops
+        modeled_throughput_mib_per_s = (
+            modeled_read_iops * drive.rand_io_size_kib
+            + modeled_write_iops * drive.seq_io_size_kib
+        ) / 1024
         selected_read_iops = modeled_read_iops * iops_calibration_factor
         selected_write_iops = modeled_write_iops * iops_calibration_factor
-        modeled_disk_iops_by_count[count] = modeled_total_iops
-        unbuffered_disk_iops_by_count[count] = selected_read_iops + selected_write_iops
-        if iops_calibration_applied:
-            # gp3 exposes one shared IOPS setting. Round that total once, then
-            # split it into 200-IOPS read/write quanta for the drive contract.
+        expected_throughput_mib_per_s = (
+            modeled_throughput_mib_per_s * throughput_calibration_factor
+        )
+        provisioned_throughput = math.ceil(
+            max(
+                min_ebs_throughput_mib_per_s,
+                expected_throughput_mib_per_s * disk_iops_buffer_ratio,
+            )
+        )
+        if details is not None:
+            details["provisioned_throughput_mib_per_s"] = provisioned_throughput
+        if record:
+            modeled_disk_iops_by_count[count] = modeled_total_iops
+            unbuffered_disk_iops_by_count[count] = (
+                selected_read_iops + selected_write_iops
+            )
+            modeled_throughput_by_count[count] = modeled_throughput_mib_per_s
+            expected_throughput_by_count[count] = expected_throughput_mib_per_s
+            provisioned_throughput_by_count[count] = provisioned_throughput
+        if is_ebs:
+            # gp3 exposes one shared IOPS setting. Apply the floor and round the
+            # total once, then retain the split only as demand explainability.
             selected_total_iops = selected_read_iops + selected_write_iops
             buffered_total_iops = (
                 math.ceil(
-                    selected_total_iops
-                    * disk_iops_buffer_ratio
+                    max(
+                        min_ebs_iops_per_node,
+                        selected_total_iops * disk_iops_buffer_ratio,
+                        (
+                            provisioned_throughput / drive.max_scale_throughput_per_io
+                            if drive.max_scale_throughput_per_io > 0
+                            else 0
+                        ),
+                    )
                     / ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT
                 )
                 * ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT
@@ -1347,24 +1569,129 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             selected_write_iops * disk_iops_buffer_ratio,
         )
 
-    cluster = compute_stateful_zone(
-        instance=instance,
-        drive=drive,
-        needed_cores=int(requirement.cpu_cores.mid),
-        needed_disk_gib=needed_disk_gib,
-        needed_memory_gib=int(requirement.mem_gib.mid),
-        needed_network_mbps=requirement.network_mbps.mid,
-        # Take into account the reads per read
-        # from the per node dataset using leveled compaction
-        required_disk_ios=required_disk_ios,
-        # Critical C* clusters grow by doubling from the current cluster size.
-        cluster_size=cluster_size_lambda,
-        min_count=min_count,
-        reserve_memory=lambda x: x - memory_layout(x).page_cache_capacity_gib,
-        write_buffer=lambda x: heap_fn(x) * max_write_buffer_percent * 0.25,
-        required_write_buffer_gib=requirement_estimate.write_buffer_gib,
-        max_node_disk_gib=max_node_disk,
-    )
+    def compute_cluster(candidate_min_count: int) -> ZoneClusterCapacity:
+        return compute_stateful_zone(
+            instance=instance,
+            drive=drive,
+            needed_cores=int(requirement.cpu_cores.mid),
+            needed_disk_gib=needed_disk_gib,
+            needed_memory_gib=int(requirement.mem_gib.mid),
+            needed_network_mbps=requirement.network_mbps.mid,
+            required_disk_ios=required_disk_ios,
+            cluster_size=cluster_size_lambda,
+            min_count=candidate_min_count,
+            reserve_memory=lambda x: x - memory_layout(x).page_cache_capacity_gib,
+            write_buffer=lambda x: heap_fn(x) * max_write_buffer_percent * 0.25,
+            required_write_buffer_gib=requirement_estimate.write_buffer_gib,
+            max_node_disk_gib=max_node_disk,
+        )
+
+    cluster = compute_cluster(min_count)
+    evaluated_clusters: Dict[int, ZoneClusterCapacity] = {cluster.count: cluster}
+    max_zonal_count = max(1, max_regional_size // zones_per_region)
+    if is_ebs:
+        # Throughput can require more nodes independently of IOPS. Find the
+        # first feasible count, then keep evaluating until both paid-performance
+        # floors are reached. Beyond that point another node can only add cost.
+        candidate_min_count = cluster.count
+        if (
+            required_cluster_size is not None
+            and provisioned_throughput_by_count[cluster.count]
+            > effective_max_throughput_mib_per_s
+        ):
+            return Excuse(
+                instance=instance.name,
+                drive=drive_name,
+                reason="Required cluster size exceeds the EBS throughput limit",
+                context={
+                    "required_cluster_size": required_cluster_size,
+                    "required_throughput_mib_per_s": (
+                        provisioned_throughput_by_count[cluster.count]
+                    ),
+                    "effective_max_throughput_mib_per_s": (
+                        effective_max_throughput_mib_per_s
+                    ),
+                },
+                bottleneck=Bottleneck.disk_iops,
+            )
+        while (
+            provisioned_throughput_by_count[cluster.count]
+            > effective_max_throughput_mib_per_s
+            and candidate_min_count < max_zonal_count
+        ):
+            candidate_min_count = max(
+                candidate_min_count + 1,
+                math.ceil(
+                    cluster.count
+                    * provisioned_throughput_by_count[cluster.count]
+                    / effective_max_throughput_mib_per_s
+                ),
+            )
+            cluster = compute_cluster(candidate_min_count)
+            evaluated_clusters[cluster.count] = cluster
+
+        if (
+            provisioned_throughput_by_count[cluster.count]
+            > effective_max_throughput_mib_per_s
+        ):
+            return Excuse(
+                instance=instance.name,
+                drive=drive_name,
+                reason="No feasible EBS throughput plan within max regional size",
+                context={
+                    "required_throughput_mib_per_s": (
+                        provisioned_throughput_by_count[cluster.count]
+                    ),
+                    "effective_max_throughput_mib_per_s": (
+                        effective_max_throughput_mib_per_s
+                    ),
+                    "max_regional_size": max_regional_size,
+                },
+                bottleneck=Bottleneck.disk_iops,
+            )
+
+        if required_cluster_size is None:
+            for candidate_min_count in range(cluster.count + 1, max_zonal_count + 1):
+                candidate = compute_cluster(candidate_min_count)
+                if candidate.count in evaluated_clusters:
+                    continue
+                evaluated_clusters[candidate.count] = candidate
+                if (
+                    provisioned_throughput_by_count[candidate.count]
+                    > effective_max_throughput_mib_per_s
+                ):
+                    continue
+                attached = candidate.attached_drives[0]
+                attached.throughput = provisioned_throughput_by_count[candidate.count]
+                if (
+                    attached.provisioned_io_per_s == min_ebs_iops_per_node
+                    and attached.throughput == min_ebs_throughput_mib_per_s
+                ):
+                    break
+
+            feasible_clusters = [
+                candidate
+                for candidate in evaluated_clusters.values()
+                if provisioned_throughput_by_count[candidate.count]
+                <= effective_max_throughput_mib_per_s
+            ]
+            for candidate in feasible_clusters:
+                candidate.attached_drives[
+                    0
+                ].throughput = provisioned_throughput_by_count[candidate.count]
+            cluster = min(
+                feasible_clusters,
+                key=lambda candidate: (
+                    candidate.annual_cost,
+                    candidate.count,
+                    candidate.attached_drives[0].provisioned_io_per_s or 0,
+                    candidate.attached_drives[0].throughput or 0,
+                ),
+            )
+        else:
+            cluster.attached_drives[0].throughput = provisioned_throughput_by_count[
+                cluster.count
+            ]
     if ebs_disk_floor and cluster.attached_drives:
         for attached_drive in cluster.attached_drives:
             attached_drive.size_gib = max(attached_drive.size_gib, ebs_disk_floor)
@@ -1390,6 +1717,191 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     }
     if is_ebs:
         params["cassandra.disk_iops_buffer_ratio"] = round(disk_iops_buffer_ratio, 2)
+        attached_drive = cluster.attached_drives[0]
+        expected_peak_iops = unbuffered_disk_iops_by_count[cluster.count]
+        expected_peak_throughput = expected_throughput_by_count[cluster.count]
+
+        def performance_cost(d: Drive) -> Dict[str, float]:
+            components = d.annual_cost_components
+            return {
+                name: round(components[name], 2)
+                for name in ("capacity", "iops", "throughput")
+            }
+
+        feasible_options = [
+            candidate
+            for candidate in evaluated_clusters.values()
+            if provisioned_throughput_by_count[candidate.count]
+            <= effective_max_throughput_mib_per_s
+        ]
+        for candidate in feasible_options:
+            candidate.attached_drives[0].throughput = provisioned_throughput_by_count[
+                candidate.count
+            ]
+        alternatives = sorted(
+            (
+                candidate
+                for candidate in feasible_options
+                if candidate.count != cluster.count
+            ),
+            key=lambda candidate: candidate.annual_cost,
+        )
+        nearest_alternative = alternatives[0] if alternatives else None
+
+        same_topology_rightsizing: Dict[str, Any] = {
+            "status": "unavailable_without_complete_unsaturated_evidence",
+            "annual_savings": None,
+        }
+        if current_capacity is not None and ebs_iops_evidence is not None:
+            current_drive = current_capacity.cluster_drive
+            current_topology_count = max(1, deployed_zonal_count_floor)
+            current_size_gib = (
+                current_drive.size_gib if current_drive is not None else 0
+            )
+            rightsizing_details: Dict[str, float] = {}
+            recommended_read_iops, recommended_write_iops = required_disk_ios(
+                max(1, math.ceil(needed_disk_gib / current_topology_count)),
+                current_topology_count,
+                record=False,
+                details=rightsizing_details,
+            )
+            recommended_iops = int(recommended_read_iops + recommended_write_iops)
+            recommended_throughput = int(
+                rightsizing_details["provisioned_throughput_mib_per_s"]
+            )
+            current_priced_drive = drive.model_copy(deep=True)
+            current_priced_drive.size_gib = current_size_gib
+            current_priced_drive.provisioned_io_per_s = (
+                ebs_iops_evidence.configured_iops_per_node
+            )
+            current_priced_drive.throughput = (
+                ebs_iops_evidence.configured_throughput_mib_per_s_per_node
+            )
+            recommended_priced_drive = current_priced_drive.model_copy(deep=True)
+            recommended_priced_drive.provisioned_io_per_s = recommended_iops
+            recommended_priced_drive.throughput = recommended_throughput
+            evidence_safe_for_reduction = (
+                iops_calibration_applied
+                and not observation_at_configured_limit
+                and throughput_calibration_applied
+                and not throughput_observation_at_configured_limit
+            )
+            recommendation_within_limits = (
+                recommended_iops <= effective_max_iops_per_node
+                and recommended_throughput <= effective_max_throughput_mib_per_s
+            )
+            current_regional_cost = (
+                current_priced_drive.annual_cost
+                * current_topology_count
+                * zones_per_region
+            )
+            recommended_regional_cost = (
+                recommended_priced_drive.annual_cost
+                * current_topology_count
+                * zones_per_region
+            )
+            cost_delta = round(current_regional_cost - recommended_regional_cost, 2)
+            if evidence_safe_for_reduction and recommendation_within_limits:
+                status = "realizable"
+                annual_savings: Optional[float] = max(0, cost_delta)
+                annual_added_cost: Optional[float] = max(0, -cost_delta)
+            elif not recommendation_within_limits:
+                status = "requires_topology_change"
+                annual_savings = None
+                annual_added_cost = None
+            else:
+                status = "blocked_by_evidence"
+                annual_savings = None
+                annual_added_cost = None
+            same_topology_rightsizing = {
+                "status": status,
+                "configured_iops_per_node": (
+                    ebs_iops_evidence.configured_iops_per_node
+                ),
+                "configured_throughput_mib_per_s_per_node": (
+                    ebs_iops_evidence.configured_throughput_mib_per_s_per_node
+                ),
+                "recommended_iops_per_node": recommended_iops,
+                "recommended_throughput_mib_per_s_per_node": (recommended_throughput),
+                "current_regional_drive_cost": round(current_regional_cost, 2),
+                "recommended_regional_drive_cost": round(recommended_regional_cost, 2),
+                "annual_savings": annual_savings,
+                "annual_added_cost": annual_added_cost,
+            }
+
+        params["cassandra.ebs_performance"] = {
+            "demand_source": (
+                "calibrated_model"
+                if iops_calibration_applied or throughput_calibration_applied
+                else "modeled"
+            ),
+            "modeled_iops_per_node": round(
+                modeled_disk_iops_by_count[cluster.count], 2
+            ),
+            "expected_iops_per_node": round(expected_peak_iops, 2),
+            "modeled_throughput_mib_per_s_per_node": round(
+                modeled_throughput_by_count[cluster.count], 2
+            ),
+            "expected_throughput_mib_per_s_per_node": round(
+                expected_peak_throughput, 2
+            ),
+            "bounds": {
+                "min_iops_per_node": min_ebs_iops_per_node,
+                "max_iops_per_node": max_ebs_iops_per_node,
+                "min_throughput_mib_per_s": min_ebs_throughput_mib_per_s,
+                "max_throughput_mib_per_s": max_ebs_throughput_mib_per_s,
+            },
+            "limits": {
+                "effective_max_iops_per_node": effective_max_iops_per_node,
+                "effective_max_throughput_mib_per_s": (
+                    effective_max_throughput_mib_per_s
+                ),
+                "volume_iops_per_gib": drive.max_scale_io_per_s_per_gib or None,
+                "volume_throughput_to_iops_ratio": (
+                    drive.max_scale_throughput_per_io or None
+                ),
+                "instance_limits_modeled": instance.ebs_baseline_iops is not None,
+            },
+            "selected_plan": {
+                "instance": instance.name,
+                "nodes_per_zone": cluster.count,
+                "volume_size_gib": attached_drive.size_gib,
+                "iops_per_node": attached_drive.provisioned_io_per_s,
+                "throughput_mib_per_s_per_node": attached_drive.throughput,
+                "annual_drive_cost_per_node": round(attached_drive.annual_cost, 2),
+                "annual_drive_cost_by_component": performance_cost(attached_drive),
+                "annual_regional_infrastructure_cost": round(
+                    cluster.annual_cost * zones_per_region, 2
+                ),
+            },
+            "nearest_alternative": (
+                {
+                    "nodes_per_zone": nearest_alternative.count,
+                    "iops_per_node": nearest_alternative.attached_drives[
+                        0
+                    ].provisioned_io_per_s,
+                    "throughput_mib_per_s_per_node": (
+                        nearest_alternative.attached_drives[0].throughput
+                    ),
+                    "annual_regional_infrastructure_cost": round(
+                        nearest_alternative.annual_cost * zones_per_region, 2
+                    ),
+                }
+                if nearest_alternative is not None
+                else None
+            ),
+            "same_topology_rightsizing": same_topology_rightsizing,
+            "pricing": {
+                "source": drive.pricing_source,
+                "region": drive.pricing_region,
+                "as_of": drive.pricing_as_of,
+                "annual_cost_per_gib": drive.annual_cost_per_gib,
+                "annual_cost_per_io": [list(rate) for rate in drive.annual_cost_per_io],
+                "annual_cost_per_throughput": [
+                    list(rate) for rate in drive.annual_cost_per_throughput
+                ],
+            },
+        }
     if reported_io_calibration:
         expected_peak_iops = unbuffered_disk_iops_by_count[cluster.count]
         assert len(cluster.attached_drives) == 1
@@ -1862,6 +2374,30 @@ class NflxCassandraArguments(BaseModel):
         "At the default 90% IOPS target, 1.8 modeled I/Os still provision two "
         "I/Os per level.",
     )
+    min_ebs_iops_per_node: int = Field(
+        default=CASSANDRA_MIN_EBS_IOPS_PER_NODE,
+        ge=3_000,
+        le=80_000,
+        description="Minimum provisioned gp3 IOPS per Cassandra node.",
+    )
+    max_ebs_iops_per_node: int = Field(
+        default=CASSANDRA_MAX_EBS_IOPS_PER_NODE,
+        ge=3_000,
+        le=80_000,
+        description="Maximum provisioned gp3 IOPS considered per Cassandra node.",
+    )
+    min_ebs_throughput_mib_per_s: int = Field(
+        default=CASSANDRA_MIN_EBS_THROUGHPUT_MIB_PER_S,
+        ge=125,
+        le=2_000,
+        description="Minimum provisioned gp3 throughput per node in MiB/s.",
+    )
+    max_ebs_throughput_mib_per_s: int = Field(
+        default=CASSANDRA_MAX_EBS_THROUGHPUT_MIB_PER_S,
+        ge=125,
+        le=2_000,
+        description="Maximum gp3 throughput considered per node in MiB/s.",
+    )
     iops_workload_profile: CassandraIopsWorkloadProfile = Field(
         default=CassandraIopsWorkloadProfile.kv,
         description="Workload family used to select the attached-storage IOPS "
@@ -1884,6 +2420,16 @@ class NflxCassandraArguments(BaseModel):
             raise ValueError(
                 f"min_storage_buffer_ratio ({self.min_storage_buffer_ratio}) "
                 f"must be <= max_storage_buffer_ratio ({self.max_storage_buffer_ratio})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_ebs_performance_bounds(self) -> "NflxCassandraArguments":
+        if self.min_ebs_iops_per_node > self.max_ebs_iops_per_node:
+            raise ValueError("min_ebs_iops_per_node must be <= max_ebs_iops_per_node")
+        if self.min_ebs_throughput_mib_per_s > self.max_ebs_throughput_mib_per_s:
+            raise ValueError(
+                "min_ebs_throughput_mib_per_s must be <= max_ebs_throughput_mib_per_s"
             )
         return self
 
@@ -2268,6 +2814,10 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             min_instance_ram_gib_exclusive=args.min_instance_ram_gib_exclusive,
             ebs_iops_evidence=args.ebs_iops_evidence,
             read_io_per_lcs_level=args.read_io_per_lcs_level,
+            min_ebs_iops_per_node=args.min_ebs_iops_per_node,
+            max_ebs_iops_per_node=args.max_ebs_iops_per_node,
+            min_ebs_throughput_mib_per_s=(args.min_ebs_throughput_mib_per_s),
+            max_ebs_throughput_mib_per_s=(args.max_ebs_throughput_mib_per_s),
         )
 
         return result
