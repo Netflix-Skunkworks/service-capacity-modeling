@@ -23,6 +23,10 @@ from tests.util import simple_drive
 EXTRA_MODEL_ARGS = {
     "require_local_disks": False,
     "ephemeral_maintenance_regret": 0,
+    # Price EBS at the gp3 included tier so the production 16k/1,000 floor
+    # does not decide EBS versus local NVMe in these scaling tests.
+    "min_ebs_iops_per_node": 3_000,
+    "min_ebs_throughput_mib_per_s": 125,
 }
 
 

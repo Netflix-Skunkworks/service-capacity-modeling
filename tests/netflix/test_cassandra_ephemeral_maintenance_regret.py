@@ -22,6 +22,12 @@ from service_capacity_modeling.models.org.netflix.cassandra import (
 DATA_PER_NODE_THRESHOLD_GIB = 300
 DATA_PER_NODE_CAP_GIB = 1024
 EPHEMERAL_REGRET = 0.2
+# At public gp3 rates, the production 16k/1,000 floor costs more than the
+# ephemeral regret. Price EBS at the included tier to isolate the regret.
+INCLUDED_GP3_PERFORMANCE = {
+    "min_ebs_iops_per_node": 3_000,
+    "min_ebs_throughput_mib_per_s": 125,
+}
 
 
 def _desires(
@@ -148,6 +154,7 @@ def test_ephemeral_maintenance_regret_prefers_ebs_by_default():
         region="us-east-1",
         desires=_desires(state_gib=1_000),
         instance_families=["i3en", "m6a"],
+        extra_model_arguments=INCLUDED_GP3_PERFORMANCE,
         num_results=20,
         max_results_per_family=10,
     )
@@ -163,7 +170,10 @@ def test_disabling_ephemeral_maintenance_regret_restores_cost_ordering():
         region="us-east-1",
         desires=_desires(state_gib=1_000),
         instance_families=["i3en", "m6a"],
-        extra_model_arguments={"ephemeral_maintenance_regret": 0},
+        extra_model_arguments={
+            **INCLUDED_GP3_PERFORMANCE,
+            "ephemeral_maintenance_regret": 0,
+        },
         num_results=20,
         max_results_per_family=10,
     )
