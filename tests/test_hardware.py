@@ -19,7 +19,7 @@ def test_drives():
     gp3 = shapes.region("us-east-1").drives["gp3"]
     assert gp3.drive_type == DriveType.attached_ssd
     assert gp3.max_scale_size_gib == 65536
-    assert gp3.max_scale_io_per_s == 80000
+    assert gp3.max_scale_io_per_s == 16000
     assert gp3.max_scale_io_per_s_per_gib == 500
     assert gp3.max_scale_throughput == 2000
     assert gp3.max_scale_throughput_per_io == 0.25

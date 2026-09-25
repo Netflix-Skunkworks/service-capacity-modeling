@@ -29,7 +29,7 @@
       "max_scale_size_gib": 65536,
       "block_size_kib": 16,
       "group_size_kib": 256,
-      "max_scale_io_per_s": 80000,
+      "max_scale_io_per_s": 16000,
       "max_scale_io_per_s_per_gib": 500,
       "max_scale_throughput": 2000,
       "max_scale_throughput_per_io": 0.25,
