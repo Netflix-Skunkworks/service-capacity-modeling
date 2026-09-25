@@ -56,8 +56,9 @@ def test_pull_family_r6id(mock_ec2):
     assert shape.drive.read_io_per_s == approx(134167, rel=0.01)
     assert shape.ebs_baseline_iops == 12000
     assert shape.ebs_max_iops == 40000
-    assert shape.ebs_baseline_throughput_mib_per_s == 312.5
-    assert shape.ebs_max_throughput_mib_per_s == 1250
+    # AWS reports decimal MB/s; gp3 throughput is MiB/s.
+    assert shape.ebs_baseline_throughput_mib_per_s == 298.02
+    assert shape.ebs_max_throughput_mib_per_s == 1192.09
 
 
 def test_pull_family_m7a(mock_ec2):
@@ -84,8 +85,8 @@ def test_pull_family_m7a(mock_ec2):
     assert shape.drive is None
     assert shape.ebs_baseline_iops == 60000
     assert shape.ebs_max_iops == 60000
-    assert shape.ebs_baseline_throughput_mib_per_s == 1875
-    assert shape.ebs_max_throughput_mib_per_s == 1875
+    assert shape.ebs_baseline_throughput_mib_per_s == 1788.14
+    assert shape.ebs_max_throughput_mib_per_s == 1788.14
 
 
 def test_guess_iops_per_gib():
