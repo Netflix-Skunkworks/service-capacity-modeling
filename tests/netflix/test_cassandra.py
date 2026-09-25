@@ -752,6 +752,63 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
                 },
             )
 
+    @staticmethod
+    def _plan_with_instance_ebs_limits(desires, baseline_iops, baseline_mib_per_s):
+        hardware = shapes.region("us-east-1")
+        # m7a.2xlarge sustains 12,000 IOPS / 298 MiB/s; production still pins its
+        # gp3 volumes at 16,000 IOPS / 1,000 MiB/s.
+        instance = hardware.instances["m7a.2xlarge"].model_copy(
+            update={
+                "ebs_baseline_iops": baseline_iops,
+                "ebs_baseline_throughput_mib_per_s": baseline_mib_per_s,
+            }
+        )
+        return NflxCassandraCapacityModel.capacity_plan(
+            instance=instance,
+            drive=hardware.drives["gp3"],
+            context=RegionContext(
+                zones_in_region=hardware.zones_in_region,
+                services=hardware.services,
+            ),
+            desires=desires,
+            extra_model_arguments={},
+        )
+
+    def test_ebs_floor_above_instance_baseline_is_still_provisioned(self):
+        result = self._plan_with_instance_ebs_limits(small_but_high_qps, 12_000, 298)
+
+        assert not isinstance(result, Excuse), result
+        drive = result.candidate_clusters.zonal[0].attached_drives[0]
+        assert drive.provisioned_io_per_s == 16_000
+        assert drive.throughput == 1_000
+
+    def test_ebs_demand_above_instance_baseline_adds_nodes(self):
+        unlimited = self._plan_with_instance_ebs_limits(small_but_high_qps, None, None)
+        assert not isinstance(unlimited, Excuse)
+        params = unlimited.candidate_clusters.zonal[0].cluster_params
+        buffered_demand = (
+            params["cassandra.ebs_performance"]["expected_iops_per_node"]
+            * params["cassandra.disk_iops_buffer_ratio"]
+        )
+        # Cap sustained instance IOPS below the unlimited plan's buffered demand
+        # (and far below the 16,000 IOPS floor): the instance limit, not the
+        # volume setting, must now set the node count.
+        instance_limit = int(buffered_demand * 0.6)
+        limited = self._plan_with_instance_ebs_limits(
+            small_but_high_qps, instance_limit, 298
+        )
+
+        assert not isinstance(limited, Excuse), limited
+        limited_zone = limited.candidate_clusters.zonal[0]
+        assert limited_zone.count > unlimited.candidate_clusters.zonal[0].count
+        limited_ebs = limited_zone.cluster_params["cassandra.ebs_performance"]
+        assert (
+            limited_ebs["expected_iops_per_node"]
+            * limited_zone.cluster_params["cassandra.disk_iops_buffer_ratio"]
+            <= instance_limit
+        )
+        assert limited_zone.attached_drives[0].provisioned_io_per_s == 16_000
+
     def test_ebs_high_reads(self):
         desires = CapacityDesires(
             service_tier=1,

@@ -662,6 +662,8 @@
                   "effective_max_iops_per_node": 16000,
                   "effective_max_throughput_mib_per_s": 1000,
                   "instance_limits_modeled": false,
+                  "instance_max_iops_per_node": null,
+                  "instance_max_throughput_mib_per_s": null,
                   "volume_iops_per_gib": 500,
                   "volume_throughput_to_iops_ratio": 0.25
                 },
@@ -767,6 +769,8 @@
                   "effective_max_iops_per_node": 16000,
                   "effective_max_throughput_mib_per_s": 1000,
                   "instance_limits_modeled": false,
+                  "instance_max_iops_per_node": null,
+                  "instance_max_throughput_mib_per_s": null,
                   "volume_iops_per_gib": 500,
                   "volume_throughput_to_iops_ratio": 0.25
                 },
@@ -872,6 +876,8 @@
                   "effective_max_iops_per_node": 16000,
                   "effective_max_throughput_mib_per_s": 1000,
                   "instance_limits_modeled": false,
+                  "instance_max_iops_per_node": null,
+                  "instance_max_throughput_mib_per_s": null,
                   "volume_iops_per_gib": 500,
                   "volume_throughput_to_iops_ratio": 0.25
                 },
@@ -988,6 +994,8 @@
                   "effective_max_iops_per_node": 16000,
                   "effective_max_throughput_mib_per_s": 1000,
                   "instance_limits_modeled": false,
+                  "instance_max_iops_per_node": null,
+                  "instance_max_throughput_mib_per_s": null,
                   "volume_iops_per_gib": 500,
                   "volume_throughput_to_iops_ratio": 0.25
                 },
@@ -1093,6 +1101,8 @@
                   "effective_max_iops_per_node": 16000,
                   "effective_max_throughput_mib_per_s": 1000,
                   "instance_limits_modeled": false,
+                  "instance_max_iops_per_node": null,
+                  "instance_max_throughput_mib_per_s": null,
                   "volume_iops_per_gib": 500,
                   "volume_throughput_to_iops_ratio": 0.25
                 },
@@ -1198,6 +1208,8 @@
                   "effective_max_iops_per_node": 16000,
                   "effective_max_throughput_mib_per_s": 1000,
                   "instance_limits_modeled": false,
+                  "instance_max_iops_per_node": null,
+                  "instance_max_throughput_mib_per_s": null,
                   "volume_iops_per_gib": 500,
                   "volume_throughput_to_iops_ratio": 0.25
                 },
@@ -1319,6 +1331,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -1424,6 +1438,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -1529,6 +1545,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -1645,6 +1663,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -1750,6 +1770,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -1855,6 +1877,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -1973,6 +1997,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -2078,6 +2104,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -2183,6 +2211,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -2299,6 +2329,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -2404,6 +2436,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -2509,6 +2543,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -2627,6 +2663,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -2724,6 +2762,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -2821,6 +2861,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -2929,6 +2971,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -3029,6 +3073,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },
@@ -3129,6 +3175,8 @@
                     "effective_max_iops_per_node": 16000,
                     "effective_max_throughput_mib_per_s": 1000,
                     "instance_limits_modeled": false,
+                    "instance_max_iops_per_node": null,
+                    "instance_max_throughput_mib_per_s": null,
                     "volume_iops_per_gib": 500,
                     "volume_throughput_to_iops_ratio": 0.25
                   },

@@ -1057,19 +1057,16 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     ).mid
 
     is_ebs = instance.drive is None
+    # Volume settings and instance limits constrain different things. The gp3
+    # setting (floor, bounds, volume maximum) is what we provision and pay for;
+    # the instance's sustained EBS baseline caps the demand it can serve. A floor
+    # above the instance baseline is wasted spend, not an infeasible plan.
     effective_max_iops_per_node = min(max_ebs_iops_per_node, drive.max_io_per_s)
-    if instance.ebs_baseline_iops is not None:
-        effective_max_iops_per_node = min(
-            effective_max_iops_per_node, instance.ebs_baseline_iops
-        )
     effective_max_throughput_mib_per_s: float = min(
         max_ebs_throughput_mib_per_s, drive.max_throughput
     )
-    if instance.ebs_baseline_throughput_mib_per_s is not None:
-        effective_max_throughput_mib_per_s = min(
-            effective_max_throughput_mib_per_s,
-            instance.ebs_baseline_throughput_mib_per_s,
-        )
+    instance_max_iops_per_node = instance.ebs_baseline_iops
+    instance_max_throughput_mib_per_s = instance.ebs_baseline_throughput_mib_per_s
     if is_ebs:
         drive = drive.model_copy(deep=True)
         drive.max_scale_io_per_s = effective_max_iops_per_node
@@ -1078,7 +1075,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             return Excuse(
                 instance=instance.name,
                 drive=drive_name,
-                reason="EBS IOPS floor exceeds the instance or volume limit",
+                reason="EBS IOPS floor exceeds the volume limit",
                 context={
                     "minimum_iops_per_node": min_ebs_iops_per_node,
                     "effective_max_iops_per_node": effective_max_iops_per_node,
@@ -1089,7 +1086,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             return Excuse(
                 instance=instance.name,
                 drive=drive_name,
-                reason="EBS throughput floor exceeds the instance or volume limit",
+                reason="EBS throughput floor exceeds the volume limit",
                 context={
                     "minimum_throughput_mib_per_s": (min_ebs_throughput_mib_per_s),
                     "effective_max_throughput_mib_per_s": (
@@ -1527,6 +1524,12 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         )
         if details is not None:
             details["provisioned_throughput_mib_per_s"] = provisioned_throughput
+            details["buffered_iops_demand"] = (
+                selected_read_iops + selected_write_iops
+            ) * disk_iops_buffer_ratio
+            details["buffered_throughput_demand"] = (
+                expected_throughput_mib_per_s * disk_iops_buffer_ratio
+            )
         if record:
             modeled_disk_iops_by_count[count] = modeled_total_iops
             unbuffered_disk_iops_by_count[count] = (
@@ -1589,62 +1592,86 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     cluster = compute_cluster(min_count)
     evaluated_clusters: Dict[int, ZoneClusterCapacity] = {cluster.count: cluster}
     max_zonal_count = max(1, max_regional_size // zones_per_region)
+
+    def ebs_limit_ratios(count: int) -> Dict[str, float]:
+        """Ratio of each gp3 setting or served demand to its limit, by limit name.
+
+        Any ratio above 1 makes the node count infeasible: the throughput setting
+        exceeds the volume limit, or buffered demand exceeds the instance's
+        sustained EBS baseline. IOPS settings above the volume limit are already
+        resolved by the attached-drive plan.
+        """
+        ratios = {
+            "EBS throughput limit": provisioned_throughput_by_count[count]
+            / effective_max_throughput_mib_per_s
+        }
+        if instance_max_throughput_mib_per_s:
+            ratios["instance EBS throughput baseline"] = (
+                expected_throughput_by_count[count]
+                * disk_iops_buffer_ratio
+                / instance_max_throughput_mib_per_s
+            )
+        if instance_max_iops_per_node:
+            ratios["instance EBS IOPS baseline"] = (
+                unbuffered_disk_iops_by_count[count]
+                * disk_iops_buffer_ratio
+                / instance_max_iops_per_node
+            )
+        return ratios
+
+    def ebs_limit_ratio(count: int) -> float:
+        return max(ebs_limit_ratios(count).values())
+
+    def binding_ebs_limit(count: int) -> str:
+        ratios = ebs_limit_ratios(count)
+        return max(ratios, key=ratios.__getitem__)
+
     if is_ebs:
-        # Throughput can require more nodes independently of IOPS. Find the
-        # first feasible count, then keep evaluating until both paid-performance
-        # floors are reached. Beyond that point another node can only add cost.
+        # Throughput and instance EBS limits can require more nodes independently
+        # of the volume IOPS setting. Find the first feasible count, then keep
+        # evaluating until both paid-performance floors are reached. Beyond that
+        # point another node can only add cost.
         candidate_min_count = cluster.count
-        if (
-            required_cluster_size is not None
-            and provisioned_throughput_by_count[cluster.count]
-            > effective_max_throughput_mib_per_s
-        ):
+        if required_cluster_size is not None and ebs_limit_ratio(cluster.count) > 1:
             return Excuse(
                 instance=instance.name,
                 drive=drive_name,
-                reason="Required cluster size exceeds the EBS throughput limit",
+                reason=(
+                    "Required cluster size exceeds the "
+                    f"{binding_ebs_limit(cluster.count)}"
+                ),
                 context={
                     "required_cluster_size": required_cluster_size,
-                    "required_throughput_mib_per_s": (
-                        provisioned_throughput_by_count[cluster.count]
-                    ),
-                    "effective_max_throughput_mib_per_s": (
-                        effective_max_throughput_mib_per_s
-                    ),
+                    "ebs_limit_ratios": {
+                        name: round(ratio, 3)
+                        for name, ratio in ebs_limit_ratios(cluster.count).items()
+                    },
                 },
                 bottleneck=Bottleneck.disk_iops,
             )
         while (
-            provisioned_throughput_by_count[cluster.count]
-            > effective_max_throughput_mib_per_s
-            and candidate_min_count < max_zonal_count
+            ebs_limit_ratio(cluster.count) > 1 and candidate_min_count < max_zonal_count
         ):
             candidate_min_count = max(
                 candidate_min_count + 1,
-                math.ceil(
-                    cluster.count
-                    * provisioned_throughput_by_count[cluster.count]
-                    / effective_max_throughput_mib_per_s
-                ),
+                math.ceil(cluster.count * ebs_limit_ratio(cluster.count)),
             )
             cluster = compute_cluster(candidate_min_count)
             evaluated_clusters[cluster.count] = cluster
 
-        if (
-            provisioned_throughput_by_count[cluster.count]
-            > effective_max_throughput_mib_per_s
-        ):
+        if ebs_limit_ratio(cluster.count) > 1:
             return Excuse(
                 instance=instance.name,
                 drive=drive_name,
-                reason="No feasible EBS throughput plan within max regional size",
+                reason=(
+                    f"No plan within max regional size fits the "
+                    f"{binding_ebs_limit(cluster.count)}"
+                ),
                 context={
-                    "required_throughput_mib_per_s": (
-                        provisioned_throughput_by_count[cluster.count]
-                    ),
-                    "effective_max_throughput_mib_per_s": (
-                        effective_max_throughput_mib_per_s
-                    ),
+                    "ebs_limit_ratios": {
+                        name: round(ratio, 3)
+                        for name, ratio in ebs_limit_ratios(cluster.count).items()
+                    },
                     "max_regional_size": max_regional_size,
                 },
                 bottleneck=Bottleneck.disk_iops,
@@ -1656,10 +1683,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 if candidate.count in evaluated_clusters:
                     continue
                 evaluated_clusters[candidate.count] = candidate
-                if (
-                    provisioned_throughput_by_count[candidate.count]
-                    > effective_max_throughput_mib_per_s
-                ):
+                if ebs_limit_ratio(candidate.count) > 1:
                     continue
                 attached = candidate.attached_drives[0]
                 attached.throughput = provisioned_throughput_by_count[candidate.count]
@@ -1672,8 +1696,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             feasible_clusters = [
                 candidate
                 for candidate in evaluated_clusters.values()
-                if provisioned_throughput_by_count[candidate.count]
-                <= effective_max_throughput_mib_per_s
+                if ebs_limit_ratio(candidate.count) <= 1
             ]
             for candidate in feasible_clusters:
                 candidate.attached_drives[
@@ -1731,8 +1754,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         feasible_options = [
             candidate
             for candidate in evaluated_clusters.values()
-            if provisioned_throughput_by_count[candidate.count]
-            <= effective_max_throughput_mib_per_s
+            if ebs_limit_ratio(candidate.count) <= 1
         ]
         for candidate in feasible_options:
             candidate.attached_drives[0].throughput = provisioned_throughput_by_count[
@@ -1789,6 +1811,16 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             recommendation_within_limits = (
                 recommended_iops <= effective_max_iops_per_node
                 and recommended_throughput <= effective_max_throughput_mib_per_s
+                and (
+                    not instance_max_iops_per_node
+                    or rightsizing_details["buffered_iops_demand"]
+                    <= instance_max_iops_per_node
+                )
+                and (
+                    not instance_max_throughput_mib_per_s
+                    or rightsizing_details["buffered_throughput_demand"]
+                    <= instance_max_throughput_mib_per_s
+                )
             )
             current_regional_cost = (
                 current_priced_drive.annual_cost
@@ -1861,6 +1893,10 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                     drive.max_scale_throughput_per_io or None
                 ),
                 "instance_limits_modeled": instance.ebs_baseline_iops is not None,
+                "instance_max_iops_per_node": instance_max_iops_per_node,
+                "instance_max_throughput_mib_per_s": (
+                    instance_max_throughput_mib_per_s
+                ),
             },
             "selected_plan": {
                 "instance": instance.name,
