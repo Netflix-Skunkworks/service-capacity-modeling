@@ -206,11 +206,11 @@
       "cassandra.backup.s3-standard": 59823.56,
       "cassandra.net.inter.region": 247461.09,
       "cassandra.net.intra.region": 123730.54,
-      "cassandra.zonal-clusters": 44944.95
+      "cassandra.zonal-clusters": 45124.95
     },
     "clusters": [
       {
-        "annual_cost": 14981.65,
+        "annual_cost": 15041.65,
         "attached_drives": [
           "gp3 : 100GB"
         ],
@@ -242,7 +242,7 @@
         "instance": "c7a.4xlarge"
       },
       {
-        "annual_cost": 14981.65,
+        "annual_cost": 15041.65,
         "attached_drives": [
           "gp3 : 100GB"
         ],
@@ -274,7 +274,7 @@
         "instance": "c7a.4xlarge"
       },
       {
-        "annual_cost": 14981.65,
+        "annual_cost": 15041.65,
         "attached_drives": [
           "gp3 : 100GB"
         ],
@@ -310,7 +310,7 @@
     "region": "us-east-1",
     "scenario": "cassandra_high_writes_ebs",
     "service_tier": 1,
-    "total_annual_cost": 475960.14
+    "total_annual_cost": 476140.14
   },
   {
     "annual_costs": {
@@ -425,11 +425,11 @@
       "cassandra.backup.s3-standard": 190735.87,
       "cassandra.net.inter.region": 336547.08,
       "cassandra.net.intra.region": 336547.08,
-      "cassandra.zonal-clusters": 1478336.64
+      "cassandra.zonal-clusters": 1480640.64
     },
     "clusters": [
       {
-        "annual_cost": 492778.88,
+        "annual_cost": 493546.88,
         "attached_drives": [
           "gp3 : 5600GB"
         ],
@@ -448,15 +448,15 @@
             "family_migration": 0.1
           },
           "required_nodes_by_type": {
-            "cluster_size": 63,
+            "cluster_size": 39,
             "cpu": 39,
-            "disk_capacity": 63,
+            "disk_capacity": 17,
             "disk_iops": 0,
             "memory": 2,
             "min_count": 64,
             "network": 3
           },
-          "resource_bottleneck": "disk_capacity"
+          "resource_bottleneck": "cpu"
         },
         "cluster_type": "cassandra",
         "count": 64,
@@ -464,7 +464,7 @@
         "instance": "m7a.2xlarge"
       },
       {
-        "annual_cost": 492778.88,
+        "annual_cost": 493546.88,
         "attached_drives": [
           "gp3 : 5600GB"
         ],
@@ -483,15 +483,15 @@
             "family_migration": 0.1
           },
           "required_nodes_by_type": {
-            "cluster_size": 63,
+            "cluster_size": 39,
             "cpu": 39,
-            "disk_capacity": 63,
+            "disk_capacity": 17,
             "disk_iops": 0,
             "memory": 2,
             "min_count": 64,
             "network": 3
           },
-          "resource_bottleneck": "disk_capacity"
+          "resource_bottleneck": "cpu"
         },
         "cluster_type": "cassandra",
         "count": 64,
@@ -499,7 +499,7 @@
         "instance": "m7a.2xlarge"
       },
       {
-        "annual_cost": 492778.88,
+        "annual_cost": 493546.88,
         "attached_drives": [
           "gp3 : 5600GB"
         ],
@@ -518,15 +518,15 @@
             "family_migration": 0.1
           },
           "required_nodes_by_type": {
-            "cluster_size": 63,
+            "cluster_size": 39,
             "cpu": 39,
-            "disk_capacity": 63,
+            "disk_capacity": 17,
             "disk_iops": 0,
             "memory": 2,
             "min_count": 64,
             "network": 3
           },
-          "resource_bottleneck": "disk_capacity"
+          "resource_bottleneck": "cpu"
         },
         "cluster_type": "cassandra",
         "count": 64,
@@ -538,18 +538,18 @@
     "region": "us-east-1",
     "scenario": "cassandra_timeseries_ebs",
     "service_tier": 1,
-    "total_annual_cost": 2342166.66
+    "total_annual_cost": 2344470.66
   },
   {
     "annual_costs": {
       "cassandra.backup.s3-standard": 33180.93,
       "cassandra.net.inter.region": 9898.44,
       "cassandra.net.intra.region": 9898.44,
-      "cassandra.zonal-clusters": 662298.0
+      "cassandra.zonal-clusters": 664314.0
     },
     "clusters": [
       {
-        "annual_cost": 220766.0,
+        "annual_cost": 221438.0,
         "attached_drives": [
           "gp3 : 2727GB"
         ],
@@ -567,7 +567,7 @@
           "required_nodes_by_type": {
             "cluster_size": 56,
             "cpu": 56,
-            "disk_capacity": 15,
+            "disk_capacity": 4,
             "disk_iops": 0,
             "memory": 1,
             "min_count": 28,
@@ -581,7 +581,7 @@
         "instance": "r6a.xlarge"
       },
       {
-        "annual_cost": 220766.0,
+        "annual_cost": 221438.0,
         "attached_drives": [
           "gp3 : 2727GB"
         ],
@@ -599,7 +599,7 @@
           "required_nodes_by_type": {
             "cluster_size": 56,
             "cpu": 56,
-            "disk_capacity": 15,
+            "disk_capacity": 4,
             "disk_iops": 0,
             "memory": 1,
             "min_count": 28,
@@ -613,7 +613,7 @@
         "instance": "r6a.xlarge"
       },
       {
-        "annual_cost": 220766.0,
+        "annual_cost": 221438.0,
         "attached_drives": [
           "gp3 : 2727GB"
         ],
@@ -631,7 +631,7 @@
           "required_nodes_by_type": {
             "cluster_size": 56,
             "cpu": 56,
-            "disk_capacity": 15,
+            "disk_capacity": 4,
             "disk_iops": 0,
             "memory": 1,
             "min_count": 28,
@@ -649,18 +649,18 @@
     "region": "us-east-1",
     "scenario": "cassandra_kv_dense_ebs",
     "service_tier": 1,
-    "total_annual_cost": 715275.82
+    "total_annual_cost": 717291.82
   },
   {
     "annual_costs": {
       "cassandra.backup.s3-standard": 14431.62,
       "cassandra.net.inter.region": 2474.61,
       "cassandra.net.intra.region": 2474.61,
-      "cassandra.zonal-clusters": 238265.94
+      "cassandra.zonal-clusters": 239057.94
     },
     "clusters": [
       {
-        "annual_cost": 79421.98,
+        "annual_cost": 79685.98,
         "attached_drives": [
           "gp3 : 2181GB"
         ],
@@ -678,7 +678,7 @@
           "required_nodes_by_type": {
             "cluster_size": 22,
             "cpu": 18,
-            "disk_capacity": 6,
+            "disk_capacity": 2,
             "disk_iops": 22,
             "memory": 1,
             "min_count": 11,
@@ -692,7 +692,7 @@
         "instance": "r6a.xlarge"
       },
       {
-        "annual_cost": 79421.98,
+        "annual_cost": 79685.98,
         "attached_drives": [
           "gp3 : 2181GB"
         ],
@@ -710,7 +710,7 @@
           "required_nodes_by_type": {
             "cluster_size": 22,
             "cpu": 18,
-            "disk_capacity": 6,
+            "disk_capacity": 2,
             "disk_iops": 22,
             "memory": 1,
             "min_count": 11,
@@ -724,7 +724,7 @@
         "instance": "r6a.xlarge"
       },
       {
-        "annual_cost": 79421.98,
+        "annual_cost": 79685.98,
         "attached_drives": [
           "gp3 : 2181GB"
         ],
@@ -742,7 +742,7 @@
           "required_nodes_by_type": {
             "cluster_size": 22,
             "cpu": 18,
-            "disk_capacity": 6,
+            "disk_capacity": 2,
             "disk_iops": 22,
             "memory": 1,
             "min_count": 11,
@@ -760,7 +760,7 @@
     "region": "us-east-1",
     "scenario": "cassandra_kv_compact_ebs",
     "service_tier": 1,
-    "total_annual_cost": 257646.78
+    "total_annual_cost": 258438.78
   },
   {
     "annual_costs": {
