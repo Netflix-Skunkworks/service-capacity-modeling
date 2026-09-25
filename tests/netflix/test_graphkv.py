@@ -86,8 +86,8 @@ def _composed_kv_data_shape(data_shape: DataShape) -> DataShape:
         ),
         data_shape=data_shape,
     )
-    ((_, transform),) = NflxGraphKVCapacityModel.compose_with(desires, {})
-    return transform(desires).data_shape
+    transforms = dict(NflxGraphKVCapacityModel.compose_with(desires, {}))
+    return transforms["org.netflix.key-value"](desires).data_shape
 
 
 def test_state_size_alone_passes_through():
@@ -255,11 +255,57 @@ def test_production_shapes_land_near_their_key_value_counterparts():
                 f"KeyValue shard behind it"
             )
 
-        # Compared as a ratio: the graph plan adds its own tier on top of everything
-        # the KV plan plans, so it has to cost more, but not by a multiple.
-        cost_ratio = float(graph_candidate.total_annual_cost) / float(
+        # Compare only the GraphKV and KV tiers here. Valkey has its own capacity
+        # model and cost; this guard remains focused on GraphKV amplification.
+        valkey_cost = sum(
+            cluster.annual_cost
+            for cluster in graph_candidate.regional
+            if cluster.cluster_type == "valkey"
+        )
+        cost_ratio = (float(graph_candidate.total_annual_cost) - valkey_cost) / float(
             kv_candidate.total_annual_cost
         )
         assert 1.0 < cost_ratio < 1.5, (
             f"{workload['shape']} costs {cost_ratio:.2f}x the KeyValue shard behind it"
         )
+
+
+def test_plan_contains_one_valid_valkey_topology():
+    candidate = _plan(
+        "org.netflix.graphkv",
+        read_per_second=10,
+        write_per_second=10,
+        state_gib=1,
+    )
+
+    valkey_clusters = [
+        cluster for cluster in candidate.regional if cluster.cluster_type == "valkey"
+    ]
+    assert len(valkey_clusters) == 1
+
+    cluster = valkey_clusters[0]
+    shards = cluster.cluster_params["valkey.shards"]
+    replicas_per_shard = cluster.cluster_params["valkey.read_replicas_per_shard"]
+    assert cluster.instance.name == "cache.r7g.xlarge"
+    assert shards == 1
+    assert replicas_per_shard == 1
+    assert cluster.count == 2
+
+
+def test_valkey_desires_are_fixed_to_a_small_cache():
+    large_graph_desires = CapacityDesires(
+        service_tier=0,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(10_000_000),
+            estimated_write_per_second=certain_int(10_000_000),
+        ),
+        data_shape=DataShape(estimated_state_size_gib=certain_int(10_000)),
+    )
+    transforms = dict(NflxGraphKVCapacityModel.compose_with(large_graph_desires, {}))
+
+    valkey_desires = transforms["org.netflix.valkey"](large_graph_desires)
+
+    assert valkey_desires.service_tier == 1
+    assert valkey_desires.query_pattern.estimated_read_per_second.mid == 1_000
+    assert valkey_desires.query_pattern.estimated_write_per_second.mid == 1_000
+    assert valkey_desires.data_shape.estimated_state_size_gib.mid == 10
