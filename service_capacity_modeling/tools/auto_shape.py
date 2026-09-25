@@ -171,6 +171,11 @@ def convert_mib_to_gib(size_mib: float) -> float:
     return round(size_mib * 10**6 / 2.0**30, 2)
 
 
+def convert_mbps_to_mib_per_s(mb_per_s: Optional[float]) -> Optional[float]:
+    """Convert AWS decimal MB/s (EbsOptimizedInfo) to MiB/s, the gp3 unit."""
+    return None if mb_per_s is None else round(mb_per_s * 10**6 / 2.0**20, 2)
+
+
 def convert_gbps_to_mbps(bandwidth_gbps: float) -> float:
     """Convert AWS Gbps network bandwidth to Mbps."""
     return round(bandwidth_gbps * 1000)
@@ -360,11 +365,11 @@ def pull_family(  # pylint: disable=too-many-positional-arguments,too-many-local
                 {
                     "ebs_baseline_iops": ebs_optimized.get("BaselineIops"),
                     "ebs_max_iops": ebs_optimized.get("MaximumIops"),
-                    "ebs_baseline_throughput_mib_per_s": ebs_optimized.get(
-                        "BaselineThroughputInMBps"
+                    "ebs_baseline_throughput_mib_per_s": convert_mbps_to_mib_per_s(
+                        ebs_optimized.get("BaselineThroughputInMBps")
                     ),
-                    "ebs_max_throughput_mib_per_s": ebs_optimized.get(
-                        "MaximumThroughputInMBps"
+                    "ebs_max_throughput_mib_per_s": convert_mbps_to_mib_per_s(
+                        ebs_optimized.get("MaximumThroughputInMBps")
                     ),
                 }
             )
