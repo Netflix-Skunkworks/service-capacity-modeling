@@ -233,14 +233,28 @@ class CapacityModel:
 
     @staticmethod
     def plan_for_regret(plan: CapacityPlan) -> CapacityPlan:
-        """Return an uncertain-regret cost view when delivery cost differs."""
+        """Return the plan uncertain regret should price for this sample.
+
+        Override only when a sample's returned purchase intentionally differs
+        from what that sample needs (e.g. a purchase pinned to a midpoint).
+        Must not mutate ``plan``; the returned plan is used only for regret,
+        never returned to callers. The default prices the purchase itself.
+        """
         return plan
 
     @staticmethod
     def uncertain_sample_arguments(  # pylint: disable=unused-argument
         desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Return model arguments shared by this model's uncertain samples."""
+        """Return extra_model_arguments to use for every uncertain sample.
+
+        Called once per model with the base (unsampled, defaulted) desires so
+        a model can pin decisions to base-distribution values that individual
+        samples cannot see. Overrides must not mutate the input; return a new
+        dict when changing arguments. They must resolve to the same decision
+        plan_certain makes for the same base desires. The default returns the
+        arguments unchanged.
+        """
         return extra_model_arguments
 
     @staticmethod

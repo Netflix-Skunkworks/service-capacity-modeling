@@ -369,15 +369,34 @@ def test_below_midpoint_sample_uses_its_own_volume_cost_for_regret():
     )
 
 
-def test_initial_state_without_new_lifecycle_does_not_reduce_certain_plan():
-    result = _plan_ebs(
-        _ebs_desires(state_gib=9765),
-        initial_ebs_physical_state_gib=100,
-        required_cluster_size=12,
+def test_initial_state_requires_new_lifecycle():
+    with pytest.raises(ValueError, match="requires provisioning_lifecycle=new"):
+        NflxCassandraArguments.from_extra_model_arguments(
+            {"initial_ebs_physical_state_gib": 100}
+        )
+
+
+def test_new_lifecycle_uses_same_midpoint_purchase_in_certain_and_uncertain():
+    desires = _ebs_desires(state_gib=9765)
+    desires.data_shape.estimated_state_size_gib = Interval(
+        low=3000, mid=9765, high=39062, confidence=0.98
+    )
+    desires.data_shape.estimated_compression_ratio = certain_float(3)
+    arguments = {"provisioning_lifecycle": "new", "required_cluster_size": 12}
+
+    certain = _plan_ebs(desires, **arguments)
+    explicit = _plan_ebs(desires, initial_ebs_physical_state_gib=9765 / 3, **arguments)
+    sample_arguments = NflxCassandraCapacityModel.uncertain_sample_arguments(
+        desires, arguments
     )
 
-    assert result.cluster_params["cassandra.ebs_volume_strategy"] == "sampled_demand"
-    assert "cassandra.ebs_initial_allocation" not in result.cluster_params
+    assert certain.cluster_params["cassandra.ebs_volume_strategy"] == "new_midpoint"
+    assert (
+        certain.cluster_params["cassandra.ebs_initial_allocation"]
+        == explicit.cluster_params["cassandra.ebs_initial_allocation"]
+    )
+    assert sample_arguments["initial_ebs_physical_state_gib"] == pytest.approx(9765 / 3)
+    assert "initial_ebs_physical_state_gib" not in arguments
 
 
 def test_uncertain_regret_uses_sampled_volume_cost(monkeypatch):

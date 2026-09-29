@@ -160,7 +160,6 @@ def _ebs_volume_strategy(
     current_capacity: Optional[CurrentClusterCapacity],
     initial_physical_state_gib: Optional[float],
     allow_volume_shrink: bool,
-    provisioning_lifecycle: Literal["new", "existing"],
 ) -> EbsVolumeStrategy:
     if current_capacity is not None:
         return (
@@ -168,9 +167,27 @@ def _ebs_volume_strategy(
             if allow_volume_shrink
             else EbsVolumeStrategy.existing_no_shrink
         )
-    if provisioning_lifecycle == "new" and initial_physical_state_gib is not None:
+    if initial_physical_state_gib is not None:
         return EbsVolumeStrategy.new_midpoint
     return EbsVolumeStrategy.sampled_demand
+
+
+def _initial_ebs_physical_state_gib(
+    desires: CapacityDesires, args: "NflxCassandraArguments"
+) -> Optional[float]:
+    """Initial state for a new EBS purchase, shared by certain and uncertain plans."""
+    if args.initial_ebs_physical_state_gib is not None:
+        return args.initial_ebs_physical_state_gib
+    if (
+        args.provisioning_lifecycle != "new"
+        or _get_current_capacity(desires) is not None
+        or args.keyspace_topology is not None
+    ):
+        return None
+    return (
+        desires.data_shape.estimated_state_size_gib.mid
+        / desires.data_shape.estimated_compression_ratio.mid
+    )
 
 
 def _apply_ebs_volume_strategy(
@@ -973,7 +990,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     keyspace_topology: Optional[CassandraKeyspaceTopology] = None,
     max_disk_utilization: float = CASSANDRA_MAX_DISK_UTILIZATION,
     initial_ebs_physical_state_gib: Optional[float] = None,
-    provisioning_lifecycle: Literal["new", "existing"] = "existing",
     min_instance_ram_gib_exclusive: float = 16.0,
     ebs_iops_evidence: Optional[CassandraEbsIopsEvidence] = None,
     read_io_per_lcs_level: float = CASSANDRA_READ_IO_PER_LCS_LEVEL,
@@ -1139,7 +1155,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             current_capacity,
             initial_ebs_physical_state_gib,
             allow_ebs_volume_shrink,
-            provisioning_lifecycle,
         )
         if is_ebs
         else None
@@ -1984,17 +1999,19 @@ class NflxCassandraArguments(BaseModel):
         default=None,
         ge=0,
         allow_inf_nan=False,
-        description="Unreplicated compressed regional initial state. With "
-        "provisioning_lifecycle=new, sizes the initial EBS purchase. Node count "
-        "fits the larger of requested disk demand and initial allocation under "
-        "the per-node density limit. Uncertain planning injects this from the "
-        "regional midpoint.",
+        description="Unreplicated compressed regional initial state for a new "
+        "EBS provisioning, overriding the estimated_state_size_gib midpoint "
+        "divided by the compression midpoint. Requires "
+        "provisioning_lifecycle=new. Node count fits the larger of requested "
+        "disk demand and initial allocation under the per-node density limit.",
     )
     provisioning_lifecycle: Literal["new", "existing"] = Field(
         default="existing",
-        description="Explicitly mark a new provisioning to buy the compressed "
-        "regional midpoint EBS volume in uncertain planning. Existing is the "
-        "safe default; current-cluster inventory always takes precedence.",
+        description="Mark a new provisioning. New EBS clusters buy the "
+        "compressed regional midpoint volume in both certain and uncertain "
+        "planning. Existing is the safe default; current-cluster inventory "
+        "always takes precedence, and keyspace_topology plans stay on sampled "
+        "demand unless initial_ebs_physical_state_gib is set.",
     )
     read_io_per_lcs_level: float = Field(
         default=CASSANDRA_READ_IO_PER_LCS_LEVEL,
@@ -2028,6 +2045,17 @@ class NflxCassandraArguments(BaseModel):
             raise ValueError(
                 f"min_storage_buffer_ratio ({self.min_storage_buffer_ratio}) "
                 f"must be <= max_storage_buffer_ratio ({self.max_storage_buffer_ratio})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_initial_ebs_state_is_new(self) -> "NflxCassandraArguments":
+        if (
+            self.initial_ebs_physical_state_gib is not None
+            and self.provisioning_lifecycle != "new"
+        ):
+            raise ValueError(
+                "initial_ebs_physical_state_gib requires provisioning_lifecycle=new"
             )
         return self
 
@@ -2409,8 +2437,9 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             backup_retention_days=args.backup_retention_days,
             keyspace_topology=args.keyspace_topology,
             max_disk_utilization=args.max_disk_utilization,
-            initial_ebs_physical_state_gib=args.initial_ebs_physical_state_gib,
-            provisioning_lifecycle=args.provisioning_lifecycle,
+            initial_ebs_physical_state_gib=_initial_ebs_physical_state_gib(
+                desires, args
+            ),
             min_instance_ram_gib_exclusive=args.min_instance_ram_gib_exclusive,
             ebs_iops_evidence=args.ebs_iops_evidence,
             read_io_per_lcs_level=args.read_io_per_lcs_level,
@@ -2422,23 +2451,13 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
     def uncertain_sample_arguments(
         desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
     ) -> Dict[str, Any]:
+        # Pin the purchase to the base midpoint before sampling; samples still
+        # determine topology and have their own volume cost for uncertain regret.
         args = NflxCassandraArguments.from_extra_model_arguments(extra_model_arguments)
-        if (
-            args.provisioning_lifecycle != "new"
-            or _get_current_capacity(desires) is not None
-            or args.keyspace_topology is not None
-            or args.initial_ebs_physical_state_gib is not None
-        ):
+        initial_gib = _initial_ebs_physical_state_gib(desires, args)
+        if initial_gib is None:
             return extra_model_arguments
-        # The purchase stays at the regional midpoint. Samples still determine
-        # topology and have their own volume cost for uncertain regret.
-        return {
-            **extra_model_arguments,
-            "initial_ebs_physical_state_gib": (
-                desires.data_shape.estimated_state_size_gib.mid
-                / desires.data_shape.estimated_compression_ratio.mid
-            ),
-        }
+        return {**extra_model_arguments, "initial_ebs_physical_state_gib": initial_gib}
 
     @staticmethod
     def plan_for_regret(plan: CapacityPlan) -> CapacityPlan:
