@@ -232,6 +232,18 @@ class CapacityModel:
         return None
 
     @staticmethod
+    def plan_for_regret(plan: CapacityPlan) -> CapacityPlan:
+        """Return an uncertain-regret cost view when delivery cost differs."""
+        return plan
+
+    @staticmethod
+    def uncertain_sample_arguments(  # pylint: disable=unused-argument
+        desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Return model arguments shared by this model's uncertain samples."""
+        return extra_model_arguments
+
+    @staticmethod
     def regret(
         regret_params: CapacityRegretParameters,
         optimal_plan: CapacityPlan,
