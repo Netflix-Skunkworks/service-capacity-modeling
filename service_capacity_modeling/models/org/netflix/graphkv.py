@@ -12,6 +12,7 @@ from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Consistency
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
@@ -208,7 +209,23 @@ class NflxGraphKVCapacityModel(CapacityModel):
                 )
             return relaxed
 
-        return (("org.netflix.key-value", _modify_kv_desires),)
+        return (
+            ("org.netflix.key-value", _modify_kv_desires),
+            (
+                "org.netflix.valkey",
+                # Bootstrap GraphKV with one small cache until its cache workload
+                # can be derived from namespace traffic and state.
+                lambda _: CapacityDesires(
+                    query_pattern=QueryPattern(
+                        estimated_read_per_second=certain_int(1_000),
+                        estimated_write_per_second=certain_int(1_000),
+                    ),
+                    data_shape=DataShape(
+                        estimated_state_size_gib=certain_int(10),
+                    ),
+                ),
+            ),
+        )
 
     @staticmethod
     def default_desires(
