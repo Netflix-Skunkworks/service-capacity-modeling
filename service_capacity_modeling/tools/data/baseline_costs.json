@@ -448,15 +448,15 @@
             "family_migration": 0.1
           },
           "required_nodes_by_type": {
-            "cluster_size": 39,
+            "cluster_size": 63,
             "cpu": 39,
-            "disk_capacity": 17,
+            "disk_capacity": 63,
             "disk_iops": 0,
             "memory": 2,
             "min_count": 64,
             "network": 3
           },
-          "resource_bottleneck": "cpu"
+          "resource_bottleneck": "disk_capacity"
         },
         "cluster_type": "cassandra",
         "count": 64,
@@ -483,15 +483,15 @@
             "family_migration": 0.1
           },
           "required_nodes_by_type": {
-            "cluster_size": 39,
+            "cluster_size": 63,
             "cpu": 39,
-            "disk_capacity": 17,
+            "disk_capacity": 63,
             "disk_iops": 0,
             "memory": 2,
             "min_count": 64,
             "network": 3
           },
-          "resource_bottleneck": "cpu"
+          "resource_bottleneck": "disk_capacity"
         },
         "cluster_type": "cassandra",
         "count": 64,
@@ -518,15 +518,15 @@
             "family_migration": 0.1
           },
           "required_nodes_by_type": {
-            "cluster_size": 39,
+            "cluster_size": 63,
             "cpu": 39,
-            "disk_capacity": 17,
+            "disk_capacity": 63,
             "disk_iops": 0,
             "memory": 2,
             "min_count": 64,
             "network": 3
           },
-          "resource_bottleneck": "cpu"
+          "resource_bottleneck": "disk_capacity"
         },
         "cluster_type": "cassandra",
         "count": 64,
@@ -567,7 +567,7 @@
           "required_nodes_by_type": {
             "cluster_size": 56,
             "cpu": 56,
-            "disk_capacity": 4,
+            "disk_capacity": 15,
             "disk_iops": 0,
             "memory": 1,
             "min_count": 28,
@@ -599,7 +599,7 @@
           "required_nodes_by_type": {
             "cluster_size": 56,
             "cpu": 56,
-            "disk_capacity": 4,
+            "disk_capacity": 15,
             "disk_iops": 0,
             "memory": 1,
             "min_count": 28,
@@ -631,7 +631,7 @@
           "required_nodes_by_type": {
             "cluster_size": 56,
             "cpu": 56,
-            "disk_capacity": 4,
+            "disk_capacity": 15,
             "disk_iops": 0,
             "memory": 1,
             "min_count": 28,
@@ -678,7 +678,7 @@
           "required_nodes_by_type": {
             "cluster_size": 22,
             "cpu": 18,
-            "disk_capacity": 2,
+            "disk_capacity": 6,
             "disk_iops": 22,
             "memory": 1,
             "min_count": 11,
@@ -710,7 +710,7 @@
           "required_nodes_by_type": {
             "cluster_size": 22,
             "cpu": 18,
-            "disk_capacity": 2,
+            "disk_capacity": 6,
             "disk_iops": 22,
             "memory": 1,
             "min_count": 11,
@@ -742,7 +742,7 @@
           "required_nodes_by_type": {
             "cluster_size": 22,
             "cpu": 18,
-            "disk_capacity": 2,
+            "disk_capacity": 6,
             "disk_iops": 22,
             "memory": 1,
             "min_count": 11,
