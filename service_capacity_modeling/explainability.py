@@ -403,6 +403,7 @@ class SampledPlan(ExcludeUnsetModel):
     sample: SampleRef
     desires: CapacityDesires
     plan: CapacityPlan
+    regret_plan: Optional[CapacityPlan] = None
 
 
 class RegretCandidate(ExcludeUnsetModel):
@@ -440,8 +441,8 @@ def regret_detailed(
         for optimal_sample in capacity_plans:
             components = model.regret(
                 regret_params=regret_params,
-                optimal_plan=optimal_sample.plan,
-                proposed_plan=proposed_sample.plan,
+                optimal_plan=optimal_sample.regret_plan or optimal_sample.plan,
+                proposed_plan=proposed_sample.regret_plan or proposed_sample.plan,
             )
             total_regret += sum(components.values())
             for component, value in components.items():

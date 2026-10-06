@@ -1425,6 +1425,9 @@ class CapacityPlanner:
         base_samples = [sample for sample, _ in model_samples(desires, simulations)]
 
         for sub_model, sub_desires in base_desires_by_model.items():
+            sample_arguments = self._models[sub_model].uncertain_sample_arguments(
+                sub_desires, extra_model_arguments
+            )
             sub_instance_families = resolve_instance_filter_allowlist(
                 sub_model,
                 instance_families,
@@ -1441,7 +1444,7 @@ class CapacityPlanner:
                     desires=sim_desires,
                     num_results=1,
                     num_regions=num_regions,
-                    extra_model_arguments=extra_model_arguments,
+                    extra_model_arguments=sample_arguments,
                     lifecycles=lifecycles,
                     instance_families=sub_instance_families,
                     drives=drives,
@@ -1462,6 +1465,9 @@ class CapacityPlanner:
                             sample=base_sample,
                             desires=sim_desires,
                             plan=sim_result.plans[0],
+                            regret_plan=self._models[sub_model].plan_for_regret(
+                                sim_result.plans[0]
+                            ),
                         )
                     )
 
