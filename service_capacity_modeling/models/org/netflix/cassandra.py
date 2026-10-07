@@ -1,12 +1,14 @@
 # pylint: disable=too-many-lines
 import logging
 import math
+from decimal import Decimal
 from functools import lru_cache
 from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import FrozenSet
 from typing import List
+from typing import Literal
 from typing import Optional
 from typing import Set
 from typing import Tuple
@@ -47,6 +49,7 @@ from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ServiceCapacity
+from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models import RANK_PENALTIES
@@ -55,6 +58,7 @@ from service_capacity_modeling.models.common import (
     ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT,
 )
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import cloud_gib_for_io
 from service_capacity_modeling.models.common import DerivedBuffers
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_disk_size_gib
@@ -75,18 +79,17 @@ from service_capacity_modeling.models.org.netflix.cassandra_memory import (
 )
 from service_capacity_modeling.models.utils import is_power_of_2
 from service_capacity_modeling.models.utils import next_doubling
+from service_capacity_modeling.models.utils import next_n
 from service_capacity_modeling.models.utils import next_power_of_2
 from service_capacity_modeling.stats import dist_for_interval
 
 logger = logging.getLogger(__name__)
 
 BACKGROUND_BUFFER = "background"
-EBS_HOTTER = "EBS_HOTTER"
 CASSANDRA_DISK_UTILIZATION_LIMIT = "CASSANDRA_DISK_UTILIZATION_LIMIT"
 CRITICAL_TIERS: Set[int] = {0, 1}
 # cluster size aka nodes per ASG
 CRITICAL_TIER_MIN_CLUSTER_SIZE = 2
-EBS_HOTTER_BUFFER_RATIO = 0.5
 CASSANDRA_MAX_DISK_UTILIZATION = 0.55
 CASSANDRA_DISK_IOPS_TARGET_UTILIZATION = 0.90
 CASSANDRA_EBS_SATURATION_TOLERANCE_IOPS = 200
@@ -106,22 +109,27 @@ _EPHEMERAL_MAINTENANCE_CAP_GIB_PER_NODE = 1024
 def _with_disk_utilization_buffer(
     desires: CapacityDesires,
     max_disk_utilization: float,
+    *,
+    exact: bool = False,
 ) -> CapacityDesires:
-    """Add only the disk buffer needed to keep Cassandra below the utilization cap.
+    """Set the disk target without changing the memory storage buffer.
 
-    The default target leaves margin below the previous cap. Callers may make
-    this stricter but not looser.
+    EBS uses an exact volume target. Local disks retain any stronger adaptive
+    buffer and use the target only as a floor.
     """
     target_disk_buffer_ratio = 1 / max_disk_utilization
     existing_disk_buffer = buffer_for_components(
         buffers=desires.buffers,
         components=[BufferComponent.disk],
     )
-    disk_utilization_ratio = (
-        target_disk_buffer_ratio
-        if not existing_disk_buffer.sources
-        else max(1.0, target_disk_buffer_ratio / existing_disk_buffer.ratio)
-    )
+    if exact:
+        disk_utilization_ratio = target_disk_buffer_ratio / existing_disk_buffer.ratio
+    elif not existing_disk_buffer.sources:
+        disk_utilization_ratio = target_disk_buffer_ratio
+    else:
+        disk_utilization_ratio = max(
+            1.0, target_disk_buffer_ratio / existing_disk_buffer.ratio
+        )
     disk_utilization_buffer = Buffer(
         ratio=disk_utilization_ratio,
         components=[BufferComponent.disk],
@@ -130,27 +138,106 @@ def _with_disk_utilization_buffer(
         update={
             "desired": {
                 **desires.buffers.desired,
-                CASSANDRA_DISK_UTILIZATION_LIMIT: disk_utilization_buffer,
+                (
+                    "EBS_VOLUME_TARGET" if exact else CASSANDRA_DISK_UTILIZATION_LIMIT
+                ): disk_utilization_buffer,
             }
         }
     )
     return desires.model_copy(update={"buffers": buffers})
 
 
-def _with_ebs_hotter_buffer(desires: CapacityDesires) -> CapacityDesires:
-    ebs_hotter_buffer = Buffer(
-        ratio=EBS_HOTTER_BUFFER_RATIO,
-        components=[BufferComponent.disk],
+class EbsVolumeStrategy(StrEnum):
+    """The physical-state basis for an EBS volume recommendation."""
+
+    new_midpoint = "new_midpoint"
+    sampled_demand = "sampled_demand"
+    existing_no_shrink = "existing_no_shrink"
+    existing_rightsize = "existing_rightsize"
+
+
+def _ebs_volume_strategy(
+    current_capacity: Optional[CurrentClusterCapacity],
+    initial_physical_state_gib: Optional[float],
+    allow_volume_shrink: bool,
+) -> EbsVolumeStrategy:
+    if current_capacity is not None:
+        return (
+            EbsVolumeStrategy.existing_rightsize
+            if allow_volume_shrink
+            else EbsVolumeStrategy.existing_no_shrink
+        )
+    if initial_physical_state_gib is not None:
+        return EbsVolumeStrategy.new_midpoint
+    return EbsVolumeStrategy.sampled_demand
+
+
+def _initial_ebs_physical_state_gib(
+    desires: CapacityDesires, args: "NflxCassandraArguments"
+) -> Optional[float]:
+    """Initial state for a new EBS purchase, shared by certain and uncertain plans."""
+    if args.initial_ebs_physical_state_gib is not None:
+        return args.initial_ebs_physical_state_gib
+    if (
+        args.provisioning_lifecycle != "new"
+        or _get_current_capacity(desires) is not None
+        or args.keyspace_topology is not None
+    ):
+        return None
+    return (
+        desires.data_shape.estimated_state_size_gib.mid
+        / desires.data_shape.estimated_compression_ratio.mid
     )
-    buffers = desires.buffers.model_copy(
-        update={
-            "desired": {
-                **desires.buffers.desired,
-                EBS_HOTTER: ebs_hotter_buffer,
-            }
-        }
+
+
+def _apply_ebs_volume_strategy(
+    *,
+    strategy: EbsVolumeStrategy,
+    cluster: ZoneClusterCapacity,
+    drive: Drive,
+    initial_zonal_disk_gib: Optional[int],
+    existing_volume_floor_gib: int,
+    max_volume_gib: int,
+) -> None:
+    """Size the recommended volume, without initiating a resize operation."""
+    if not cluster.attached_drives:
+        return
+    attached = cluster.attached_drives[0]
+    if strategy is EbsVolumeStrategy.new_midpoint:
+        assert initial_zonal_disk_gib is not None
+        initial_per_node_gib = max(1, math.ceil(initial_zonal_disk_gib / cluster.count))
+        required_for_io_gib = cloud_gib_for_io(
+            drive,
+            attached.provisioned_io_per_s
+            or (attached.read_io_per_s or 0) + (attached.write_io_per_s or 0),
+            initial_per_node_gib,
+        )
+        attached.size_gib = min(
+            max_volume_gib,
+            next_n(max(initial_per_node_gib, required_for_io_gib), 100),
+        )
+    elif strategy is EbsVolumeStrategy.existing_no_shrink:
+        attached.size_gib = max(attached.size_gib, existing_volume_floor_gib)
+
+
+def _with_sampled_ebs_cost_for_regret(plan: CapacityPlan) -> CapacityPlan:
+    """Price sampled EBS demand while preserving today's returned purchase."""
+    if not any(
+        "cassandra.ebs_initial_allocation" in cluster.cluster_params
+        for cluster in plan.candidate_clusters.zonal
+    ):
+        return plan
+    sampled = plan.model_copy(deep=True)
+    for cluster in sampled.candidate_clusters.zonal:
+        allocation = cluster.cluster_params.get("cassandra.ebs_initial_allocation")
+        if allocation and cluster.attached_drives:
+            cluster.attached_drives[0].size_gib = allocation[
+                "sampled_requirement_volume_gib"
+            ]
+    sampled.candidate_clusters.annual_costs["cassandra.zonal-clusters"] = Decimal(
+        str(sum(cluster.annual_cost for cluster in sampled.candidate_clusters.zonal))
     )
-    return desires.model_copy(update={"buffers": buffers})
+    return sampled
 
 
 @enum_docstrings
@@ -902,6 +989,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     backup_retention_days: Optional[float] = None,
     keyspace_topology: Optional[CassandraKeyspaceTopology] = None,
     max_disk_utilization: float = CASSANDRA_MAX_DISK_UTILIZATION,
+    initial_ebs_physical_state_gib: Optional[float] = None,
     min_instance_ram_gib_exclusive: float = 16.0,
     ebs_iops_evidence: Optional[CassandraEbsIopsEvidence] = None,
     read_io_per_lcs_level: float = CASSANDRA_READ_IO_PER_LCS_LEVEL,
@@ -1026,10 +1114,10 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     ).mid
 
     is_ebs = instance.drive is None
-    capacity_desires = _with_ebs_hotter_buffer(desires) if is_ebs else desires
     capacity_desires = _with_disk_utilization_buffer(
-        capacity_desires,
+        desires,
         max_disk_utilization,
+        exact=is_ebs,
     )
     requirement_desires = capacity_desires
     if keyspace_topology is not None:
@@ -1061,11 +1149,29 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         else 1.0
     )
     needed_disk_gib = math.ceil(requirement.disk_gib.mid)
+    current_capacity = _get_current_capacity(desires)
+    ebs_volume_strategy = (
+        _ebs_volume_strategy(
+            current_capacity,
+            initial_ebs_physical_state_gib,
+            allow_ebs_volume_shrink,
+        )
+        if is_ebs
+        else None
+    )
+    initial_ebs_disk_gib = None
+    if ebs_volume_strategy is EbsVolumeStrategy.new_midpoint:
+        assert initial_ebs_physical_state_gib is not None
+        initial_ebs_disk_gib = math.ceil(
+            initial_ebs_physical_state_gib
+            * copies_per_region
+            / zones_per_region
+            / max_disk_utilization
+        )
 
     # For existing EBS clusters, raise disk caps to at least the observed
     # values so _get_min_count and compute_stateful_zone don't reject the
     # current topology or inflate node count.
-    current_capacity = _get_current_capacity(desires)
     current_zonal = (
         list(desires.current_clusters.zonal)
         if desires.current_clusters is not None
@@ -1079,12 +1185,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         default=current_data_per_node_gib,
     )
     ebs_disk_floor = 0
-    if is_ebs and not allow_ebs_volume_shrink and hottest_current_data_per_node_gib > 0:
+    if ebs_volume_strategy is EbsVolumeStrategy.existing_no_shrink:
         assert current_capacity is not None
-        observed_disk_per_node = int(hottest_current_data_per_node_gib)
-        max_attached_data_per_node_gib = max(
-            max_attached_data_per_node_gib, observed_disk_per_node
-        )
         current_drive_size_gib = max(
             (
                 get_disk_size_gib(capacity.cluster_drive, instance)
@@ -1092,10 +1194,15 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             ),
             default=get_disk_size_gib(current_capacity.cluster_drive, instance),
         )
-        ebs_disk_floor = max(
-            int(observed_disk_per_node * disk_buffer_ratio),
-            int(current_drive_size_gib),
-        )
+        ebs_disk_floor = int(current_drive_size_gib)
+        if hottest_current_data_per_node_gib > 0:
+            observed_disk_per_node = int(hottest_current_data_per_node_gib)
+            max_attached_data_per_node_gib = max(
+                max_attached_data_per_node_gib, observed_disk_per_node
+            )
+            ebs_disk_floor = max(
+                int(observed_disk_per_node * disk_buffer_ratio), ebs_disk_floor
+            )
 
     effective_disk_per_node_gib = get_effective_disk_per_node_gib(
         instance,
@@ -1272,7 +1379,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     min_count = _get_min_count(
         tier=desires.service_tier,
         required_cluster_size=required_cluster_size,
-        needed_disk_gib=needed_disk_gib,
+        needed_disk_gib=max(needed_disk_gib, initial_ebs_disk_gib or 0),
         disk_per_node_gib=sizing_disk_per_node_gib,
         cluster_size_lambda=cluster_size_lambda,
     )
@@ -1351,7 +1458,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         instance=instance,
         drive=drive,
         needed_cores=int(requirement.cpu_cores.mid),
-        needed_disk_gib=needed_disk_gib,
+        needed_disk_gib=max(needed_disk_gib, initial_ebs_disk_gib or 0),
         needed_memory_gib=int(requirement.mem_gib.mid),
         needed_network_mbps=requirement.network_mbps.mid,
         # Take into account the reads per read
@@ -1365,9 +1472,29 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         required_write_buffer_gib=requirement_estimate.write_buffer_gib,
         max_node_disk_gib=max_node_disk,
     )
-    if ebs_disk_floor and cluster.attached_drives:
-        for attached_drive in cluster.attached_drives:
-            attached_drive.size_gib = max(attached_drive.size_gib, ebs_disk_floor)
+    sampled_ebs_volume_gib = None
+    if initial_ebs_disk_gib is not None and cluster.attached_drives:
+        attached = cluster.attached_drives[0]
+        sampled_per_node_gib = max(1, math.ceil(needed_disk_gib / cluster.count))
+        sampled_io_gib = cloud_gib_for_io(
+            drive,
+            attached.provisioned_io_per_s
+            or (attached.read_io_per_s or 0) + (attached.write_io_per_s or 0),
+            sampled_per_node_gib,
+        )
+        sampled_ebs_volume_gib = min(
+            max_node_disk(drive),
+            next_n(max(sampled_per_node_gib, sampled_io_gib), 100),
+        )
+    if ebs_volume_strategy is not None:
+        _apply_ebs_volume_strategy(
+            strategy=ebs_volume_strategy,
+            cluster=cluster,
+            drive=drive,
+            initial_zonal_disk_gib=initial_ebs_disk_gib,
+            existing_volume_floor_gib=ebs_disk_floor,
+            max_volume_gib=max_node_disk(drive),
+        )
 
     # Communicate to the actual provision that if we want reduced RF
     params = {
@@ -1389,7 +1516,23 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         "cassandra.read_io_per_lcs_level": read_io_per_lcs_level,
     }
     if is_ebs:
+        assert ebs_volume_strategy is not None
+        params["cassandra.ebs_volume_strategy"] = ebs_volume_strategy.value
         params["cassandra.disk_iops_buffer_ratio"] = round(disk_iops_buffer_ratio, 2)
+        if initial_ebs_disk_gib is not None:
+            assert initial_ebs_physical_state_gib is not None
+            params["cassandra.ebs_initial_allocation"] = {
+                "physical_data_per_node_gib": round(
+                    initial_ebs_physical_state_gib
+                    * copies_per_region
+                    / zones_per_region
+                    / cluster.count,
+                    2,
+                ),
+                "volume_size_gib": cluster.attached_drives[0].size_gib,
+                "sampled_requirement_volume_gib": sampled_ebs_volume_gib,
+                "target_disk_utilization": max_disk_utilization,
+            }
     if reported_io_calibration:
         expected_peak_iops = unbuffered_disk_iops_by_count[cluster.count]
         assert len(cluster.attached_drives) == 1
@@ -1852,6 +1995,24 @@ class NflxCassandraArguments(BaseModel):
         "Lower values are more conservative; higher values allow denser current "
         "shape planning.",
     )
+    initial_ebs_physical_state_gib: Optional[float] = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+        description="Unreplicated compressed regional initial state for a new "
+        "EBS provisioning, overriding the estimated_state_size_gib midpoint "
+        "divided by the compression midpoint. Requires "
+        "provisioning_lifecycle=new. Node count fits the larger of requested "
+        "disk demand and initial allocation under the per-node density limit.",
+    )
+    provisioning_lifecycle: Literal["new", "existing"] = Field(
+        default="existing",
+        description="Mark a new provisioning. New EBS clusters buy the "
+        "compressed regional midpoint volume in both certain and uncertain "
+        "planning. Existing is the safe default; current-cluster inventory "
+        "always takes precedence, and keyspace_topology plans stay on sampled "
+        "demand unless initial_ebs_physical_state_gib is set.",
+    )
     read_io_per_lcs_level: float = Field(
         default=CASSANDRA_READ_IO_PER_LCS_LEVEL,
         ge=1.0,
@@ -1884,6 +2045,17 @@ class NflxCassandraArguments(BaseModel):
             raise ValueError(
                 f"min_storage_buffer_ratio ({self.min_storage_buffer_ratio}) "
                 f"must be <= max_storage_buffer_ratio ({self.max_storage_buffer_ratio})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_initial_ebs_state_is_new(self) -> "NflxCassandraArguments":
+        if (
+            self.initial_ebs_physical_state_gib is not None
+            and self.provisioning_lifecycle != "new"
+        ):
+            raise ValueError(
+                "initial_ebs_physical_state_gib requires provisioning_lifecycle=new"
             )
         return self
 
@@ -2265,12 +2437,31 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             backup_retention_days=args.backup_retention_days,
             keyspace_topology=args.keyspace_topology,
             max_disk_utilization=args.max_disk_utilization,
+            initial_ebs_physical_state_gib=_initial_ebs_physical_state_gib(
+                desires, args
+            ),
             min_instance_ram_gib_exclusive=args.min_instance_ram_gib_exclusive,
             ebs_iops_evidence=args.ebs_iops_evidence,
             read_io_per_lcs_level=args.read_io_per_lcs_level,
         )
 
         return result
+
+    @staticmethod
+    def uncertain_sample_arguments(
+        desires: CapacityDesires, extra_model_arguments: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        # Pin the purchase to the base midpoint before sampling; samples still
+        # determine topology and have their own volume cost for uncertain regret.
+        args = NflxCassandraArguments.from_extra_model_arguments(extra_model_arguments)
+        initial_gib = _initial_ebs_physical_state_gib(desires, args)
+        if initial_gib is None:
+            return extra_model_arguments
+        return {**extra_model_arguments, "initial_ebs_physical_state_gib": initial_gib}
+
+    @staticmethod
+    def plan_for_regret(plan: CapacityPlan) -> CapacityPlan:
+        return _with_sampled_ebs_cost_for_regret(plan)
 
     @staticmethod
     def regret(

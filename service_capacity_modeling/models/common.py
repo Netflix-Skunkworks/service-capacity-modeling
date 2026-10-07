@@ -730,7 +730,7 @@ class _AttachedDrivePlanResult(NamedTuple):
     attached_drives: List[Drive]
 
 
-def _attached_drive_plan(
+def _attached_drive_plan(  # noqa: C901
     *,
     drive: Drive,
     needed_disk_gib: float,
@@ -854,6 +854,10 @@ def _attached_drive_plan(
     attached_drive.size_gib = final_sizing.drive_size_gib
     attached_drive.read_io_per_s = int(round(final_sizing.read_io, 2))
     attached_drive.write_io_per_s = int(round(final_sizing.write_io, 2))
+    if attached_drive.annual_cost_per_io:
+        attached_drive.provisioned_io_per_s = (
+            attached_drive.read_io_per_s + attached_drive.write_io_per_s
+        )
     return _AttachedDrivePlanResult(
         count_disk_capacity=count_disk_capacity,
         count_disk_iops=count_disk_iops,
@@ -873,6 +877,13 @@ def gp2_gib_for_io(read_ios: float) -> int:
 def cloud_gib_for_io(drive: Drive, total_ios: float, space_gib: float) -> int:
     if drive.name == "gp2":
         return gp2_gib_for_io(total_ios)
+    if drive.max_scale_io_per_s_per_gib > 0:
+        return int(
+            max(
+                space_gib,
+                math.ceil(total_ios / drive.max_scale_io_per_s_per_gib),
+            )
+        )
     return int(space_gib)
 
 

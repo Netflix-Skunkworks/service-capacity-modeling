@@ -256,7 +256,14 @@ class Drive(ExcludeUnsetModel):
     size_gib: int = 0
     read_io_per_s: Optional[int] = None
     write_io_per_s: Optional[int] = None
+    provisioned_io_per_s: Optional[int] = None
+    """Shared provisioned IOPS for drives such as gp3.
+
+    This is distinct from directional workload demand. Providers bill gp3 once
+    for the volume's configured IOPS, regardless of the read/write mix.
+    """
     throughput: Optional[int] = None
+    """Provisioned throughput in MiB/s."""
 
     single_tenant: bool = True
     """Whether this drive has single tenant IO capacity (e.g. physical
@@ -267,6 +274,15 @@ class Drive(ExcludeUnsetModel):
 
     max_scale_io_per_s: int = 0
     """Maximum IOPS this drive can scale to"""
+
+    max_scale_io_per_s_per_gib: int = 0
+    """Maximum provisioned IOPS per GiB. Zero means no density limit."""
+
+    max_scale_throughput: int = 0
+    """Maximum throughput this drive can scale to, in MiB/s."""
+
+    max_scale_throughput_per_io: float = 0
+    """Maximum MiB/s of throughput per provisioned IOPS."""
 
     block_size_kib: int = 4
     """Size of a single IO operation against this device (in KiB)"""
@@ -282,6 +298,16 @@ class Drive(ExcludeUnsetModel):
     compatible_families: List[str] = []
 
     annual_cost_per_gib: float = 0
+
+    annual_cost_per_io: List[Tuple[float, float]] = []
+    """Tiered shared provisioned-IOPS pricing."""
+
+    annual_cost_per_throughput: List[Tuple[float, float]] = []
+    """Tiered provisioned-throughput pricing in MiB/s."""
+
+    pricing_source: str = "public"
+    pricing_region: Optional[str] = None
+    pricing_as_of: Optional[str] = None
 
     annual_cost_per_read_io: List[Tuple[float, float]] = []
     """Tiered pricing for read IOPS: list of (max_iops, annual_cost)
@@ -326,12 +352,37 @@ class Drive(ExcludeUnsetModel):
         else:
             return sys.maxsize
 
+    @property
+    def max_throughput(self) -> int:
+        if self.max_scale_throughput != 0:
+            return self.max_scale_throughput
+        return sys.maxsize
+
+    @staticmethod
+    def _tiered_annual_cost(quantity: float, rates: List[Tuple[float, float]]) -> float:
+        result = 0.0
+        offset = 0.0
+        for end, cost in rates:
+            charge = max(0.0, min(quantity, end) - offset)
+            result += charge * cost
+            offset += charge
+            if offset >= quantity:
+                break
+        return result
+
     @computed_field(return_type=float)  # type: ignore
     @property
     def annual_cost(self) -> float:
+        return sum(self.annual_cost_components.values())
+
+    @property
+    def annual_cost_components(self) -> Dict[str, float]:
+        """Annual drive cost split by capacity and performance dimension."""
         size = self.size_gib or 0
         r_ios = self.read_io_per_s or 0
         w_ios = self.write_io_per_s or 0
+        provisioned_ios = self.provisioned_io_per_s or 0
+        provisioned_throughput = self.throughput or 0
 
         # Time to do income taxes ...
         # Inputs are ranges of io limits and costs for ios in that range
@@ -356,7 +407,19 @@ class Drive(ExcludeUnsetModel):
                 if offset >= w_ios:
                     break
 
-        return size * self.annual_cost_per_gib + r_cost + w_cost
+        shared_io_cost = self._tiered_annual_cost(
+            provisioned_ios, self.annual_cost_per_io
+        )
+        throughput_cost = self._tiered_annual_cost(
+            provisioned_throughput, self.annual_cost_per_throughput
+        )
+        return {
+            "capacity": size * self.annual_cost_per_gib,
+            "iops": shared_io_cost,
+            "throughput": throughput_cost,
+            "read_iops": r_cost,
+            "write_iops": w_cost,
+        }
 
     @staticmethod
     def get_managed_drive() -> Drive:
@@ -432,6 +495,10 @@ class Instance(ExcludeUnsetModel):
     )
     ram_gib: float
     net_mbps: float
+    ebs_baseline_iops: Optional[int] = None
+    ebs_max_iops: Optional[int] = None
+    ebs_baseline_throughput_mib_per_s: Optional[float] = None
+    ebs_max_throughput_mib_per_s: Optional[float] = None
     drive: Optional[Drive] = None
     annual_cost: float = 0
     lifecycle: Lifecycle = Lifecycle.stable
@@ -577,7 +644,8 @@ class Hardware(ExcludeUnsetModel):
         drive name and returns a properly priced Drive instance.
 
         Args:
-            drive: Drive with name, size_gib, read_io_per_s, write_io_per_s
+            drive: Drive with name, size_gib, workload IOPS, provisioned IOPS,
+                and throughput.
 
         Returns:
             Drive with catalog pricing and input size/IO values
@@ -591,6 +659,12 @@ class Hardware(ExcludeUnsetModel):
         priced.size_gib = drive.size_gib
         priced.read_io_per_s = drive.read_io_per_s
         priced.write_io_per_s = drive.write_io_per_s
+        priced.provisioned_io_per_s = drive.provisioned_io_per_s
+        if priced.annual_cost_per_io and priced.provisioned_io_per_s is None:
+            priced.provisioned_io_per_s = (drive.read_io_per_s or 0) + (
+                drive.write_io_per_s or 0
+            )
+        priced.throughput = drive.throughput
         return priced
 
 
@@ -614,8 +688,13 @@ class InstancePricing(ExcludeUnsetModel):
 
 class DrivePricing(ExcludeUnsetModel):
     annual_cost_per_gib: float = 0
+    annual_cost_per_io: List[Tuple[float, float]] = []
+    annual_cost_per_throughput: List[Tuple[float, float]] = []
     annual_cost_per_read_io: List[Tuple[float, float]] = []
     annual_cost_per_write_io: List[Tuple[float, float]] = []
+    pricing_source: str = "public"
+    pricing_region: Optional[str] = None
+    pricing_as_of: Optional[str] = None
 
 
 class ServicePricing(ExcludeUnsetModel):
