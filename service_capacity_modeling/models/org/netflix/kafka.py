@@ -248,7 +248,7 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     require_local_disks: bool = False,
     require_attached_disks: bool = False,
     required_zone_size: Optional[int] = None,
-    max_regional_size: int = 210,
+    max_regional_size: int = 150,
     max_local_data_per_node_gib: int = 2 * 1024,
     max_attached_data_per_node_gib: int = 2 * 1024,
     min_instance_cpu: int = 2,
@@ -530,7 +530,7 @@ class NflxKafkaArguments(BaseModel):
         description="Require zonal clusters to be this size (force vertical scaling)",
     )
     max_regional_size: int = Field(
-        default=210,
+        default=150,
         description="What is the maximum size of a cluster in this region",
     )
     max_local_disk_gib: int = Field(
@@ -576,7 +576,7 @@ class NflxKafkaCapacityModel(CapacityModel, CostAwareModel):
         if cluster_type == ClusterType.strong and copies_per_region < 3:
             raise ValueError("Strong consistency and RF<3 doesn't work")
 
-        max_regional_size: int = extra_model_arguments.get("max_regional_size", 210)
+        max_regional_size: int = extra_model_arguments.get("max_regional_size", 150)
         # Very large nodes are hard to cache warm
         max_local_data_per_node_gib: int = extra_model_arguments.get(
             "max_local_data_per_node_gib",
