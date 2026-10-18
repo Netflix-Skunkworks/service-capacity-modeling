@@ -1,6 +1,5 @@
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -14,6 +13,8 @@ import botocore
 from pydantic import BaseModel
 
 from service_capacity_modeling.hardware import shapes
+from service_capacity_modeling.hardware.context import HardwareProvider
+from service_capacity_modeling.hardware.context import InstanceContext
 from service_capacity_modeling.tools.instance_families import INSTANCE_TYPES
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import DriveType
@@ -554,20 +555,8 @@ def parse_db_engines(engines_str: str) -> Sequence[str]:
 
 
 def _parse_family(family: str) -> Tuple[str, int, str]:
-    series = family[0]
-    # Some families encode multiple numbers (e.g. "p6-b200" for the Blackwell
-    # B200 GPU). The first number is always the instance generation.
-    num = re.findall(r"\d+", family)
-    assert len(num) >= 1
-    gen = int(num[0])
-
-    vendor = "intel"
-    if family[-1] == "a":
-        vendor = "amd"
-    if family[-1] == "g":
-        vendor = "graviton"
-
-    return series, gen, vendor
+    parsed = InstanceContext.from_name(family, HardwareProvider.aws)
+    return parsed.series, parsed.generation, parsed.vendor.value
 
 
 def parse_io_curve(inp: str, family: str) -> FixedInterval:

@@ -188,6 +188,8 @@ def normalized_aws_size(name: str) -> Fraction:
         assert len(numeric) == 1
         return Fraction(float(numeric[0]))
     return {
+        "nano": Fraction(1, 32),
+        "micro": Fraction(1, 16),
         "small": Fraction(1, 8),
         "medium": Fraction(1, 4),
         "large": Fraction(1, 2),
