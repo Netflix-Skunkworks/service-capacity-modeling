@@ -850,6 +850,7 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
     def test_only_memory_buffers_add_sst_memory_headroom(
         self,
         sst_memory_desires,
+        *,
         component,
         expected_memory_ratio,
         expected_memory_limit,

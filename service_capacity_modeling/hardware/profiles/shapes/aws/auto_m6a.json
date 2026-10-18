@@ -8,7 +8,11 @@
       "cpu_ipc_scale": 1.15,
       "ram_gib": 7.63,
       "net_mbps": 781.0,
-      "drive": null
+      "drive": null,
+      "platforms": [
+        "amd64",
+        "amd64 AMD"
+      ]
     },
     "m6a.xlarge": {
       "name": "m6a.xlarge",
@@ -18,7 +22,11 @@
       "cpu_ipc_scale": 1.15,
       "ram_gib": 15.26,
       "net_mbps": 1562.0,
-      "drive": null
+      "drive": null,
+      "platforms": [
+        "amd64",
+        "amd64 AMD"
+      ]
     },
     "m6a.2xlarge": {
       "name": "m6a.2xlarge",
@@ -28,7 +36,11 @@
       "cpu_ipc_scale": 1.15,
       "ram_gib": 30.52,
       "net_mbps": 3125.0,
-      "drive": null
+      "drive": null,
+      "platforms": [
+        "amd64",
+        "amd64 AMD"
+      ]
     },
     "m6a.4xlarge": {
       "name": "m6a.4xlarge",
@@ -38,7 +50,11 @@
       "cpu_ipc_scale": 1.15,
       "ram_gib": 61.04,
       "net_mbps": 6250.0,
-      "drive": null
+      "drive": null,
+      "platforms": [
+        "amd64",
+        "amd64 AMD"
+      ]
     },
     "m6a.8xlarge": {
       "name": "m6a.8xlarge",
@@ -48,7 +64,11 @@
       "cpu_ipc_scale": 1.15,
       "ram_gib": 122.07,
       "net_mbps": 12500.0,
-      "drive": null
+      "drive": null,
+      "platforms": [
+        "amd64",
+        "amd64 AMD"
+      ]
     },
     "m6a.12xlarge": {
       "name": "m6a.12xlarge",
@@ -58,7 +78,11 @@
       "cpu_ipc_scale": 1.15,
       "ram_gib": 183.11,
       "net_mbps": 18750.0,
-      "drive": null
+      "drive": null,
+      "platforms": [
+        "amd64",
+        "amd64 AMD"
+      ]
     },
     "m6a.16xlarge": {
       "name": "m6a.16xlarge",
@@ -68,7 +92,11 @@
       "cpu_ipc_scale": 1.15,
       "ram_gib": 244.14,
       "net_mbps": 25000.0,
-      "drive": null
+      "drive": null,
+      "platforms": [
+        "amd64",
+        "amd64 AMD"
+      ]
     },
     "m6a.24xlarge": {
       "name": "m6a.24xlarge",
@@ -78,7 +106,11 @@
       "cpu_ipc_scale": 1.15,
       "ram_gib": 366.21,
       "net_mbps": 37500.0,
-      "drive": null
+      "drive": null,
+      "platforms": [
+        "amd64",
+        "amd64 AMD"
+      ]
     },
     "m6a.32xlarge": {
       "name": "m6a.32xlarge",
@@ -88,7 +120,11 @@
       "cpu_ipc_scale": 1.15,
       "ram_gib": 488.28,
       "net_mbps": 50000.0,
-      "drive": null
+      "drive": null,
+      "platforms": [
+        "amd64",
+        "amd64 AMD"
+      ]
     },
     "m6a.48xlarge": {
       "name": "m6a.48xlarge",
@@ -98,7 +134,11 @@
       "cpu_ipc_scale": 1.15,
       "ram_gib": 732.42,
       "net_mbps": 50000.0,
-      "drive": null
+      "drive": null,
+      "platforms": [
+        "amd64",
+        "amd64 AMD"
+      ]
     }
   }
 }
