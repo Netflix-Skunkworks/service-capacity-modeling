@@ -443,6 +443,18 @@ class Platform(StrEnum):
     """ARM64 architecture - Graviton and other ARM-based instances (e.g.,
     m6g, c7g)"""
 
+    # CPU vendor subtags. These accompany (never replace) the top-level
+    # architecture tag, so models filtering on amd64/arm64 are unaffected.
+    # Managed platforms (Aurora, Valkey) intentionally do not carry them.
+    amd64_intel = "amd64 Intel"
+    """x86-64 with an Intel processor (e.g., m7i, r6id)"""
+
+    amd64_amd = "amd64 AMD"
+    """x86-64 with an AMD processor (e.g., m7a, c6a)"""
+
+    arm64_graviton = "arm64 Graviton"
+    """ARM64 with an AWS Graviton processor (e.g., m7g, r8gd)"""
+
     aurora_mysql = "Aurora MySQL"
     """AWS Aurora MySQL-compatible managed database platform"""
 
@@ -506,7 +518,8 @@ class Instance(ExcludeUnsetModel):
     platforms: List[Platform] = [Platform.amd64]
     """CPU platforms this instance supports. Typically hardware has a
     single platform, but sometimes instances can run on multiple platforms
-    (e.g. amd64 and arm64)."""
+    (e.g. amd64 and arm64). EC2 shapes may also carry a CPU vendor subtag
+    alongside their architecture (e.g. [amd64, amd64_intel])."""
 
     family_separator: str = "."
 

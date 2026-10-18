@@ -20,6 +20,7 @@ from service_capacity_modeling.interface import DriveType
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import normalized_aws_size
+from service_capacity_modeling.interface import Platform
 
 
 # Default latency curves from FIO testing per generation
@@ -130,6 +131,16 @@ aws_io_links = {
 }
 aws_instance_link = "https://docs.aws.amazon.com/ec2/latest/instancetypes/ec2-instance-type-specifications.html"
 
+# describe_instance_types ProcessorInfo -> Platform tags. We trust what AWS
+# reports over the family name, whose suffix letters are ambiguous (the "d" in
+# m7gd means local disk, not a vendor).
+aws_arch_platforms = {"x86_64": Platform.amd64, "arm64": Platform.arm64}
+aws_manufacturer_platforms = {
+    "Intel": Platform.amd64_intel,
+    "AMD": Platform.amd64_amd,
+    "AWS": Platform.arm64_graviton,
+}
+
 
 class CPUPerformance(BaseModel):
     ipc_scale_factor: Optional[float] = None
@@ -228,7 +239,7 @@ def _drive(
     )
 
 
-def pull_family(  # pylint: disable=too-many-positional-arguments,too-many-locals,too-many-branches
+def pull_family(  # pylint: disable=too-many-positional-arguments,too-many-locals,too-many-branches,too-many-statements
     ec2_client: Any,
     family: str,
     cpu_perf: Optional[CPUPerformance] = None,
@@ -349,6 +360,21 @@ def pull_family(  # pylint: disable=too-many-positional-arguments,too-many-local
                     file=sys.stderr,
                 )
 
+        platforms = [
+            aws_arch_platforms[arch]
+            for arch in data["ProcessorInfo"].get("SupportedArchitectures", [])
+            if arch in aws_arch_platforms
+        ] or [Platform.amd64]
+        manufacturer = data["ProcessorInfo"].get("Manufacturer")
+        if manufacturer in aws_manufacturer_platforms:
+            platforms.append(aws_manufacturer_platforms[manufacturer])
+        else:
+            print(
+                f"[{data['InstanceType']}] WARNING: unknown processor "
+                f"manufacturer {manufacturer!r}; not adding a vendor platform tag",
+                file=sys.stderr,
+            )
+
         shape_kwargs: Dict[str, Any] = {
             "name": data["InstanceType"],
             "cpu": vcpu_count,
@@ -358,6 +384,7 @@ def pull_family(  # pylint: disable=too-many-positional-arguments,too-many-local
             "ram_gib": convert_mib_to_gib(data["MemoryInfo"]["SizeInMiB"]),
             "net_mbps": aggregate_network_mbps(data["NetworkInfo"]),
             "drive": drive,
+            "platforms": platforms,
         }
         ebs_optimized = data.get("EbsInfo", {}).get("EbsOptimizedInfo", {})
         if ebs_optimized:
@@ -476,8 +503,6 @@ def pull_rds_family(  # pylint: disable=too-many-locals
             f"ghz={cpu_ghz}, ram={ram_gib} GiB, net={net_mbps} Mbps, "
             f"platforms={platforms}"
         )
-        from service_capacity_modeling.interface import Platform
-
         new_instance = Instance(
             name=db_instance_class,
             cpu=vcpu_count,
