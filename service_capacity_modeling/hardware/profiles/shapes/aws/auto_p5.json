@@ -6,6 +6,7 @@
       "cpu_cores": 8,
       "cpu_ghz": 3.6,
       "cpu_ipc_scale": 1.0,
+      "cpu_microarch": "milan",
       "ram_gib": 244.14,
       "net_mbps": 100000.0,
       "drive": {
@@ -25,8 +26,7 @@
       },
       "lifecycle": "alpha",
       "platforms": [
-        "amd64",
-        "amd64 AMD"
+        "amd64"
       ]
     },
     "p5.48xlarge": {
@@ -35,6 +35,7 @@
       "cpu_cores": 96,
       "cpu_ghz": 3.6,
       "cpu_ipc_scale": 1.0,
+      "cpu_microarch": "milan",
       "ram_gib": 1953.12,
       "net_mbps": 3200000.0,
       "drive": {
@@ -54,8 +55,7 @@
       },
       "lifecycle": "alpha",
       "platforms": [
-        "amd64",
-        "amd64 AMD"
+        "amd64"
       ]
     }
   }

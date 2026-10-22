@@ -6,6 +6,7 @@
       "cpu_cores": 96,
       "cpu_ghz": 3.2,
       "cpu_ipc_scale": 1.33,
+      "cpu_microarch": "emerald_rapids",
       "ram_gib": 1953.12,
       "net_mbps": 1600000.0,
       "drive": {
@@ -25,8 +26,7 @@
       },
       "lifecycle": "alpha",
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     }
   }

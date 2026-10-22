@@ -22,11 +22,6 @@ SHAPES_DIR = (
 )
 # Synthetic shape that exercises lifecycle filtering, not a real AWS name
 SYNTHETIC_SHAPES = {"f5.large.deprecated"}
-VENDOR_TAGS = {
-    Platform.amd64_intel: "intel",
-    Platform.amd64_amd: "amd",
-    Platform.arm64_graviton: "graviton",
-}
 
 
 def _one_shape_per_family() -> List[Instance]:
@@ -58,10 +53,9 @@ def test_parse_shipped_shapes(instance: Instance) -> None:
         generation,
         vendor,
     )
-    # EC2 shapes carry vendor tags verified against AWS; managed shapes do not
-    tagged = [VENDOR_TAGS[p] for p in instance.platforms if p in VENDOR_TAGS]
-    if tagged:
-        assert tagged == [vendor]
+    # EC2 shapes carry a curated microarch checked against AWS; managed do not
+    if instance.cpu_microarch is not None:
+        assert instance.cpu_vendor == vendor
         assert parsed.arch in instance.platforms
 
 

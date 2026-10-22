@@ -6,6 +6,7 @@
       "cpu_cores": 1,
       "cpu_ghz": 3.9,
       "cpu_ipc_scale": 1.42,
+      "cpu_microarch": "granite_rapids",
       "ram_gib": 7.63,
       "net_mbps": 937.0,
       "drive": {
@@ -25,8 +26,7 @@
       },
       "lifecycle": "alpha",
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m8id.xlarge": {
@@ -35,6 +35,7 @@
       "cpu_cores": 2,
       "cpu_ghz": 3.9,
       "cpu_ipc_scale": 1.42,
+      "cpu_microarch": "granite_rapids",
       "ram_gib": 15.26,
       "net_mbps": 1875.0,
       "drive": {
@@ -54,8 +55,7 @@
       },
       "lifecycle": "alpha",
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m8id.2xlarge": {
@@ -64,6 +64,7 @@
       "cpu_cores": 4,
       "cpu_ghz": 3.9,
       "cpu_ipc_scale": 1.42,
+      "cpu_microarch": "granite_rapids",
       "ram_gib": 30.52,
       "net_mbps": 3750.0,
       "drive": {
@@ -83,8 +84,7 @@
       },
       "lifecycle": "alpha",
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m8id.4xlarge": {
@@ -93,6 +93,7 @@
       "cpu_cores": 8,
       "cpu_ghz": 3.9,
       "cpu_ipc_scale": 1.42,
+      "cpu_microarch": "granite_rapids",
       "ram_gib": 61.04,
       "net_mbps": 7500.0,
       "drive": {
@@ -112,8 +113,7 @@
       },
       "lifecycle": "alpha",
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m8id.8xlarge": {
@@ -122,6 +122,7 @@
       "cpu_cores": 16,
       "cpu_ghz": 3.9,
       "cpu_ipc_scale": 1.42,
+      "cpu_microarch": "granite_rapids",
       "ram_gib": 122.07,
       "net_mbps": 15000.0,
       "drive": {
@@ -141,8 +142,7 @@
       },
       "lifecycle": "alpha",
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m8id.12xlarge": {
@@ -151,6 +151,7 @@
       "cpu_cores": 24,
       "cpu_ghz": 3.9,
       "cpu_ipc_scale": 1.42,
+      "cpu_microarch": "granite_rapids",
       "ram_gib": 183.11,
       "net_mbps": 22500.0,
       "drive": {
@@ -170,8 +171,7 @@
       },
       "lifecycle": "alpha",
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m8id.16xlarge": {
@@ -180,6 +180,7 @@
       "cpu_cores": 32,
       "cpu_ghz": 3.9,
       "cpu_ipc_scale": 1.42,
+      "cpu_microarch": "granite_rapids",
       "ram_gib": 244.14,
       "net_mbps": 30000.0,
       "drive": {
@@ -199,8 +200,7 @@
       },
       "lifecycle": "alpha",
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m8id.24xlarge": {
@@ -209,6 +209,7 @@
       "cpu_cores": 48,
       "cpu_ghz": 3.9,
       "cpu_ipc_scale": 1.42,
+      "cpu_microarch": "granite_rapids",
       "ram_gib": 366.21,
       "net_mbps": 40000.0,
       "drive": {
@@ -228,8 +229,7 @@
       },
       "lifecycle": "alpha",
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m8id.32xlarge": {
@@ -238,6 +238,7 @@
       "cpu_cores": 64,
       "cpu_ghz": 3.9,
       "cpu_ipc_scale": 1.42,
+      "cpu_microarch": "granite_rapids",
       "ram_gib": 488.28,
       "net_mbps": 50000.0,
       "drive": {
@@ -257,8 +258,7 @@
       },
       "lifecycle": "alpha",
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m8id.48xlarge": {
@@ -267,6 +267,7 @@
       "cpu_cores": 96,
       "cpu_ghz": 3.9,
       "cpu_ipc_scale": 1.42,
+      "cpu_microarch": "granite_rapids",
       "ram_gib": 732.42,
       "net_mbps": 75000.0,
       "drive": {
@@ -286,8 +287,7 @@
       },
       "lifecycle": "alpha",
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m8id.96xlarge": {
@@ -296,6 +296,7 @@
       "cpu_cores": 192,
       "cpu_ghz": 3.9,
       "cpu_ipc_scale": 1.42,
+      "cpu_microarch": "granite_rapids",
       "ram_gib": 1464.84,
       "net_mbps": 100000.0,
       "drive": {
@@ -315,8 +316,7 @@
       },
       "lifecycle": "alpha",
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     }
   }

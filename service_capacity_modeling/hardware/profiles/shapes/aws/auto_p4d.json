@@ -6,6 +6,7 @@
       "cpu_cores": 48,
       "cpu_ghz": 3.0,
       "cpu_ipc_scale": 1.0,
+      "cpu_microarch": "cascade_lake",
       "ram_gib": 1098.63,
       "net_mbps": 400000.0,
       "drive": {
@@ -25,8 +26,7 @@
       },
       "lifecycle": "alpha",
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     }
   }
