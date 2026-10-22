@@ -6,6 +6,7 @@
       "cpu_cores": 1,
       "cpu_ghz": 3.5,
       "cpu_ipc_scale": 1.15,
+      "cpu_microarch": "ice_lake",
       "ram_gib": 7.63,
       "net_mbps": 781.0,
       "drive": {
@@ -24,8 +25,7 @@
         }
       },
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m6id.xlarge": {
@@ -34,6 +34,7 @@
       "cpu_cores": 2,
       "cpu_ghz": 3.5,
       "cpu_ipc_scale": 1.15,
+      "cpu_microarch": "ice_lake",
       "ram_gib": 15.26,
       "net_mbps": 1562.0,
       "drive": {
@@ -52,8 +53,7 @@
         }
       },
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m6id.2xlarge": {
@@ -62,6 +62,7 @@
       "cpu_cores": 4,
       "cpu_ghz": 3.5,
       "cpu_ipc_scale": 1.15,
+      "cpu_microarch": "ice_lake",
       "ram_gib": 30.52,
       "net_mbps": 3125.0,
       "drive": {
@@ -80,8 +81,7 @@
         }
       },
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m6id.4xlarge": {
@@ -90,6 +90,7 @@
       "cpu_cores": 8,
       "cpu_ghz": 3.5,
       "cpu_ipc_scale": 1.15,
+      "cpu_microarch": "ice_lake",
       "ram_gib": 61.04,
       "net_mbps": 6250.0,
       "drive": {
@@ -108,8 +109,7 @@
         }
       },
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m6id.8xlarge": {
@@ -118,6 +118,7 @@
       "cpu_cores": 16,
       "cpu_ghz": 3.5,
       "cpu_ipc_scale": 1.15,
+      "cpu_microarch": "ice_lake",
       "ram_gib": 122.07,
       "net_mbps": 12500.0,
       "drive": {
@@ -136,8 +137,7 @@
         }
       },
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m6id.12xlarge": {
@@ -146,6 +146,7 @@
       "cpu_cores": 24,
       "cpu_ghz": 3.5,
       "cpu_ipc_scale": 1.15,
+      "cpu_microarch": "ice_lake",
       "ram_gib": 183.11,
       "net_mbps": 18750.0,
       "drive": {
@@ -164,8 +165,7 @@
         }
       },
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m6id.16xlarge": {
@@ -174,6 +174,7 @@
       "cpu_cores": 32,
       "cpu_ghz": 3.5,
       "cpu_ipc_scale": 1.15,
+      "cpu_microarch": "ice_lake",
       "ram_gib": 244.14,
       "net_mbps": 25000.0,
       "drive": {
@@ -192,8 +193,7 @@
         }
       },
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m6id.24xlarge": {
@@ -202,6 +202,7 @@
       "cpu_cores": 48,
       "cpu_ghz": 3.5,
       "cpu_ipc_scale": 1.15,
+      "cpu_microarch": "ice_lake",
       "ram_gib": 366.21,
       "net_mbps": 37500.0,
       "drive": {
@@ -220,8 +221,7 @@
         }
       },
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     },
     "m6id.32xlarge": {
@@ -230,6 +230,7 @@
       "cpu_cores": 64,
       "cpu_ghz": 3.5,
       "cpu_ipc_scale": 1.15,
+      "cpu_microarch": "ice_lake",
       "ram_gib": 488.28,
       "net_mbps": 50000.0,
       "drive": {
@@ -248,8 +249,7 @@
         }
       },
       "platforms": [
-        "amd64",
-        "amd64 Intel"
+        "amd64"
       ]
     }
   }

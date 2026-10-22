@@ -445,18 +445,6 @@ class Platform(StrEnum):
     """ARM64 architecture - Graviton and other ARM-based instances (e.g.,
     m6g, c7g)"""
 
-    # CPU vendor subtags. These accompany (never replace) the top-level
-    # architecture tag, so models filtering on amd64/arm64 are unaffected.
-    # Managed platforms (Aurora, Valkey) intentionally do not carry them.
-    amd64_intel = "amd64 Intel"
-    """x86-64 with an Intel processor (e.g., m7i, r6id)"""
-
-    amd64_amd = "amd64 AMD"
-    """x86-64 with an AMD processor (e.g., m7a, c6a)"""
-
-    arm64_graviton = "arm64 Graviton"
-    """ARM64 with an AWS Graviton processor (e.g., m7g, r8gd)"""
-
     aurora_mysql = "Aurora MySQL"
     """AWS Aurora MySQL-compatible managed database platform"""
 
@@ -465,6 +453,79 @@ class Platform(StrEnum):
 
     valkey = "Valkey"
     """AWS ElastiCache for Valkey managed cache platform"""
+
+
+@enum_docstrings
+class CPUVendor(StrEnum):
+    """Who designed the CPU"""
+
+    intel = "intel"
+    amd = "amd"
+    graviton = "graviton"
+    arm = "arm"
+    """Any other Arm design, e.g. Ampere, NVIDIA Grace or Apple silicon"""
+
+
+@enum_docstrings
+class CPUMicroarch(StrEnum):
+    """CPU microarchitecture, by the codename the cloud provider documents
+
+    This is a fact about the silicon, which vendor, ISA and (later) instruction
+    set features derive from. It is not a performance measure: compare
+    cpu_ghz * cpu_ipc_scale for that.
+    """
+
+    haswell = "haswell"
+    broadwell = "broadwell"
+    skylake = "skylake"
+    cascade_lake = "cascade_lake"
+    ice_lake = "ice_lake"
+    sapphire_rapids = "sapphire_rapids"
+    emerald_rapids = "emerald_rapids"
+    granite_rapids = "granite_rapids"
+    naples = "naples"
+    """AMD EPYC 1st gen (Zen)"""
+    rome = "rome"
+    """AMD EPYC 2nd gen (Zen 2)"""
+    milan = "milan"
+    """AMD EPYC 3rd gen (Zen 3)"""
+    genoa = "genoa"
+    """AMD EPYC 4th gen (Zen 4)"""
+    turin = "turin"
+    """AMD EPYC 5th gen (Zen 5)"""
+    graviton2 = "graviton2"
+    graviton3 = "graviton3"
+    graviton4 = "graviton4"
+
+    @property
+    def vendor(self) -> CPUVendor:
+        return _CPU_MICROARCH_VENDORS[self]
+
+    @property
+    def isa(self) -> Platform:
+        if self.vendor in (CPUVendor.graviton, CPUVendor.arm):
+            return Platform.arm64
+        return Platform.amd64
+
+
+_CPU_MICROARCH_VENDORS: Dict[CPUMicroarch, CPUVendor] = {
+    CPUMicroarch.haswell: CPUVendor.intel,
+    CPUMicroarch.broadwell: CPUVendor.intel,
+    CPUMicroarch.skylake: CPUVendor.intel,
+    CPUMicroarch.cascade_lake: CPUVendor.intel,
+    CPUMicroarch.ice_lake: CPUVendor.intel,
+    CPUMicroarch.sapphire_rapids: CPUVendor.intel,
+    CPUMicroarch.emerald_rapids: CPUVendor.intel,
+    CPUMicroarch.granite_rapids: CPUVendor.intel,
+    CPUMicroarch.naples: CPUVendor.amd,
+    CPUMicroarch.rome: CPUVendor.amd,
+    CPUMicroarch.milan: CPUVendor.amd,
+    CPUMicroarch.genoa: CPUVendor.amd,
+    CPUMicroarch.turin: CPUVendor.amd,
+    CPUMicroarch.graviton2: CPUVendor.graviton,
+    CPUMicroarch.graviton3: CPUVendor.graviton,
+    CPUMicroarch.graviton4: CPUVendor.graviton,
+}
 
 
 class Instance(ExcludeUnsetModel):
@@ -507,6 +568,10 @@ class Instance(ExcludeUnsetModel):
             "expect to replace this with a standard measure of average performance."
         ),
     )
+    cpu_microarch: Optional[CPUMicroarch] = None
+    """CPU microarchitecture, None when not curated (e.g. managed shapes).
+    Families that mix hosts use the oldest one, since that is what every host
+    guarantees."""
     ram_gib: float
     net_mbps: float
     ebs_baseline_iops: Optional[int] = None
@@ -520,10 +585,23 @@ class Instance(ExcludeUnsetModel):
     platforms: List[Platform] = [Platform.amd64]
     """CPU platforms this instance supports. Typically hardware has a
     single platform, but sometimes instances can run on multiple platforms
-    (e.g. amd64 and arm64). EC2 shapes may also carry a CPU vendor subtag
-    alongside their architecture (e.g. [amd64, amd64_intel])."""
+    (e.g. amd64 and arm64)."""
 
     family_separator: str = "."
+
+    @model_validator(mode="after")
+    def _microarch_runs_on_platforms(self) -> "Instance":
+        isa = self.cpu_microarch.isa if self.cpu_microarch else None
+        if isa is not None and isa not in self.platforms:
+            raise ValueError(
+                f"{self.name}: cpu_microarch {self.cpu_microarch} is {isa} but "
+                f"platforms are {[str(p) for p in self.platforms]}"
+            )
+        return self
+
+    @property
+    def cpu_vendor(self) -> Optional[CPUVendor]:
+        return self.cpu_microarch.vendor if self.cpu_microarch else None
 
     @property
     def family(self) -> str:
