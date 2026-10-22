@@ -16,6 +16,8 @@ from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.hardware.context import HardwareProvider
 from service_capacity_modeling.hardware.context import InstanceContext
 from service_capacity_modeling.tools.instance_families import INSTANCE_TYPES
+from service_capacity_modeling.interface import CPUMicroarch
+from service_capacity_modeling.interface import CPUVendor
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import DriveType
 from service_capacity_modeling.interface import FixedInterval
@@ -132,14 +134,14 @@ aws_io_links = {
 }
 aws_instance_link = "https://docs.aws.amazon.com/ec2/latest/instancetypes/ec2-instance-type-specifications.html"
 
-# describe_instance_types ProcessorInfo -> Platform tags. We trust what AWS
-# reports over the family name, whose suffix letters are ambiguous (the "d" in
-# m7gd means local disk, not a vendor).
+# describe_instance_types ProcessorInfo. AWS reports the architecture and
+# manufacturer but not the microarchitecture, so the curated cpu_microarch in
+# instance_families.py is checked against the manufacturer instead.
 aws_arch_platforms = {"x86_64": Platform.amd64, "arm64": Platform.arm64}
-aws_manufacturer_platforms = {
-    "Intel": Platform.amd64_intel,
-    "AMD": Platform.amd64_amd,
-    "AWS": Platform.arm64_graviton,
+aws_manufacturer_vendors = {
+    "Intel": CPUVendor.intel,
+    "AMD": CPUVendor.amd,
+    "AWS": CPUVendor.graviton,
 }
 
 
@@ -249,6 +251,7 @@ def pull_family(  # pylint: disable=too-many-positional-arguments,too-many-local
     cpu_turbo_all_ghz: Optional[float] = None,
     cpu_freq_from: str = "aws",
     debug: bool = False,
+    cpu_microarch: Optional[CPUMicroarch] = None,
 ) -> Sequence[Instance]:
     # flake8: noqa: C901
     """
@@ -367,13 +370,19 @@ def pull_family(  # pylint: disable=too-many-positional-arguments,too-many-local
             if arch in aws_arch_platforms
         ] or [Platform.amd64]
         manufacturer = data["ProcessorInfo"].get("Manufacturer")
-        if manufacturer in aws_manufacturer_platforms:
-            platforms.append(aws_manufacturer_platforms[manufacturer])
-        else:
+        if cpu_microarch is None:
             print(
-                f"[{data['InstanceType']}] WARNING: unknown processor "
-                f"manufacturer {manufacturer!r}; not adding a vendor platform tag",
+                f"[{data['InstanceType']}] WARNING: no cpu_microarch in "
+                f"instance_families.py; AWS reports manufacturer {manufacturer!r}",
                 file=sys.stderr,
+            )
+        elif manufacturer is not None and (
+            aws_manufacturer_vendors.get(manufacturer) != cpu_microarch.vendor
+        ):
+            raise ValueError(
+                f"[{data['InstanceType']}] AWS reports manufacturer "
+                f"{manufacturer!r} but instance_families.py says {cpu_microarch} "
+                f"({cpu_microarch.vendor})"
             )
 
         shape_kwargs: Dict[str, Any] = {
@@ -387,6 +396,8 @@ def pull_family(  # pylint: disable=too-many-positional-arguments,too-many-local
             "drive": drive,
             "platforms": platforms,
         }
+        if cpu_microarch is not None:
+            shape_kwargs["cpu_microarch"] = cpu_microarch
         ebs_optimized = data.get("EbsInfo", {}).get("EbsOptimizedInfo", {})
         if ebs_optimized:
             shape_kwargs.update(
@@ -664,6 +675,7 @@ def main(args: Any) -> int:
             lifecycle,
             cpu_turbo_all_ghz,
         ) = resolve_family_defaults(lookup_family, args)
+        cpu_microarch = INSTANCE_TYPES.get(lookup_family, {}).get("cpu_microarch")
         if is_rds:
             rds_family = family[3:]
             if not args.db_engines:
@@ -720,6 +732,7 @@ def main(args: Any) -> int:
                 cpu_turbo_all_ghz=cpu_turbo_all_ghz,
                 cpu_freq_from=args.cpu_freq_from,
                 debug=args.debug,
+                cpu_microarch=cpu_microarch,
             )
             output_filename = f"auto_{family}.json"
         json_shapes: Dict[str, Dict[str, Any]] = {"instances": {}}

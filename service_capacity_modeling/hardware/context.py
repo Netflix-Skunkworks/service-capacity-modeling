@@ -14,6 +14,7 @@ from pydantic import Field
 
 from service_capacity_modeling.enum_utils import enum_docstrings
 from service_capacity_modeling.enum_utils import StrEnum
+from service_capacity_modeling.interface import CPUVendor
 from service_capacity_modeling.interface import ExcludeUnsetModel
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import normalized_aws_size
@@ -27,18 +28,6 @@ class HardwareProvider(StrEnum):
     aws = "aws"
     gcp = "gcp"
     azure = "azure"
-
-
-@enum_docstrings
-class CPUVendor(StrEnum):
-    """CPU vendor as far as an instance type name reveals it"""
-
-    intel = "intel"
-    amd = "amd"
-    graviton = "graviton"
-    arm = "arm"
-    """Any other Arm host, e.g. GCE Axion/Ampere, Azure Cobalt/Ampere,
-    NVIDIA Grace or Apple silicon"""
 
 
 # Naming conventions, note letters mean different things per provider (AWS

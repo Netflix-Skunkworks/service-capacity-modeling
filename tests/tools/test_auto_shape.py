@@ -5,6 +5,7 @@ import pytest
 from botocore.stub import Stubber
 from pytest import approx
 
+from service_capacity_modeling.interface import CPUMicroarch
 from service_capacity_modeling.interface import Platform
 from service_capacity_modeling.tools import auto_shape
 from service_capacity_modeling.tools.auto_shape import deduce_cpu_perf
@@ -46,6 +47,7 @@ def test_pull_family_r6id(mock_ec2):
         family="r6id",
         cpu_perf=cpu_perf,
         io_perf=io_perf,
+        cpu_microarch=CPUMicroarch.ice_lake,
     )[0]
 
     assert shape.name == "r6id.2xlarge"
@@ -64,7 +66,8 @@ def test_pull_family_r6id(mock_ec2):
     # AWS reports decimal MB/s; gp3 throughput is MiB/s.
     assert shape.ebs_baseline_throughput_mib_per_s == 298.02
     assert shape.ebs_max_throughput_mib_per_s == 1192.09
-    assert shape.platforms == [Platform.amd64, Platform.amd64_intel]
+    assert shape.platforms == [Platform.amd64]
+    assert shape.cpu_microarch == CPUMicroarch.ice_lake
 
 
 def test_pull_family_m7a(mock_ec2):
@@ -78,6 +81,7 @@ def test_pull_family_m7a(mock_ec2):
         family="m7a",
         cpu_perf=cpu_perf,
         io_perf=io_perf,
+        cpu_microarch=CPUMicroarch.genoa,
     )[0]
 
     assert shape.name == "m7a.12xlarge"
@@ -93,27 +97,18 @@ def test_pull_family_m7a(mock_ec2):
     assert shape.ebs_max_iops == 60000
     assert shape.ebs_baseline_throughput_mib_per_s == 1788.14
     assert shape.ebs_max_throughput_mib_per_s == 1788.14
-    assert shape.platforms == [Platform.amd64, Platform.amd64_amd]
+    assert shape.platforms == [Platform.amd64]
+    assert shape.cpu_microarch == CPUMicroarch.genoa
 
 
-@pytest.mark.parametrize(
-    "archs,manufacturer,expected",
-    [
-        (["arm64"], "AWS", [Platform.arm64, Platform.arm64_graviton]),
-        (["i386", "x86_64"], "Intel", [Platform.amd64, Platform.amd64_intel]),
-        # Unknown vendors get no subtag rather than a guess
-        (["x86_64"], "Hygon", [Platform.amd64]),
-        (["x86_64"], None, [Platform.amd64]),
-    ],
-)
-def test_pull_family_platform_tags(mock_ec2, archs, manufacturer, expected):
+def _stub_m7a_processor(client, archs, manufacturer):
     response = copy.deepcopy(mock_data["m7a"])
     processor = response["InstanceTypes"][0]["ProcessorInfo"]
     processor["SupportedArchitectures"] = archs
     processor.pop("Manufacturer")
     if manufacturer is not None:
         processor["Manufacturer"] = manufacturer
-    stub = Stubber(mock_ec2)
+    stub = Stubber(client)
     stub.add_response(
         "describe_instance_types",
         response,
@@ -121,8 +116,42 @@ def test_pull_family_platform_tags(mock_ec2, archs, manufacturer, expected):
     )
     stub.activate()
 
-    shapes = pull_family(ec2_client=mock_ec2, family="m7a")
-    assert [s.platforms for s in shapes] == [expected]
+
+@pytest.mark.parametrize(
+    "archs,manufacturer,microarch,expected",
+    [
+        (["arm64"], "AWS", CPUMicroarch.graviton3, [Platform.arm64]),
+        (["i386", "x86_64"], "Intel", CPUMicroarch.ice_lake, [Platform.amd64]),
+        # Uncurated families still get an architecture, just no microarch
+        (["x86_64"], "AMD", None, [Platform.amd64]),
+        # AWS not reporting a manufacturer can't contradict the curated value
+        (["x86_64"], None, CPUMicroarch.genoa, [Platform.amd64]),
+    ],
+)
+def test_pull_family_cpu_tags(mock_ec2, archs, manufacturer, microarch, expected):
+    _stub_m7a_processor(mock_ec2, archs, manufacturer)
+
+    shapes = pull_family(ec2_client=mock_ec2, family="m7a", cpu_microarch=microarch)
+    assert [(s.platforms, s.cpu_microarch) for s in shapes] == [(expected, microarch)]
+
+
+@pytest.mark.parametrize(
+    "manufacturer,microarch",
+    [
+        ("AMD", CPUMicroarch.sapphire_rapids),
+        ("Intel", CPUMicroarch.genoa),
+        ("Hygon", CPUMicroarch.genoa),
+    ],
+)
+def test_pull_family_rejects_microarch_aws_contradicts(
+    mock_ec2, manufacturer, microarch
+):
+    # A curated microarch from the wrong vendor is a data entry mistake in
+    # instance_families.py, so regeneration must stop rather than write it
+    _stub_m7a_processor(mock_ec2, ["x86_64"], manufacturer)
+
+    with pytest.raises(ValueError, match="manufacturer"):
+        pull_family(ec2_client=mock_ec2, family="m7a", cpu_microarch=microarch)
 
 
 def test_pull_rds_family_has_no_ec2_platform_tags(monkeypatch):
