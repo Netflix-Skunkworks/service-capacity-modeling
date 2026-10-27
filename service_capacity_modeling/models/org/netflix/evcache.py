@@ -8,6 +8,7 @@ from typing import Tuple
 from typing import Union
 
 from pydantic import BaseModel
+from pydantic import ConfigDict
 from pydantic import Field
 
 from service_capacity_modeling.enum_utils import StrEnum
@@ -42,6 +43,7 @@ from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models import RANK_PENALTIES
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import DerivedBuffers
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
@@ -104,22 +106,29 @@ def calculate_vitals_for_capacity_planner(
     current_disk_gib: float,
 ) -> Tuple[float, float, float, float]:
     # First calculate assuming new deployment
-    needed_cores = normalize_cores(
-        core_count=sqrt_staffed_cores(desires),
-        target_shape=instance,
-        reference_shape=desires.reference_shape,
+    needed_cores = float(
+        normalize_cores(
+            core_count=sqrt_staffed_cores(desires),
+            target_shape=instance,
+            reference_shape=desires.reference_shape,
+        )
     )
     needed_network_mbps = float(simple_network_mbps(desires))
     needed_memory_gib = current_memory_gib
     needed_disk_gib = current_disk_gib
 
     # Check if we can apply optimizations based on current cluster capacity
-    current_capacity = (
-        desires.current_clusters.zonal[0]
-        if desires.current_clusters and desires.current_clusters.zonal
-        else None
-    )
+    current_capacity = _current_evcache_cluster(desires)
     if not current_capacity:
+        needed_cores *= buffer_for_components(
+            desires.buffers, [BufferComponent.cpu]
+        ).ratio
+        needed_network_mbps *= buffer_for_components(
+            desires.buffers, [BufferComponent.network]
+        ).ratio
+        needed_memory_gib *= buffer_for_components(
+            desires.buffers, [BufferComponent.memory]
+        ).ratio
         return needed_cores, needed_network_mbps, needed_memory_gib, needed_disk_gib
     requirements = RequirementFromCurrentCapacity(
         current_capacity=current_capacity,
@@ -131,10 +140,31 @@ def calculate_vitals_for_capacity_planner(
         reference_shape=current_capacity.cluster_instance,
     )
     needed_network_mbps = float(requirements.network_mbps)
+    current_count = current_capacity.cluster_instance_count.mid
     needed_disk_gib = float(
         requirements.disk_gib if current_capacity.cluster_drive is not None else 0.0
     )
-    needed_memory_gib = requirements.mem_gib
+    # Host-used memory does not identify actual non-cache usage. Do not deduct
+    # reserve budgets: unused connection/OS allowances could hide cache demand.
+    current_base_mem = (
+        desires.data_shape.reserved_instance_app_mem_gib
+        + desires.data_shape.reserved_instance_system_mem_gib
+    )
+    current_reserve = current_base_mem + int(
+        requirements.current_instance.ram_gib * 0.03
+    )
+    needed_memory_gib = DerivedBuffers.for_components(
+        desires.buffers.derived, [BufferComponent.memory]
+    ).calculate_requirement(
+        current_usage=current_capacity.memory_utilization_gib.mid * current_count,
+        existing_capacity=max(
+            0, requirements.current_instance.ram_gib - current_reserve
+        )
+        * current_count,
+        desired_buffer_ratio=buffer_for_components(
+            desires.buffers, [BufferComponent.memory]
+        ).ratio,
+    )
     return needed_cores, needed_network_mbps, needed_memory_gib, needed_disk_gib
 
 
@@ -203,7 +233,7 @@ def _estimate_evcache_requirement(
         CapacityRequirement(
             requirement_type=NflxEVCacheCapacityModel.cluster_type,
             reference_shape=desires.reference_shape,
-            cpu_cores=certain_int(needed_cores),
+            cpu_cores=certain_int(math.ceil(needed_cores)),
             mem_gib=certain_float(needed_memory),
             disk_gib=certain_float(needed_disk),
             network_mbps=certain_float(needed_network_mbps),
@@ -219,14 +249,15 @@ def _estimate_evcache_requirement(
 def _current_evcache_cluster(
     desires: CapacityDesires,
 ) -> Optional[CurrentZoneClusterCapacity]:
-    """Pick the current cluster the family-migration penalty should key off.
+    """Pick the current EVCache cluster for sizing and family preference.
 
     Prefer a zonal cluster explicitly tagged as evcache: when EVCache is a
     sub-model of a composite (key-value / read-only-kv / graphkv), the current
     clusters may also carry the Cassandra tier, so zonal[0] is not reliably the
     EVCache cluster. When nothing is tagged, only a single current cluster is
     unambiguously ours (direct EVCache planning); if several untagged clusters
-    are present we cannot identify ours, so return None (skip the penalty).
+    are present we cannot identify ours, so use desire-based sizing and skip
+    the penalty. A cluster explicitly tagged as another datastore is not ours.
     """
     zonal = desires.current_clusters.zonal if desires.current_clusters else []
     if not zonal:
@@ -236,7 +267,7 @@ def _current_evcache_cluster(
     ]
     if typed:
         return typed[0]
-    return zonal[0] if len(zonal) == 1 else None
+    return zonal[0] if len(zonal) == 1 and zonal[0].cluster_type is None else None
 
 
 def _compute_evcache_penalties(
@@ -278,7 +309,9 @@ def _compute_evcache_penalties(
     return penalties
 
 
-# pylint: disable=too-many-locals
+# Keep each rejected resource explicit in the returned Excuse.
+# pylint: disable=too-many-locals,too-many-return-statements
+# pylint: disable=too-many-branches,too-many-statements
 def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many-positional-arguments
     instance: Instance,
     drive: Drive,
@@ -356,22 +389,18 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         + desires.data_shape.reserved_instance_system_mem_gib
     )
 
-    # (Arun) We currently reserve extra memory for the OS as instances get
-    # larger to account for additional overhead. Note that the
-    # reserved_instance_system_mem_gib has a base of 1 GiB OSMEM so this
-    # just represents the variable component
+    # Apply the existing configured reserve to the memory used for sizing.
     def reserve_memory(instance_mem_gib: float) -> float:
-        # (Joey) From the chart it appears to be about a 3% overhead for
-        # OS memory.
-        variable_os = int(instance_mem_gib * 0.03)
-        return base_mem + variable_os
+        return base_mem + int(instance_mem_gib * 0.03)
 
-    # No guard for reserves overrunning the box here, unlike Cassandra, Kafka
-    # and Elasticsearch: the compute_stateful_zone call below does not pass
-    # reserve_memory, so it divides by the full instance RAM and cannot hit the
-    # non-positive case. Passing the reserve through would be a sizing change,
-    # not a fix.
     requirement.context["osmem"] = reserve_memory(instance.ram_gib)
+    if reserve_memory(instance.ram_gib) >= instance.ram_gib:
+        return Excuse(
+            instance=instance.name,
+            drive=drive.name,
+            reason="Memory reservations leave no usable datastore memory",
+            bottleneck=Bottleneck.memory,
+        )
     # EVCache clusters aim to be at least 2 nodes per zone to start
     # out with for tier 0
     min_count_for_tier = 0
@@ -391,12 +420,16 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         adjusted_disk_io_needed = read_disk_io_needed + write_disk_io_needed
         # Giving headroom for cachewarming and region squeeze
         adjusted_disk_io_needed = 1.4 * adjusted_disk_io_needed
-        read_write_ratio = reads_per_sec / (reads_per_sec + writes_per_sec)
+        total_requests = reads_per_sec + writes_per_sec
+        read_write_ratio = reads_per_sec / total_requests if total_requests else 0.0
 
-    needed_disk_gib = int(requirement.disk_gib.mid)
+    needed_disk_gib = requirement.disk_gib.mid
     disk_buffer_ratio = buffer_for_components(
         desires.buffers, [BufferComponent.disk]
     ).ratio
+    # Current-capacity requirements already include the disk buffer.
+    if _current_evcache_cluster(desires) is not None:
+        disk_buffer_ratio = 1.0
     max_data_per_node_gib = get_effective_disk_per_node_gib(
         instance,
         drive,
@@ -404,12 +437,16 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         max_local_data_per_node_gib=max_local_data_per_node_gib,
     )
     min_count_for_data = math.ceil(needed_disk_gib / max_data_per_node_gib)
+    # Division can round an exact capacity boundary one ULP above an integer.
+    if (min_count_for_data - 1) * max_data_per_node_gib >= needed_disk_gib:
+        min_count_for_data -= 1
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
-        needed_cores=int(requirement.cpu_cores.mid),
+        needed_cores=math.ceil(requirement.cpu_cores.mid),
         needed_disk_gib=needed_disk_gib,
-        needed_memory_gib=int(requirement.mem_gib.mid),
+        needed_memory_gib=requirement.mem_gib.mid,
+        reserve_memory=reserve_memory,
         needed_network_mbps=requirement.network_mbps.mid,
         min_count=max(min_count_for_data, min_count_for_tier),
         adjusted_disk_io_needed=adjusted_disk_io_needed,
@@ -504,18 +541,30 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
 
 
 class NflxEVCacheArguments(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     copies_per_region: int = Field(
         default=3,
+        gt=0,
         description="How many copies of the data will exist e.g. RF=3. If not supplied"
         " this will be deduced from tier",
     )
     max_regional_size: int = Field(
         default=10000,
+        gt=0,
         description="What is the maximum size of a cluster in this region",
     )
     max_local_disk_gib: int = Field(
         default=6144,
+        gt=0,
         description="The maximum amount of data we store per machine",
+    )
+    max_local_data_per_node_gib: int = Field(
+        default=5120,
+        gt=0,
+        description=(
+            "Legacy per-node data limit; takes precedence over max_local_disk_gib"
+        ),
     )
     min_instance_memory_gib: int = Field(
         default=12,
@@ -604,6 +653,7 @@ class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Union[CapacityPlan, Excuse, None]:
+        NflxEVCacheArguments(**extra_model_arguments)
         # (Arun) EVCache defaults to RF=3 for tier 0 and tier 1
         default_copies = context.zones_in_region
         copies_per_region: int = int(
