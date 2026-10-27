@@ -254,10 +254,10 @@ def _current_evcache_cluster(
     Prefer a zonal cluster explicitly tagged as evcache: when EVCache is a
     sub-model of a composite (key-value / read-only-kv / graphkv), the current
     clusters may also carry the Cassandra tier, so zonal[0] is not reliably the
-    EVCache cluster. When nothing is tagged, only a single current cluster is
-    unambiguously ours (direct EVCache planning); if several untagged clusters
-    are present we cannot identify ours, so use desire-based sizing and skip
-    the penalty. A cluster explicitly tagged as another datastore is not ours.
+    EVCache cluster. Legacy direct inputs can contain one untyped record or
+    identical untyped records for each zone; use one representative without
+    summing copies. Otherwise use desire-based sizing and skip the penalty.
+    A cluster explicitly tagged as another datastore is not ours.
     """
     zonal = desires.current_clusters.zonal if desires.current_clusters else []
     if not zonal:
@@ -267,7 +267,10 @@ def _current_evcache_cluster(
     ]
     if typed:
         return typed[0]
-    return zonal[0] if len(zonal) == 1 and zonal[0].cluster_type is None else None
+    first = zonal[0]
+    if first.cluster_type is None and all(c == first for c in zonal):
+        return first
+    return None
 
 
 def _compute_evcache_penalties(
@@ -427,9 +430,8 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     disk_buffer_ratio = buffer_for_components(
         desires.buffers, [BufferComponent.disk]
     ).ratio
-    # Current-capacity requirements already include the disk buffer.
-    if _current_evcache_cluster(desires) is not None:
-        disk_buffer_ratio = 1.0
+    # Convert the raw data cap to buffered units, keeping the physical drive
+    # capacity unchanged when sizing buffered current disk demand.
     max_data_per_node_gib = get_effective_disk_per_node_gib(
         instance,
         drive,

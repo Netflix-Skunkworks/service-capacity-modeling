@@ -614,6 +614,9 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
             "a cluster."
         )
     count_memory = math.ceil(needed_memory_gib / memory_per_node_gib)
+    # Division can round an exact capacity boundary above an integer.
+    if (count_memory - 1) * memory_per_node_gib >= needed_memory_gib:
+        count_memory -= 1
     if write_buffer(instance.ram_gib) > 0:
         count_memory = max(
             count_memory,

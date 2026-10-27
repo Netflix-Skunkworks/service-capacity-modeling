@@ -165,7 +165,6 @@ def test_preserve_storage_uses_usable_capacity_without_readding_reserves():
 
 def test_current_disk_buffer_is_applied_once():
     from service_capacity_modeling.hardware import shapes
-    from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 
     desire = workload(items=1_000_000)
     desire.current_clusters = CurrentClusters(
@@ -191,12 +190,10 @@ def test_current_disk_buffer_is_applied_once():
     requirement = candidates[0].requirements.zonal[0]
     cluster = candidates[0].candidate_clusters.zonal[0]
     assert requirement.disk_gib.mid == 2 * 64 * 24
-    # The current path buffers demand, so per-node capacity remains unbuffered.
-    assert cluster.cluster_params["effective_disk_per_node_gib"] == (
-        get_effective_disk_per_node_gib(
-            cluster.instance, cluster.instance.drive, 1, max_local_data_per_node_gib=100
-        )
-    )
+    # The data limit is raw data; the requirement includes the disk buffer.
+    assert cluster.count == 16
+    assert 64 * 24 / cluster.count <= 100
+    assert requirement.disk_gib.mid / cluster.count <= cluster.instance.drive.size_gib
 
 
 def test_fractional_memory_demand_cannot_drop_a_required_node():
@@ -235,3 +232,123 @@ def test_fractional_disk_demand_cannot_drop_a_required_node():
     assert (
         cluster.count * cluster.cluster_params["effective_disk_per_node_gib"] >= 200.1
     )
+
+
+@pytest.mark.parametrize("cluster_type", [None, "evcache"])
+def test_identical_current_zone_records_keep_measured_zonal_demand(cluster_type):
+    desire = workload(state=1, items=1000)
+    current = CurrentZoneClusterCapacity(
+        cluster_type=cluster_type,
+        cluster_instance_name="i4i.large",
+        cluster_instance_count=certain_float(24),
+        memory_utilization_gib=certain_float(10),
+        cpu_utilization=certain_float(1),
+    )
+    desire.current_clusters = CurrentClusters(zonal=[current])
+    single_zone = plans(desire)
+    desire.current_clusters = CurrentClusters(
+        zonal=[current.model_copy(deep=True) for _ in range(3)]
+    )
+    all_zones = plans(desire)
+    assert single_zone and all_zones
+    assert all_zones[0].requirements == single_zone[0].requirements
+    assert all_zones[0].candidate_clusters == single_zone[0].candidate_clusters
+    assert all_zones[0].requirements.zonal[0].mem_gib.mid >= 24 * 10
+
+
+@pytest.mark.parametrize("difference", ["usage", "count", "type"])
+def test_nonidentical_untyped_zones_do_not_guess_current_evcache(difference):
+    desire = workload(state=1, items=1000)
+    expected = plans(desire)
+    current = CurrentZoneClusterCapacity(
+        cluster_instance_name="i4i.large",
+        cluster_instance_count=certain_float(24),
+        memory_utilization_gib=certain_float(10),
+        cpu_utilization=certain_float(1),
+    )
+    other = current.model_copy(deep=True)
+    if difference == "usage":
+        other.memory_utilization_gib = certain_float(8)
+    elif difference == "count":
+        other.cluster_instance_count = certain_float(12)
+    else:
+        other.cluster_type = "cassandra"
+    desire.current_clusters = CurrentClusters(zonal=[current, other])
+    candidates = plans(desire)
+    assert expected and candidates
+    assert (
+        candidates[0].requirements.zonal[0].mem_gib
+        == expected[0].requirements.zonal[0].mem_gib
+    )
+    assert candidates[0].candidate_clusters == expected[0].candidate_clusters
+
+
+@pytest.mark.parametrize("data_limit", [5120, 10000])
+def test_current_disk_raw_data_limit_and_buffered_physical_limit(data_limit):
+    from service_capacity_modeling.hardware import shapes
+
+    instance = shapes.instance("i3en.3xlarge")
+    desire = workload()
+    desire.current_clusters = CurrentClusters(
+        zonal=[
+            CurrentZoneClusterCapacity(
+                cluster_instance_name=instance.name,
+                cluster_instance_count=certain_float(100),
+                cluster_drive=instance.drive,
+                memory_utilization_gib=certain_float(1),
+                cpu_utilization=certain_float(1),
+                disk_utilization_gib=certain_float(3000),
+            )
+        ]
+    )
+    desire.buffers = Buffers(
+        desired={
+            "storage": Buffer(ratio=1, components=["storage"]),
+            "disk": Buffer(ratio=1.25, components=["disk"]),
+        }
+    )
+    candidates = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        instance_families=[instance.name],
+        desires=desire,
+        extra_model_arguments={"max_local_data_per_node_gib": data_limit},
+    )
+    assert candidates
+    requirement = candidates[0].requirements.zonal[0]
+    cluster = candidates[0].candidate_clusters.zonal[0]
+    raw_data = 100 * 3000
+    buffered_data = raw_data * 1.25
+    expected_count = max(
+        math.ceil(raw_data / data_limit),
+        math.ceil(buffered_data / instance.drive.size_gib),
+    )
+    assert requirement.disk_gib.mid == buffered_data
+    assert cluster.count == expected_count
+    assert raw_data / cluster.count <= data_limit
+    assert buffered_data / cluster.count <= instance.drive.size_gib
+
+
+@pytest.mark.parametrize("component", ["memory", "storage"])
+def test_preserved_fractional_memory_fits_exact_current_count(component):
+    desire = workload(state=1, items=1000)
+    desire.current_clusters = CurrentClusters(
+        zonal=[
+            CurrentZoneClusterCapacity(
+                cluster_instance_name="i4i.large",
+                cluster_instance_count=certain_float(23),
+                memory_utilization_gib=certain_float(6),
+                cpu_utilization=certain_float(1),
+            )
+        ]
+    )
+    desire.buffers = Buffers(
+        derived={"keep": Buffer(intent="preserve", components=[component])}
+    )
+    candidates = plans(desire, max_regional_size=69)
+    assert candidates
+    requirement = candidates[0].requirements.zonal[0]
+    cluster = candidates[0].candidate_clusters.zonal[0]
+    usable_memory = cluster.instance.ram_gib - requirement.context["osmem"]
+    assert cluster.count == 23
+    assert requirement.mem_gib.mid == 23 * usable_memory

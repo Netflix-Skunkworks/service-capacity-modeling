@@ -1,4 +1,7 @@
+import math
 from decimal import Decimal
+
+import pytest
 
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import Buffer
@@ -19,6 +22,7 @@ from service_capacity_modeling.interface import RegionClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
+from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
@@ -589,3 +593,24 @@ def test_get_disk_with_buffer_preserve():
         buffers=buffers_copy,
     ).disk_gib
     assert needed_disk == 13968
+
+
+@pytest.mark.parametrize("above_boundary", [False, True])
+def test_stateful_memory_rounding_at_exact_capacity(above_boundary):
+    instance = shapes.instance("i4i.large")
+    per_node_memory = instance.ram_gib - 4
+    needed_memory = 23 * per_node_memory
+    if above_boundary:
+        needed_memory = math.nextafter(needed_memory, math.inf)
+    cluster = compute_stateful_zone(
+        instance=instance,
+        drive=instance.drive,
+        needed_cores=1,
+        needed_disk_gib=0,
+        needed_memory_gib=needed_memory,
+        needed_network_mbps=0,
+        reserve_memory=lambda _: 4,
+    )
+    assert cluster.count == (24 if above_boundary else 23)
+    assert cluster.count * per_node_memory >= needed_memory
+    assert (cluster.count - 1) * per_node_memory < needed_memory
