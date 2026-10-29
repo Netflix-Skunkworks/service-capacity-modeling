@@ -99,6 +99,10 @@ CASSANDRA_MAX_ATTACHED_DATA_PER_NODE_GIB = 1536
 # without consuming the provisioned IOPS safety margin.
 CASSANDRA_READ_IO_PER_LCS_LEVEL = 1.8
 CASSANDRA_TIME_SERIES_READ_IO_PER_LCS_LEVEL = 1.0
+CASSANDRA_MIN_EBS_IOPS_PER_NODE = 16_000
+CASSANDRA_MAX_EBS_IOPS_PER_NODE = 16_000
+CASSANDRA_MIN_EBS_THROUGHPUT_MIB_PER_S = 1_000
+CASSANDRA_MAX_EBS_THROUGHPUT_MIB_PER_S = 1_000
 _CASSANDRA_WORKING_SET_READ_IO_PER_LCS_LEVEL = 2.0
 _CURRENT_TOPOLOGY_DATA_REL_TOLERANCE = 0.05
 _CURRENT_TOPOLOGY_NODE_TOLERANCE = 1
@@ -993,6 +997,10 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     min_instance_ram_gib_exclusive: float = 16.0,
     ebs_iops_evidence: Optional[CassandraEbsIopsEvidence] = None,
     read_io_per_lcs_level: float = CASSANDRA_READ_IO_PER_LCS_LEVEL,
+    min_ebs_iops_per_node: int = CASSANDRA_MIN_EBS_IOPS_PER_NODE,
+    max_ebs_iops_per_node: int = CASSANDRA_MAX_EBS_IOPS_PER_NODE,
+    min_ebs_throughput_mib_per_s: int = CASSANDRA_MIN_EBS_THROUGHPUT_MIB_PER_S,
+    max_ebs_throughput_mib_per_s: int = CASSANDRA_MAX_EBS_THROUGHPUT_MIB_PER_S,
 ) -> Union[CapacityPlan, Excuse, None]:
     drive_name = drive.name
 
@@ -1114,6 +1122,30 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     ).mid
 
     is_ebs = instance.drive is None
+    if is_ebs:
+        # Cap the volume at the performance bounds so the shared attached-drive
+        # plan adds nodes instead of buying more IOPS or throughput per node.
+        drive = drive.model_copy(deep=True)
+        drive.max_scale_io_per_s = min(max_ebs_iops_per_node, drive.max_io_per_s)
+        drive.max_scale_throughput = min(
+            max_ebs_throughput_mib_per_s, drive.max_throughput
+        )
+        if (
+            min_ebs_iops_per_node > drive.max_scale_io_per_s
+            or min_ebs_throughput_mib_per_s > drive.max_scale_throughput
+        ):
+            return Excuse(
+                instance=instance.name,
+                drive=drive_name,
+                reason="EBS performance floor exceeds the volume limit",
+                context={
+                    "min_iops_per_node": min_ebs_iops_per_node,
+                    "max_iops_per_node": drive.max_scale_io_per_s,
+                    "min_throughput_mib_per_s": min_ebs_throughput_mib_per_s,
+                    "max_throughput_mib_per_s": drive.max_scale_throughput,
+                },
+                bottleneck=Bottleneck.disk_iops,
+            )
     capacity_desires = _with_disk_utilization_buffer(
         desires,
         max_disk_utilization,
@@ -1416,25 +1448,31 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
 
     modeled_disk_iops_by_count: Dict[int, float] = {}
     unbuffered_disk_iops_by_count: Dict[int, float] = {}
+    expected_throughput_by_count: Dict[int, float] = {}
+
+    def modeled_disk_ios(_size: float, count: int) -> Tuple[float, float]:
+        return (
+            _cass_io_per_read(_size, read_io_per_lcs_level=read_io_per_lcs_level)
+            * math.ceil(read_io_per_sec / count),
+            write_io_per_sec / count,
+        )
 
     def required_disk_ios(_size: float, count: int) -> Tuple[float, float]:
-        modeled_read_iops = _cass_io_per_read(
-            _size, read_io_per_lcs_level=read_io_per_lcs_level
-        ) * math.ceil(read_io_per_sec / count)
-        modeled_write_iops = write_io_per_sec / count
-        modeled_total_iops = modeled_read_iops + modeled_write_iops
+        modeled_read_iops, modeled_write_iops = modeled_disk_ios(_size, count)
         selected_read_iops = modeled_read_iops * iops_calibration_factor
         selected_write_iops = modeled_write_iops * iops_calibration_factor
-        modeled_disk_iops_by_count[count] = modeled_total_iops
+        modeled_disk_iops_by_count[count] = modeled_read_iops + modeled_write_iops
         unbuffered_disk_iops_by_count[count] = selected_read_iops + selected_write_iops
-        if iops_calibration_applied:
-            # gp3 exposes one shared IOPS setting. Round that total once, then
-            # split it into 200-IOPS read/write quanta for the drive contract.
+        if is_ebs:
+            # gp3 exposes one shared IOPS setting. Apply the floor and round the
+            # total once, then split it into 200-IOPS read/write quanta.
             selected_total_iops = selected_read_iops + selected_write_iops
             buffered_total_iops = (
                 math.ceil(
-                    selected_total_iops
-                    * disk_iops_buffer_ratio
+                    max(
+                        min_ebs_iops_per_node,
+                        selected_total_iops * disk_iops_buffer_ratio,
+                    )
                     / ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT
                 )
                 * ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT
@@ -1454,6 +1492,19 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             selected_write_iops * disk_iops_buffer_ratio,
         )
 
+    def required_disk_throughput(_size: float, count: int) -> float:
+        if not is_ebs:
+            return 0
+        modeled_read_iops, modeled_write_iops = modeled_disk_ios(_size, count)
+        expected_throughput_by_count[count] = (
+            modeled_read_iops * drive.rand_io_size_kib
+            + modeled_write_iops * drive.seq_io_size_kib
+        ) / 1024
+        return max(
+            min_ebs_throughput_mib_per_s,
+            expected_throughput_by_count[count] * disk_iops_buffer_ratio,
+        )
+
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
@@ -1464,6 +1515,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         # Take into account the reads per read
         # from the per node dataset using leveled compaction
         required_disk_ios=required_disk_ios,
+        required_disk_throughput=required_disk_throughput,
         # Critical C* clusters grow by doubling from the current cluster size.
         cluster_size=cluster_size_lambda,
         min_count=min_count,
@@ -1533,13 +1585,30 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
                 "sampled_requirement_volume_gib": sampled_ebs_volume_gib,
                 "target_disk_utilization": max_disk_utilization,
             }
+        # The drive carries the selected IOPS and throughput; report the
+        # throughput demand behind them, before the buffer and floor, and the
+        # cluster's annual drive cost split by what drives it.
+        params["cassandra.ebs_performance"] = {
+            "expected_throughput_mib_per_s_per_node": round(
+                expected_throughput_by_count[cluster.count], 2
+            ),
+            "annual_drive_cost_by_component": {
+                name: round(
+                    cluster.count
+                    * sum(
+                        d.annual_cost_components[name] for d in cluster.attached_drives
+                    ),
+                    2,
+                )
+                for name in ("capacity", "iops", "throughput")
+            },
+        }
     if reported_io_calibration:
         expected_peak_iops = unbuffered_disk_iops_by_count[cluster.count]
         assert len(cluster.attached_drives) == 1
         attached_drive = cluster.attached_drives[0]
-        assert attached_drive.read_io_per_s is not None
-        assert attached_drive.write_io_per_s is not None
-        provisioned_iops = attached_drive.read_io_per_s + attached_drive.write_io_per_s
+        assert attached_drive.provisioned_io_per_s is not None
+        provisioned_iops = attached_drive.provisioned_io_per_s
         if not iops_calibration_applied:
             demand_source = "modeled"
         elif current_topology_iops_governor == (
@@ -2023,6 +2092,30 @@ class NflxCassandraArguments(BaseModel):
         "At the default 90% IOPS target, 1.8 modeled I/Os still provision two "
         "I/Os per level.",
     )
+    min_ebs_iops_per_node: int = Field(
+        default=CASSANDRA_MIN_EBS_IOPS_PER_NODE,
+        ge=3_000,
+        le=80_000,
+        description="Minimum provisioned gp3 IOPS per Cassandra node.",
+    )
+    max_ebs_iops_per_node: int = Field(
+        default=CASSANDRA_MAX_EBS_IOPS_PER_NODE,
+        ge=3_000,
+        le=80_000,
+        description="Maximum provisioned gp3 IOPS considered per Cassandra node.",
+    )
+    min_ebs_throughput_mib_per_s: int = Field(
+        default=CASSANDRA_MIN_EBS_THROUGHPUT_MIB_PER_S,
+        ge=125,
+        le=2_000,
+        description="Minimum provisioned gp3 throughput per node in MiB/s.",
+    )
+    max_ebs_throughput_mib_per_s: int = Field(
+        default=CASSANDRA_MAX_EBS_THROUGHPUT_MIB_PER_S,
+        ge=125,
+        le=2_000,
+        description="Maximum gp3 throughput considered per node in MiB/s.",
+    )
     iops_workload_profile: CassandraIopsWorkloadProfile = Field(
         default=CassandraIopsWorkloadProfile.kv,
         description="Workload family used to select the attached-storage IOPS "
@@ -2056,6 +2149,16 @@ class NflxCassandraArguments(BaseModel):
         ):
             raise ValueError(
                 "initial_ebs_physical_state_gib requires provisioning_lifecycle=new"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_ebs_performance_bounds(self) -> "NflxCassandraArguments":
+        if self.min_ebs_iops_per_node > self.max_ebs_iops_per_node:
+            raise ValueError("min_ebs_iops_per_node must be <= max_ebs_iops_per_node")
+        if self.min_ebs_throughput_mib_per_s > self.max_ebs_throughput_mib_per_s:
+            raise ValueError(
+                "min_ebs_throughput_mib_per_s must be <= max_ebs_throughput_mib_per_s"
             )
         return self
 
@@ -2443,6 +2546,10 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             min_instance_ram_gib_exclusive=args.min_instance_ram_gib_exclusive,
             ebs_iops_evidence=args.ebs_iops_evidence,
             read_io_per_lcs_level=args.read_io_per_lcs_level,
+            min_ebs_iops_per_node=args.min_ebs_iops_per_node,
+            max_ebs_iops_per_node=args.max_ebs_iops_per_node,
+            min_ebs_throughput_mib_per_s=(args.min_ebs_throughput_mib_per_s),
+            max_ebs_throughput_mib_per_s=(args.max_ebs_throughput_mib_per_s),
         )
 
         return result

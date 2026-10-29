@@ -133,12 +133,15 @@ class TestCassandraCapacityPlanning:
         # Storage should be sufficient for the data (300 GiB with buffer)
         assert_minimum_storage_gib(high_writes_result, 400)
         assert_similar_compute(
-            shapes.instance("c8a.4xlarge"),
+            shapes.instance("c7a.4xlarge"),
             high_writes_result.instance,
             expected_count=5,
             actual_count=high_writes_result.count,
             expected_attached_disk=simple_drive(
-                size_gib=100, read_io_per_s=5400, write_io_per_s=200
+                size_gib=100,
+                read_io_per_s=15_400,
+                write_io_per_s=600,
+                throughput_mib_per_s=1_000,
             ),
             actual_attached_disk=high_writes_result.attached_drives[0],
         )
@@ -395,6 +398,186 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
                 )
             )
 
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            {"min_ebs_iops_per_node": 16_200, "max_ebs_iops_per_node": 16_000},
+            {
+                "min_ebs_throughput_mib_per_s": 1_001,
+                "max_ebs_throughput_mib_per_s": 1_000,
+            },
+        ],
+    )
+    def test_ebs_performance_bounds_require_ordered_ranges(self, arguments):
+        with pytest.raises(ValueError, match="must be <="):
+            NflxCassandraArguments.from_extra_model_arguments(arguments)
+
+    def test_production_bounds_pin_new_ebs_plans_to_16k_and_1k(self):
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(100_000),
+                estimated_write_per_second=certain_int(1_000),
+            ),
+            data_shape=DataShape(estimated_state_size_gib=certain_int(1_000)),
+        )
+
+        cluster = self._ebs_plan(desires)
+        drive = cluster.attached_drives[0]
+        performance = cluster.cluster_params["cassandra.ebs_performance"]
+
+        assert drive.provisioned_io_per_s == 16_000
+        assert drive.throughput == 1_000
+        assert performance["expected_throughput_mib_per_s_per_node"] < 1_000
+        drive_cost = performance["annual_drive_cost_by_component"]
+        assert drive_cost["throughput"] > 0
+        assert sum(drive_cost.values()) == pytest.approx(
+            cluster.count * drive.annual_cost, abs=0.05
+        )
+
+    @pytest.mark.parametrize("region", ["us-east-1", "eu-west-1"])
+    def test_explicit_ebs_policy_is_selected_and_priced_in_regional_total(
+        self, region, monkeypatch
+    ):
+        if region == "eu-west-1":
+            # The bundled catalog is US-only. A distinct synthetic rate checks
+            # that caller-supplied regional pricing reaches the final total.
+            hardware = shapes.region("us-east-1").model_copy(deep=True)
+            drive = hardware.drives["gp3"]
+            drive.annual_cost_per_throughput = [
+                (end, cost * 1.25) for end, cost in drive.annual_cost_per_throughput
+            ]
+            monkeypatch.setitem(
+                planner.hardware_shapes.hardware.regions, region, hardware
+            )
+        plan = planner.plan_certain(
+            model_name="org.netflix.cassandra",
+            region=region,
+            desires=CapacityDesires(
+                service_tier=1,
+                query_pattern=QueryPattern(
+                    estimated_read_per_second=certain_int(1_000),
+                    estimated_write_per_second=certain_int(1_000),
+                ),
+                data_shape=DataShape(estimated_state_size_gib=certain_int(1_000)),
+            ),
+            extra_model_arguments={
+                "require_attached_disks": True,
+                "required_cluster_size": 3,
+                "min_ebs_iops_per_node": 12_000,
+                "max_ebs_iops_per_node": 12_000,
+                "min_ebs_throughput_mib_per_s": 1_000,
+                "max_ebs_throughput_mib_per_s": 1_000,
+            },
+            instance_families=["m7a.2xlarge"],
+            num_results=1,
+        )[0]
+
+        expected_regional_cost = 0.0
+        for cluster in plan.candidate_clusters.zonal:
+            drive = cluster.attached_drives[0]
+            assert drive.provisioned_io_per_s == 12_000
+            assert drive.throughput == 1_000
+            expected_iops_cost = 9_000 * drive.annual_cost_per_io[-1][1]
+            expected_throughput_cost = 875 * drive.annual_cost_per_throughput[-1][1]
+            assert expected_throughput_cost > 0
+            assert drive.annual_cost_components["throughput"] == pytest.approx(
+                expected_throughput_cost
+            )
+            expected_regional_cost += cluster.count * (
+                cluster.instance.annual_cost
+                + drive.size_gib * drive.annual_cost_per_gib
+                + expected_iops_cost
+                + expected_throughput_cost
+            )
+        assert float(
+            plan.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
+        ) == pytest.approx(expected_regional_cost)
+
+    def test_raising_ebs_bounds_buys_performance_instead_of_nodes(self):
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(100_000),
+                estimated_write_per_second=certain_int(1_000),
+                estimated_mean_read_size_bytes=certain_int(4_096),
+                estimated_mean_write_size_bytes=certain_int(1_024),
+            ),
+            data_shape=DataShape(estimated_state_size_gib=certain_int(1_000)),
+        )
+
+        pinned = self._ebs_plan(desires)
+        expanded = self._ebs_plan(
+            desires,
+            max_ebs_iops_per_node=80_000,
+            max_ebs_throughput_mib_per_s=2_000,
+        )
+        drive = expanded.attached_drives[0]
+
+        assert drive.provisioned_io_per_s > 16_000
+        assert drive.throughput == 1_000
+        assert expanded.count < pinned.count
+        assert expanded.annual_cost < pinned.annual_cost
+
+    def test_expanded_bounds_make_throughput_a_priced_planning_dimension(self):
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(1_000_000),
+                estimated_write_per_second=certain_int(1_000_000),
+                estimated_mean_read_size_bytes=certain_int(4_096),
+                estimated_mean_write_size_bytes=certain_int(1_024),
+            ),
+            data_shape=DataShape(estimated_state_size_gib=certain_int(10_000)),
+        )
+
+        cluster = self._ebs_plan(
+            desires,
+            max_ebs_iops_per_node=80_000,
+            max_ebs_throughput_mib_per_s=2_000,
+        )
+        drive = cluster.attached_drives[0]
+
+        assert drive.provisioned_io_per_s > 16_000
+        assert drive.throughput > 1_000
+
+    def test_pinned_topology_reports_throughput_limit(self):
+        desires = CapacityDesires(
+            service_tier=1,
+            query_pattern=QueryPattern(
+                estimated_read_per_second=certain_int(100_000),
+                estimated_write_per_second=certain_int(1_000),
+                estimated_mean_read_size_bytes=certain_int(262_144),
+                estimated_mean_write_size_bytes=certain_int(1_024),
+            ),
+            data_shape=DataShape(estimated_state_size_gib=certain_int(1_000)),
+        )
+
+        explained = planner.plan_certain_explained(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=desires,
+            extra_model_arguments={
+                "require_attached_disks": True,
+                "require_local_disks": False,
+                "required_cluster_size": 3,
+                "max_regional_size": 600,
+                "max_ebs_iops_per_node": 80_000,
+                "max_ebs_throughput_mib_per_s": 1_000,
+            },
+            instance_families=["r7a"],
+            num_results=20,
+        )
+
+        # The shared attached-drive plan scales out past the pinned size when
+        # per-node throughput would exceed the volume limit.
+        assert not explained.plans
+        assert any(
+            excuse.reason.endswith("!= required 3")
+            and excuse.context["required_nodes_by_type"]["disk_iops"] > 3
+            for excuse in explained.excuses_by_model["org.netflix.cassandra"]
+        )
+
     def test_comfortable_evidence_uses_calibrated_model_with_disk_iops_buffer(self):
         cluster = (
             self._ebs_explained(
@@ -532,6 +715,8 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             extra_model_arguments={
                 "require_attached_disks": True,
                 "require_local_disks": False,
+                # Floor at the gp3 included tier so IOPS demand reaches the drive
+                "min_ebs_iops_per_node": 3_000,
             },
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
@@ -542,6 +727,7 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             extra_model_arguments={
                 "require_attached_disks": True,
                 "require_local_disks": False,
+                "min_ebs_iops_per_node": 3_000,
                 "read_io_per_lcs_level": 2.0,
             },
         )[0].candidate_clusters.zonal[0]
@@ -552,11 +738,9 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         assert result.attached_drives, (
             "Expected attached drives with require_attached_disks=True"
         )
-        assert result.attached_drives[0].read_io_per_s is not None
-        assert conservative_result.attached_drives[0].read_io_per_s is not None
-        assert (
-            result.attached_drives[0].read_io_per_s
-            < conservative_result.attached_drives[0].read_io_per_s
+        assert result.attached_drives[0].provisioned_io_per_s * result.count < (
+            conservative_result.attached_drives[0].provisioned_io_per_s
+            * conservative_result.count
         )
         assert result.cluster_params["cassandra.read_io_per_lcs_level"] == 1.8
         assert result.attached_drives[0].name == "gp3"
