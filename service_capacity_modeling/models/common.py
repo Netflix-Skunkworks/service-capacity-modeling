@@ -583,6 +583,8 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     # (per_node_size_gib, node_count) -> (read_ios, write_ios)
     required_disk_ios: Callable[[float, int], Tuple[float, float]] = lambda size_gib,
     count: (0, 0),
+    # Provisioned attached-drive throughput in MiB/s, same contract as disk ios
+    required_disk_throughput: Callable[[float, int], float] = lambda size_gib, count: 0,
     # Some stateful clusters have sidecars that take memory
     reserve_memory: Callable[[float], float] = lambda x: 0,
     # How much write buffer we get per instance (usually a percentage of
@@ -644,6 +646,7 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
             cluster_size=cluster_size,
             min_count=min_count,
             required_disk_ios=required_disk_ios,
+            required_disk_throughput=required_disk_throughput,
             max_node_disk_gib=max_node_disk_gib,
         )
         count_disk_capacity = attached_drive_plan.count_disk_capacity
@@ -740,6 +743,7 @@ def _attached_drive_plan(  # noqa: C901
     cluster_size: Callable[[int], int],
     min_count: int,
     required_disk_ios: Callable[[float, int], Tuple[float, float]],
+    required_disk_throughput: Callable[[float, int], float],
     max_node_disk_gib: Callable[[Drive], int],
 ) -> _AttachedDrivePlanResult:
     preliminary_resource_count = max(count_cpu, count_memory, count_network)
@@ -753,6 +757,8 @@ def _attached_drive_plan(  # noqa: C901
         drive_size_gib: int
         read_io: float
         write_io: float
+        provisioned_io: float
+        throughput: int
         next_count: int
 
     def sizing_for_count(node_count: int) -> AttachedDriveSizing:
@@ -762,7 +768,19 @@ def _attached_drive_plan(  # noqa: C901
             utils.next_n(read_io, n=ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT),
             utils.next_n(write_io, n=ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT),
         )
-        io_gib = cloud_gib_for_io(drive, read_io + write_io, space_gib)
+        throughput = math.ceil(required_disk_throughput(space_gib, node_count))
+        # gp3 caps throughput per provisioned IOPS, so throughput demand can
+        # require more IOPS than the workload's IO count.
+        provisioned_io = read_io + write_io
+        if drive.max_scale_throughput_per_io > 0:
+            provisioned_io = max(
+                provisioned_io,
+                utils.next_n(
+                    throughput / drive.max_scale_throughput_per_io,
+                    n=ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT,
+                ),
+            )
+        io_gib = cloud_gib_for_io(drive, provisioned_io, space_gib)
         drive_size_gib = utils.next_n(max(1, io_gib, space_gib), n=100)
 
         count_disk_capacity = 0
@@ -774,9 +792,14 @@ def _attached_drive_plan(  # noqa: C901
             drive_size_gib = min(drive_size_gib, int(max_size_gib))
 
         count_disk_iops = 0
-        if (read_io + write_io) > drive.max_io_per_s:
+        if provisioned_io > drive.max_io_per_s:
             count_disk_iops = math.ceil(
-                node_count * ((read_io + write_io) / drive.max_io_per_s)
+                node_count * (provisioned_io / drive.max_io_per_s)
+            )
+        if throughput > drive.max_throughput:
+            count_disk_iops = max(
+                count_disk_iops,
+                math.ceil(node_count * throughput / drive.max_throughput),
             )
 
         next_count = int(
@@ -799,6 +822,8 @@ def _attached_drive_plan(  # noqa: C901
             drive_size_gib=drive_size_gib,
             read_io=read_io,
             write_io=write_io,
+            provisioned_io=provisioned_io,
+            throughput=throughput,
             next_count=next_count,
         )
 
@@ -855,9 +880,9 @@ def _attached_drive_plan(  # noqa: C901
     attached_drive.read_io_per_s = int(round(final_sizing.read_io, 2))
     attached_drive.write_io_per_s = int(round(final_sizing.write_io, 2))
     if attached_drive.annual_cost_per_io:
-        attached_drive.provisioned_io_per_s = (
-            attached_drive.read_io_per_s + attached_drive.write_io_per_s
-        )
+        attached_drive.provisioned_io_per_s = int(final_sizing.provisioned_io)
+    if final_sizing.throughput > 0:
+        attached_drive.throughput = final_sizing.throughput
     return _AttachedDrivePlanResult(
         count_disk_capacity=count_disk_capacity,
         count_disk_iops=count_disk_iops,
