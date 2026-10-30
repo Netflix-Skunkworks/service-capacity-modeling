@@ -134,6 +134,44 @@ def test_attached_drive_sets_shared_provisioned_iops_for_pricing():
     assert attached_drive.provisioned_io_per_s == 16_000
 
 
+def test_attached_drive_throughput_raises_iops_and_scales_out():
+    gp3 = Drive(
+        name="throughput-limited-ebs",
+        max_scale_size_gib=1_000,
+        max_scale_io_per_s=80_000,
+        max_scale_throughput=1_000,
+        max_scale_throughput_per_io=0.25,
+        annual_cost_per_io=[(3_000, 0), (80_000, 1)],
+    )
+    single = compute_stateful_zone(
+        instance=M5_4XL,
+        drive=gp3,
+        needed_cores=4,
+        needed_disk_gib=100,
+        needed_memory_gib=10,
+        needed_network_mbps=100,
+        required_disk_ios=lambda _size, _count: (1_000, 1_000),
+        required_disk_throughput=lambda _size, _count: 750,
+    )
+    scaled = compute_stateful_zone(
+        instance=M5_4XL,
+        drive=gp3,
+        needed_cores=4,
+        needed_disk_gib=100,
+        needed_memory_gib=10,
+        needed_network_mbps=100,
+        required_disk_throughput=lambda _size, count: 3_000 / count,
+    )
+
+    # 750 MiB/s at 0.25 MiB/s per IOPS needs 3,000 IOPS, above the 2,000 IOs.
+    assert single.count == 1
+    assert single.attached_drives[0].throughput == 750
+    assert single.attached_drives[0].provisioned_io_per_s == 3_000
+    assert scaled.count == 3
+    assert scaled.attached_drives[0].throughput == 1_000
+    assert scaled.cluster_params["required_nodes_by_type"]["disk_iops"] == 3
+
+
 def test_attached_drive_respects_provisioned_iops_per_gib_limit():
     cluster = compute_stateful_zone(
         instance=M5_4XL,
