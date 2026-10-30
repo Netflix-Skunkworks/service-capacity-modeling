@@ -90,7 +90,8 @@ def calculate_spread_cost(
     Returns an additive cost penalty (in dollars) that increases as clusters
     get smaller. This was originally injected into annual_costs as fake
     dollars; now it's applied to plan.rank instead, keeping total_annual_cost
-    honest. Existing EVCache clusters skip this preference.
+    honest. Existing EVCache clusters with at most 10 nodes per zone skip this
+    preference.
     """
     if cluster_size > 10:
         return min_cost
@@ -285,9 +286,9 @@ def _compute_evcache_penalties(
     Penalties inflate plan.rank without touching total_annual_cost:
         rank = total_annual_cost + sum(penalties.values())
 
-    - under_spread: discourages small clusters only when current EVCache
-      capacity cannot be identified. Existing clusters use only the soft
-      family_migration preference.
+    - under_spread: discourages small candidates unless the current EVCache
+      cluster already has at most 10 nodes per zone. Missing current capacity
+      retains the existing spread preference.
     - family_migration: biases scale-up toward the instance family the cluster
       already runs; a different family must be meaningfully cheaper (on compute)
       to out-rank the incumbent. Soft, so a different family still wins when it
@@ -298,7 +299,7 @@ def _compute_evcache_penalties(
     penalties: Dict[str, float] = {}
 
     current = _current_evcache_cluster(desires)
-    if current is None:
+    if current is None or current.cluster_instance_count.mid > 10:
         spread_cost = calculate_spread_cost(cluster_count)
         if spread_cost > 0:
             penalties["under_spread"] = spread_cost

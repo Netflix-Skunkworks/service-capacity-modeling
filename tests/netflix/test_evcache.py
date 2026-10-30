@@ -493,6 +493,7 @@ def test_spread_cost_function():
     """calculate_spread_cost returns additive dollar penalty for small clusters."""
     assert calculate_spread_cost(1) == 100000  # < 2 nodes → max penalty
     assert calculate_spread_cost(0) == 100000
+    assert calculate_spread_cost(10) > 0  # threshold remains penalized
     assert calculate_spread_cost(11) == 0  # above threshold
     assert calculate_spread_cost(20) == 0
     # Intermediate values decrease as cluster grows
@@ -545,8 +546,8 @@ def test_evcache_spread_deterministic():
     assert found_penalized, "Expected at least one plan with < 10 nodes per zone"
 
 
-@pytest.mark.parametrize("current_count", [3, 20])
-def test_evcache_existing_cluster_skips_spread_penalty(current_count):
+@pytest.mark.parametrize("current_count", [3, 10, 11, 20])
+def test_evcache_existing_cluster_spread_penalty_follows_current_size(current_count):
     from service_capacity_modeling.models import RANK_PENALTIES
 
     desires = _small_cluster_desires.model_copy(deep=True)
@@ -578,16 +579,17 @@ def test_evcache_existing_cluster_skips_spread_penalty(current_count):
         cluster = plan.candidate_clusters.zonal[0]
         assert 2 <= cluster.count <= 10
         penalties = cluster.cluster_params.get(RANK_PENALTIES, {})
-        assert "under_spread" not in penalties
+        if current_count <= 10:
+            assert "under_spread" not in penalties
+        else:
+            assert penalties["under_spread"] == calculate_spread_cost(cluster.count)
         if cluster.instance.family == "i4i":
             assert "family_migration" not in penalties
-            assert plan.rank == plan.candidate_clusters.total_annual_cost
         else:
             assert penalties["family_migration"] > 0
-            assert plan.rank == pytest.approx(
-                plan.candidate_clusters.total_annual_cost
-                + penalties["family_migration"]
-            )
+        assert plan.rank == pytest.approx(
+            plan.candidate_clusters.total_annual_cost + sum(penalties.values())
+        )
 
 
 @pytest.mark.parametrize("current_kind", ["none", "other", "ambiguous"])
