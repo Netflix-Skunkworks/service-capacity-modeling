@@ -90,7 +90,7 @@ def calculate_spread_cost(
     Returns an additive cost penalty (in dollars) that increases as clusters
     get smaller. This was originally injected into annual_costs as fake
     dollars; now it's applied to plan.rank instead, keeping total_annual_cost
-    honest while preserving the same selection behavior in plan_certain().
+    honest. Existing EVCache clusters skip this preference.
     """
     if cluster_size > 10:
         return min_cost
@@ -256,7 +256,7 @@ def _current_evcache_cluster(
     clusters may also carry the Cassandra tier, so zonal[0] is not reliably the
     EVCache cluster. Legacy direct inputs can contain one untyped record or
     identical untyped records for each zone; use one representative without
-    summing copies. Otherwise use desire-based sizing and skip the penalty.
+    summing copies. Otherwise use desire-based sizing and skip family preference.
     A cluster explicitly tagged as another datastore is not ours.
     """
     zonal = desires.current_clusters.zonal if desires.current_clusters else []
@@ -285,7 +285,9 @@ def _compute_evcache_penalties(
     Penalties inflate plan.rank without touching total_annual_cost:
         rank = total_annual_cost + sum(penalties.values())
 
-    - under_spread: discourages small / under-spread clusters.
+    - under_spread: discourages small clusters only when current EVCache
+      capacity cannot be identified. Existing clusters use only the soft
+      family_migration preference.
     - family_migration: biases scale-up toward the instance family the cluster
       already runs; a different family must be meaningfully cheaper (on compute)
       to out-rank the incumbent. Soft, so a different family still wins when it
@@ -295,11 +297,12 @@ def _compute_evcache_penalties(
     """
     penalties: Dict[str, float] = {}
 
-    spread_cost = calculate_spread_cost(cluster_count)
-    if spread_cost > 0:
-        penalties["under_spread"] = spread_cost
-
     current = _current_evcache_cluster(desires)
+    if current is None:
+        spread_cost = calculate_spread_cost(cluster_count)
+        if spread_cost > 0:
+            penalties["under_spread"] = spread_cost
+
     if different_family_regret > 0 and current is not None:
         current_family = (
             current.cluster_instance.family
