@@ -1,6 +1,6 @@
 from typing import Optional
 
-from _pytest.python_api import approx
+from pytest import approx
 
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.hardware import shapes
