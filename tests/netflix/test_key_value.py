@@ -152,13 +152,15 @@ def test_evcache_also_gets_its_own_app_memory_reserve():
     )
 
     plan = planner.plan_certain(
-        model_name="org.netflix.key-value", region="us-east-1", desires=cached
+        model_name="org.netflix.key-value",
+        region="us-east-1",
+        desires=cached,
+        instance_filters_by_model={"org.netflix.evcache": ["i4i.large"]},
     )[0]
     evcache = [c for c in plan.candidate_clusters.zonal if c.cluster_type == "evcache"]
     assert evcache, "Expected this workload to attach EVCache"
 
-    # EVCache reserves 1 GiB for its own app, so it is free to use small
-    # shapes. A node cannot be holding back 24 GiB of dgwkv heap and still
-    # fit on a box with less RAM than that.
+    # Force a small EVCache shape to check reserve isolation independently of
+    # cost ranking. A leaked 24 GiB KV heap would make this shape infeasible.
     for cluster in evcache:
         assert cluster.instance.ram_gib < 24
