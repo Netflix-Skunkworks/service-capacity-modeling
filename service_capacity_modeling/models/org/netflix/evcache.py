@@ -415,11 +415,11 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
             reason="Memory reservations leave no usable datastore memory",
             bottleneck=Bottleneck.memory,
         )
-    # EVCache clusters aim to be at least 2 nodes per zone to start
-    # out with for tier 0 or tier 1
-    min_count_for_tier = 0
-    if desires.service_tier in (0, 1):
-        min_count_for_tier = 2
+    # Keep the two-node floor unless the current EVCache cluster has one node.
+    min_count_for_cluster = 2
+    current = _current_evcache_cluster(desires)
+    if current is not None and current.cluster_instance_count.mid == 1:
+        min_count_for_cluster = 1
 
     is_disk_io_constraint: bool = requirement.disk_gib.mid > 0.0
     adjusted_disk_io_needed = 0.0
@@ -461,7 +461,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         needed_memory_gib=requirement.mem_gib.mid,
         reserve_memory=reserve_memory,
         needed_network_mbps=requirement.network_mbps.mid,
-        min_count=max(min_count_for_data, min_count_for_tier),
+        min_count=max(min_count_for_data, min_count_for_cluster),
         adjusted_disk_io_needed=adjusted_disk_io_needed,
         read_write_ratio=read_write_ratio,
     )

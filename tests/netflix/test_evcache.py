@@ -53,8 +53,8 @@ def test_evcache_read_latency():
 
 
 @pytest.mark.parametrize("tier", [0, 1, 2, 3])
-@pytest.mark.parametrize("existing", [False, True])
-def test_evcache_minimum_nodes_per_zone_for_service_tier(tier, existing):
+@pytest.mark.parametrize("current_count", [None, 1, 2])
+def test_evcache_minimum_nodes_per_zone_for_service_tier(tier, current_count):
     desires = CapacityDesires(
         service_tier=tier,
         query_pattern=QueryPattern(
@@ -63,13 +63,13 @@ def test_evcache_minimum_nodes_per_zone_for_service_tier(tier, existing):
         ),
         data_shape=DataShape(estimated_state_size_gib=certain_float(1)),
     )
-    if existing:
+    if current_count is not None:
         desires.current_clusters = CurrentClusters(
             zonal=[
                 CurrentZoneClusterCapacity(
                     cluster_type="evcache",
                     cluster_instance_name="i4i.large",
-                    cluster_instance_count=certain_float(3),
+                    cluster_instance_count=certain_float(current_count),
                     cpu_utilization=certain_float(0.1),
                     memory_utilization_gib=certain_float(0.1),
                     network_utilization_mbps=certain_float(0.1),
@@ -87,7 +87,7 @@ def test_evcache_minimum_nodes_per_zone_for_service_tier(tier, existing):
     for plan in plans:
         assert len(plan.candidate_clusters.zonal) == 3
         for cluster in plan.candidate_clusters.zonal:
-            assert cluster.count == (2 if tier in (0, 1) else 1)
+            assert cluster.count == (1 if current_count == 1 else 2)
 
 
 def test_evcache_inmemory_low_latency_reads_cpu():
