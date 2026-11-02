@@ -873,6 +873,7 @@ def test_evcache_different_family_regret():
             assert "family_migration" not in penalties
         else:
             assert penalties.get("family_migration", 0) > 0
+            assert "size_migration" not in penalties
             assert p.rank > p.candidate_clusters.total_annual_cost
 
     # Explicitly disabling (0.0) removes the family-migration penalty entirely.
@@ -886,6 +887,8 @@ def test_evcache_different_family_regret():
     for p in plans_off:
         penalties = p.candidate_clusters.zonal[0].cluster_params.get(RANK_PENALTIES, {})
         assert "family_migration" not in penalties
+        if p.candidate_clusters.zonal[0].instance.family != "i3en":
+            assert "size_migration" not in penalties
 
 
 def test_evcache_different_family_regret_flips_selection():

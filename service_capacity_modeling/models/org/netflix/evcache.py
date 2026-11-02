@@ -295,6 +295,8 @@ def _compute_evcache_penalties(
       is genuinely much cheaper or when the current family cannot satisfy the
       requirement -- avoiding empty results. Only applies when the current
       EVCache cluster can be identified (see _current_evcache_cluster).
+    - size_migration: adds 0.1% of compute cost when changing sizes within the
+      current family, so ties and small price differences favor the current size.
     """
     penalties: Dict[str, float] = {}
 
@@ -304,14 +306,19 @@ def _compute_evcache_penalties(
         if spread_cost > 0:
             penalties["under_spread"] = spread_cost
 
-    if different_family_regret > 0 and current is not None:
+    if current is not None:
         current_family = (
             current.cluster_instance.family
             if current.cluster_instance is not None
             else current.cluster_instance_name.rsplit(".", 1)[0]
         )
-        if instance.family != current_family:
+        if instance.family != current_family and different_family_regret > 0:
             penalties["family_migration"] = different_family_regret * compute_cost
+        elif (
+            instance.family == current_family
+            and instance.name != current.cluster_instance_name
+        ):
+            penalties["size_migration"] = 0.001 * compute_cost
 
     return penalties
 
@@ -508,13 +515,9 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     )
     compute_cost = float(sum(compute_costs.values()))
 
-    # Rank penalties (under-spread + family-migration) bias plan.rank without
-    # touching total_annual_cost. Family-migration is a soft bias toward the
-    # currently running instance family: unlike a hard exclude it never drops
-    # the candidate, so a different family still wins when it is meaningfully
-    # cheaper or when the current family cannot satisfy the requirement. Upserted
-    # before Clusters() is built so the params live on the cluster object the
-    # plan carries; stored as dollar amounts (like under_spread).
+    # Apply dollar-valued rank penalties before Clusters() so the plan carries
+    # their metadata. Migration preferences keep alternatives available and do
+    # not change total_annual_cost.
     penalties = _compute_evcache_penalties(
         instance=instance,
         desires=desires,
