@@ -409,9 +409,9 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
             bottleneck=Bottleneck.memory,
         )
     # EVCache clusters aim to be at least 2 nodes per zone to start
-    # out with for tier 0
+    # out with for tier 0 or tier 1
     min_count_for_tier = 0
-    if desires.service_tier < 1:
+    if desires.service_tier in (0, 1):
         min_count_for_tier = 2
 
     is_disk_io_constraint: bool = requirement.disk_gib.mid > 0.0

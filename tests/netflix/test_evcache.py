@@ -52,6 +52,44 @@ def test_evcache_read_latency():
     assert 0.140 < extra_large < 0.160
 
 
+@pytest.mark.parametrize("tier", [0, 1, 2, 3])
+@pytest.mark.parametrize("existing", [False, True])
+def test_evcache_minimum_nodes_per_zone_for_service_tier(tier, existing):
+    desires = CapacityDesires(
+        service_tier=tier,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_float(1),
+            estimated_write_per_second=certain_float(1),
+        ),
+        data_shape=DataShape(estimated_state_size_gib=certain_float(1)),
+    )
+    if existing:
+        desires.current_clusters = CurrentClusters(
+            zonal=[
+                CurrentZoneClusterCapacity(
+                    cluster_type="evcache",
+                    cluster_instance_name="i4i.large",
+                    cluster_instance_count=certain_float(3),
+                    cpu_utilization=certain_float(0.1),
+                    memory_utilization_gib=certain_float(0.1),
+                    network_utilization_mbps=certain_float(0.1),
+                )
+            ]
+        )
+    plans = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=desires,
+        instance_families=["i4i.large"],
+    )
+
+    assert plans
+    for plan in plans:
+        assert len(plan.candidate_clusters.zonal) == 3
+        for cluster in plan.candidate_clusters.zonal:
+            assert cluster.count == (2 if tier in (0, 1) else 1)
+
+
 def test_evcache_inmemory_low_latency_reads_cpu():
     inmemory_cluster_low_latency_reads_qps = CapacityDesires(
         service_tier=1,

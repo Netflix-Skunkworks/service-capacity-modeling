@@ -2484,7 +2484,7 @@
                 "disk_capacity": 1,
                 "disk_iops": 1,
                 "memory": 1,
-                "min_count": 1,
+                "min_count": 2,
                 "network": 2
               },
               "resource_bottleneck": "cpu"
@@ -2505,7 +2505,7 @@
                 "disk_capacity": 1,
                 "disk_iops": 1,
                 "memory": 1,
-                "min_count": 1,
+                "min_count": 2,
                 "network": 2
               },
               "resource_bottleneck": "cpu"
@@ -2526,7 +2526,7 @@
                 "disk_capacity": 1,
                 "disk_iops": 1,
                 "memory": 1,
-                "min_count": 1,
+                "min_count": 2,
                 "network": 2
               },
               "resource_bottleneck": "cpu"
@@ -2666,7 +2666,7 @@
                 "disk_capacity": 1,
                 "disk_iops": 1,
                 "memory": 1,
-                "min_count": 1,
+                "min_count": 2,
                 "network": 1
               },
               "resource_bottleneck": "cpu"
@@ -2687,7 +2687,7 @@
                 "disk_capacity": 1,
                 "disk_iops": 1,
                 "memory": 1,
-                "min_count": 1,
+                "min_count": 2,
                 "network": 1
               },
               "resource_bottleneck": "cpu"
@@ -2708,7 +2708,7 @@
                 "disk_capacity": 1,
                 "disk_iops": 1,
                 "memory": 1,
-                "min_count": 1,
+                "min_count": 2,
                 "network": 1
               },
               "resource_bottleneck": "cpu"
@@ -2853,7 +2853,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 1,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 1
                 },
                 "resource_bottleneck": "cpu"
@@ -2874,7 +2874,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 1,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 1
                 },
                 "resource_bottleneck": "cpu"
@@ -2895,7 +2895,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 1,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 1
                 },
                 "resource_bottleneck": "cpu"
@@ -3032,7 +3032,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 1,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 1
                 },
                 "resource_bottleneck": "cpu"
@@ -3053,7 +3053,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 1,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 1
                 },
                 "resource_bottleneck": "cpu"
@@ -3074,7 +3074,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 1,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 1
                 },
                 "resource_bottleneck": "cpu"
@@ -3213,7 +3213,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 1,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 1
                 },
                 "resource_bottleneck": "cpu"
@@ -3234,7 +3234,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 1,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 1
                 },
                 "resource_bottleneck": "cpu"
@@ -3255,7 +3255,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 1,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 1
                 },
                 "resource_bottleneck": "cpu"
@@ -3392,7 +3392,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 1,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 1
                 },
                 "resource_bottleneck": "cpu"
@@ -3413,7 +3413,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 1,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 1
                 },
                 "resource_bottleneck": "cpu"
@@ -3434,7 +3434,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 1,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 1
                 },
                 "resource_bottleneck": "cpu"
@@ -3573,7 +3573,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 2,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 3
                 },
                 "resource_bottleneck": "cpu"
@@ -3594,7 +3594,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 2,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 3
                 },
                 "resource_bottleneck": "cpu"
@@ -3615,7 +3615,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 2,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 3
                 },
                 "resource_bottleneck": "cpu"
@@ -3755,7 +3755,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 1,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 2
                 },
                 "resource_bottleneck": "cpu"
@@ -3776,7 +3776,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 1,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 2
                 },
                 "resource_bottleneck": "cpu"
@@ -3797,7 +3797,7 @@
                   "disk_capacity": 1,
                   "disk_iops": 1,
                   "memory": 1,
-                  "min_count": 1,
+                  "min_count": 2,
                   "network": 2
                 },
                 "resource_bottleneck": "cpu"
