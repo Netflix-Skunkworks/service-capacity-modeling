@@ -251,7 +251,9 @@ def _compute_evcache_penalties(
     Penalties inflate plan.rank without touching total_annual_cost:
         rank = total_annual_cost + sum(penalties.values())
 
-    - under_spread: discourages small / under-spread clusters.
+    - under_spread: discourages small candidates unless the current EVCache
+      cluster already has at most 10 nodes per zone. Missing current capacity
+      retains the existing spread preference.
     - family_migration: biases scale-up toward the instance family the cluster
       already runs; a different family must be meaningfully cheaper (on compute)
       to out-rank the incumbent. Soft, so a different family still wins when it
@@ -261,11 +263,16 @@ def _compute_evcache_penalties(
     """
     penalties: Dict[str, float] = {}
 
-    spread_cost = calculate_spread_cost(cluster_count)
-    if spread_cost > 0:
-        penalties["under_spread"] = spread_cost
-
     current = _current_evcache_cluster(desires)
+    if (
+        current is None
+        or current.cluster_type not in (None, NflxEVCacheCapacityModel.cluster_type)
+        or current.cluster_instance_count.mid > 10
+    ):
+        spread_cost = calculate_spread_cost(cluster_count)
+        if spread_cost > 0:
+            penalties["under_spread"] = spread_cost
+
     if different_family_regret > 0 and current is not None:
         current_family = (
             current.cluster_instance.family
