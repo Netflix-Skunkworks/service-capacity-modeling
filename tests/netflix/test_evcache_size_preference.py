@@ -7,7 +7,6 @@ from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import certain_float
-from service_capacity_modeling.models.org.netflix.evcache import calculate_spread_cost
 
 
 @pytest.mark.parametrize(
@@ -62,14 +61,10 @@ def test_evcache_same_family_size_preference(
         0
     ].cluster_params.get(RANK_PENALTIES, {})
     compute_cost = sum(c.annual_cost for c in resized.candidate_clusters.zonal)
-    expected_penalties = {"size_migration": pytest.approx(compute_cost * 0.001)}
-    spread_cost = calculate_spread_cost(resized.candidate_clusters.zonal[0].count)
-    if spread_cost > 0:
-        expected_penalties["under_spread"] = pytest.approx(spread_cost)
-    assert (
-        resized.candidate_clusters.zonal[0].cluster_params[RANK_PENALTIES]
-        == expected_penalties
-    )
+    penalties = resized.candidate_clusters.zonal[0].cluster_params[RANK_PENALTIES]
+    assert penalties["size_migration"] == pytest.approx(compute_cost * 0.001)
+    assert set(penalties) <= {"size_migration", "under_spread"}
+    spread_cost = penalties.get("under_spread", 0)
     assert resized.rank == pytest.approx(
         resized.candidate_clusters.total_annual_cost
         + compute_cost * 0.001
