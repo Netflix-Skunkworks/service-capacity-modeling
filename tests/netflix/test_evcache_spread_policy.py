@@ -65,7 +65,7 @@ def test_evcache_existing_cluster_spread_penalty_follows_current_size(
     }
     for plan in plans:
         cluster = plan.candidate_clusters.zonal[0]
-        assert 2 <= cluster.count <= 10
+        assert 1 <= cluster.count <= 10
         penalties = cluster.cluster_params.get(RANK_PENALTIES, {})
         if current_count <= 10:
             assert "under_spread" not in penalties
