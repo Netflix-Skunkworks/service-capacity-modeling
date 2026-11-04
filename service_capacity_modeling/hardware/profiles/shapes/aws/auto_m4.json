@@ -8,7 +8,11 @@
       "cpu_ipc_scale": 0.85,
       "ram_gib": 7.63,
       "net_mbps": 450.0,
-      "drive": null
+      "drive": null,
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "m4.xlarge": {
       "name": "m4.xlarge",
@@ -18,7 +22,11 @@
       "cpu_ipc_scale": 0.85,
       "ram_gib": 15.26,
       "net_mbps": 750.0,
-      "drive": null
+      "drive": null,
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "m4.2xlarge": {
       "name": "m4.2xlarge",
@@ -28,7 +36,11 @@
       "cpu_ipc_scale": 0.85,
       "ram_gib": 30.52,
       "net_mbps": 1000.0,
-      "drive": null
+      "drive": null,
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "m4.4xlarge": {
       "name": "m4.4xlarge",
@@ -38,7 +50,11 @@
       "cpu_ipc_scale": 0.85,
       "ram_gib": 61.04,
       "net_mbps": 2000.0,
-      "drive": null
+      "drive": null,
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "m4.10xlarge": {
       "name": "m4.10xlarge",
@@ -48,7 +64,11 @@
       "cpu_ipc_scale": 0.85,
       "ram_gib": 152.59,
       "net_mbps": 10000.0,
-      "drive": null
+      "drive": null,
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "m4.16xlarge": {
       "name": "m4.16xlarge",
@@ -58,7 +78,11 @@
       "cpu_ipc_scale": 0.85,
       "ram_gib": 244.14,
       "net_mbps": 25000.0,
-      "drive": null
+      "drive": null,
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     }
   }
 }

@@ -10,6 +10,7 @@
     },
     "i3.xlarge": {
       "name": "i3.xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 4,
       "cpu_ghz": 2.3,
       "cpu_ipc_scale": 0.8925,
@@ -28,6 +29,7 @@
     },
     "i3.2xlarge": {
       "name": "i3.2xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 8,
       "cpu_ghz": 2.3,
       "cpu_ipc_scale": 0.8925,
@@ -42,6 +44,7 @@
     },
     "i3.4xlarge": {
       "name": "i3.4xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 16,
       "cpu_ghz": 2.3,
       "cpu_ipc_scale": 0.8925,
@@ -60,6 +63,7 @@
     },
     "m5d.large": {
       "name": "m5d.large",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 2,
       "cpu_ghz": 3.1,
       "ram_gib": 7.48,
@@ -73,6 +77,7 @@
     },
     "m5d.xlarge": {
       "name": "m5d.xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 4,
       "cpu_ghz": 3.1,
       "ram_gib": 15.57,
@@ -86,6 +91,7 @@
     },
     "m5d.2xlarge": {
       "name": "m5d.2xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 8,
       "cpu_ghz": 3.1,
       "ram_gib": 31.36,
@@ -99,6 +105,7 @@
     },
     "m5d.4xlarge": {
       "name": "m5d.4xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 16,
       "cpu_ghz": 3.1,
       "ram_gib": 62.95,
@@ -112,6 +119,7 @@
     },
     "m5d.8xlarge": {
       "name": "m5d.8xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 32,
       "cpu_ghz": 3.1,
       "ram_gib": 128,
@@ -125,6 +133,7 @@
     },
     "m5dn.xlarge": {
       "name": "m5dn.xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 4,
       "cpu_ghz": 3.1,
       "ram_gib": 15.57,
@@ -138,6 +147,7 @@
     },
     "m5dn.2xlarge": {
       "name": "m5dn.2xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 8,
       "cpu_ghz": 3.1,
       "ram_gib": 31.36,
@@ -151,6 +161,7 @@
     },
     "m5dn.4xlarge": {
       "name": "m5dn.4xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 16,
       "cpu_ghz": 3.1,
       "ram_gib": 62.95,
@@ -164,6 +175,7 @@
     },
     "m5dn.8xlarge": {
       "name": "m5dn.8xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 32,
       "cpu_ghz": 3.1,
       "ram_gib": 128,
@@ -177,6 +189,7 @@
     },
     "r5d.large": {
       "name": "r5d.large",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 2,
       "cpu_ghz": 3.1,
       "ram_gib": 15.74,
@@ -190,6 +203,7 @@
     },
     "r5d.xlarge": {
       "name": "r5d.xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 4,
       "cpu_ghz": 3.1,
       "ram_gib": 31.7,
@@ -203,6 +217,7 @@
     },
     "r5d.2xlarge": {
       "name": "r5d.2xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 8,
       "cpu_ghz": 3.1,
       "ram_gib": 63.62,
@@ -216,6 +231,7 @@
     },
     "r5d.4xlarge": {
       "name": "r5d.4xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 16,
       "cpu_ghz": 3.1,
       "ram_gib": 128,
@@ -229,6 +245,7 @@
     },
     "r5d.8xlarge": {
       "name": "r5d.8xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 32,
       "cpu_ghz": 3.1,
       "ram_gib": 256,
@@ -242,6 +259,7 @@
     },
     "r5d.16xlarge": {
       "name": "r5d.16xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 64,
       "cpu_ghz": 3.1,
       "ram_gib": 512,
@@ -255,6 +273,7 @@
     },
     "r5dn.large": {
       "name": "r5dn.large",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 2,
       "cpu_ghz": 3.1,
       "ram_gib": 15.74,
@@ -272,6 +291,7 @@
     },
     "r5dn.xlarge": {
       "name": "r5dn.xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 4,
       "cpu_ghz": 3.1,
       "ram_gib": 31.7,
@@ -285,6 +305,7 @@
     },
     "r5dn.2xlarge": {
       "name": "r5dn.2xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 8,
       "cpu_ghz": 3.1,
       "ram_gib": 63.62,
@@ -298,6 +319,7 @@
     },
     "r5dn.4xlarge": {
       "name": "r5dn.4xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 16,
       "cpu_ghz": 3.1,
       "ram_gib": 128,
@@ -311,6 +333,7 @@
     },
     "r5dn.8xlarge": {
       "name": "r5dn.8xlarge",
+      "platforms": ["amd64", "amd64 Intel"],
       "cpu": 32,
       "cpu_ghz": 3.1,
       "ram_gib": 256,

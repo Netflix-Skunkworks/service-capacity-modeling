@@ -22,7 +22,11 @@
           "minimum_value": 0.07,
           "maximum_value": 2.0
         }
-      }
+      },
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "i3en.xlarge": {
       "name": "i3en.xlarge",
@@ -46,7 +50,11 @@
           "minimum_value": 0.07,
           "maximum_value": 2.0
         }
-      }
+      },
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "i3en.2xlarge": {
       "name": "i3en.2xlarge",
@@ -70,7 +78,11 @@
           "minimum_value": 0.07,
           "maximum_value": 2.0
         }
-      }
+      },
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "i3en.3xlarge": {
       "name": "i3en.3xlarge",
@@ -94,7 +106,11 @@
           "minimum_value": 0.07,
           "maximum_value": 2.0
         }
-      }
+      },
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "i3en.6xlarge": {
       "name": "i3en.6xlarge",
@@ -118,7 +134,11 @@
           "minimum_value": 0.07,
           "maximum_value": 2.0
         }
-      }
+      },
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "i3en.12xlarge": {
       "name": "i3en.12xlarge",
@@ -142,7 +162,11 @@
           "minimum_value": 0.07,
           "maximum_value": 2.0
         }
-      }
+      },
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "i3en.24xlarge": {
       "name": "i3en.24xlarge",
@@ -166,7 +190,11 @@
           "minimum_value": 0.07,
           "maximum_value": 2.0
         }
-      }
+      },
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     }
   }
 }

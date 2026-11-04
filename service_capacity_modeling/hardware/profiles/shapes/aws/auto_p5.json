@@ -23,7 +23,11 @@
           "maximum_value": 2.0
         }
       },
-      "lifecycle": "alpha"
+      "lifecycle": "alpha",
+      "platforms": [
+        "amd64",
+        "amd64 AMD"
+      ]
     },
     "p5.48xlarge": {
       "name": "p5.48xlarge",
@@ -48,7 +52,11 @@
           "maximum_value": 2.0
         }
       },
-      "lifecycle": "alpha"
+      "lifecycle": "alpha",
+      "platforms": [
+        "amd64",
+        "amd64 AMD"
+      ]
     }
   }
 }
