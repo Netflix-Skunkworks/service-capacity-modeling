@@ -1,3 +1,4 @@
+import pytest
 from hypothesis import assume, given, HealthCheck, settings
 
 from service_capacity_modeling.capacity_planner import planner
@@ -49,6 +50,44 @@ def test_evcache_read_latency():
     assert 0.060 < large < 0.080
     assert 0.120 < very_large < 0.140
     assert 0.140 < extra_large < 0.160
+
+
+@pytest.mark.parametrize("tier", [0, 1, 2, 3])
+@pytest.mark.parametrize("current_count", [None, 1, 2])
+def test_evcache_minimum_nodes_per_zone_for_service_tier(tier, current_count):
+    desires = CapacityDesires(
+        service_tier=tier,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_float(1),
+            estimated_write_per_second=certain_float(1),
+        ),
+        data_shape=DataShape(estimated_state_size_gib=certain_float(1)),
+    )
+    if current_count is not None:
+        desires.current_clusters = CurrentClusters(
+            zonal=[
+                CurrentZoneClusterCapacity(
+                    cluster_type="evcache",
+                    cluster_instance_name="i4i.large",
+                    cluster_instance_count=certain_float(current_count),
+                    cpu_utilization=certain_float(0.1),
+                    memory_utilization_gib=certain_float(0.1),
+                    network_utilization_mbps=certain_float(0.1),
+                )
+            ]
+        )
+    plans = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=desires,
+        instance_families=["i4i.large"],
+    )
+
+    assert plans
+    for plan in plans:
+        assert len(plan.candidate_clusters.zonal) == 3
+        for cluster in plan.candidate_clusters.zonal:
+            assert cluster.count == (1 if current_count == 1 else 2)
 
 
 def test_evcache_inmemory_low_latency_reads_cpu():
@@ -492,6 +531,7 @@ def test_spread_cost_function():
     """calculate_spread_cost returns additive dollar penalty for small clusters."""
     assert calculate_spread_cost(1) == 100000  # < 2 nodes → max penalty
     assert calculate_spread_cost(0) == 100000
+    assert calculate_spread_cost(10) > 0  # threshold remains penalized
     assert calculate_spread_cost(11) == 0  # above threshold
     assert calculate_spread_cost(20) == 0
     # Intermediate values decrease as cluster grows
@@ -542,6 +582,38 @@ def test_evcache_spread_deterministic():
             ), f"Small cluster ({cluster_count} nodes) should have rank > cost"
             found_penalized = True
     assert found_penalized, "Expected at least one plan with < 10 nodes per zone"
+
+
+@pytest.mark.parametrize("current_kind", ["none", "other", "ambiguous"])
+def test_evcache_without_identified_current_keeps_spread_penalty(current_kind):
+    from service_capacity_modeling.models import RANK_PENALTIES
+
+    desires = _small_cluster_desires.model_copy(deep=True)
+    if current_kind != "none":
+        current = CurrentZoneClusterCapacity(
+            cluster_type="cassandra" if current_kind == "other" else None,
+            cluster_instance_name="i4i.large",
+            cluster_instance_count=certain_float(3),
+        )
+        zonal = [current]
+        if current_kind == "ambiguous":
+            zonal.append(
+                current.model_copy(update={"cluster_instance_name": "i3en.xlarge"})
+            )
+        desires.current_clusters = CurrentClusters(zonal=zonal)
+    plans = planner.plan_certain(
+        model_name="org.netflix.evcache",
+        region="us-east-1",
+        desires=desires,
+        instance_families=["i4i.large"],
+    )
+
+    assert plans
+    for plan in plans:
+        cluster = plan.candidate_clusters.zonal[0]
+        assert cluster.count <= 10
+        penalties = cluster.cluster_params[RANK_PENALTIES]
+        assert penalties == {"under_spread": calculate_spread_cost(cluster.count)}
 
 
 def test_evcache_spread_stochastic_regret():
@@ -755,6 +827,7 @@ def test_evcache_different_family_regret():
             assert "family_migration" not in penalties
         else:
             assert penalties.get("family_migration", 0) > 0
+            assert "size_migration" not in penalties
             assert p.rank > p.candidate_clusters.total_annual_cost
 
     # Explicitly disabling (0.0) removes the family-migration penalty entirely.
@@ -768,6 +841,8 @@ def test_evcache_different_family_regret():
     for p in plans_off:
         penalties = p.candidate_clusters.zonal[0].cluster_params.get(RANK_PENALTIES, {})
         assert "family_migration" not in penalties
+        if p.candidate_clusters.zonal[0].instance.family != "i3en":
+            assert "size_migration" not in penalties
 
 
 def test_evcache_different_family_regret_flips_selection():
