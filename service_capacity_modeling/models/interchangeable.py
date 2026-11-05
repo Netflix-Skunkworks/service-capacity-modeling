@@ -20,7 +20,8 @@ For each preferred type, the chosen layout is the model's most preferred layout
 that the preferred type serves and that serves the most other families, up to
 ``max_fallback_types``. The fallbacks are the smallest serving size in each of
 those families, ordered by the rank of their own single-type plans. Plans are
-then ranked by their re-sized cost, so cost still picks the plan.
+then ranked by their re-sized cost, so cost still picks the plan. No family is
+preferred over another.
 
 Models that place work in proportion to node capacity cannot satisfy the
 contract and should not register.
@@ -32,12 +33,12 @@ and their tests.
 
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Hashable
 from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import FrozenSet
 from typing import Generic
-from typing import Hashable
 from typing import List
 from typing import Optional
 from typing import Sequence
@@ -143,8 +144,7 @@ class InterchangeableModel(ABC, Generic[Layout]):
     ) -> CapacityPlan:
         """Apply the layout to the preferred type's plan, re-priced at the
         preferred type and ranked as the model's own ``capacity_plan`` would
-        rank it; the planner's preferred-family penalty is applied afterwards.
-        ``instance_names`` lists the preferred type and its fallbacks, all of
+        rank it. ``instance_names`` lists the preferred type and its fallbacks, all of
         which serve the layout."""
 
 
@@ -152,22 +152,6 @@ InterchangeableModelFactory = Callable[
     [Dict[str, CapacityPlan], CapacityDesires, Dict[str, Any]],
     InterchangeableModel[Any],
 ]
-
-
-def with_preferred_family_penalty(
-    plan: CapacityPlan,
-    family: str,
-    preferred_families: Optional[FrozenSet[str]],
-    penalty: float,
-) -> CapacityPlan:
-    """Inflate a model-ranked plan's rank as ``CapacityPlanner`` does for
-    families outside the model's preferred families."""
-    if preferred_families is None or family in preferred_families or penalty <= 0:
-        return plan
-    service_cost = sum(s.annual_cost for s in plan.candidate_clusters.services)
-    return plan.model_copy(
-        update={"rank": plan.rank + (plan.rank - service_cost) * penalty}
-    )
 
 
 def dominance_edges(served: Dict[str, FrozenSet[int]]) -> List[DominanceEdge]:
@@ -224,7 +208,11 @@ def plan_interchangeable(
         num_results=_ALL_CANDIDATES,
         num_regions=num_regions,
         extra_model_arguments=extra_model_arguments,
-        max_results_per_family=_ALL_CANDIDATES,
+        # Fallbacks exist to ride out capacity shortages, so no family is
+        # preferred; instance_families is the way to exclude families.
+        planner_arguments=PlannerArguments(
+            max_results_per_family=_ALL_CANDIDATES, preferred_family_penalty=0
+        ),
     )
     # The planner returns plans best rank first, so the first plan for each
     # instance type is its best option.
@@ -254,9 +242,6 @@ def plan_interchangeable(
         for i in served[name]:
             smallest_by_family[i].setdefault(instances[name].family, name)
 
-    # plan_certain ranks with the default planner arguments.
-    preferred_families = planner.models[model_name].preferred_families()
-    family_penalty = PlannerArguments().preferred_family_penalty
     wanted = options.max_fallback_types
     revised: List[InterchangeablePlan] = []
     for name, plan in candidates.items():
@@ -276,12 +261,7 @@ def plan_interchangeable(
         if best is not None and best_count > 0:
             others = [n for f, n in smallest_by_family[best].items() if f != family]
             fallbacks = sorted(others, key=rank.__getitem__)[:wanted]
-            plan = with_preferred_family_penalty(
-                model.resize(plan, layouts[best], [name, *fallbacks]),
-                family,
-                preferred_families,
-                family_penalty,
-            )
+            plan = model.resize(plan, layouts[best], [name, *fallbacks])
         revised.append(
             InterchangeablePlan(
                 plan=plan,
