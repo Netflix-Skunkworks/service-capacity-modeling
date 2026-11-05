@@ -47,6 +47,7 @@ from pydantic import BaseModel
 from pydantic import Field
 
 from service_capacity_modeling.capacity_planner import CapacityPlanner
+from service_capacity_modeling.capacity_planner import PlannerArguments
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import ClusterCapacity
@@ -140,15 +141,33 @@ class InterchangeableModel(ABC, Generic[Layout]):
     def resize(
         self, plan: CapacityPlan, layout: Layout, instance_names: Sequence[str]
     ) -> CapacityPlan:
-        """Apply the layout to the preferred type's plan, re-priced and
-        re-ranked at the preferred type. ``instance_names`` lists the preferred
-        type and its fallbacks, all of which serve the layout."""
+        """Apply the layout to the preferred type's plan, re-priced at the
+        preferred type and ranked as the model's own ``capacity_plan`` would
+        rank it; the planner's preferred-family penalty is applied afterwards.
+        ``instance_names`` lists the preferred type and its fallbacks, all of
+        which serve the layout."""
 
 
 InterchangeableModelFactory = Callable[
     [Dict[str, CapacityPlan], CapacityDesires, Dict[str, Any]],
     InterchangeableModel[Any],
 ]
+
+
+def with_preferred_family_penalty(
+    plan: CapacityPlan,
+    family: str,
+    preferred_families: Optional[FrozenSet[str]],
+    penalty: float,
+) -> CapacityPlan:
+    """Inflate a model-ranked plan's rank as ``CapacityPlanner`` does for
+    families outside the model's preferred families."""
+    if preferred_families is None or family in preferred_families or penalty <= 0:
+        return plan
+    service_cost = sum(s.annual_cost for s in plan.candidate_clusters.services)
+    return plan.model_copy(
+        update={"rank": plan.rank + (plan.rank - service_cost) * penalty}
+    )
 
 
 def dominance_edges(served: Dict[str, FrozenSet[int]]) -> List[DominanceEdge]:
@@ -235,6 +254,9 @@ def plan_interchangeable(
         for i in served[name]:
             smallest_by_family[i].setdefault(instances[name].family, name)
 
+    # plan_certain ranks with the default planner arguments.
+    preferred_families = planner.models[model_name].preferred_families()
+    family_penalty = PlannerArguments().preferred_family_penalty
     wanted = options.max_fallback_types
     revised: List[InterchangeablePlan] = []
     for name, plan in candidates.items():
@@ -254,7 +276,12 @@ def plan_interchangeable(
         if best is not None and best_count > 0:
             others = [n for f, n in smallest_by_family[best].items() if f != family]
             fallbacks = sorted(others, key=rank.__getitem__)[:wanted]
-            plan = model.resize(plan, layouts[best], [name, *fallbacks])
+            plan = with_preferred_family_penalty(
+                model.resize(plan, layouts[best], [name, *fallbacks]),
+                family,
+                preferred_families,
+                family_penalty,
+            )
         revised.append(
             InterchangeablePlan(
                 plan=plan,
