@@ -1,4 +1,4 @@
-"""EXPERIMENTAL: read-only KV adapter for interchangeable capacity plans.
+"""EXPERIMENTAL: read-only KV adapter for instance fallback plans.
 
 Every read-only KV node holds the same ``ppn`` partitions and serves the same
 share of reads, whatever its instance type, so whether a type can serve a
@@ -31,7 +31,7 @@ from service_capacity_modeling.models import RANK_PENALTIES
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import upsert_params
-from service_capacity_modeling.models.interchangeable import InterchangeableModel
+from service_capacity_modeling.models.instance_fallback import InstanceFallbackAdapter
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
     _partitions_that_fit,
     CapacityProblem,
@@ -63,7 +63,7 @@ def ppn_cap(problem: CapacityProblem) -> int:
     )
 
 
-class ReadOnlyKVInterchangeable(InterchangeableModel):
+class ReadOnlyKVInstanceFallbackAdapter(InstanceFallbackAdapter):
     def __init__(
         self,
         candidates: Dict[str, CapacityPlan],

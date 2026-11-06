@@ -1,4 +1,4 @@
-"""Tests for Cassandra interchangeable zonal plans."""
+"""Tests for Cassandra instance fallback plans."""
 
 import pytest
 
@@ -13,15 +13,15 @@ from service_capacity_modeling.interface import (
     certain_int,
 )
 from service_capacity_modeling.models import RANK_PENALTIES
-from service_capacity_modeling.models.interchangeable import (
-    InterchangeableOptions,
-    plan_interchangeable,
+from service_capacity_modeling.models.instance_fallback import (
+    InstanceFallbackOptions,
+    plan_with_instance_fallbacks,
 )
-from service_capacity_modeling.models.org.netflix.cassandra_interchangeable import (
-    CassandraInterchangeable,
+from service_capacity_modeling.models.org.netflix.cassandra_instance_fallback import (
+    CassandraInstanceFallbackAdapter,
 )
-from service_capacity_modeling.models.org.netflix.interchangeable_models import (
-    INTERCHANGEABLE_MODELS,
+from service_capacity_modeling.models.org.netflix.instance_fallback_adapters import (
+    INSTANCE_FALLBACK_ADAPTERS,
 )
 
 MODEL = "org.netflix.cassandra"
@@ -58,7 +58,7 @@ def _singles(args, desires=DESIRES):
         extra_model_arguments=args,
         instance_families=FAMILIES,
         num_results=10_000,
-        # plan_interchangeable plans without the preferred-family penalty.
+        # plan_with_instance_fallbacks plans without the preferred-family penalty.
         planner_arguments=PlannerArguments(
             max_results_per_family=10_000, preferred_family_penalty=0
         ),
@@ -69,7 +69,7 @@ def _model(args, desires=DESIRES):
     candidates = {}
     for plan in _singles(args, desires):
         candidates.setdefault(plan.candidate_clusters.zonal[0].instance.name, plan)
-    return candidates, CassandraInterchangeable(candidates, desires, args)
+    return candidates, CassandraInstanceFallbackAdapter(candidates, desires, args)
 
 
 @pytest.mark.parametrize("args", [{}, {"cluster_size_mode": "doubling"}])
@@ -100,16 +100,16 @@ def test_single_type_preserves_planner_layout_and_rank(args):
 )
 def test_returned_types_pass_planner_at_shared_count_and_configuration(desires):
     args = {}
-    result = plan_interchangeable(
+    result = plan_with_instance_fallbacks(
         planner,
         MODEL,
-        INTERCHANGEABLE_MODELS[MODEL],
+        INSTANCE_FALLBACK_ADAPTERS[MODEL],
         REGION,
         desires,
         args,
         # A loose budget lets local-disk plans grow to reach more families.
-        InterchangeableOptions(
-            min_fallback_types=0, max_fallback_types=2, max_fallback_cost=1.0
+        InstanceFallbackOptions(
+            min_fallback_types=0, max_fallback_types=2, max_fallback_cost_increase=1.0
         ),
         instance_families=FAMILIES,
         num_results=100,

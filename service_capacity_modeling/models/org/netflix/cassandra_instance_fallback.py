@@ -1,4 +1,4 @@
-"""EXPERIMENTAL: Cassandra adapter for interchangeable capacity plans.
+"""EXPERIMENTAL: Cassandra adapter for instance fallback plans.
 
 Every Cassandra node in a zone owns an equal token range and so the same share
 of data and traffic, whatever its instance type. Whether a type can serve a
@@ -29,7 +29,7 @@ from service_capacity_modeling.models.common import (
     DerivedBuffers,
     buffer_for_components,
 )
-from service_capacity_modeling.models.interchangeable import InterchangeableModel
+from service_capacity_modeling.models.instance_fallback import InstanceFallbackAdapter
 from service_capacity_modeling.models.org.netflix.cassandra import (
     CassandraClusterSizeMode,
     NflxCassandraArguments,
@@ -64,7 +64,7 @@ def _layout(plan: CapacityPlan) -> CassandraLayout:
     )
 
 
-class CassandraInterchangeable(InterchangeableModel):
+class CassandraInstanceFallbackAdapter(InstanceFallbackAdapter):
     def __init__(
         self,
         candidates: dict[str, CapacityPlan],
