@@ -27,6 +27,7 @@ from service_capacity_modeling.models.org.netflix.interchangeable_models import 
 MODEL = "org.netflix.cassandra"
 REGION = "us-east-1"
 FAMILIES = ["m6id", "r6id", "i4i", "m6i", "r6i"]
+REGRET = 1.0
 DESIRES = CapacityDesires(
     service_tier=1,
     query_pattern=QueryPattern(
@@ -107,7 +108,8 @@ def test_returned_types_pass_planner_at_shared_count_and_configuration(desires):
         REGION,
         desires,
         args,
-        InterchangeableOptions(max_fallback_types=2),
+        # A high regret makes local-disk plans grow to reach more families.
+        InterchangeableOptions(max_fallback_types=2, missing_fallback_regret=REGRET),
         instance_families=FAMILIES,
         num_results=100,
         max_results_per_family=100,
@@ -158,8 +160,9 @@ def test_returned_types_pass_planner_at_shared_count_and_configuration(desires):
         assert float(
             item.plan.candidate_clusters.annual_costs["cassandra.zonal-clusters"]
         ) == pytest.approx(sum(zone.annual_cost for zone in zones))
+        missing = 2 - len(item.fallback_instance_types)
         assert item.plan.rank == pytest.approx(
-            by_name[item.preferred_instance_type].rank
+            by_name[item.preferred_instance_type].rank * (1 + REGRET * missing)
         )
 
 

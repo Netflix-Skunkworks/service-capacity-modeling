@@ -64,7 +64,7 @@ def _layout(plan: CapacityPlan) -> CassandraLayout:
     )
 
 
-class CassandraInterchangeable(InterchangeableModel[CassandraLayout]):
+class CassandraInterchangeable(InterchangeableModel):
     def __init__(
         self,
         candidates: dict[str, CapacityPlan],
