@@ -1,6 +1,7 @@
 """EXPERIMENTAL: capacity models that support instance fallback plans.
 
-Each entry builds a :class:`NodeCountAdapter` from the model's own size limits.
+Most entries build a :class:`NodeCountAdapter` from the model's own size
+limits.
 """
 
 from typing import Any
@@ -18,6 +19,9 @@ from service_capacity_modeling.models.org.netflix.cassandra import (
     NflxCassandraCapacityModel,
     _get_cluster_size_lambda,
     _get_current_cluster_size,
+)
+from service_capacity_modeling.models.org.netflix.read_only_kv_instance_fallback import (  # noqa: E501
+    ReadOnlyKVInstanceFallbackAdapter,
 )
 
 
@@ -81,4 +85,6 @@ INSTANCE_FALLBACK_ADAPTERS: Dict[str, InstanceFallbackAdapterFactory] = {
     "org.netflix.evcache": _evcache,
     # Data nodes only: master and search nodes are separate clusters.
     "org.netflix.elasticsearch.node": _elasticsearch_data,
+    # A node count does not describe a read-only KV layout; see its module.
+    "org.netflix.read-only-kv": ReadOnlyKVInstanceFallbackAdapter,
 }
