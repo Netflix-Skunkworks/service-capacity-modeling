@@ -4,7 +4,9 @@ An interchangeable plan is one cluster layout that holds whether each node
 launches as the preferred instance type or as any of its fallback types. An
 autoscaling group can then launch the fallbacks, in order, when the preferred
 type runs short of capacity. Fallbacks exist only to ride out those shortages,
-so cost never decides whether a type is a fallback.
+so cost never makes a type ineligible: any type that serves the layout can be a
+fallback. Cost only orders them, and when more families qualify than
+``max_fallback_types`` allows, the families whose own plans rank best are kept.
 
 How the search stays exact
 --------------------------
@@ -49,6 +51,7 @@ from pydantic import Field
 
 from service_capacity_modeling.capacity_planner import CapacityPlanner
 from service_capacity_modeling.capacity_planner import PlannerArguments
+from service_capacity_modeling.capacity_planner import _resolve_cluster_instances
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import ClusterCapacity
@@ -222,7 +225,11 @@ def plan_interchangeable(
     if not candidates:
         return InterchangeablePlans(plans=[], dominance_edges=[])
 
-    model = model_factory(candidates, desires, extra_model_arguments)
+    # Give the adapter the desires the model saw: the planner resolves current
+    # clusters given only by instance name on its own copy of the desires.
+    resolved = desires.model_copy(deep=True)
+    _resolve_cluster_instances(resolved)
+    model = model_factory(candidates, resolved, extra_model_arguments)
     layouts = model.layouts()
     instances = {
         name: planned_cluster(plan).instance for name, plan in candidates.items()
