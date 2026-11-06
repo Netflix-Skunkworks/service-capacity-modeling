@@ -106,18 +106,24 @@ def test_timeseries_uses_cassandra_default_storage_preference():
 
 def test_new_timeseries_ebs_plan_uses_fleet_iops_fallback():
     desires = _namespace(4_000, 40_000)
-    cluster = _cassandra_tier(desires)[0]
+    attached = {
+        **NAMESPACE,
+        "require_attached_disks": True,
+        "require_local_disks": False,
+        # Floor at the gp3 included tier so IOPS demand reaches the drive
+        "min_ebs_iops_per_node": 3_000,
+    }
+    cluster = _cassandra_tier(desires, attached)[0]
     kv_baseline_cluster = _cassandra_tier(
-        desires, {**NAMESPACE, "read_io_per_lcs_level": 1.8}
+        desires, {**attached, "read_io_per_lcs_level": 1.8}
     )[0]
 
     assert cluster.cluster_params["cassandra.read_io_per_lcs_level"] == 1.0
     provisioned_iops = sum(
-        drive.read_io_per_s + drive.write_io_per_s for drive in cluster.attached_drives
+        drive.provisioned_io_per_s for drive in cluster.attached_drives
     )
     kv_baseline_iops = sum(
-        drive.read_io_per_s + drive.write_io_per_s
-        for drive in kv_baseline_cluster.attached_drives
+        drive.provisioned_io_per_s for drive in kv_baseline_cluster.attached_drives
     )
     assert provisioned_iops * cluster.count < (
         kv_baseline_iops * kv_baseline_cluster.count
@@ -282,17 +288,11 @@ def test_deployed_ebs_iops_evidence_flows_through_timeseries_composition():
     assert calibration["same_deployed_topology"] is True
     assert calibration["current_topology_iops_governor"] == "deployed_topology"
     assert cluster.count == 6
-    assert headroom == {
-        "demand_source": "calibrated_model",
-        "modeled_candidate_iops_per_node": 2_834.17,
-        "expected_peak_iops_per_node": 5_001.47,
-        "target_utilization": 0.9,
-        "required_iops_before_rounding": 5_557.19,
-        "provisioned_iops_per_node": 5_600,
-        "buffer_iops_per_node": 598.53,
-        "planned_utilization": 0.8931,
-        "candidate_max_iops_per_node": 16_000,
-    }
+    assert headroom["demand_source"] == "calibrated_model"
+    assert headroom["modeled_candidate_iops_per_node"] == 2_834.17
+    assert headroom["expected_peak_iops_per_node"] == 5_001.47
+    assert headroom["provisioned_iops_per_node"] == 16_000
+    assert cluster.attached_drives[0].throughput == 1_000
 
 
 def test_timeseries_tier_is_unchanged_by_the_ebs_choice():

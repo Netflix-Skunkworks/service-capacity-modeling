@@ -231,11 +231,11 @@
           "cassandra.backup.s3-standard": 190735.87,
           "cassandra.net.inter.region": 336547.08,
           "cassandra.net.intra.region": 336547.08,
-          "cassandra.zonal-clusters": 1473728.64
+          "cassandra.zonal-clusters": 1570496.64
         },
         "clusters": [
           {
-            "annual_cost": 491242.88,
+            "annual_cost": 523498.88,
             "attached_drives": [
               "gp3 : 5600GB"
             ],
@@ -243,6 +243,14 @@
               "cassandra.compaction.min_threshold": 8,
               "cassandra.compute_buffer_ratio": 1.32,
               "cassandra.disk_iops_buffer_ratio": 1.11,
+              "cassandra.ebs_performance": {
+                "annual_drive_cost_by_component": {
+                  "capacity": 344064.0,
+                  "iops": 49920.0,
+                  "throughput": 26880.0
+                },
+                "expected_throughput_mib_per_s_per_node": 215.25
+              },
               "cassandra.ebs_volume_strategy": "existing_no_shrink",
               "cassandra.heap.gib": 15.0,
               "cassandra.heap.table.percent": 0.2,
@@ -271,7 +279,7 @@
             "instance": "m7a.2xlarge"
           },
           {
-            "annual_cost": 491242.88,
+            "annual_cost": 523498.88,
             "attached_drives": [
               "gp3 : 5600GB"
             ],
@@ -279,6 +287,14 @@
               "cassandra.compaction.min_threshold": 8,
               "cassandra.compute_buffer_ratio": 1.32,
               "cassandra.disk_iops_buffer_ratio": 1.11,
+              "cassandra.ebs_performance": {
+                "annual_drive_cost_by_component": {
+                  "capacity": 344064.0,
+                  "iops": 49920.0,
+                  "throughput": 26880.0
+                },
+                "expected_throughput_mib_per_s_per_node": 215.25
+              },
               "cassandra.ebs_volume_strategy": "existing_no_shrink",
               "cassandra.heap.gib": 15.0,
               "cassandra.heap.table.percent": 0.2,
@@ -307,7 +323,7 @@
             "instance": "m7a.2xlarge"
           },
           {
-            "annual_cost": 491242.88,
+            "annual_cost": 523498.88,
             "attached_drives": [
               "gp3 : 5600GB"
             ],
@@ -315,6 +331,14 @@
               "cassandra.compaction.min_threshold": 8,
               "cassandra.compute_buffer_ratio": 1.32,
               "cassandra.disk_iops_buffer_ratio": 1.11,
+              "cassandra.ebs_performance": {
+                "annual_drive_cost_by_component": {
+                  "capacity": 344064.0,
+                  "iops": 49920.0,
+                  "throughput": 26880.0
+                },
+                "expected_throughput_mib_per_s_per_node": 215.25
+              },
               "cassandra.ebs_volume_strategy": "existing_no_shrink",
               "cassandra.heap.gib": 15.0,
               "cassandra.heap.table.percent": 0.2,
@@ -343,18 +367,18 @@
             "instance": "m7a.2xlarge"
           }
         ],
-        "total_annual_cost": 2342166.66
+        "total_annual_cost": 2434326.66
       },
       {
         "annual_costs": {
           "cassandra.backup.s3-standard": 190735.87,
           "cassandra.net.inter.region": 336547.08,
           "cassandra.net.intra.region": 336547.08,
-          "cassandra.zonal-clusters": 1560255.36
+          "cassandra.zonal-clusters": 1657023.36
         },
         "clusters": [
           {
-            "annual_cost": 520085.12,
+            "annual_cost": 552341.12,
             "attached_drives": [
               "gp3 : 5600GB"
             ],
@@ -362,6 +386,14 @@
               "cassandra.compaction.min_threshold": 8,
               "cassandra.compute_buffer_ratio": 1.32,
               "cassandra.disk_iops_buffer_ratio": 1.11,
+              "cassandra.ebs_performance": {
+                "annual_drive_cost_by_component": {
+                  "capacity": 344064.0,
+                  "iops": 49920.0,
+                  "throughput": 26880.0
+                },
+                "expected_throughput_mib_per_s_per_node": 215.25
+              },
               "cassandra.ebs_volume_strategy": "existing_no_shrink",
               "cassandra.heap.gib": 15.0,
               "cassandra.heap.table.percent": 0.2,
@@ -390,7 +422,7 @@
             "instance": "c6a.4xlarge"
           },
           {
-            "annual_cost": 520085.12,
+            "annual_cost": 552341.12,
             "attached_drives": [
               "gp3 : 5600GB"
             ],
@@ -398,6 +430,14 @@
               "cassandra.compaction.min_threshold": 8,
               "cassandra.compute_buffer_ratio": 1.32,
               "cassandra.disk_iops_buffer_ratio": 1.11,
+              "cassandra.ebs_performance": {
+                "annual_drive_cost_by_component": {
+                  "capacity": 344064.0,
+                  "iops": 49920.0,
+                  "throughput": 26880.0
+                },
+                "expected_throughput_mib_per_s_per_node": 215.25
+              },
               "cassandra.ebs_volume_strategy": "existing_no_shrink",
               "cassandra.heap.gib": 15.0,
               "cassandra.heap.table.percent": 0.2,
@@ -426,7 +466,7 @@
             "instance": "c6a.4xlarge"
           },
           {
-            "annual_cost": 520085.12,
+            "annual_cost": 552341.12,
             "attached_drives": [
               "gp3 : 5600GB"
             ],
@@ -434,6 +474,14 @@
               "cassandra.compaction.min_threshold": 8,
               "cassandra.compute_buffer_ratio": 1.32,
               "cassandra.disk_iops_buffer_ratio": 1.11,
+              "cassandra.ebs_performance": {
+                "annual_drive_cost_by_component": {
+                  "capacity": 344064.0,
+                  "iops": 49920.0,
+                  "throughput": 26880.0
+                },
+                "expected_throughput_mib_per_s_per_node": 215.25
+              },
               "cassandra.ebs_volume_strategy": "existing_no_shrink",
               "cassandra.heap.gib": 15.0,
               "cassandra.heap.table.percent": 0.2,
@@ -462,7 +510,7 @@
             "instance": "c6a.4xlarge"
           }
         ],
-        "total_annual_cost": 2428693.38
+        "total_annual_cost": 2520853.38
       }
     ],
     "model": "org.netflix.cassandra",
@@ -474,11 +522,11 @@
             "cassandra.backup.s3-standard": 142152.08,
             "cassandra.net.inter.region": 188258.93,
             "cassandra.net.intra.region": 188258.93,
-            "cassandra.zonal-clusters": 1409216.64
+            "cassandra.zonal-clusters": 1570496.64
           },
           "clusters": [
             {
-              "annual_cost": 469738.88,
+              "annual_cost": 523498.88,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -486,6 +534,14 @@
                 "cassandra.compaction.min_threshold": 4,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 344064.0,
+                    "iops": 49920.0,
+                    "throughput": 26880.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 127.14
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 15.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -514,7 +570,7 @@
               "instance": "m7a.2xlarge"
             },
             {
-              "annual_cost": 469738.88,
+              "annual_cost": 523498.88,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -522,6 +578,14 @@
                 "cassandra.compaction.min_threshold": 4,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 344064.0,
+                    "iops": 49920.0,
+                    "throughput": 26880.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 127.14
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 15.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -550,7 +614,7 @@
               "instance": "m7a.2xlarge"
             },
             {
-              "annual_cost": 469738.88,
+              "annual_cost": 523498.88,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -558,6 +622,14 @@
                 "cassandra.compaction.min_threshold": 4,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 344064.0,
+                    "iops": 49920.0,
+                    "throughput": 26880.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 127.14
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 15.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -586,18 +658,18 @@
               "instance": "m7a.2xlarge"
             }
           ],
-          "total_annual_cost": 1927886.58
+          "total_annual_cost": 2089166.58
         },
         {
           "annual_costs": {
             "cassandra.backup.s3-standard": 142152.08,
             "cassandra.net.inter.region": 188258.93,
             "cassandra.net.intra.region": 188258.93,
-            "cassandra.zonal-clusters": 1495743.36
+            "cassandra.zonal-clusters": 1657023.36
           },
           "clusters": [
             {
-              "annual_cost": 498581.12,
+              "annual_cost": 552341.12,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -605,6 +677,14 @@
                 "cassandra.compaction.min_threshold": 4,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 344064.0,
+                    "iops": 49920.0,
+                    "throughput": 26880.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 127.14
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 15.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -633,7 +713,7 @@
               "instance": "c6a.4xlarge"
             },
             {
-              "annual_cost": 498581.12,
+              "annual_cost": 552341.12,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -641,6 +721,14 @@
                 "cassandra.compaction.min_threshold": 4,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 344064.0,
+                    "iops": 49920.0,
+                    "throughput": 26880.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 127.14
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 15.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -669,7 +757,7 @@
               "instance": "c6a.4xlarge"
             },
             {
-              "annual_cost": 498581.12,
+              "annual_cost": 552341.12,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -677,6 +765,14 @@
                 "cassandra.compaction.min_threshold": 4,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 344064.0,
+                    "iops": 49920.0,
+                    "throughput": 26880.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 127.14
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 15.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -705,7 +801,7 @@
               "instance": "c6a.4xlarge"
             }
           ],
-          "total_annual_cost": 2014413.3
+          "total_annual_cost": 2175693.3
         }
       ],
       "50": [
@@ -714,11 +810,11 @@
             "cassandra.backup.s3-standard": 187028.14,
             "cassandra.net.inter.region": 322674.96,
             "cassandra.net.intra.region": 322674.96,
-            "cassandra.zonal-clusters": 1466816.64
+            "cassandra.zonal-clusters": 1570496.64
           },
           "clusters": [
             {
-              "annual_cost": 488938.88,
+              "annual_cost": 523498.88,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -726,6 +822,14 @@
                 "cassandra.compaction.min_threshold": 4,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 344064.0,
+                    "iops": 49920.0,
+                    "throughput": 26880.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 205.26
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 15.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -754,7 +858,7 @@
               "instance": "m7a.2xlarge"
             },
             {
-              "annual_cost": 488938.88,
+              "annual_cost": 523498.88,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -762,6 +866,14 @@
                 "cassandra.compaction.min_threshold": 4,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 344064.0,
+                    "iops": 49920.0,
+                    "throughput": 26880.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 205.26
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 15.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -790,7 +902,7 @@
               "instance": "m7a.2xlarge"
             },
             {
-              "annual_cost": 488938.88,
+              "annual_cost": 523498.88,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -798,6 +910,14 @@
                 "cassandra.compaction.min_threshold": 4,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 344064.0,
+                    "iops": 49920.0,
+                    "throughput": 26880.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 205.26
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 15.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -826,18 +946,18 @@
               "instance": "m7a.2xlarge"
             }
           ],
-          "total_annual_cost": 2299194.7
+          "total_annual_cost": 2402874.7
         },
         {
           "annual_costs": {
             "cassandra.backup.s3-standard": 187028.14,
             "cassandra.net.inter.region": 322674.96,
             "cassandra.net.intra.region": 322674.96,
-            "cassandra.zonal-clusters": 1553343.36
+            "cassandra.zonal-clusters": 1657023.36
           },
           "clusters": [
             {
-              "annual_cost": 517781.12,
+              "annual_cost": 552341.12,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -845,6 +965,14 @@
                 "cassandra.compaction.min_threshold": 4,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 344064.0,
+                    "iops": 49920.0,
+                    "throughput": 26880.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 205.26
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 15.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -873,7 +1001,7 @@
               "instance": "c6a.4xlarge"
             },
             {
-              "annual_cost": 517781.12,
+              "annual_cost": 552341.12,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -881,6 +1009,14 @@
                 "cassandra.compaction.min_threshold": 4,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 344064.0,
+                    "iops": 49920.0,
+                    "throughput": 26880.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 205.26
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 15.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -909,7 +1045,7 @@
               "instance": "c6a.4xlarge"
             },
             {
-              "annual_cost": 517781.12,
+              "annual_cost": 552341.12,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -917,6 +1053,14 @@
                 "cassandra.compaction.min_threshold": 4,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 344064.0,
+                    "iops": 49920.0,
+                    "throughput": 26880.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 205.26
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 15.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -945,7 +1089,7 @@
               "instance": "c6a.4xlarge"
             }
           ],
-          "total_annual_cost": 2390329.42
+          "total_annual_cost": 2489401.42
         }
       ],
       "95": [
@@ -954,11 +1098,11 @@
             "cassandra.backup.s3-standard": 263007.51,
             "cassandra.net.inter.region": 580473.79,
             "cassandra.net.intra.region": 580473.79,
-            "cassandra.zonal-clusters": 2860289.28
+            "cassandra.zonal-clusters": 3127553.28
           },
           "clusters": [
             {
-              "annual_cost": 953429.76,
+              "annual_cost": 1042517.76,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -966,6 +1110,14 @@
                 "cassandra.compaction.min_threshold": 8,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 688128.0,
+                    "iops": 99840.0,
+                    "throughput": 53760.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 160.95
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 30.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -991,7 +1143,7 @@
               "instance": "r6a.2xlarge"
             },
             {
-              "annual_cost": 953429.76,
+              "annual_cost": 1042517.76,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -999,6 +1151,14 @@
                 "cassandra.compaction.min_threshold": 8,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 688128.0,
+                    "iops": 99840.0,
+                    "throughput": 53760.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 160.95
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 30.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -1024,7 +1184,7 @@
               "instance": "r6a.2xlarge"
             },
             {
-              "annual_cost": 953429.76,
+              "annual_cost": 1042517.76,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -1032,6 +1192,14 @@
                 "cassandra.compaction.min_threshold": 8,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 688128.0,
+                    "iops": 99840.0,
+                    "throughput": 53760.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 160.95
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 30.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -1057,18 +1225,18 @@
               "instance": "r6a.2xlarge"
             }
           ],
-          "total_annual_cost": 4284244.37
+          "total_annual_cost": 4551508.37
         },
         {
           "annual_costs": {
             "cassandra.backup.s3-standard": 263007.51,
             "cassandra.net.inter.region": 580473.79,
             "cassandra.net.intra.region": 580473.79,
-            "cassandra.zonal-clusters": 2662014.72
+            "cassandra.zonal-clusters": 2929278.72
           },
           "clusters": [
             {
-              "annual_cost": 887338.24,
+              "annual_cost": 976426.24,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -1076,6 +1244,14 @@
                 "cassandra.compaction.min_threshold": 8,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 688128.0,
+                    "iops": 99840.0,
+                    "throughput": 53760.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 160.95
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 15.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -1104,7 +1280,7 @@
               "instance": "r7a.xlarge"
             },
             {
-              "annual_cost": 887338.24,
+              "annual_cost": 976426.24,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -1112,6 +1288,14 @@
                 "cassandra.compaction.min_threshold": 8,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 688128.0,
+                    "iops": 99840.0,
+                    "throughput": 53760.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 160.95
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 15.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -1140,7 +1324,7 @@
               "instance": "r7a.xlarge"
             },
             {
-              "annual_cost": 887338.24,
+              "annual_cost": 976426.24,
               "attached_drives": [
                 "gp3 : 5600GB"
               ],
@@ -1148,6 +1332,14 @@
                 "cassandra.compaction.min_threshold": 8,
                 "cassandra.compute_buffer_ratio": 1.32,
                 "cassandra.disk_iops_buffer_ratio": 1.11,
+                "cassandra.ebs_performance": {
+                  "annual_drive_cost_by_component": {
+                    "capacity": 688128.0,
+                    "iops": 99840.0,
+                    "throughput": 53760.0
+                  },
+                  "expected_throughput_mib_per_s_per_node": 160.95
+                },
                 "cassandra.ebs_volume_strategy": "existing_no_shrink",
                 "cassandra.heap.gib": 15.0,
                 "cassandra.heap.table.percent": 0.2,
@@ -1176,7 +1368,7 @@
               "instance": "r7a.xlarge"
             }
           ],
-          "total_annual_cost": 4085969.81
+          "total_annual_cost": 4353233.81
         }
       ]
     },
