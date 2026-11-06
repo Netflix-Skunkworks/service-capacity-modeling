@@ -203,15 +203,8 @@ def test_resized_plan_ranks_on_its_new_cost():
         assert interchangeable.plan.rank >= clusters.total_annual_cost
 
 
-@pytest.mark.parametrize(
-    "regret, fallback_count, node_count",
-    # A third family needs 6 nodes instead of 4, so 50% more cost: worth it
-    # only when a missing fallback costs more than that.
-    [(0.05, 2, 4), (1.0, 3, 6)],
-)
-def test_missing_fallback_regret_decides_whether_to_add_nodes(
-    regret, fallback_count, node_count
-):
+def _i4i_plan(**options):
+    # A third family needs 6 nodes instead of 4 for i4i.4xlarge: 50% more cost.
     plans = plan_interchangeable(
         planner,
         model_name=MODEL_NAME,
@@ -219,14 +212,26 @@ def test_missing_fallback_regret_decides_whether_to_add_nodes(
         region=REGION,
         desires=_desires(rps=5_000, state_gib=4_096, memory_buffer=False),
         extra_model_arguments=ARGS,
-        options=InterchangeableOptions(
-            max_fallback_types=3, missing_fallback_regret=regret
-        ),
+        options=InterchangeableOptions(max_fallback_types=3, **options),
         instance_families=FAMILIES,
         num_results=10_000,
         max_results_per_family=10_000,
     ).plans
-    chosen = next(p for p in plans if p.preferred_instance_type == "i4i.4xlarge")
+    return next((p for p in plans if p.preferred_instance_type == "i4i.4xlarge"), None)
+
+
+@pytest.mark.parametrize(
+    "max_fallback_cost, fallback_count, node_count",
+    [(0.2, 2, 4), (0.6, 3, 6)],
+)
+def test_fallbacks_stay_within_the_cost_budget(
+    max_fallback_cost, fallback_count, node_count
+):
+    chosen = _i4i_plan(max_fallback_cost=max_fallback_cost)
     assert chosen.single_type_node_count == 4
     assert len(chosen.fallback_instance_types) == fallback_count
     assert chosen.plan.candidate_clusters.regional[0].count == node_count
+
+
+def test_types_short_of_the_minimum_within_budget_are_dropped():
+    assert _i4i_plan(min_fallback_types=3, max_fallback_cost=0.2) is None

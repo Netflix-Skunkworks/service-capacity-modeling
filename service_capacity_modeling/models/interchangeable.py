@@ -21,10 +21,11 @@ Choosing fallbacks
 Fallbacks are the smallest serving size of each other family, ordered by the
 rank of their own single-type plans. Reaching another family can cost nodes, so
 for each preferred type the planner prices every fallback count up to
-``max_fallback_types``: the first layout, in the model's preference order, that
-reaches that count, re-sized and ranked by the model, plus
-``missing_fallback_regret`` for each fallback short of the maximum. The best
-rank wins. No family is preferred over another.
+``max_fallback_types`` at the first layout, in the model's preference order,
+that reaches it. It takes the most fallbacks that add at most
+``max_fallback_cost`` to the preferred type's own cost, and drops the
+preferred type if that is fewer than ``min_fallback_types``. Plans then rank as
+the model ranks them. No family is preferred over another.
 
 To remove the experiment, delete this module, the model adapters that subclass
 :class:`InterchangeableModel`, ``models/org/netflix/interchangeable_models.py``
@@ -42,12 +43,14 @@ from typing import Tuple
 
 from pydantic import BaseModel
 from pydantic import Field
+from pydantic import model_validator
 
 from service_capacity_modeling.capacity_planner import CapacityPlanner
 from service_capacity_modeling.capacity_planner import PlannerArguments
 from service_capacity_modeling.capacity_planner import _resolve_cluster_instances
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Lifecycle
 from service_capacity_modeling.models.utils import reduce_by_family
@@ -63,26 +66,37 @@ def planned_cluster(plan: CapacityPlan) -> ClusterCapacity:
 
 
 class InterchangeableOptions(BaseModel):
+    min_fallback_types: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        description="Fewest fallback types a plan must have. Preferred types "
+        "that cannot reach this within max_fallback_cost are left out.",
+    )
     max_fallback_types: int = Field(
         default=3,
         ge=1,
         le=5,
         description="Most fallback instance types to attach to one plan.",
     )
-    missing_fallback_regret: float = Field(
-        default=0.05,
+    max_fallback_cost: float = Field(
+        default=0.2,
         ge=0,
-        description="Rank penalty, as a fraction of the plan's rank, for each "
-        "fallback short of max_fallback_types. A plan adds nodes to reach "
-        "another family only when that costs less than this regret.",
+        description="Most the fallbacks may add to the preferred type's own "
+        "annual cost, as a fraction of it.",
     )
+
+    @model_validator(mode="after")
+    def _min_within_max(self) -> "InterchangeableOptions":
+        if self.min_fallback_types > self.max_fallback_types:
+            raise ValueError("min_fallback_types exceeds max_fallback_types")
+        return self
 
 
 class InterchangeablePlan(BaseModel):
     plan: CapacityPlan = Field(
         description="The layout holds on the preferred type and every "
-        "fallback type; costs assume the preferred type. The rank includes "
-        "missing_fallback_regret."
+        "fallback type; costs assume the preferred type."
     )
     preferred_instance_type: str
     fallback_instance_types: List[str] = Field(
@@ -144,6 +158,41 @@ InterchangeableModelFactory = Callable[
 ]
 
 
+def _smallest_by_family(
+    layout_count: int,
+    served: Dict[str, FrozenSet[int]],
+    instances: Dict[str, Instance],
+    rank: Dict[str, int],
+) -> List[Dict[str, str]]:
+    """The smallest serving size of each family, per layout index.
+
+    A second size of one family adds little protection: sizes of a family
+    share a hardware pool, so they tend to run short together.
+    """
+    smallest: List[Dict[str, str]] = [{} for _ in range(layout_count)]
+    for name in sorted(served, key=lambda n: (instances[n].cpu, rank[n])):
+        for i in served[name]:
+            smallest[i].setdefault(instances[name].family, name)
+    return smallest
+
+
+def _most_fallbacks_within_budget(
+    plan: CapacityPlan,
+    choices: List[Tuple[CapacityPlan, List[str]]],
+    options: InterchangeableOptions,
+) -> Optional[Tuple[CapacityPlan, List[str]]]:
+    """The choice with the most fallbacks, at least ``min_fallback_types``, that
+    adds at most ``max_fallback_cost`` to the preferred type's own plan."""
+    budget = plan.candidate_clusters.total_annual_cost * (1 + options.max_fallback_cost)
+    affordable = [
+        (p, f)
+        for p, f in choices
+        if len(f) >= options.min_fallback_types
+        and p.candidate_clusters.total_annual_cost <= budget
+    ]
+    return max(affordable, key=lambda c: len(c[1])) if affordable else None
+
+
 # pylint: disable-next=too-many-positional-arguments,too-many-locals
 def plan_interchangeable(
     planner: CapacityPlanner,
@@ -203,16 +252,9 @@ def plan_interchangeable(
         )
         for name in candidates
     }
-    # The smallest serving size of each family, per layout. A second size of
-    # one family adds little protection: sizes of a family share a hardware
-    # pool, so they tend to run short together.
-    smallest_by_family: List[Dict[str, str]] = [{} for _ in layouts]
-    for name in sorted(candidates, key=lambda n: (instances[n].cpu, rank[n])):
-        for i in served[name]:
-            smallest_by_family[i].setdefault(instances[name].family, name)
+    smallest_by_family = _smallest_by_family(len(layouts), served, instances, rank)
 
     target = options.max_fallback_types
-    regret = options.missing_fallback_regret
     revised: List[InterchangeablePlan] = []
     for name, plan in candidates.items():
         family = instances[name].family
@@ -234,12 +276,13 @@ def plan_interchangeable(
                 )
             if reach == target:
                 break
-        scored = [(p.rank * (1 + regret * (target - len(f))), p, f) for p, f in choices]
-        # Ties go to more fallbacks.
-        score, chosen, fallbacks = min(scored, key=lambda c: (c[0], -len(c[2])))
+        picked = _most_fallbacks_within_budget(plan, choices, options)
+        if picked is None:
+            continue
+        chosen, fallbacks = picked
         revised.append(
             InterchangeablePlan(
-                plan=chosen.model_copy(update={"rank": score}),
+                plan=chosen,
                 preferred_instance_type=name,
                 fallback_instance_types=fallbacks,
                 single_type_node_count=planned_cluster(plan).count,
