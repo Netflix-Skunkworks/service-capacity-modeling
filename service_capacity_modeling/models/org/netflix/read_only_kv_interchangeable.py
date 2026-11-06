@@ -17,6 +17,7 @@ on its own gets back the planner's layout.
 """
 
 import math
+from decimal import Decimal
 from typing import Any
 from typing import Dict
 from typing import List
@@ -62,7 +63,7 @@ def ppn_cap(problem: CapacityProblem) -> int:
     )
 
 
-class ReadOnlyKVInterchangeable(InterchangeableModel[ReadOnlyKVLayout]):
+class ReadOnlyKVInterchangeable(InterchangeableModel):
     def __init__(
         self,
         candidates: Dict[str, CapacityPlan],
@@ -167,10 +168,14 @@ class ReadOnlyKVInterchangeable(InterchangeableModel[ReadOnlyKVLayout]):
         clusters = plan.candidate_clusters.model_copy(
             update={
                 "regional": [resized],
-                "annual_costs": NflxReadOnlyKVCapacityModel.cluster_costs(
-                    service_type=NflxReadOnlyKVCapacityModel.service_name,
-                    regional_clusters=[resized],
-                ),
+                # model_copy skips validation, so convert to Decimal here.
+                "annual_costs": {
+                    k: Decimal(str(v))
+                    for k, v in NflxReadOnlyKVCapacityModel.cluster_costs(
+                        service_type=NflxReadOnlyKVCapacityModel.service_name,
+                        regional_clusters=[resized],
+                    ).items()
+                },
             }
         )
         # Regional memory scales with RF, as in the model's own plan.
