@@ -12,10 +12,14 @@ and a test of whether one instance type can serve one layout. The test must not
 depend on which other types share the cluster, which holds when every node gets
 the same work whatever its hardware (equal partitions, an equal token range).
 The types are then interchangeable: a mixed fleet serves a layout exactly when
-each of its types does, so the
-planner walks the layouts once and filters the types for each one instead of
-searching combinations of types. Models that place work in proportion to node
-capacity cannot satisfy this and should not register.
+each of its types does, so the planner walks the layouts once and filters the
+types for each one instead of searching combinations of types. Models that
+place work in proportion to node capacity cannot satisfy this and should not
+register.
+
+Most models need no adapter of their own: :class:`NodeCountAdapter` covers
+zonal models whose layout is a node count. A model writes its own adapter only
+when a node count does not describe what each node holds.
 
 Choosing fallbacks
 ------------------
@@ -28,16 +32,19 @@ that reaches it. It takes the most fallbacks that add at most
 preferred type if that is fewer than ``min_fallback_types``. Plans then rank as
 the model ranks them. No family is preferred over another.
 
-To remove the experiment, delete this module, the model adapters that subclass
+To remove the experiment, delete this module, the adapters that subclass
 :class:`InstanceFallbackAdapter`, ``models/org/netflix/instance_fallback_adapters.py``
 and their tests.
 """
 
+from collections.abc import Hashable
+from decimal import Decimal
 from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import FrozenSet
 from typing import List
+from typing import NamedTuple
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
@@ -54,6 +61,7 @@ from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Lifecycle
+from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models.utils import reduce_by_family
 
 # Large enough that the planner returns every single-type candidate.
@@ -159,6 +167,124 @@ InstanceFallbackAdapterFactory = Callable[
     [Dict[str, CapacityPlan], CapacityDesires, Dict[str, Any]],
     InstanceFallbackAdapter,
 ]
+
+
+class NodeCountLayout(NamedTuple):
+    zone_count: int
+    # Settings every node in the zone shares: the attached drive configuration
+    # (one launch template) and the model's shared cluster params.
+    shared: Tuple[Hashable, ...]
+
+
+class NodeCountAdapter(InstanceFallbackAdapter):
+    """The adapter for zonal models where a layout is just a node count.
+
+    It fits models that give every node in a zone an equal share of the work
+    (an equal token range, consistent hashing, balanced shards). A type whose
+    own plan has ``n`` nodes per zone then serves any larger count, since more
+    nodes only give each node less work, up to ``max_regional_size``. A count
+    beyond a type's own adds no type, so the candidates' own counts are the
+    only layouts that matter.
+
+    ``resize`` keeps the preferred type's cluster, changes its count and
+    re-prices it. Rank penalties keep the dollar value of the preferred type's
+    own plan, so the rank grows by exactly the added cost; penalties that
+    shrink with more nodes are slightly overstated.
+    """
+
+    # pylint: disable-next=too-many-arguments
+    def __init__(
+        self,
+        candidates: Dict[str, CapacityPlan],
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
+        *,
+        cluster_type: str,
+        max_regional_size: int,
+        shared_params: Sequence[str] = (),
+        allowed_count: Callable[[int], bool] = lambda count: True,
+    ) -> None:
+        super().__init__(candidates, desires, extra_model_arguments)
+        self.cluster_type = cluster_type
+        self.allowed_count = allowed_count
+        self.own: Dict[str, NodeCountLayout] = {}
+        self.max_zone_count: Dict[str, int] = {}
+        for name, plan in candidates.items():
+            zones = self._zones(plan)
+            cluster = zones[0]
+            self.own[name] = NodeCountLayout(
+                cluster.count,
+                (
+                    _drive_signature(cluster),
+                    *(cluster.cluster_params.get(key) for key in shared_params),
+                ),
+            )
+            self.max_zone_count[name] = max_regional_size // len(zones)
+
+    def _zones(self, plan: CapacityPlan) -> List[ZoneClusterCapacity]:
+        zones = [
+            c
+            for c in plan.candidate_clusters.zonal
+            if c.cluster_type == self.cluster_type
+        ]
+        assert zones, f"plan has no zonal {self.cluster_type} cluster"
+        return zones
+
+    def layouts(self) -> Sequence[NodeCountLayout]:
+        counts = {own.zone_count for own in self.own.values()}
+        shared = {own.shared for own in self.own.values()}
+        return sorted(
+            NodeCountLayout(count, s)
+            for count in counts
+            for s in shared
+            if self.allowed_count(count)
+        )
+
+    def serves(self, instance_name: str, layout: NodeCountLayout) -> bool:
+        own = self.own[instance_name]
+        return (
+            own.shared == layout.shared
+            and own.zone_count
+            <= layout.zone_count
+            <= self.max_zone_count[instance_name]
+            and self.allowed_count(layout.zone_count)
+        )
+
+    def resize(
+        self, plan: CapacityPlan, layout: NodeCountLayout, instance_names: Sequence[str]
+    ) -> CapacityPlan:
+        del instance_names
+        clusters = plan.candidate_clusters
+        zonal = [c.model_copy(deep=True) for c in clusters.zonal]
+        resized = [c for c in zonal if c.cluster_type == self.cluster_type]
+        for cluster in resized:
+            cluster.count = layout.zone_count
+        cost_key = f"{self.cluster_type}.zonal-clusters"
+        assert cost_key in clusters.annual_costs, cost_key
+        updated = clusters.model_copy(
+            update={
+                "zonal": zonal,
+                # model_copy skips validation, so convert to Decimal here.
+                "annual_costs": {
+                    **clusters.annual_costs,
+                    cost_key: Decimal(str(sum(c.annual_cost for c in resized))),
+                },
+            }
+        )
+        added = updated.total_annual_cost - clusters.total_annual_cost
+        return plan.model_copy(
+            update={"candidate_clusters": updated, "rank": plan.rank + added}
+        )
+
+
+def _drive_signature(cluster: ClusterCapacity) -> str:
+    if cluster.attached_drives:
+        return "attached:" + ",".join(
+            d.model_dump_json() for d in cluster.attached_drives
+        )
+    if cluster.instance.drive is not None:
+        return f"local:{cluster.instance.drive.drive_type}"
+    return "none"
 
 
 def _smallest_by_family(
