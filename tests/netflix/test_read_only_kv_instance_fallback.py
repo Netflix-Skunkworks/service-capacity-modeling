@@ -1,4 +1,4 @@
-"""Tests for read-only KV interchangeable capacity plans."""
+"""Tests for read-only KV instance fallback plans."""
 
 import itertools
 from typing import Dict
@@ -16,11 +16,13 @@ from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import QueryPattern
-from service_capacity_modeling.models.interchangeable import InterchangeableOptions
-from service_capacity_modeling.models.interchangeable import InterchangeablePlans
-from service_capacity_modeling.models.interchangeable import plan_interchangeable
-from service_capacity_modeling.models.org.netflix.interchangeable_models import (
-    INTERCHANGEABLE_MODELS,
+from service_capacity_modeling.models.instance_fallback import InstanceFallbackOptions
+from service_capacity_modeling.models.instance_fallback import InstanceFallbackPlans
+from service_capacity_modeling.models.instance_fallback import (
+    plan_with_instance_fallbacks,
+)
+from service_capacity_modeling.models.org.netflix.instance_fallback_adapters import (
+    INSTANCE_FALLBACK_ADAPTERS,
 )
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
     search_for_min_nodes,
@@ -28,8 +30,8 @@ from service_capacity_modeling.models.org.netflix.partition_aware_algorithm impo
 from service_capacity_modeling.models.org.netflix.read_only_kv import (
     NflxReadOnlyKVCapacityModel,
 )
-from service_capacity_modeling.models.org.netflix.read_only_kv_interchangeable import (
-    ReadOnlyKVInterchangeable,
+from service_capacity_modeling.models.org.netflix.read_only_kv_instance_fallback import (  # noqa: E501
+    ReadOnlyKVInstanceFallbackAdapter,
 )
 
 MODEL_NAME = "org.netflix.read-only-kv"
@@ -69,7 +71,7 @@ WORKLOADS = pytest.mark.parametrize(
 
 def _model(
     desires: CapacityDesires,
-) -> Tuple[Dict[str, CapacityPlan], ReadOnlyKVInterchangeable]:
+) -> Tuple[Dict[str, CapacityPlan], ReadOnlyKVInstanceFallbackAdapter]:
     candidates: Dict[str, CapacityPlan] = {}
     for plan in planner.plan_certain(
         model_name=MODEL_NAME,
@@ -80,18 +82,18 @@ def _model(
         max_results_per_family=10_000,
     ):
         candidates.setdefault(plan.candidate_clusters.regional[0].instance.name, plan)
-    return candidates, ReadOnlyKVInterchangeable(candidates, desires, ARGS)
+    return candidates, ReadOnlyKVInstanceFallbackAdapter(candidates, desires, ARGS)
 
 
-def _plans(desires: CapacityDesires, max_fallback_types: int) -> InterchangeablePlans:
-    return plan_interchangeable(
+def _plans(desires: CapacityDesires, max_fallback_types: int) -> InstanceFallbackPlans:
+    return plan_with_instance_fallbacks(
         planner,
         model_name=MODEL_NAME,
-        model_factory=INTERCHANGEABLE_MODELS[MODEL_NAME],
+        model_factory=INSTANCE_FALLBACK_ADAPTERS[MODEL_NAME],
         region=REGION,
         desires=desires,
         extra_model_arguments=ARGS,
-        options=InterchangeableOptions(max_fallback_types=max_fallback_types),
+        options=InstanceFallbackOptions(max_fallback_types=max_fallback_types),
         instance_families=FAMILIES,
         num_results=10,
     )
@@ -126,19 +128,19 @@ def test_layout_holds_on_every_listed_type(desires):
     _, model = _model(desires)
     result = _plans(desires, max_fallback_types=2)
     assert result.plans
-    for interchangeable in result.plans:
-        cluster = interchangeable.plan.candidate_clusters.regional[0]
+    for fallback_plan in result.plans:
+        cluster = fallback_plan.plan.candidate_clusters.regional[0]
         params = cluster.cluster_params
         ppn = params["read-only-kv.partitions_per_node"]
         rf = params["read-only-kv.replica_count"]
         n1 = params["read-only-kv.nodes_for_one_copy"]
         names = [
-            interchangeable.preferred_instance_type,
-            *interchangeable.fallback_instance_types,
+            fallback_plan.preferred_instance_type,
+            *fallback_plan.fallback_instance_types,
         ]
         families = {planner.instance(n, region=REGION).family for n in names}
         assert len(families) == len(names)
-        assert cluster.count >= interchangeable.single_type_node_count
+        assert cluster.count >= fallback_plan.single_type_node_count
         for name in names:
             # Checked against the planner's own limits for a fleet of only
             # this type, not against the adapter's serves().
@@ -162,14 +164,14 @@ def test_fallbacks_add_the_fewest_nodes_any_family_set_could(max_fallback_types)
     }
     by_name = {
         p.preferred_instance_type: p
-        for p in plan_interchangeable(
+        for p in plan_with_instance_fallbacks(
             planner,
             model_name=MODEL_NAME,
-            model_factory=INTERCHANGEABLE_MODELS[MODEL_NAME],
+            model_factory=INSTANCE_FALLBACK_ADAPTERS[MODEL_NAME],
             region=REGION,
             desires=DISK_ONLY,
             extra_model_arguments=ARGS,
-            options=InterchangeableOptions(max_fallback_types=max_fallback_types),
+            options=InstanceFallbackOptions(max_fallback_types=max_fallback_types),
             num_results=10_000,
             max_results_per_family=10_000,
         ).plans
@@ -193,26 +195,26 @@ def test_fallbacks_add_the_fewest_nodes_any_family_set_could(max_fallback_types)
 
 
 def test_one_fallback_per_family_up_to_the_limit():
-    for interchangeable in _plans(DISK_ONLY, max_fallback_types=3).plans:
-        assert len(interchangeable.fallback_instance_types) == 3
+    for fallback_plan in _plans(DISK_ONLY, max_fallback_types=3).plans:
+        assert len(fallback_plan.fallback_instance_types) == 3
 
 
 def test_resized_plan_ranks_on_its_new_cost():
-    for interchangeable in _plans(DISK_ONLY, max_fallback_types=2).plans:
-        clusters = interchangeable.plan.candidate_clusters
-        assert interchangeable.plan.rank >= clusters.total_annual_cost
+    for fallback_plan in _plans(DISK_ONLY, max_fallback_types=2).plans:
+        clusters = fallback_plan.plan.candidate_clusters
+        assert fallback_plan.plan.rank >= clusters.total_annual_cost
 
 
 def _i4i_plan(**options):
     # A third family needs 6 nodes instead of 4 for i4i.4xlarge: 50% more cost.
-    plans = plan_interchangeable(
+    plans = plan_with_instance_fallbacks(
         planner,
         model_name=MODEL_NAME,
-        model_factory=INTERCHANGEABLE_MODELS[MODEL_NAME],
+        model_factory=INSTANCE_FALLBACK_ADAPTERS[MODEL_NAME],
         region=REGION,
         desires=_desires(rps=5_000, state_gib=4_096, memory_buffer=False),
         extra_model_arguments=ARGS,
-        options=InterchangeableOptions(max_fallback_types=3, **options),
+        options=InstanceFallbackOptions(max_fallback_types=3, **options),
         instance_families=FAMILIES,
         num_results=10_000,
         max_results_per_family=10_000,
@@ -221,17 +223,17 @@ def _i4i_plan(**options):
 
 
 @pytest.mark.parametrize(
-    "max_fallback_cost, fallback_count, node_count",
+    "max_fallback_cost_increase, fallback_count, node_count",
     [(0.2, 2, 4), (0.6, 3, 6)],
 )
 def test_fallbacks_stay_within_the_cost_budget(
-    max_fallback_cost, fallback_count, node_count
+    max_fallback_cost_increase, fallback_count, node_count
 ):
-    chosen = _i4i_plan(max_fallback_cost=max_fallback_cost)
+    chosen = _i4i_plan(max_fallback_cost_increase=max_fallback_cost_increase)
     assert chosen.single_type_node_count == 4
     assert len(chosen.fallback_instance_types) == fallback_count
     assert chosen.plan.candidate_clusters.regional[0].count == node_count
 
 
 def test_types_short_of_the_minimum_within_budget_are_dropped():
-    assert _i4i_plan(min_fallback_types=3, max_fallback_cost=0.2) is None
+    assert _i4i_plan(min_fallback_types=3, max_fallback_cost_increase=0.2) is None

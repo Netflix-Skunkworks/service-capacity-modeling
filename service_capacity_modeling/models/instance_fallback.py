@@ -1,17 +1,18 @@
-"""EXPERIMENTAL: interchangeable capacity plans.
+"""EXPERIMENTAL: capacity plans with instance fallbacks.
 
-An interchangeable plan is one cluster layout that holds whether each node
+An instance fallback plan is one cluster layout that holds whether each node
 launches as the preferred instance type or as any of its fallback types, so an
 autoscaling group can launch the fallbacks, in order, when the preferred type
 runs short of capacity.
 
 Why the search is exact
 -----------------------
-A model supplies an :class:`InterchangeableModel`: the layouts it could deploy
+A model supplies an :class:`InstanceFallbackAdapter`: the layouts it could deploy
 and a test of whether one instance type can serve one layout. The test must not
 depend on which other types share the cluster, which holds when every node gets
 the same work whatever its hardware (equal partitions, an equal token range).
-A mixed fleet then serves a layout exactly when each of its types does, so the
+The types are then interchangeable: a mixed fleet serves a layout exactly when
+each of its types does, so the
 planner walks the layouts once and filters the types for each one instead of
 searching combinations of types. Models that place work in proportion to node
 capacity cannot satisfy this and should not register.
@@ -23,12 +24,12 @@ rank of their own single-type plans. Reaching another family can cost nodes, so
 for each preferred type the planner prices every fallback count up to
 ``max_fallback_types`` at the first layout, in the model's preference order,
 that reaches it. It takes the most fallbacks that add at most
-``max_fallback_cost`` to the preferred type's own cost, and drops the
+``max_fallback_cost_increase`` to the preferred type's own cost, and drops the
 preferred type if that is fewer than ``min_fallback_types``. Plans then rank as
 the model ranks them. No family is preferred over another.
 
 To remove the experiment, delete this module, the model adapters that subclass
-:class:`InterchangeableModel`, ``models/org/netflix/interchangeable_models.py``
+:class:`InstanceFallbackAdapter`, ``models/org/netflix/instance_fallback_adapters.py``
 and their tests.
 """
 
@@ -65,13 +66,14 @@ def planned_cluster(plan: CapacityPlan) -> ClusterCapacity:
     return (clusters.regional or clusters.zonal)[0]
 
 
-class InterchangeableOptions(BaseModel):
+class InstanceFallbackOptions(BaseModel):
     min_fallback_types: int = Field(
         default=1,
         ge=0,
         le=5,
         description="Fewest fallback types a plan must have. Preferred types "
-        "that cannot reach this within max_fallback_cost are left out.",
+        "that cannot reach this within max_fallback_cost_increase are left out; "
+        "0 keeps plans with no fallbacks.",
     )
     max_fallback_types: int = Field(
         default=3,
@@ -79,21 +81,22 @@ class InterchangeableOptions(BaseModel):
         le=5,
         description="Most fallback instance types to attach to one plan.",
     )
-    max_fallback_cost: float = Field(
+    max_fallback_cost_increase: float = Field(
         default=0.2,
         ge=0,
-        description="Most the fallbacks may add to the preferred type's own "
-        "annual cost, as a fraction of it.",
+        description="Most the plan's annual cost, priced at the preferred "
+        "type, may grow to fit the fallbacks, as a fraction of the preferred "
+        "type's own plan.",
     )
 
     @model_validator(mode="after")
-    def _min_within_max(self) -> "InterchangeableOptions":
+    def _min_within_max(self) -> "InstanceFallbackOptions":
         if self.min_fallback_types > self.max_fallback_types:
             raise ValueError("min_fallback_types exceeds max_fallback_types")
         return self
 
 
-class InterchangeablePlan(BaseModel):
+class InstanceFallbackPlan(BaseModel):
     plan: CapacityPlan = Field(
         description="The layout holds on the preferred type and every "
         "fallback type; costs assume the preferred type."
@@ -110,12 +113,12 @@ class InterchangeablePlan(BaseModel):
     )
 
 
-class InterchangeablePlans(BaseModel):
-    plans: List[InterchangeablePlan]
+class InstanceFallbackPlans(BaseModel):
+    plans: List[InstanceFallbackPlan]
 
 
-class InterchangeableModel:
-    """What a capacity model supplies to plan interchangeable instance types.
+class InstanceFallbackAdapter:
+    """What a capacity model supplies to plan instance fallbacks.
 
     ``candidates`` maps each instance type to its best single-type plan, best
     rank first. A layout is any hashable value the adapter chooses; the
@@ -152,9 +155,9 @@ class InterchangeableModel:
         raise NotImplementedError
 
 
-InterchangeableModelFactory = Callable[
+InstanceFallbackAdapterFactory = Callable[
     [Dict[str, CapacityPlan], CapacityDesires, Dict[str, Any]],
-    InterchangeableModel,
+    InstanceFallbackAdapter,
 ]
 
 
@@ -179,11 +182,13 @@ def _smallest_by_family(
 def _most_fallbacks_within_budget(
     plan: CapacityPlan,
     choices: List[Tuple[CapacityPlan, List[str]]],
-    options: InterchangeableOptions,
+    options: InstanceFallbackOptions,
 ) -> Optional[Tuple[CapacityPlan, List[str]]]:
     """The choice with the most fallbacks, at least ``min_fallback_types``, that
-    adds at most ``max_fallback_cost`` to the preferred type's own plan."""
-    budget = plan.candidate_clusters.total_annual_cost * (1 + options.max_fallback_cost)
+    adds at most ``max_fallback_cost_increase`` to the preferred type's own plan."""
+    budget = plan.candidate_clusters.total_annual_cost * (
+        1 + options.max_fallback_cost_increase
+    )
     affordable = [
         (p, f)
         for p, f in choices
@@ -194,20 +199,20 @@ def _most_fallbacks_within_budget(
 
 
 # pylint: disable-next=too-many-positional-arguments,too-many-locals
-def plan_interchangeable(
+def plan_with_instance_fallbacks(
     planner: CapacityPlanner,
     model_name: str,
-    model_factory: InterchangeableModelFactory,
+    model_factory: InstanceFallbackAdapterFactory,
     region: str,
     desires: CapacityDesires,
     extra_model_arguments: Dict[str, Any],
-    options: InterchangeableOptions,
+    options: InstanceFallbackOptions,
     lifecycles: Optional[Sequence[Lifecycle]] = None,
     instance_families: Optional[Sequence[str]] = None,
     num_results: int = 3,
     max_results_per_family: int = 1,
     num_regions: int = 3,
-) -> InterchangeablePlans:
+) -> InstanceFallbackPlans:
     """Plan a model and give each plan fallback instance types.
 
     Every single-type candidate is a possible fallback, including candidates
@@ -234,7 +239,7 @@ def plan_interchangeable(
     for plan in singles:
         candidates.setdefault(planned_cluster(plan).instance.name, plan)
     if not candidates:
-        return InterchangeablePlans(plans=[])
+        return InstanceFallbackPlans(plans=[])
 
     # Give the adapter the desires the model saw: the planner resolves current
     # clusters given only by instance name on its own copy of the desires.
@@ -255,7 +260,7 @@ def plan_interchangeable(
     smallest_by_family = _smallest_by_family(len(layouts), served, instances, rank)
 
     target = options.max_fallback_types
-    revised: List[InterchangeablePlan] = []
+    revised: List[InstanceFallbackPlan] = []
     for name, plan in candidates.items():
         family = instances[name].family
         # Each fallback count, priced at the first layout that reaches it.
@@ -281,7 +286,7 @@ def plan_interchangeable(
             continue
         chosen, fallbacks = picked
         revised.append(
-            InterchangeablePlan(
+            InstanceFallbackPlan(
                 plan=chosen,
                 preferred_instance_type=name,
                 fallback_instance_types=fallbacks,
@@ -296,4 +301,4 @@ def plan_interchangeable(
     kept = reduce_by_family(
         [p.plan for p in revised], max_results_per_family=max_results_per_family
     )[:num_results]
-    return InterchangeablePlans(plans=[by_plan[id(plan)] for plan in kept])
+    return InstanceFallbackPlans(plans=[by_plan[id(plan)] for plan in kept])
