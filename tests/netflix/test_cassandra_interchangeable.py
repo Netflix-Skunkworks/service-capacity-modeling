@@ -5,8 +5,11 @@ import pytest
 from service_capacity_modeling.capacity_planner import PlannerArguments, planner
 from service_capacity_modeling.interface import (
     CapacityDesires,
+    CurrentClusters,
+    CurrentZoneClusterCapacity,
     DataShape,
     QueryPattern,
+    certain_float,
     certain_int,
 )
 from service_capacity_modeling.models import RANK_PENALTIES
@@ -32,6 +35,19 @@ DESIRES = CapacityDesires(
     ),
     data_shape=DataShape(estimated_state_size_gib=certain_int(4_000)),
 )
+
+
+def _with_current(disk_utilization_gib):
+    """DESIRES with an existing i4i cluster given only by instance name."""
+    current = CurrentZoneClusterCapacity(
+        cluster_instance_name="i4i.4xlarge",
+        cluster_instance_count=certain_int(8),
+        cpu_utilization=certain_float(30),
+        disk_utilization_gib=certain_float(disk_utilization_gib),
+    )
+    return DESIRES.model_copy(
+        update={"current_clusters": CurrentClusters(zonal=[current] * 3)}
+    )
 
 
 def _singles(args, desires=DESIRES):
@@ -75,14 +91,21 @@ def test_single_type_preserves_planner_layout_and_rank(args):
         assert resized.rank == pytest.approx(original.rank)
 
 
-def test_returned_types_pass_planner_at_shared_count_and_configuration():
+# A current cluster adds the family-migration penalty, and one that reports no
+# disk usage makes the model estimate data size from the desires instead.
+@pytest.mark.parametrize(
+    "desires",
+    [DESIRES, _with_current(0), _with_current(300)],
+    ids=["new", "current-no-disk", "current-with-disk"],
+)
+def test_returned_types_pass_planner_at_shared_count_and_configuration(desires):
     args = {}
     result = plan_interchangeable(
         planner,
         MODEL,
         INTERCHANGEABLE_MODELS[MODEL],
         REGION,
-        DESIRES,
+        desires,
         args,
         InterchangeableOptions(max_fallback_types=2),
         instance_families=FAMILIES,
@@ -105,7 +128,7 @@ def test_returned_types_pass_planner_at_shared_count_and_configuration():
     for item in result.plans:
         cluster = item.plan.candidate_clusters.zonal[0]
         if cluster.count not in plans_by_count:
-            at_count = _singles({"required_cluster_size": cluster.count})
+            at_count = _singles({"required_cluster_size": cluster.count}, desires)
             plans_by_count[cluster.count] = {
                 p.candidate_clusters.zonal[0].instance.name: p for p in at_count
             }

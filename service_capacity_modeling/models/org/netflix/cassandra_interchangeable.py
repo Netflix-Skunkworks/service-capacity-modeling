@@ -132,7 +132,13 @@ class CassandraInterchangeable(InterchangeableModel[CassandraLayout]):
         resized = preferred.model_copy(deep=True)
         resized.count = layout.zone_count
         if not resized.attached_drives:
-            if self.current is not None and self.args.keyspace_topology is None:
+            # Same source the model uses: observed disk when the current
+            # cluster reports it, otherwise data size from the desires.
+            if (
+                self.current is not None
+                and self.current.disk_utilization_gib.mid > 0
+                and self.args.keyspace_topology is None
+            ):
                 scale = DerivedBuffers.for_components(
                     self.sized_desires.buffers.derived, [BufferComponent.disk]
                 ).scale
