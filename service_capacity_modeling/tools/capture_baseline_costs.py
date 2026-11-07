@@ -28,6 +28,13 @@ from pathlib import Path
 from typing import Any, cast
 
 from service_capacity_modeling.capacity_planner import planner
+from service_capacity_modeling.models.instance_fallback import (
+    InstanceFallbackOptions,
+    plan_with_instance_fallbacks,
+)
+from service_capacity_modeling.models.org.netflix.instance_fallback_adapters import (  # noqa: E501
+    INSTANCE_FALLBACK_ADAPTERS,
+)
 from service_capacity_modeling.interface import (
     AccessConsistency,
     Buffer,
@@ -1033,6 +1040,68 @@ UNCERTAIN_SCENARIOS: dict[str, dict[str, Any]] = {
     },
 }
 
+
+def capture_instance_fallbacks(
+    model_name: str,
+    region: str,
+    desires: CapacityDesires,
+    extra_args: dict[str, Any] | None = None,
+    scenario_name: str = "",
+) -> dict[str, Any]:
+    """Capture the experimental instance fallback plans with default options."""
+    try:
+        fallback_plans = plan_with_instance_fallbacks(
+            planner,
+            model_name,
+            INSTANCE_FALLBACK_ADAPTERS[model_name],
+            region,
+            desires,
+            extra_args or {},
+            InstanceFallbackOptions(),
+        ).plans
+    except (ValueError, KeyError, AttributeError) as e:
+        return _capture_error(scenario_name, e, model_name, region, desires)
+    return {
+        "scenario": scenario_name,
+        "model": model_name,
+        "region": region,
+        "service_tier": desires.service_tier,
+        "plans": [
+            {
+                "preferred_instance_type": p.preferred_instance_type,
+                "fallback_instance_types": p.fallback_instance_types,
+                "single_type_node_count": p.single_type_node_count,
+                **_capture_candidate(p.plan.candidate_clusters),
+            }
+            for p in fallback_plans
+        ],
+    }
+
+
+# One scenario per model with an instance fallback adapter.
+INSTANCE_FALLBACK_SCENARIOS: dict[str, dict[str, Any]] = {
+    name: SCENARIOS[name]
+    for name in (
+        "cassandra_small_high_qps_local",
+        "cassandra_high_writes_ebs",
+        "evcache_small_no_replication",
+        "read_only_kv_medium",
+    )
+}
+INSTANCE_FALLBACK_SCENARIOS["elasticsearch_data_small"] = {
+    "model": "org.netflix.elasticsearch.node",
+    "region": "us-east-1",
+    "desires": CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(10_000),
+            estimated_write_per_second=certain_int(5_000),
+        ),
+        data_shape=DataShape(estimated_state_size_gib=certain_int(2_000)),
+    ),
+    "extra_args": None,
+}
+
 if __name__ == "__main__":
     # Capture all scenarios
     results = []
@@ -1083,6 +1152,23 @@ if __name__ == "__main__":
     output_dir = Path(__file__).parent / "data"
     output_file = output_dir / "baseline_costs.json"
     _write_json_snapshot(output_file, results)
+
+    fallback_results = []
+    for scenario_name, scenario in INSTANCE_FALLBACK_SCENARIOS.items():
+        print(f"Capturing instance fallbacks: {scenario_name}...")
+        result = capture_instance_fallbacks(
+            scenario["model"],
+            scenario["region"],
+            scenario["desires"],
+            scenario["extra_args"],
+            scenario_name,
+        )
+        fallback_results.append(result)
+        if "error" in result:
+            print(f"  ERROR: {result['error']}")
+    _write_json_snapshot(
+        output_dir / "baseline_instance_fallback.json", fallback_results
+    )
 
     uncertain_output_file = output_dir / "baseline_uncertain.json"
     cost_preservation_stats = CostPreservationStats()
