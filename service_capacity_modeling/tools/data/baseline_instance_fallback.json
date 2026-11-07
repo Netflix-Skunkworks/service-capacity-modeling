@@ -1,0 +1,1359 @@
+[
+  {
+    "model": "org.netflix.cassandra",
+    "plans": [
+      {
+        "annual_costs": {
+          "cassandra.backup.s3-standard": 11954.83,
+          "cassandra.net.inter.region": 49492.22,
+          "cassandra.net.intra.region": 49492.22,
+          "cassandra.zonal-clusters": 28139.76
+        },
+        "clusters": [
+          {
+            "annual_cost": 9379.92,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.37,
+              "cassandra.heap.gib": 30.0,
+              "cassandra.heap.table.percent": 0.11,
+              "cassandra.heap.write.percent": 0.25,
+              "cassandra.keyspace.rf": 3,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 3.99,
+              "effective_disk_per_node_gib": 885,
+              "rank_penalties": {
+                "ephemeral_maintenance": 0.2
+              },
+              "required_nodes_by_type": {
+                "cluster_size": 3,
+                "cpu": 3,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 1,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "m6id.4xlarge"
+          },
+          {
+            "annual_cost": 9379.92,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.37,
+              "cassandra.heap.gib": 30.0,
+              "cassandra.heap.table.percent": 0.11,
+              "cassandra.heap.write.percent": 0.25,
+              "cassandra.keyspace.rf": 3,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 3.99,
+              "effective_disk_per_node_gib": 885,
+              "rank_penalties": {
+                "ephemeral_maintenance": 0.2
+              },
+              "required_nodes_by_type": {
+                "cluster_size": 3,
+                "cpu": 3,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 1,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "m6id.4xlarge"
+          },
+          {
+            "annual_cost": 9379.92,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.37,
+              "cassandra.heap.gib": 30.0,
+              "cassandra.heap.table.percent": 0.11,
+              "cassandra.heap.write.percent": 0.25,
+              "cassandra.keyspace.rf": 3,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 3.99,
+              "effective_disk_per_node_gib": 885,
+              "rank_penalties": {
+                "ephemeral_maintenance": 0.2
+              },
+              "required_nodes_by_type": {
+                "cluster_size": 3,
+                "cpu": 3,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 1,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "m6id.4xlarge"
+          }
+        ],
+        "fallback_instance_types": [
+          "c6id.8xlarge",
+          "c5d.9xlarge",
+          "m6idn.4xlarge"
+        ],
+        "preferred_instance_type": "m6id.4xlarge",
+        "single_type_node_count": 3,
+        "total_annual_cost": 139079.03
+      },
+      {
+        "annual_costs": {
+          "cassandra.backup.s3-standard": 11954.83,
+          "cassandra.net.inter.region": 49492.22,
+          "cassandra.net.intra.region": 49492.22,
+          "cassandra.zonal-clusters": 30829.98
+        },
+        "clusters": [
+          {
+            "annual_cost": 10276.66,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.37,
+              "cassandra.heap.gib": 30.0,
+              "cassandra.heap.table.percent": 0.11,
+              "cassandra.heap.write.percent": 0.25,
+              "cassandra.keyspace.rf": 3,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 3.99,
+              "effective_disk_per_node_gib": 1770,
+              "rank_penalties": {
+                "ephemeral_maintenance": 0.2
+              },
+              "required_nodes_by_type": {
+                "cluster_size": 2,
+                "cpu": 2,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 1,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 2,
+            "deployment": "zonal",
+            "instance": "c6id.8xlarge"
+          },
+          {
+            "annual_cost": 10276.66,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.37,
+              "cassandra.heap.gib": 30.0,
+              "cassandra.heap.table.percent": 0.11,
+              "cassandra.heap.write.percent": 0.25,
+              "cassandra.keyspace.rf": 3,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 3.99,
+              "effective_disk_per_node_gib": 1770,
+              "rank_penalties": {
+                "ephemeral_maintenance": 0.2
+              },
+              "required_nodes_by_type": {
+                "cluster_size": 2,
+                "cpu": 2,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 1,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 2,
+            "deployment": "zonal",
+            "instance": "c6id.8xlarge"
+          },
+          {
+            "annual_cost": 10276.66,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.37,
+              "cassandra.heap.gib": 30.0,
+              "cassandra.heap.table.percent": 0.11,
+              "cassandra.heap.write.percent": 0.25,
+              "cassandra.keyspace.rf": 3,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 3.99,
+              "effective_disk_per_node_gib": 1770,
+              "rank_penalties": {
+                "ephemeral_maintenance": 0.2
+              },
+              "required_nodes_by_type": {
+                "cluster_size": 2,
+                "cpu": 2,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 1,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 2,
+            "deployment": "zonal",
+            "instance": "c6id.8xlarge"
+          }
+        ],
+        "fallback_instance_types": [
+          "c5d.9xlarge",
+          "m5d.8xlarge",
+          "m6id.8xlarge"
+        ],
+        "preferred_instance_type": "c6id.8xlarge",
+        "single_type_node_count": 2,
+        "total_annual_cost": 141769.25
+      },
+      {
+        "annual_costs": {
+          "cassandra.backup.s3-standard": 11954.83,
+          "cassandra.net.inter.region": 49492.22,
+          "cassandra.net.intra.region": 49492.22,
+          "cassandra.zonal-clusters": 31262.07
+        },
+        "clusters": [
+          {
+            "annual_cost": 10420.69,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.37,
+              "cassandra.heap.gib": 15.0,
+              "cassandra.heap.table.percent": 0.11,
+              "cassandra.heap.write.percent": 0.25,
+              "cassandra.keyspace.rf": 3,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 3.99,
+              "effective_disk_per_node_gib": 280,
+              "rank_penalties": {
+                "ephemeral_maintenance": 0.2
+              },
+              "required_nodes_by_type": {
+                "cluster_size": 7,
+                "cpu": 7,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 2,
+                "min_count": 2,
+                "network": 2
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 7,
+            "deployment": "zonal",
+            "instance": "m5d.2xlarge"
+          },
+          {
+            "annual_cost": 10420.69,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.37,
+              "cassandra.heap.gib": 15.0,
+              "cassandra.heap.table.percent": 0.11,
+              "cassandra.heap.write.percent": 0.25,
+              "cassandra.keyspace.rf": 3,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 3.99,
+              "effective_disk_per_node_gib": 280,
+              "rank_penalties": {
+                "ephemeral_maintenance": 0.2
+              },
+              "required_nodes_by_type": {
+                "cluster_size": 7,
+                "cpu": 7,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 2,
+                "min_count": 2,
+                "network": 2
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 7,
+            "deployment": "zonal",
+            "instance": "m5d.2xlarge"
+          },
+          {
+            "annual_cost": 10420.69,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.37,
+              "cassandra.heap.gib": 15.0,
+              "cassandra.heap.table.percent": 0.11,
+              "cassandra.heap.write.percent": 0.25,
+              "cassandra.keyspace.rf": 3,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 3.99,
+              "effective_disk_per_node_gib": 280,
+              "rank_penalties": {
+                "ephemeral_maintenance": 0.2
+              },
+              "required_nodes_by_type": {
+                "cluster_size": 7,
+                "cpu": 7,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 2,
+                "min_count": 2,
+                "network": 2
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 7,
+            "deployment": "zonal",
+            "instance": "m5d.2xlarge"
+          }
+        ],
+        "fallback_instance_types": [
+          "c5d.4xlarge",
+          "c6id.4xlarge",
+          "m6id.2xlarge"
+        ],
+        "preferred_instance_type": "m5d.2xlarge",
+        "single_type_node_count": 7,
+        "total_annual_cost": 142201.34
+      }
+    ],
+    "region": "us-east-1",
+    "scenario": "cassandra_small_high_qps_local",
+    "service_tier": 1
+  },
+  {
+    "model": "org.netflix.cassandra",
+    "plans": [
+      {
+        "annual_costs": {
+          "cassandra.backup.s3-standard": 59823.56,
+          "cassandra.net.inter.region": 247461.09,
+          "cassandra.net.intra.region": 123730.54,
+          "cassandra.zonal-clusters": 61278.03
+        },
+        "clusters": [
+          {
+            "annual_cost": 20426.01,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.33,
+              "cassandra.disk_iops_buffer_ratio": 1.11,
+              "cassandra.ebs_performance": {
+                "annual_drive_cost_by_component": {
+                  "capacity": 288.0,
+                  "iops": 2340.0,
+                  "throughput": 1260.0
+                },
+                "expected_throughput_mib_per_s_per_node": 192.49
+              },
+              "cassandra.ebs_volume_strategy": "sampled_demand",
+              "cassandra.heap.gib": 30.0,
+              "cassandra.heap.table.percent": 0.2,
+              "cassandra.heap.write.percent": 0.5,
+              "cassandra.keyspace.rf": 2,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 1.82,
+              "effective_disk_per_node_gib": 2800,
+              "required_nodes_by_type": {
+                "cluster_size": 3,
+                "cpu": 3,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 3,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "c7a.8xlarge"
+          },
+          {
+            "annual_cost": 20426.01,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.33,
+              "cassandra.disk_iops_buffer_ratio": 1.11,
+              "cassandra.ebs_performance": {
+                "annual_drive_cost_by_component": {
+                  "capacity": 288.0,
+                  "iops": 2340.0,
+                  "throughput": 1260.0
+                },
+                "expected_throughput_mib_per_s_per_node": 192.49
+              },
+              "cassandra.ebs_volume_strategy": "sampled_demand",
+              "cassandra.heap.gib": 30.0,
+              "cassandra.heap.table.percent": 0.2,
+              "cassandra.heap.write.percent": 0.5,
+              "cassandra.keyspace.rf": 2,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 1.82,
+              "effective_disk_per_node_gib": 2800,
+              "required_nodes_by_type": {
+                "cluster_size": 3,
+                "cpu": 3,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 3,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "c7a.8xlarge"
+          },
+          {
+            "annual_cost": 20426.01,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.33,
+              "cassandra.disk_iops_buffer_ratio": 1.11,
+              "cassandra.ebs_performance": {
+                "annual_drive_cost_by_component": {
+                  "capacity": 288.0,
+                  "iops": 2340.0,
+                  "throughput": 1260.0
+                },
+                "expected_throughput_mib_per_s_per_node": 192.49
+              },
+              "cassandra.ebs_volume_strategy": "sampled_demand",
+              "cassandra.heap.gib": 30.0,
+              "cassandra.heap.table.percent": 0.2,
+              "cassandra.heap.write.percent": 0.5,
+              "cassandra.keyspace.rf": 2,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 1.82,
+              "effective_disk_per_node_gib": 2800,
+              "required_nodes_by_type": {
+                "cluster_size": 3,
+                "cpu": 3,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 3,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "c7a.8xlarge"
+          }
+        ],
+        "fallback_instance_types": [
+          "c8a.8xlarge",
+          "m7a.8xlarge",
+          "m8a.8xlarge"
+        ],
+        "preferred_instance_type": "c7a.8xlarge",
+        "single_type_node_count": 3,
+        "total_annual_cost": 492293.22
+      },
+      {
+        "annual_costs": {
+          "cassandra.backup.s3-standard": 59823.56,
+          "cassandra.net.inter.region": 247461.09,
+          "cassandra.net.intra.region": 123730.54,
+          "cassandra.zonal-clusters": 63756.72
+        },
+        "clusters": [
+          {
+            "annual_cost": 21252.24,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.33,
+              "cassandra.disk_iops_buffer_ratio": 1.11,
+              "cassandra.ebs_performance": {
+                "annual_drive_cost_by_component": {
+                  "capacity": 288.0,
+                  "iops": 2340.0,
+                  "throughput": 1260.0
+                },
+                "expected_throughput_mib_per_s_per_node": 192.49
+              },
+              "cassandra.ebs_volume_strategy": "sampled_demand",
+              "cassandra.heap.gib": 30.0,
+              "cassandra.heap.table.percent": 0.2,
+              "cassandra.heap.write.percent": 0.5,
+              "cassandra.keyspace.rf": 2,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 1.82,
+              "effective_disk_per_node_gib": 2800,
+              "required_nodes_by_type": {
+                "cluster_size": 3,
+                "cpu": 3,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 3,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "c8a.8xlarge"
+          },
+          {
+            "annual_cost": 21252.24,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.33,
+              "cassandra.disk_iops_buffer_ratio": 1.11,
+              "cassandra.ebs_performance": {
+                "annual_drive_cost_by_component": {
+                  "capacity": 288.0,
+                  "iops": 2340.0,
+                  "throughput": 1260.0
+                },
+                "expected_throughput_mib_per_s_per_node": 192.49
+              },
+              "cassandra.ebs_volume_strategy": "sampled_demand",
+              "cassandra.heap.gib": 30.0,
+              "cassandra.heap.table.percent": 0.2,
+              "cassandra.heap.write.percent": 0.5,
+              "cassandra.keyspace.rf": 2,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 1.82,
+              "effective_disk_per_node_gib": 2800,
+              "required_nodes_by_type": {
+                "cluster_size": 3,
+                "cpu": 3,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 3,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "c8a.8xlarge"
+          },
+          {
+            "annual_cost": 21252.24,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.33,
+              "cassandra.disk_iops_buffer_ratio": 1.11,
+              "cassandra.ebs_performance": {
+                "annual_drive_cost_by_component": {
+                  "capacity": 288.0,
+                  "iops": 2340.0,
+                  "throughput": 1260.0
+                },
+                "expected_throughput_mib_per_s_per_node": 192.49
+              },
+              "cassandra.ebs_volume_strategy": "sampled_demand",
+              "cassandra.heap.gib": 30.0,
+              "cassandra.heap.table.percent": 0.2,
+              "cassandra.heap.write.percent": 0.5,
+              "cassandra.keyspace.rf": 2,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 1.82,
+              "effective_disk_per_node_gib": 2800,
+              "required_nodes_by_type": {
+                "cluster_size": 3,
+                "cpu": 3,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 3,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "c8a.8xlarge"
+          }
+        ],
+        "fallback_instance_types": [
+          "c7a.8xlarge",
+          "m7a.8xlarge",
+          "m8a.8xlarge"
+        ],
+        "preferred_instance_type": "c8a.8xlarge",
+        "single_type_node_count": 3,
+        "total_annual_cost": 494771.91
+      },
+      {
+        "annual_costs": {
+          "cassandra.backup.s3-standard": 59823.56,
+          "cassandra.net.inter.region": 247461.09,
+          "cassandra.net.intra.region": 123730.54,
+          "cassandra.zonal-clusters": 67549.95
+        },
+        "clusters": [
+          {
+            "annual_cost": 22516.65,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.33,
+              "cassandra.disk_iops_buffer_ratio": 1.11,
+              "cassandra.ebs_performance": {
+                "annual_drive_cost_by_component": {
+                  "capacity": 480.0,
+                  "iops": 3900.0,
+                  "throughput": 2100.0
+                },
+                "expected_throughput_mib_per_s_per_node": 115.54
+              },
+              "cassandra.ebs_volume_strategy": "sampled_demand",
+              "cassandra.heap.gib": 30.0,
+              "cassandra.heap.table.percent": 0.2,
+              "cassandra.heap.write.percent": 0.5,
+              "cassandra.keyspace.rf": 2,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 1.82,
+              "effective_disk_per_node_gib": 2800,
+              "required_nodes_by_type": {
+                "cluster_size": 5,
+                "cpu": 5,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 3,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 5,
+            "deployment": "zonal",
+            "instance": "m7a.4xlarge"
+          },
+          {
+            "annual_cost": 22516.65,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.33,
+              "cassandra.disk_iops_buffer_ratio": 1.11,
+              "cassandra.ebs_performance": {
+                "annual_drive_cost_by_component": {
+                  "capacity": 480.0,
+                  "iops": 3900.0,
+                  "throughput": 2100.0
+                },
+                "expected_throughput_mib_per_s_per_node": 115.54
+              },
+              "cassandra.ebs_volume_strategy": "sampled_demand",
+              "cassandra.heap.gib": 30.0,
+              "cassandra.heap.table.percent": 0.2,
+              "cassandra.heap.write.percent": 0.5,
+              "cassandra.keyspace.rf": 2,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 1.82,
+              "effective_disk_per_node_gib": 2800,
+              "required_nodes_by_type": {
+                "cluster_size": 5,
+                "cpu": 5,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 3,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 5,
+            "deployment": "zonal",
+            "instance": "m7a.4xlarge"
+          },
+          {
+            "annual_cost": 22516.65,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4,
+              "cassandra.compute_buffer_ratio": 1.33,
+              "cassandra.disk_iops_buffer_ratio": 1.11,
+              "cassandra.ebs_performance": {
+                "annual_drive_cost_by_component": {
+                  "capacity": 480.0,
+                  "iops": 3900.0,
+                  "throughput": 2100.0
+                },
+                "expected_throughput_mib_per_s_per_node": 115.54
+              },
+              "cassandra.ebs_volume_strategy": "sampled_demand",
+              "cassandra.heap.gib": 30.0,
+              "cassandra.heap.table.percent": 0.2,
+              "cassandra.heap.write.percent": 0.5,
+              "cassandra.keyspace.rf": 2,
+              "cassandra.read_io_per_lcs_level": 1.8,
+              "cassandra.storage_buffer_ratio": 1.82,
+              "effective_disk_per_node_gib": 2800,
+              "required_nodes_by_type": {
+                "cluster_size": 5,
+                "cpu": 5,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 3,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "cassandra",
+            "count": 5,
+            "deployment": "zonal",
+            "instance": "m7a.4xlarge"
+          }
+        ],
+        "fallback_instance_types": [
+          "c7a.8xlarge",
+          "c8a.8xlarge",
+          "m8a.4xlarge"
+        ],
+        "preferred_instance_type": "m7a.4xlarge",
+        "single_type_node_count": 5,
+        "total_annual_cost": 498565.14
+      }
+    ],
+    "region": "us-east-1",
+    "scenario": "cassandra_high_writes_ebs",
+    "service_tier": 1
+  },
+  {
+    "model": "org.netflix.evcache",
+    "plans": [
+      {
+        "annual_costs": {
+          "evcache.zonal-clusters": 35360.64
+        },
+        "clusters": [
+          {
+            "annual_cost": 11786.88,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 16384,
+              "evcache.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 14,
+                "cpu": 14,
+                "disk_capacity": 0,
+                "disk_iops": 0,
+                "memory": 2,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "evcache",
+            "count": 14,
+            "deployment": "zonal",
+            "instance": "m8a.xlarge"
+          },
+          {
+            "annual_cost": 11786.88,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 16384,
+              "evcache.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 14,
+                "cpu": 14,
+                "disk_capacity": 0,
+                "disk_iops": 0,
+                "memory": 2,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "evcache",
+            "count": 14,
+            "deployment": "zonal",
+            "instance": "m8a.xlarge"
+          },
+          {
+            "annual_cost": 11786.88,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 16384,
+              "evcache.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 14,
+                "cpu": 14,
+                "disk_capacity": 0,
+                "disk_iops": 0,
+                "memory": 2,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "evcache",
+            "count": 14,
+            "deployment": "zonal",
+            "instance": "m8a.xlarge"
+          }
+        ],
+        "fallback_instance_types": [
+          "c6a.2xlarge",
+          "c6i.2xlarge",
+          "r8a.xlarge"
+        ],
+        "preferred_instance_type": "m8a.xlarge",
+        "single_type_node_count": 14,
+        "total_annual_cost": 35360.64
+      },
+      {
+        "annual_costs": {
+          "evcache.zonal-clusters": 36075.15
+        },
+        "clusters": [
+          {
+            "annual_cost": 12025.05,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 16384,
+              "evcache.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 15,
+                "cpu": 15,
+                "disk_capacity": 0,
+                "disk_iops": 0,
+                "memory": 2,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "evcache",
+            "count": 15,
+            "deployment": "zonal",
+            "instance": "m7a.xlarge"
+          },
+          {
+            "annual_cost": 12025.05,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 16384,
+              "evcache.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 15,
+                "cpu": 15,
+                "disk_capacity": 0,
+                "disk_iops": 0,
+                "memory": 2,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "evcache",
+            "count": 15,
+            "deployment": "zonal",
+            "instance": "m7a.xlarge"
+          },
+          {
+            "annual_cost": 12025.05,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 16384,
+              "evcache.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 15,
+                "cpu": 15,
+                "disk_capacity": 0,
+                "disk_iops": 0,
+                "memory": 2,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "evcache",
+            "count": 15,
+            "deployment": "zonal",
+            "instance": "m7a.xlarge"
+          }
+        ],
+        "fallback_instance_types": [
+          "m8a.xlarge",
+          "c6a.2xlarge",
+          "c6i.2xlarge"
+        ],
+        "preferred_instance_type": "m7a.xlarge",
+        "single_type_node_count": 15,
+        "total_annual_cost": 36075.15
+      },
+      {
+        "annual_costs": {
+          "evcache.zonal-clusters": 40053.0
+        },
+        "clusters": [
+          {
+            "annual_cost": 13351.0,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 16384,
+              "evcache.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 13,
+                "cpu": 13,
+                "disk_capacity": 0,
+                "disk_iops": 0,
+                "memory": 2,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "evcache",
+            "count": 13,
+            "deployment": "zonal",
+            "instance": "c6a.2xlarge"
+          },
+          {
+            "annual_cost": 13351.0,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 16384,
+              "evcache.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 13,
+                "cpu": 13,
+                "disk_capacity": 0,
+                "disk_iops": 0,
+                "memory": 2,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "evcache",
+            "count": 13,
+            "deployment": "zonal",
+            "instance": "c6a.2xlarge"
+          },
+          {
+            "annual_cost": 13351.0,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 16384,
+              "evcache.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 13,
+                "cpu": 13,
+                "disk_capacity": 0,
+                "disk_iops": 0,
+                "memory": 2,
+                "min_count": 2,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "evcache",
+            "count": 13,
+            "deployment": "zonal",
+            "instance": "c6a.2xlarge"
+          }
+        ],
+        "fallback_instance_types": [
+          "c6i.2xlarge",
+          "m6a.2xlarge",
+          "c7i.2xlarge"
+        ],
+        "preferred_instance_type": "c6a.2xlarge",
+        "single_type_node_count": 13,
+        "total_annual_cost": 40053.0
+      }
+    ],
+    "region": "us-east-1",
+    "scenario": "evcache_small_no_replication",
+    "service_tier": 1
+  },
+  {
+    "model": "org.netflix.read-only-kv",
+    "plans": [
+      {
+        "annual_costs": {
+          "read-only-kv.regional-clusters": 14523.96
+        },
+        "clusters": [
+          {
+            "annual_cost": 14523.96,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 873,
+              "read-only-kv.min_replica_count": 3,
+              "read-only-kv.nodes_for_cpu": 12,
+              "read-only-kv.nodes_for_one_copy": 2,
+              "read-only-kv.partitions_per_node": 4,
+              "read-only-kv.replica_count": 6,
+              "read-only-kv.total_num_partitions": 8
+            },
+            "cluster_type": "read-only-kv",
+            "count": 12,
+            "deployment": "regional",
+            "instance": "i4i.xlarge"
+          }
+        ],
+        "fallback_instance_types": [
+          "c6id.4xlarge",
+          "i7i.xlarge",
+          "m6id.4xlarge"
+        ],
+        "preferred_instance_type": "i4i.xlarge",
+        "single_type_node_count": 12,
+        "total_annual_cost": 14523.96
+      },
+      {
+        "annual_costs": {
+          "read-only-kv.regional-clusters": 15414.0
+        },
+        "clusters": [
+          {
+            "annual_cost": 15414.0,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 885,
+              "read-only-kv.min_replica_count": 3,
+              "read-only-kv.nodes_for_cpu": 3,
+              "read-only-kv.nodes_for_one_copy": 2,
+              "read-only-kv.partitions_per_node": 4,
+              "read-only-kv.replica_count": 3,
+              "read-only-kv.total_num_partitions": 8
+            },
+            "cluster_type": "read-only-kv",
+            "count": 6,
+            "deployment": "regional",
+            "instance": "c6id.4xlarge"
+          }
+        ],
+        "fallback_instance_types": [
+          "i4i.2xlarge",
+          "i7i.2xlarge",
+          "m6id.4xlarge"
+        ],
+        "preferred_instance_type": "c6id.4xlarge",
+        "single_type_node_count": 6,
+        "total_annual_cost": 15414.0
+      },
+      {
+        "annual_costs": {
+          "read-only-kv.regional-clusters": 15978.24
+        },
+        "clusters": [
+          {
+            "annual_cost": 15978.24,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 1746,
+              "read-only-kv.min_replica_count": 3,
+              "read-only-kv.nodes_for_cpu": 6,
+              "read-only-kv.nodes_for_one_copy": 1,
+              "read-only-kv.partitions_per_node": 8,
+              "read-only-kv.replica_count": 6,
+              "read-only-kv.total_num_partitions": 8
+            },
+            "cluster_type": "read-only-kv",
+            "count": 6,
+            "deployment": "regional",
+            "instance": "i7i.2xlarge"
+          }
+        ],
+        "fallback_instance_types": [
+          "i4i.2xlarge",
+          "c6id.8xlarge",
+          "i7ie.2xlarge"
+        ],
+        "preferred_instance_type": "i7i.2xlarge",
+        "single_type_node_count": 6,
+        "total_annual_cost": 15978.24
+      }
+    ],
+    "region": "us-east-1",
+    "scenario": "read_only_kv_medium",
+    "service_tier": 1
+  },
+  {
+    "model": "org.netflix.elasticsearch.node",
+    "plans": [
+      {
+        "annual_costs": {
+          "elasticsearch-data.zonal-clusters": 8997.0
+        },
+        "clusters": [
+          {
+            "annual_cost": 2999.0,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 4657,
+              "elasticsearch.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 1,
+                "cpu": 1,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 1,
+                "min_count": 1,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "elasticsearch-data",
+            "count": 1,
+            "deployment": "zonal",
+            "instance": "i3en.2xlarge"
+          },
+          {
+            "annual_cost": 2999.0,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 4657,
+              "elasticsearch.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 1,
+                "cpu": 1,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 1,
+                "min_count": 1,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "elasticsearch-data",
+            "count": 1,
+            "deployment": "zonal",
+            "instance": "i3en.2xlarge"
+          },
+          {
+            "annual_cost": 2999.0,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 4657,
+              "elasticsearch.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 1,
+                "cpu": 1,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 1,
+                "min_count": 1,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "elasticsearch-data",
+            "count": 1,
+            "deployment": "zonal",
+            "instance": "i3en.2xlarge"
+          }
+        ],
+        "fallback_instance_types": [
+          "i7ie.2xlarge",
+          "i3.4xlarge",
+          "i4i.4xlarge"
+        ],
+        "preferred_instance_type": "i3en.2xlarge",
+        "single_type_node_count": 1,
+        "total_annual_cost": 8997.0
+      },
+      {
+        "annual_costs": {
+          "elasticsearch-data.zonal-clusters": 10346.43
+        },
+        "clusters": [
+          {
+            "annual_cost": 3448.81,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 4657,
+              "elasticsearch.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 1,
+                "cpu": 1,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 1,
+                "min_count": 1,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "elasticsearch-data",
+            "count": 1,
+            "deployment": "zonal",
+            "instance": "i7ie.2xlarge"
+          },
+          {
+            "annual_cost": 3448.81,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 4657,
+              "elasticsearch.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 1,
+                "cpu": 1,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 1,
+                "min_count": 1,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "elasticsearch-data",
+            "count": 1,
+            "deployment": "zonal",
+            "instance": "i7ie.2xlarge"
+          },
+          {
+            "annual_cost": 3448.81,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 4657,
+              "elasticsearch.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 1,
+                "cpu": 1,
+                "disk_capacity": 1,
+                "disk_iops": 0,
+                "memory": 1,
+                "min_count": 1,
+                "network": 1
+              },
+              "resource_bottleneck": "cpu"
+            },
+            "cluster_type": "elasticsearch-data",
+            "count": 1,
+            "deployment": "zonal",
+            "instance": "i7ie.2xlarge"
+          }
+        ],
+        "fallback_instance_types": [
+          "i3en.2xlarge",
+          "i3.4xlarge",
+          "i4i.4xlarge"
+        ],
+        "preferred_instance_type": "i7ie.2xlarge",
+        "single_type_node_count": 1,
+        "total_annual_cost": 10346.43
+      },
+      {
+        "annual_costs": {
+          "elasticsearch-data.zonal-clusters": 13872.0
+        },
+        "clusters": [
+          {
+            "annual_cost": 4624.0,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 885,
+              "elasticsearch.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 4,
+                "cpu": 3,
+                "disk_capacity": 4,
+                "disk_iops": 0,
+                "memory": 2,
+                "min_count": 4,
+                "network": 1
+              },
+              "resource_bottleneck": "disk_capacity"
+            },
+            "cluster_type": "elasticsearch-data",
+            "count": 4,
+            "deployment": "zonal",
+            "instance": "i3.xlarge"
+          },
+          {
+            "annual_cost": 4624.0,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 885,
+              "elasticsearch.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 4,
+                "cpu": 3,
+                "disk_capacity": 4,
+                "disk_iops": 0,
+                "memory": 2,
+                "min_count": 4,
+                "network": 1
+              },
+              "resource_bottleneck": "disk_capacity"
+            },
+            "cluster_type": "elasticsearch-data",
+            "count": 4,
+            "deployment": "zonal",
+            "instance": "i3.xlarge"
+          },
+          {
+            "annual_cost": 4624.0,
+            "cluster_params": {
+              "effective_disk_per_node_gib": 885,
+              "elasticsearch.copies": 3,
+              "required_nodes_by_type": {
+                "cluster_size": 4,
+                "cpu": 3,
+                "disk_capacity": 4,
+                "disk_iops": 0,
+                "memory": 2,
+                "min_count": 4,
+                "network": 1
+              },
+              "resource_bottleneck": "disk_capacity"
+            },
+            "cluster_type": "elasticsearch-data",
+            "count": 4,
+            "deployment": "zonal",
+            "instance": "i3.xlarge"
+          }
+        ],
+        "fallback_instance_types": [
+          "i3en.xlarge",
+          "i7ie.xlarge",
+          "i4i.xlarge"
+        ],
+        "preferred_instance_type": "i3.xlarge",
+        "single_type_node_count": 4,
+        "total_annual_cost": 13872.0
+      }
+    ],
+    "region": "us-east-1",
+    "scenario": "elasticsearch_data_small",
+    "service_tier": 1
+  }
+]
