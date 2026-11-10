@@ -48,6 +48,7 @@ from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.common import required_cluster_size_excuse
 from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -333,6 +334,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     min_instance_memory_gib: int = 12,
     cross_region_replication: Replication = Replication.none,
     different_family_regret: float = 0.0,
+    required_cluster_size: Optional[int] = None,
 ) -> Union[CapacityPlan, Excuse, None]:
     # EVCache doesn't like to deploy on single CPU instances
     if instance.cpu < 2:
@@ -457,10 +459,17 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         needed_memory_gib=requirement.mem_gib.mid,
         reserve_memory=reserve_memory,
         needed_network_mbps=requirement.network_mbps.mid,
-        min_count=max(min_count_for_data, min_count_for_cluster),
+        min_count=max(
+            min_count_for_data, min_count_for_cluster, required_cluster_size or 0
+        ),
         adjusted_disk_io_needed=adjusted_disk_io_needed,
         read_write_ratio=read_write_ratio,
     )
+    excuse = required_cluster_size_excuse(
+        instance, drive, cluster.count, required_cluster_size
+    )
+    if excuse is not None:
+        return excuse
     # Communicate to the actual provision that if we want reduced RF
     params = {
         "evcache.copies": copies_per_region,
@@ -596,6 +605,10 @@ class NflxEVCacheArguments(BaseModel):
             "EVCache cluster can be identified (see cluster_type)."
         ),
     )
+    required_cluster_size: Optional[int] = Field(
+        default=None,
+        description="Require zonal clusters to be this size (force vertical scaling)",
+    )
 
 
 class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
@@ -699,6 +712,7 @@ class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
             min_instance_memory_gib=min_instance_memory_gib,
             cross_region_replication=cross_region_replication,
             different_family_regret=different_family_regret,
+            required_cluster_size=extra_model_arguments.get("required_cluster_size"),
             context=context,
         )
 

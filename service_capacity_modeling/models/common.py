@@ -21,6 +21,7 @@ from service_capacity_modeling.interface import AVG_ITEM_SIZE_BYTES
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import BufferIntent
+from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
@@ -33,6 +34,7 @@ from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import NodeCountContext
@@ -570,6 +572,30 @@ def usable_memory_gib(
 
 # pylint: disable=too-many-locals
 # pylint: disable=too-many-statements
+def required_cluster_size_excuse(
+    instance: Instance,
+    drive: Drive,
+    count: int,
+    required_cluster_size: Optional[int],
+) -> Optional[Excuse]:
+    """Reject a zone whose planned count differs from ``required_cluster_size``.
+
+    Models raise their minimum count to the required size first, so a mismatch
+    means the workload needs more nodes than required."""
+    if required_cluster_size is None or count == required_cluster_size:
+        return None
+    return Excuse(
+        instance=instance.name,
+        drive=drive.name,
+        reason=f"Cluster size {count} != required {required_cluster_size}",
+        context={
+            "computed_count": count,
+            "required_cluster_size": required_cluster_size,
+        },
+        bottleneck=Bottleneck.cluster_size,
+    )
+
+
 def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     instance: Instance,
     drive: Drive,
