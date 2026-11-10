@@ -14,9 +14,9 @@ Key characteristics:
 
 import logging
 import math
+from collections.abc import Hashable
 from typing import Any
 from typing import Dict
-from typing import Hashable
 from typing import List
 from typing import Optional
 from typing import Sequence

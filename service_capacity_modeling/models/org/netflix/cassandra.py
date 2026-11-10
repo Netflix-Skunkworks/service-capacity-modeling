@@ -3,11 +3,11 @@ import logging
 import math
 from decimal import Decimal
 from functools import lru_cache
+from collections.abc import Hashable
 from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import FrozenSet
-from typing import Hashable
 from typing import List
 from typing import Literal
 from typing import Optional

@@ -1,8 +1,8 @@
 """Contract tests for models that can run mixed instance types at one layout."""
 
+from collections.abc import Hashable
 from typing import Any
 from typing import Dict
-from typing import Hashable
 from typing import List
 from typing import Tuple
 
