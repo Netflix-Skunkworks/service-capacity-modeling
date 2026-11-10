@@ -16,9 +16,12 @@ import logging
 import math
 from typing import Any
 from typing import Dict
+from typing import Hashable
 from typing import List
 from typing import Optional
+from typing import Sequence
 from typing import Tuple
+from typing import cast
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -59,10 +62,14 @@ from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
     CapacityProblem,
+    plan_at_layout,
     search_for_min_nodes,
 )
 
 logger = logging.getLogger(__name__)
+
+# (nodes_for_one_copy, replica_count)
+ReadOnlyKVLayout = Tuple[int, int]
 
 
 def _compute_penalties(
@@ -201,6 +208,7 @@ def _compute_read_only_kv_regional_cluster(
     sst_memory_overhead_ratio: float,
     memory_buffer_ratio: float,
     reserved_memory_gib: float,
+    layout: Optional[ReadOnlyKVLayout] = None,
 ) -> Optional[RegionClusterCapacity]:
     """Compute the regional cluster configuration using the partition-aware algorithm.
 
@@ -223,6 +231,8 @@ def _compute_read_only_kv_regional_cluster(
         sst_memory_overhead_ratio: Active resident SST memory estimate
         memory_buffer_ratio: Memory buffer ratio for headroom
         reserved_memory_gib: Total memory reserved outside SST table readers
+        layout: Plan exactly this layout instead of searching for the fewest
+            nodes
 
     Returns:
         RegionClusterCapacity or None if configuration is not viable
@@ -264,7 +274,11 @@ def _compute_read_only_kv_regional_cluster(
         max_nodes=args.max_regional_size,
     )
 
-    result = search_for_min_nodes(problem)
+    result = (
+        search_for_min_nodes(problem)
+        if layout is None
+        else plan_at_layout(problem, *layout)
+    )
     if result is None:
         return None
 
@@ -331,6 +345,7 @@ def _estimate_read_only_kv_cluster(
     instance: Instance,
     desires: CapacityDesires,
     args: NflxReadOnlyKVArguments,
+    layout: Optional[ReadOnlyKVLayout] = None,
 ) -> Optional[CapacityPlan]:
     """Main function to estimate read-only KV cluster configuration.
 
@@ -342,6 +357,8 @@ def _estimate_read_only_kv_cluster(
         instance: The compute instance being considered (must have local disk)
         desires: User's capacity desires
         args: Read-only KV specific arguments
+        layout: Plan exactly this layout instead of searching for the fewest
+            nodes
 
     Returns:
         CapacityPlan or None if configuration is not viable
@@ -413,6 +430,7 @@ def _estimate_read_only_kv_cluster(
         sst_memory_overhead_ratio=sst_memory_overhead_ratio,
         memory_buffer_ratio=memory_buffer_ratio,
         reserved_memory_gib=reserved_memory_gib,
+        layout=layout,
     )
 
     if cluster is None:
@@ -509,6 +527,47 @@ class NflxReadOnlyKVCapacityModel(CapacityModel, CostAwareModel):
             instance=instance,
             desires=desires,
             args=args,
+        )
+
+    @staticmethod
+    def shared_layouts(
+        plans: Sequence[CapacityPlan], extra_model_arguments: Dict[str, Any]
+    ) -> Optional[Sequence[Hashable]]:
+        """Every (nodes_for_one_copy, replica_count) pair from the types' own
+        nodes per copy and the replica counts up to the largest any type
+        chose, fewest nodes first, then more replicas, as the search breaks
+        ties. A type that runs a layout also runs any layout with more nodes
+        per copy or more replicas."""
+        args = NflxReadOnlyKVArguments.model_validate(extra_model_arguments)
+        params = [plan.candidate_clusters.regional[0].cluster_params for plan in plans]
+        copies = {p["read-only-kv.nodes_for_one_copy"] for p in params}
+        most_replicas = max(
+            (p["read-only-kv.replica_count"] for p in params), default=0
+        )
+        layouts: List[ReadOnlyKVLayout] = [
+            (n1, rf)
+            for n1 in copies
+            for rf in range(args.min_replica_count, most_replicas + 1)
+        ]
+        layouts.sort(key=lambda layout: (max(layout[0] * layout[1], 2), -layout[1]))
+        return layouts
+
+    @staticmethod
+    def capacity_plan_at_layout(  # pylint: disable=too-many-positional-arguments
+        instance: Instance,
+        drive: Drive,
+        context: RegionContext,
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
+        layout: Hashable,
+    ) -> Optional[CapacityPlan]:
+        _ = (drive, context)
+        nodes_for_one_copy, replica_count = cast(ReadOnlyKVLayout, layout)
+        return _estimate_read_only_kv_cluster(
+            instance=instance,
+            desires=desires,
+            args=NflxReadOnlyKVArguments.model_validate(extra_model_arguments),
+            layout=(nodes_for_one_copy, replica_count),
         )
 
     @staticmethod

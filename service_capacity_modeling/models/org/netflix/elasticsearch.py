@@ -3,7 +3,9 @@ import math
 from typing import Any
 from typing import Callable
 from typing import Dict
+from typing import Hashable
 from typing import Optional
+from typing import Sequence
 from typing import Tuple
 from typing import Union
 
@@ -44,6 +46,7 @@ from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
+from service_capacity_modeling.models.common import zonal_node_counts
 from service_capacity_modeling.stats import dist_for_interval
 
 logger = logging.getLogger(__name__)
@@ -375,6 +378,33 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         )
 
         return plan
+
+    @staticmethod
+    def shared_layouts(
+        plans: Sequence[CapacityPlan], extra_model_arguments: Dict[str, Any]
+    ) -> Optional[Sequence[Hashable]]:
+        del extra_model_arguments
+        return zonal_node_counts(plans)
+
+    @staticmethod
+    def capacity_plan_at_layout(  # pylint: disable=too-many-positional-arguments
+        instance: Instance,
+        drive: Drive,
+        context: RegionContext,
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
+        layout: Hashable,
+    ) -> Union[CapacityPlan, Excuse, None]:
+        return NflxElasticsearchDataCapacityModel.capacity_plan(
+            instance=instance,
+            drive=drive,
+            context=context,
+            desires=desires,
+            extra_model_arguments={
+                **extra_model_arguments,
+                "required_cluster_size": layout,
+            },
+        )
 
 
 class NflxElasticsearchMasterCapacityModel(CapacityModel):

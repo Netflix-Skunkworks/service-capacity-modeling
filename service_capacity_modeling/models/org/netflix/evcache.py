@@ -2,8 +2,10 @@ import logging
 import math
 from typing import Any
 from typing import Dict
+from typing import Hashable
 from typing import List
 from typing import Optional
+from typing import Sequence
 from typing import Tuple
 from typing import Union
 
@@ -50,6 +52,7 @@ from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import required_cluster_size_excuse
 from service_capacity_modeling.models.common import upsert_params
+from service_capacity_modeling.models.common import zonal_node_counts
 from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -714,6 +717,33 @@ class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
             different_family_regret=different_family_regret,
             required_cluster_size=extra_model_arguments.get("required_cluster_size"),
             context=context,
+        )
+
+    @staticmethod
+    def shared_layouts(
+        plans: Sequence[CapacityPlan], extra_model_arguments: Dict[str, Any]
+    ) -> Optional[Sequence[Hashable]]:
+        del extra_model_arguments
+        return zonal_node_counts(plans)
+
+    @staticmethod
+    def capacity_plan_at_layout(  # pylint: disable=too-many-positional-arguments
+        instance: Instance,
+        drive: Drive,
+        context: RegionContext,
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
+        layout: Hashable,
+    ) -> Union[CapacityPlan, Excuse, None]:
+        return NflxEVCacheCapacityModel.capacity_plan(
+            instance=instance,
+            drive=drive,
+            context=context,
+            desires=desires,
+            extra_model_arguments={
+                **extra_model_arguments,
+                "required_cluster_size": layout,
+            },
         )
 
     @staticmethod

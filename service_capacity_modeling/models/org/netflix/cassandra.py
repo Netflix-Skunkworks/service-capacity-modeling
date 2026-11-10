@@ -7,9 +7,11 @@ from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import FrozenSet
+from typing import Hashable
 from typing import List
 from typing import Literal
 from typing import Optional
+from typing import Sequence
 from typing import Set
 from typing import Tuple
 from typing import Union
@@ -39,6 +41,7 @@ from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import DriveType
 from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.explainability import STATEFUL_DATASTORE_FAMILIES
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
@@ -69,6 +72,7 @@ from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
+from service_capacity_modeling.models.common import zonal_node_counts
 from service_capacity_modeling.models.common import zonal_requirements_from_current
 from service_capacity_modeling.models.org.netflix.cassandra_memory import (
     DEFAULT_MAX_PAGE_CACHE_GIB,
@@ -2217,6 +2221,42 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
     @staticmethod
     def preferred_families() -> Optional[FrozenSet[str]]:
         return STATEFUL_DATASTORE_FAMILIES
+
+    @staticmethod
+    def shared_layouts(
+        plans: Sequence[CapacityPlan], extra_model_arguments: Dict[str, Any]
+    ) -> Optional[Sequence[Hashable]]:
+        del extra_model_arguments
+        return zonal_node_counts(plans)
+
+    @staticmethod
+    def capacity_plan_at_layout(  # pylint: disable=too-many-positional-arguments
+        instance: Instance,
+        drive: Drive,
+        context: RegionContext,
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
+        layout: Hashable,
+    ) -> Union[CapacityPlan, Excuse, None]:
+        return NflxCassandraCapacityModel.capacity_plan(
+            instance=instance,
+            drive=drive,
+            context=context,
+            desires=desires,
+            extra_model_arguments={
+                **extra_model_arguments,
+                "required_cluster_size": layout,
+            },
+        )
+
+    @staticmethod
+    def launch_config(cluster: ClusterCapacity) -> Hashable:
+        # Heap is left out: the model sizes heap from each type's RAM, and each
+        # type's plan at the layout checks that its own heap fits.
+        return (
+            CapacityModel.launch_config(cluster),
+            cluster.cluster_params["cassandra.compaction.min_threshold"],
+        )
 
     @staticmethod
     def get_required_cluster_size(
