@@ -466,7 +466,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         read_write_ratio=read_write_ratio,
     )
     excuse = required_cluster_size_excuse(
-        instance, drive, cluster.count, required_cluster_size
+        instance, drive, cluster, required_cluster_size
     )
     if excuse is not None:
         return excuse

@@ -570,32 +570,53 @@ def usable_memory_gib(
     return instance.ram_gib - reserve_memory(instance.ram_gib)
 
 
-# pylint: disable=too-many-locals
-# pylint: disable=too-many-statements
 def required_cluster_size_excuse(
     instance: Instance,
     drive: Drive,
-    count: int,
+    cluster: ClusterCapacity,
     required_cluster_size: Optional[int],
+    context: Optional[Dict[str, Any]] = None,
 ) -> Optional[Excuse]:
     """Reject a zone whose planned count differs from ``required_cluster_size``.
 
     Models raise their minimum count to the required size first, so a mismatch
-    means the workload needs more nodes than required."""
-    if required_cluster_size is None or count == required_cluster_size:
+    means the workload needs more nodes than required. The excuse names the
+    resource that set the count when the cluster records it, and includes any
+    model-specific ``context``."""
+    if required_cluster_size is None or cluster.count == required_cluster_size:
         return None
+    node_counts = cluster.node_count_context
+    required_nodes_by_type = (
+        {k.value: v for k, v in node_counts.required_nodes_by_type.items()}
+        if node_counts is not None
+        else {}
+    )
+    resource_bottleneck = (
+        node_counts.resource_bottleneck.value
+        if node_counts is not None and node_counts.resource_bottleneck is not None
+        else "unknown"
+    )
     return Excuse(
         instance=instance.name,
         drive=drive.name,
-        reason=f"Cluster size {count} != required {required_cluster_size}",
+        reason=(
+            f"Cluster size {cluster.count} "
+            f"(resource bottleneck: {resource_bottleneck}) "
+            f"!= required {required_cluster_size}"
+        ),
         context={
-            "computed_count": count,
+            "computed_count": cluster.count,
             "required_cluster_size": required_cluster_size,
+            "required_nodes_by_type": required_nodes_by_type,
+            "resource_bottleneck": resource_bottleneck,
+            **(context or {}),
         },
         bottleneck=Bottleneck.cluster_size,
     )
 
 
+# pylint: disable=too-many-locals
+# pylint: disable=too-many-statements
 def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     instance: Instance,
     drive: Drive,

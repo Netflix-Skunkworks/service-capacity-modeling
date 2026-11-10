@@ -66,6 +66,7 @@ from service_capacity_modeling.models.common import get_effective_disk_per_node_
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import upsert_params
+from service_capacity_modeling.models.common import required_cluster_size_excuse
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
@@ -1662,26 +1663,17 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
 
     # Sometimes we don't want modify cluster topology, so only allow
     # topologies that match the desired zone size
-    if required_cluster_size is not None and cluster.count != required_cluster_size:
-        node_counts = cluster.node_count_context
-        required_nodes_by_type = (
-            {k.value: v for k, v in node_counts.required_nodes_by_type.items()}
-            if node_counts is not None
-            else {}
-        )
-        resource_bottleneck = (
-            node_counts.resource_bottleneck.value
-            if node_counts is not None and node_counts.resource_bottleneck is not None
-            else "unknown"
-        )
-        excuse_context: Dict[str, Any] = {
-            "computed_count": cluster.count,
-            "required_cluster_size": required_cluster_size,
-            "required_nodes_by_type": required_nodes_by_type,
-            "resource_bottleneck": resource_bottleneck,
-        }
-        if reported_io_calibration:
-            excuse_context["ebs_io_calibration"] = reported_io_calibration
+    size_excuse = required_cluster_size_excuse(
+        instance,
+        drive,
+        cluster,
+        required_cluster_size,
+        {"ebs_io_calibration": reported_io_calibration}
+        if reported_io_calibration
+        else None,
+    )
+    if size_excuse is not None:
+        assert required_cluster_size is not None
         deployed_iops_floor = reported_io_calibration.get(
             "deployed_topology_min_count_floor"
         )
@@ -1689,28 +1681,17 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             isinstance(deployed_iops_floor, int)
             and deployed_iops_floor > required_cluster_size
         ):
-            return Excuse(
-                instance=instance.name,
-                drive=drive_name,
-                reason=(
-                    "Deployed EBS IOPS evidence requires at least "
-                    f"{deployed_iops_floor} nodes per zone, above required "
-                    f"{required_cluster_size}"
-                ),
-                context=excuse_context,
-                bottleneck=Bottleneck.disk_iops,
+            return size_excuse.model_copy(
+                update={
+                    "reason": (
+                        "Deployed EBS IOPS evidence requires at least "
+                        f"{deployed_iops_floor} nodes per zone, above required "
+                        f"{required_cluster_size}"
+                    ),
+                    "bottleneck": Bottleneck.disk_iops,
+                }
             )
-        return Excuse(
-            instance=instance.name,
-            drive=drive_name,
-            reason=(
-                f"Cluster size {cluster.count} "
-                f"(resource bottleneck: {resource_bottleneck}) "
-                f"!= required {required_cluster_size}"
-            ),
-            context=excuse_context,
-            bottleneck=Bottleneck.cluster_size,
-        )
+        return size_excuse
 
     # Cassandra clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as
@@ -1722,7 +1703,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     #       duration of this can increase a lot with > 500 node clusters.
     max_zonal = max_regional_size // zones_per_region
     if cluster.count > max_zonal:
-        excuse_context = {
+        excuse_context: Dict[str, Any] = {
             "zonal_count": cluster.count,
             "max_zonal": max_zonal,
             "needed_disk_gib": needed_disk_gib,

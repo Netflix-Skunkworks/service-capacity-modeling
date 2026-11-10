@@ -336,7 +336,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             reserve_memory=reserve_memory,
         )
         excuse = required_cluster_size_excuse(
-            instance, drive, data_cluster.count, required_cluster_size
+            instance, drive, data_cluster, required_cluster_size
         )
         if excuse is not None:
             return excuse
