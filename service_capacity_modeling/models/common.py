@@ -570,15 +570,8 @@ def usable_memory_gib(
     return instance.ram_gib - reserve_memory(instance.ram_gib)
 
 
-def zonal_node_counts(plans: Sequence[CapacityPlan]) -> List[int]:
-    """The distinct zonal node counts of single-type plans, fewest first.
-
-    For models that give every node in a zone an equal share of the work, a
-    type that runs ``n`` nodes per zone also runs any larger count, so a set of
-    types first shares the largest of their own counts."""
-    return sorted({plan.candidate_clusters.zonal[0].count for plan in plans})
-
-
+# pylint: disable=too-many-locals
+# pylint: disable=too-many-statements
 def required_cluster_size_excuse(
     instance: Instance,
     drive: Drive,
@@ -603,8 +596,6 @@ def required_cluster_size_excuse(
     )
 
 
-# pylint: disable=too-many-locals
-# pylint: disable=too-many-statements
 def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     instance: Instance,
     drive: Drive,

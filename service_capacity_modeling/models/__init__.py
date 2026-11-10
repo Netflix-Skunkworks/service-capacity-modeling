@@ -1,4 +1,3 @@
-from collections.abc import Hashable
 from typing import Any
 from typing import Callable
 from typing import Dict
@@ -214,54 +213,6 @@ class CapacityModel:
         # quiet pylint
         (_, _, _, _, _) = (instance, drive, context, desires, extra_model_arguments)
         return None
-
-    @staticmethod
-    def shared_layouts(
-        plans: Sequence[CapacityPlan], extra_model_arguments: Dict[str, Any]
-    ) -> Optional[Sequence[Hashable]]:
-        """Layouts several instance types could share, in preference order.
-
-        A layout fixes how the model divides work among nodes (for example a
-        node count per zone), so every node gets the same work whatever its
-        instance type. ``plans`` are this model's single-type plans. Return
-        None, the default, if this model cannot run mixed instance types.
-        """
-        (_, _) = (plans, extra_model_arguments)
-        return None
-
-    @staticmethod
-    def capacity_plan_at_layout(  # pylint: disable=too-many-positional-arguments
-        instance: Instance,
-        drive: Drive,
-        context: RegionContext,
-        desires: CapacityDesires,
-        extra_model_arguments: Dict[str, Any],
-        layout: Hashable,
-    ) -> Union[CapacityPlan, Excuse, None]:
-        """This instance type's plan at exactly ``layout``, from the same code
-        as ``capacity_plan``, or why the type cannot run it. Models that return
-        layouts from ``shared_layouts`` must override this."""
-        (_, _, _, _, _, _) = (
-            instance,
-            drive,
-            context,
-            desires,
-            extra_model_arguments,
-            layout,
-        )
-        return None
-
-    @staticmethod
-    def launch_config(cluster: ClusterCapacity) -> Hashable:
-        """What one launch template fixes for this cluster. Instance types can
-        share an autoscaling group at a layout only if their plans there have
-        equal launch configs."""
-        return (
-            cluster.cluster_type,
-            cluster.count,
-            tuple(sorted(cluster.instance.platforms)),
-            tuple(drive.model_dump_json() for drive in cluster.attached_drives),
-        )
 
     @staticmethod
     def preferred_families() -> Optional[FrozenSet[str]]:

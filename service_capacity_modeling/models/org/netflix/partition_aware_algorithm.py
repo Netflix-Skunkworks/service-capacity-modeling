@@ -11,7 +11,6 @@ the same cost.
 
 import math
 from typing import Optional
-from typing import Tuple
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -60,62 +59,6 @@ def _partitions_that_fit(capacity_gib: float, partition_size_gib: float) -> int:
     return math.floor(math.nextafter(fit, math.inf))
 
 
-def max_partitions_per_node(problem: CapacityProblem) -> Tuple[int, Optional[int]]:
-    """The most partitions one node holds by disk and, when placement uses
-    memory, by memory."""
-    disk_ppn = _partitions_that_fit(
-        problem.disk_per_node_gib, problem.partition_size_gib
-    )
-    memory_ppn = None
-    if problem.memory_per_partition_gib is not None:
-        assert problem.memory_per_node_gib is not None
-        memory_ppn = _partitions_that_fit(
-            problem.memory_per_node_gib, problem.memory_per_partition_gib
-        )
-    return disk_ppn, memory_ppn
-
-
-def replicas_needed(problem: CapacityProblem, nodes_for_one_copy: int) -> int:
-    """The fewest replicas that meet the minimum RF and the CPU requirement."""
-    return max(
-        problem.min_rf,
-        math.ceil(problem.cpu_needed / (nodes_for_one_copy * problem.cpu_per_node)),
-    )
-
-
-def plan_at_layout(
-    problem: CapacityProblem, nodes_for_one_copy: int, replica_count: int
-) -> Optional[CapacityResult]:
-    """The configuration at exactly this layout, or None if it does not fit.
-
-    Reports the densest partitions per node that still needs
-    ``nodes_for_one_copy`` nodes per copy, as ``search_for_min_nodes`` does, so
-    a type at its own layout gets back its own result.
-    """
-    disk_ppn, memory_ppn = max_partitions_per_node(problem)
-    max_ppn = min(disk_ppn, memory_ppn) if memory_ppn is not None else disk_ppn
-    if max_ppn < 1 or nodes_for_one_copy < 1:
-        return None
-    ppn = max_ppn
-    if nodes_for_one_copy > 1:
-        ppn = min(ppn, (problem.n_partitions - 1) // (nodes_for_one_copy - 1))
-    if ppn < 1 or math.ceil(problem.n_partitions / ppn) != nodes_for_one_copy:
-        return None
-    if replica_count < replicas_needed(problem, nodes_for_one_copy):
-        return None
-    node_count = max(nodes_for_one_copy * replica_count, 2)
-    if node_count > problem.max_nodes:
-        return None
-    return CapacityResult(
-        node_count=node_count,
-        replica_count=replica_count,
-        partitions_per_node=ppn,
-        nodes_for_one_copy=nodes_for_one_copy,
-        max_partitions_per_node_by_disk=disk_ppn,
-        max_partitions_per_node_by_memory=memory_ppn,
-    )
-
-
 def search_for_min_nodes(
     problem: CapacityProblem,
 ) -> Optional[CapacityResult]:
@@ -132,7 +75,16 @@ def search_for_min_nodes(
         CapacityResult with the lowest node count, or None if no valid
         configuration exists within the constraints.
     """
-    disk_ppn, memory_ppn = max_partitions_per_node(problem)
+    disk_ppn = _partitions_that_fit(
+        problem.disk_per_node_gib, problem.partition_size_gib
+    )
+    memory_ppn = None
+    if problem.memory_per_partition_gib is not None:
+        assert problem.memory_per_node_gib is not None
+        memory_ppn = _partitions_that_fit(
+            problem.memory_per_node_gib, problem.memory_per_partition_gib
+        )
+
     max_ppn = min(disk_ppn, memory_ppn) if memory_ppn is not None else disk_ppn
     if max_ppn < 1:
         return None
@@ -142,7 +94,11 @@ def search_for_min_nodes(
     while ppn > 0:
         nodes_for_one_copy = math.ceil(problem.n_partitions / ppn)
 
-        rf = replicas_needed(problem, nodes_for_one_copy)
+        # Calculate minimum RF for CPU
+        rf = max(
+            problem.min_rf,
+            math.ceil(problem.cpu_needed / (nodes_for_one_copy * problem.cpu_per_node)),
+        )
         # Ensure at least 2 nodes for availability
         total_nodes = max(nodes_for_one_copy * rf, 2)
 
