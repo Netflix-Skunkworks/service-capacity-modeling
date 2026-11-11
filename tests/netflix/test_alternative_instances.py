@@ -7,9 +7,12 @@ from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
+from service_capacity_modeling.interface import CurrentClusters
+from service_capacity_modeling.interface import CurrentZoneClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import AlternativeInstanceOptions
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.interface import ExcuseTag
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.models.alternative_instances import planned_cluster
 from service_capacity_modeling.tools.capture_baseline_costs import SCENARIOS
@@ -177,6 +180,17 @@ def test_caller_layout_arguments_win():
         }
 
 
+def test_a_caller_none_argument_keeps_the_layout():
+    def summary(args):
+        plans = _plan("org.netflix.evcache", EVCACHE_IN_MEMORY, args).plans
+        return [
+            (layout_of(p), [i.name for i in planned_cluster(p).alternative_instances])
+            for p in plans
+        ]
+
+    assert summary({"required_cluster_size": None}) == summary({})
+
+
 def test_a_composed_plan_needs_every_role():
     """Alone in the i4i family, data nodes have no alternatives, so no
     Elasticsearch plan is complete."""
@@ -221,6 +235,60 @@ def test_a_type_that_cannot_reach_the_minimum_is_excused():
     excused = {e.instance for e in excuses if e.bottleneck == Bottleneck.cost}
     assert excused
     assert not excused & {planned_cluster(p).instance.name for p in result.plans}
+
+
+def test_an_excused_current_shape_stays_in_the_family_graph():
+    options = {
+        "min_alternatives": 5,
+        "max_alternatives": 5,
+        "max_alternative_cost_increase": 0.0,
+    }
+    model = "org.netflix.elasticsearch.node"
+    first = _plan(model, ELASTICSEARCH, {}, **options)
+    current = next(
+        e.instance
+        for e in first.excuses_by_model[model]
+        if e.bottleneck == Bottleneck.cost
+    )
+    desires = ELASTICSEARCH.model_copy(
+        update={
+            "current_clusters": CurrentClusters(
+                zonal=[
+                    CurrentZoneClusterCapacity(
+                        cluster_instance_name=current,
+                        cluster_instance_count=certain_int(4),
+                    )
+                ]
+            )
+        }
+    )
+    result = _plan(model, desires, {}, **options)
+    assert any(
+        e.instance == current and ExcuseTag.current_shape in e.tags
+        for e in result.excuses_by_model[model]
+    )
+    assert current.split(".")[0] in result.family_graph.traits
+
+
+def test_composed_explanations_cover_only_returned_plans():
+    result = planner.plan_certain_explained(
+        model_name="org.netflix.elasticsearch",
+        region=REGION,
+        desires=ELASTICSEARCH,
+        num_results=20,
+        instance_filters_by_model={"org.netflix.elasticsearch.master": ["m6a"]},
+        planner_arguments=PlannerArguments(
+            alternative_instances=AlternativeInstanceOptions(min_alternatives=0),
+        ),
+    )
+    returned = {
+        cluster.instance.name
+        for plan in result.plans
+        for cluster in plan.candidate_clusters.zonal
+    }
+    explained = result.alternative_plans_by_model
+    assert explained["org.netflix.elasticsearch.node"]
+    assert all(name in returned for by in explained.values() for name in by)
 
 
 def test_composed_elasticsearch_lists_alternatives_on_data_clusters_only():

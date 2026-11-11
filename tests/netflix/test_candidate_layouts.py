@@ -135,7 +135,7 @@ def plan_at(model, instance, drive, context, desires, args, layout):
         drive=drive,
         context=context,
         desires=desires,
-        extra_model_arguments={**args, **layout},
+        extra_model_arguments={**layout, **args},
     )
 
 

@@ -863,6 +863,22 @@ class CapacityPlanner:
             else []
         )
 
+        # Composition can return fewer plans than a role planned, so keep only
+        # the explanations for primary types in the returned plans.
+        returned = {
+            cluster.instance.name
+            for plan in plans
+            for cluster in (
+                *plan.candidate_clusters.regional,
+                *plan.candidate_clusters.zonal,
+            )
+        }
+        alternative_plans_by_model = {
+            model: kept
+            for model, by_primary in alternative_plans_by_model.items()
+            if (kept := {n: a for n, a in by_primary.items() if n in returned})
+        }
+
         excuses_by_model = {
             model: deduplicate_excuses(excuses)
             for model, excuses in raw_excuses_by_model.items()
@@ -941,20 +957,19 @@ class CapacityPlanner:
                 extra_model_arguments,
                 pargs.alternative_instances,
             )
-            excuses.extend(dropped)
+            for excuse in dropped:
+                tags = compute_excuse_tags(excuse.instance, current_inst)
+                excuses.append(
+                    excuse.model_copy(update={"tags": tags}) if tags else excuse
+                )
 
         num_results = num_results or self._default_num_results
-        plans = reduce_by_family(
-            plans, max_results_per_family=pargs.max_results_per_family
-        )[:num_results]
         return _CertainResult(
-            plans=plans,
+            plans=reduce_by_family(
+                plans, max_results_per_family=pargs.max_results_per_family
+            )[:num_results],
             excuses=excuses,
-            alternative_plans={
-                name: alternatives
-                for name, alternatives in alternative_plans.items()
-                if any(planned_cluster(p).instance.name == name for p in plans)
-            },
+            alternative_plans=alternative_plans,
         )
 
     def _get_model_costs(
@@ -1568,6 +1583,8 @@ def _plan_alternative_instances(
     layouts = model.candidate_layouts(list(own_plans.values()))
     if layouts is None:
         return plans, {}, []
+    # Arguments the caller set win over the layout; None means not set.
+    caller_args = {k: v for k, v in extra_model_arguments.items() if v is not None}
     plans_by_layout = []
     for layout in layouts:
         at_layout = []
@@ -1577,7 +1594,7 @@ def _plan_alternative_instances(
                 drive=drive,
                 context=context,
                 desires=desires,
-                extra_model_arguments={**layout, **extra_model_arguments},
+                extra_model_arguments={**layout, **caller_args},
             )
             if isinstance(plan, CapacityPlan):
                 at_layout.append(plan)
