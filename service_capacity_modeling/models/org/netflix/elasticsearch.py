@@ -4,6 +4,7 @@ from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import Optional
+from typing import Sequence
 from typing import Tuple
 from typing import Union
 
@@ -44,6 +45,7 @@ from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
+from service_capacity_modeling.models.common import zone_size_layouts
 from service_capacity_modeling.stats import dist_for_interval
 
 logger = logging.getLogger(__name__)
@@ -375,6 +377,12 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         )
 
         return plan
+
+    @staticmethod
+    def candidate_layouts(
+        plans: Sequence[CapacityPlan],
+    ) -> Optional[Sequence[Dict[str, Any]]]:
+        return zone_size_layouts(plans)
 
 
 class NflxElasticsearchMasterCapacityModel(CapacityModel):

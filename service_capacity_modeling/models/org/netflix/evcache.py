@@ -4,6 +4,7 @@ from typing import Any
 from typing import Dict
 from typing import List
 from typing import Optional
+from typing import Sequence
 from typing import Tuple
 from typing import Union
 
@@ -50,6 +51,7 @@ from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import check_cluster_size_requirement
 from service_capacity_modeling.models.common import upsert_params
+from service_capacity_modeling.models.common import zone_size_layouts
 from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -715,6 +717,12 @@ class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
             required_cluster_size=extra_model_arguments.get("required_cluster_size"),
             context=context,
         )
+
+    @staticmethod
+    def candidate_layouts(
+        plans: Sequence[CapacityPlan],
+    ) -> Optional[Sequence[Dict[str, Any]]]:
+        return zone_size_layouts(plans)
 
     @staticmethod
     def description() -> str:

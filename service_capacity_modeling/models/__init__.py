@@ -214,6 +214,25 @@ class CapacityModel:
         return None
 
     @staticmethod
+    def candidate_layouts(
+        plans: Sequence[CapacityPlan],
+    ) -> Optional[Sequence[Dict[str, Any]]]:
+        """Layouts several instance types could share, in preference order.
+
+        A layout is the model arguments that fix how the model divides work
+        among nodes, for example ``{"required_cluster_size": 4}``. The planner
+        plans each type again with a layout merged into
+        ``extra_model_arguments``; arguments the caller set win. Types planned
+        at one layout must be able to run in one cluster, so a layout fixes
+        every setting the nodes share except attached drives, which the planner
+        requires to be equal. ``plans`` are this model's single-type plans, so
+        a layout can read their ``cluster_params``.
+        Return None, the default, if this model cannot run mixed instance types.
+        """
+        _ = plans
+        return None
+
+    @staticmethod
     def plan_for_regret(plan: CapacityPlan) -> CapacityPlan:
         """Return the plan uncertain regret should price for this sample.
 

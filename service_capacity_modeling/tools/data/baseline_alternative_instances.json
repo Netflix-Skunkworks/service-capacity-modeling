@@ -1,0 +1,570 @@
+[
+  {
+    "model": "org.netflix.cassandra",
+    "plans": [
+      {
+        "alternative_instances": [
+          "c6id.4xlarge",
+          "m6id.4xlarge"
+        ],
+        "clusters": [
+          {
+            "annual_cost": 7377.0,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "c5d.4xlarge"
+          },
+          {
+            "annual_cost": 7377.0,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "c5d.4xlarge"
+          },
+          {
+            "annual_cost": 7377.0,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "c5d.4xlarge"
+          }
+        ],
+        "primary_instance_type": "c5d.4xlarge",
+        "total_annual_cost": 133070.27
+      },
+      {
+        "alternative_instances": [
+          "c5d.4xlarge",
+          "m6id.4xlarge",
+          "m6idn.4xlarge"
+        ],
+        "clusters": [
+          {
+            "annual_cost": 7707.0,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "c6id.4xlarge"
+          },
+          {
+            "annual_cost": 7707.0,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "c6id.4xlarge"
+          },
+          {
+            "annual_cost": 7707.0,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "c6id.4xlarge"
+          }
+        ],
+        "primary_instance_type": "c6id.4xlarge",
+        "total_annual_cost": 134060.27
+      },
+      {
+        "alternative_instances": [
+          "c5d.4xlarge",
+          "c6id.4xlarge",
+          "m6idn.4xlarge"
+        ],
+        "clusters": [
+          {
+            "annual_cost": 9379.92,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "m6id.4xlarge"
+          },
+          {
+            "annual_cost": 9379.92,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "m6id.4xlarge"
+          },
+          {
+            "annual_cost": 9379.92,
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 3,
+            "deployment": "zonal",
+            "instance": "m6id.4xlarge"
+          }
+        ],
+        "primary_instance_type": "m6id.4xlarge",
+        "total_annual_cost": 139079.03
+      }
+    ],
+    "region": "us-east-1",
+    "scenario": "cassandra_small_high_qps_local",
+    "service_tier": 1
+  },
+  {
+    "model": "org.netflix.cassandra",
+    "plans": [
+      {
+        "alternative_instances": [
+          "c8a.4xlarge",
+          "m7a.4xlarge",
+          "m8a.4xlarge"
+        ],
+        "clusters": [
+          {
+            "annual_cost": 20261.65,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 5,
+            "deployment": "zonal",
+            "instance": "c7a.4xlarge"
+          },
+          {
+            "annual_cost": 20261.65,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 5,
+            "deployment": "zonal",
+            "instance": "c7a.4xlarge"
+          },
+          {
+            "annual_cost": 20261.65,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 5,
+            "deployment": "zonal",
+            "instance": "c7a.4xlarge"
+          }
+        ],
+        "primary_instance_type": "c7a.4xlarge",
+        "total_annual_cost": 491800.14
+      },
+      {
+        "alternative_instances": [
+          "c7a.4xlarge",
+          "m7a.4xlarge",
+          "m8a.4xlarge"
+        ],
+        "clusters": [
+          {
+            "annual_cost": 20950.2,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 5,
+            "deployment": "zonal",
+            "instance": "c8a.4xlarge"
+          },
+          {
+            "annual_cost": 20950.2,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 5,
+            "deployment": "zonal",
+            "instance": "c8a.4xlarge"
+          },
+          {
+            "annual_cost": 20950.2,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 5,
+            "deployment": "zonal",
+            "instance": "c8a.4xlarge"
+          }
+        ],
+        "primary_instance_type": "c8a.4xlarge",
+        "total_annual_cost": 493865.79
+      },
+      {
+        "alternative_instances": [
+          "c7a.4xlarge",
+          "c8a.4xlarge",
+          "m8a.4xlarge"
+        ],
+        "clusters": [
+          {
+            "annual_cost": 22516.65,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 5,
+            "deployment": "zonal",
+            "instance": "m7a.4xlarge"
+          },
+          {
+            "annual_cost": 22516.65,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 5,
+            "deployment": "zonal",
+            "instance": "m7a.4xlarge"
+          },
+          {
+            "annual_cost": 22516.65,
+            "attached_drives": [
+              "gp3 : 100GB"
+            ],
+            "cluster_params": {
+              "cassandra.compaction.min_threshold": 4
+            },
+            "cluster_type": "cassandra",
+            "count": 5,
+            "deployment": "zonal",
+            "instance": "m7a.4xlarge"
+          }
+        ],
+        "primary_instance_type": "m7a.4xlarge",
+        "total_annual_cost": 498565.14
+      }
+    ],
+    "region": "us-east-1",
+    "scenario": "cassandra_high_writes_ebs",
+    "service_tier": 1
+  },
+  {
+    "model": "org.netflix.evcache",
+    "plans": [
+      {
+        "alternative_instances": [
+          "c6a.2xlarge",
+          "r8a.xlarge",
+          "c6i.2xlarge"
+        ],
+        "clusters": [
+          {
+            "annual_cost": 11786.88,
+            "cluster_type": "evcache",
+            "count": 14,
+            "deployment": "zonal",
+            "instance": "m8a.xlarge"
+          },
+          {
+            "annual_cost": 11786.88,
+            "cluster_type": "evcache",
+            "count": 14,
+            "deployment": "zonal",
+            "instance": "m8a.xlarge"
+          },
+          {
+            "annual_cost": 11786.88,
+            "cluster_type": "evcache",
+            "count": 14,
+            "deployment": "zonal",
+            "instance": "m8a.xlarge"
+          }
+        ],
+        "primary_instance_type": "m8a.xlarge",
+        "total_annual_cost": 35360.64
+      },
+      {
+        "alternative_instances": [
+          "m8a.xlarge",
+          "c5a.2xlarge",
+          "c6a.2xlarge"
+        ],
+        "clusters": [
+          {
+            "annual_cost": 12025.05,
+            "cluster_type": "evcache",
+            "count": 15,
+            "deployment": "zonal",
+            "instance": "m7a.xlarge"
+          },
+          {
+            "annual_cost": 12025.05,
+            "cluster_type": "evcache",
+            "count": 15,
+            "deployment": "zonal",
+            "instance": "m7a.xlarge"
+          },
+          {
+            "annual_cost": 12025.05,
+            "cluster_type": "evcache",
+            "count": 15,
+            "deployment": "zonal",
+            "instance": "m7a.xlarge"
+          }
+        ],
+        "primary_instance_type": "m7a.xlarge",
+        "total_annual_cost": 36075.15
+      },
+      {
+        "alternative_instances": [
+          "c6i.2xlarge",
+          "m6a.2xlarge",
+          "c7i.2xlarge"
+        ],
+        "clusters": [
+          {
+            "annual_cost": 13351.0,
+            "cluster_type": "evcache",
+            "count": 13,
+            "deployment": "zonal",
+            "instance": "c6a.2xlarge"
+          },
+          {
+            "annual_cost": 13351.0,
+            "cluster_type": "evcache",
+            "count": 13,
+            "deployment": "zonal",
+            "instance": "c6a.2xlarge"
+          },
+          {
+            "annual_cost": 13351.0,
+            "cluster_type": "evcache",
+            "count": 13,
+            "deployment": "zonal",
+            "instance": "c6a.2xlarge"
+          }
+        ],
+        "primary_instance_type": "c6a.2xlarge",
+        "total_annual_cost": 40053.0
+      }
+    ],
+    "region": "us-east-1",
+    "scenario": "evcache_small_no_replication",
+    "service_tier": 1
+  },
+  {
+    "model": "org.netflix.read-only-kv",
+    "plans": [
+      {
+        "alternative_instances": [
+          "i7i.xlarge",
+          "m6id.2xlarge",
+          "i7ie.xlarge"
+        ],
+        "clusters": [
+          {
+            "annual_cost": 14523.96,
+            "cluster_params": {
+              "read-only-kv.partitions_per_node": 2,
+              "read-only-kv.replica_count": 3
+            },
+            "cluster_type": "read-only-kv",
+            "count": 12,
+            "deployment": "regional",
+            "instance": "i4i.xlarge"
+          }
+        ],
+        "primary_instance_type": "i4i.xlarge",
+        "total_annual_cost": 14523.96
+      },
+      {
+        "alternative_instances": [
+          "i4i.2xlarge",
+          "i7i.2xlarge",
+          "m6id.4xlarge"
+        ],
+        "clusters": [
+          {
+            "annual_cost": 15414.0,
+            "cluster_params": {
+              "read-only-kv.partitions_per_node": 4,
+              "read-only-kv.replica_count": 3
+            },
+            "cluster_type": "read-only-kv",
+            "count": 6,
+            "deployment": "regional",
+            "instance": "c6id.4xlarge"
+          }
+        ],
+        "primary_instance_type": "c6id.4xlarge",
+        "total_annual_cost": 15414.0
+      },
+      {
+        "alternative_instances": [
+          "i4i.2xlarge",
+          "c6id.4xlarge",
+          "m6id.4xlarge"
+        ],
+        "clusters": [
+          {
+            "annual_cost": 15978.24,
+            "cluster_params": {
+              "read-only-kv.partitions_per_node": 4,
+              "read-only-kv.replica_count": 3
+            },
+            "cluster_type": "read-only-kv",
+            "count": 6,
+            "deployment": "regional",
+            "instance": "i7i.2xlarge"
+          }
+        ],
+        "primary_instance_type": "i7i.2xlarge",
+        "total_annual_cost": 15978.24
+      }
+    ],
+    "region": "us-east-1",
+    "scenario": "read_only_kv_medium",
+    "service_tier": 1
+  },
+  {
+    "model": "org.netflix.elasticsearch.node",
+    "plans": [
+      {
+        "alternative_instances": [
+          "i7ie.2xlarge"
+        ],
+        "clusters": [
+          {
+            "annual_cost": 2999.0,
+            "cluster_type": "elasticsearch-data",
+            "count": 1,
+            "deployment": "zonal",
+            "instance": "i3en.2xlarge"
+          },
+          {
+            "annual_cost": 2999.0,
+            "cluster_type": "elasticsearch-data",
+            "count": 1,
+            "deployment": "zonal",
+            "instance": "i3en.2xlarge"
+          },
+          {
+            "annual_cost": 2999.0,
+            "cluster_type": "elasticsearch-data",
+            "count": 1,
+            "deployment": "zonal",
+            "instance": "i3en.2xlarge"
+          }
+        ],
+        "primary_instance_type": "i3en.2xlarge",
+        "total_annual_cost": 8997.0
+      },
+      {
+        "alternative_instances": [
+          "i3en.2xlarge",
+          "i3.4xlarge",
+          "i4i.4xlarge"
+        ],
+        "clusters": [
+          {
+            "annual_cost": 3448.81,
+            "cluster_type": "elasticsearch-data",
+            "count": 1,
+            "deployment": "zonal",
+            "instance": "i7ie.2xlarge"
+          },
+          {
+            "annual_cost": 3448.81,
+            "cluster_type": "elasticsearch-data",
+            "count": 1,
+            "deployment": "zonal",
+            "instance": "i7ie.2xlarge"
+          },
+          {
+            "annual_cost": 3448.81,
+            "cluster_type": "elasticsearch-data",
+            "count": 1,
+            "deployment": "zonal",
+            "instance": "i7ie.2xlarge"
+          }
+        ],
+        "primary_instance_type": "i7ie.2xlarge",
+        "total_annual_cost": 10346.43
+      },
+      {
+        "alternative_instances": [
+          "i4i.xlarge",
+          "i7i.xlarge",
+          "i3en.xlarge"
+        ],
+        "clusters": [
+          {
+            "annual_cost": 4624.0,
+            "cluster_type": "elasticsearch-data",
+            "count": 4,
+            "deployment": "zonal",
+            "instance": "i3.xlarge"
+          },
+          {
+            "annual_cost": 4624.0,
+            "cluster_type": "elasticsearch-data",
+            "count": 4,
+            "deployment": "zonal",
+            "instance": "i3.xlarge"
+          },
+          {
+            "annual_cost": 4624.0,
+            "cluster_type": "elasticsearch-data",
+            "count": 4,
+            "deployment": "zonal",
+            "instance": "i3.xlarge"
+          }
+        ],
+        "primary_instance_type": "i3.xlarge",
+        "total_annual_cost": 13872.0
+      }
+    ],
+    "region": "us-east-1",
+    "scenario": "elasticsearch_data_small",
+    "service_tier": 1
+  }
+]
