@@ -1,20 +1,12 @@
 """Tests for family selection penalties.
 
-Two penalties interact:
-1. Cassandra-level different_family_regret (default 10%) — penalises
-   cross-family plans relative to the *current* cluster's family.
-   Configured via extra_model_arguments["different_family_regret"].
-2. Planner-level preferred_family penalty (15%, _PREFERRED_FAMILY_RANK_PENALTY)
-   — applied by the planner to any plan whose instance family is not in
-   model.preferred_families(). Models declare their preferred set; the
-   planner enforces the bias uniformly (no per-model code needed).
-
-c6id is not in STATEFUL_DATASTORE_FAMILIES, so it always carries the 15%
-planner penalty. c6id is ~18% cheaper per-CPU than m6id. Combined:
-  - default ((1 + 10% model) * (1 + 15% planner)): m6id wins
-  - disabled model penalty (0% + 15% planner = 15% total): c6id still wins
-    (18% savings > 15% penalty)
-  - high model penalty ((1 + 25%) * (1 + 15%)): m6id wins decisively
+Cassandra's different_family_regret (default 10%) penalises plans whose family
+differs from the *current* cluster's family. It is configured through
+extra_model_arguments["different_family_regret"]. c6id is ~18% cheaper per CPU
+than m6id, so:
+  - default 10%: c6id wins (18% savings > 10% penalty)
+  - disabled (0%): c6id wins on pure cost
+  - high (25%): the current family wins decisively
 
 Ephemeral maintenance regret is disabled in these ordering checks so they
 continue to isolate family selection.
@@ -29,9 +21,6 @@ from service_capacity_modeling.interface import (
     DataShape,
     Interval,
     QueryPattern,
-)
-from service_capacity_modeling.models.org.netflix.cassandra import (
-    NflxCassandraArguments,
 )
 
 
@@ -97,7 +86,7 @@ def _first_family(desires, extra_model_arguments, families=None):
             "m6id",
             id="high_regret_keeps_m6id",
         ),
-        pytest.param("m6id.8xlarge", {}, "m6id", id="preferred_penalty_keeps_m6id"),
+        pytest.param("m6id.8xlarge", {}, "c6id", id="default_regret_prefers_c6id"),
         pytest.param(
             "m6id.8xlarge",
             {"different_family_regret": 0},
@@ -143,60 +132,6 @@ def test_combined_family_and_large_instance_penalties():
             )
 
 
-def test_planner_arguments_zero_penalty_pure_cost():
-    """PlannerArguments.preferred_family_penalty=0 removes family bias.
-
-    With both penalties disabled (different_family_regret=0 AND
-    preferred_family_penalty=0), c6id wins as the cheaper option.
-    """
-    desires = _desires("m6id.8xlarge")
-    plans = planner.plan_certain(
-        model_name="org.netflix.cassandra",
-        region="us-east-1",
-        desires=desires,
-        extra_model_arguments={
-            "different_family_regret": 0,
-            "ephemeral_maintenance_regret": 0,
-        },
-        instance_families=["m6id", "c6id"],
-        num_results=20,
-        max_results_per_family=10,
-        planner_arguments=PlannerArguments(preferred_family_penalty=0.0),
-    )
-    assert plans, "planner returned no plans"
-    assert plans[0].candidate_clusters.zonal[0].instance.family == "c6id", (
-        "With preferred_family_penalty=0 and different_family_regret=0, "
-        "c6id should rank first as the cheaper option"
-    )
-
-
-def test_preferred_family_penalty_compounds_model_rank_penalties():
-    desires = _desires("m6id.8xlarge")
-    plan_args = {
-        "model_name": "org.netflix.cassandra",
-        "region": "us-east-1",
-        "desires": desires,
-        "extra_model_arguments": {"ephemeral_maintenance_regret": 0.2},
-        "instance_families": ["c5d"],
-        "num_results": 1,
-    }
-
-    compounded = planner.plan_certain(**plan_args)[0]
-    model_ranked = planner.plan_certain(
-        **plan_args,
-        planner_arguments=PlannerArguments(preferred_family_penalty=0),
-    )[0]
-    service_cost = sum(
-        service.annual_cost for service in compounded.candidate_clusters.services
-    )
-
-    assert compounded.rank == pytest.approx(
-        model_ranked.rank
-        + (model_ranked.rank - service_cost)
-        * PlannerArguments().preferred_family_penalty
-    )
-
-
 def test_planner_arguments_max_results_per_family():
     """PlannerArguments.max_results_per_family limits plans per instance family."""
     from collections import Counter
@@ -217,18 +152,4 @@ def test_planner_arguments_max_results_per_family():
     )
     assert all(count <= 3 for count in family_counts.values()), (
         f"Each family should appear at most 3 times, got: {dict(family_counts)}"
-    )
-
-
-def test_non_preferred_family_regret_is_planner_responsibility():
-    """Finding 1: non_preferred_family_regret must not be a Cassandra argument.
-
-    The preferred-family rank penalty belongs in the planner (via preferred_families()),
-    not in each model's argument list. After this change, NflxCassandraArguments
-    should not expose non_preferred_family_regret.
-    """
-    fields = dict(NflxCassandraArguments.model_fields)
-    assert "non_preferred_family_regret" not in fields, (
-        "non_preferred_family_regret should be removed from Cassandra args; "
-        "the planner applies this penalty via model.preferred_families()"
     )

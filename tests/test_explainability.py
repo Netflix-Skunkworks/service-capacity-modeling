@@ -13,15 +13,18 @@ from service_capacity_modeling.explainability import (
     FamilyGraph,
     FamilyTrait,
     SampledExcuse,
-    STATEFUL_DATASTORE_FAMILIES,
 )
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import (
     Bottleneck,
+    CapacityPlan,
+    Clusters,
     ExcuseSummary,
     Excuse,
     ExcuseTag,
+    Requirements,
     SampleRef,
+    ZoneClusterCapacity,
 )
 from service_capacity_modeling.models.utils import compute_excuse_tags
 
@@ -299,51 +302,94 @@ def test_compute_excuse_tags(excuse_inst, current_inst, expected_tags):
     assert compute_excuse_tags(excuse_inst, current_inst) == expected_tags
 
 
+STATEFUL_FAMILIES = ("i4i", "i3en", "r6a", "r7a", "m6id", "c7a")
+
+
+def _plans_on(*families: str) -> list:
+    """One minimal plan per family, on that family's first instance."""
+    hardware = shapes.region("us-east-1")
+    plans = []
+    for family in families:
+        instance = next(i for i in hardware.instances.values() if i.family == family)
+        plans.append(
+            CapacityPlan(
+                requirements=Requirements(),
+                candidate_clusters=Clusters(
+                    annual_costs={},
+                    zonal=[
+                        ZoneClusterCapacity(
+                            cluster_type="test", count=3, instance=instance
+                        )
+                    ],
+                ),
+            )
+        )
+    return plans
+
+
 class TestFamilyGraphBuild:
     """Test FamilyGraph.build() construction from hardware data."""
 
-    def test_no_excuses_uses_preferred_families(self):
-        """FamilyGraph.build() with empty excuses uses preferred_families as base."""
-        hardware = shapes.region("us-east-1")
+    def test_nodes_are_plan_families(self):
         graph = FamilyGraph.build(
             excuses=[],
-            hardware=hardware,
-            preferred_families=STATEFUL_DATASTORE_FAMILIES,
+            hardware=shapes.region("us-east-1"),
+            plans=_plans_on(*STATEFUL_FAMILIES),
         )
-        assert len(graph.traits) > 0, (
-            "Graph should be populated from preferred_families even with no excuses"
-        )
-        assert "i4i" in graph.traits
-        assert "r6a" in graph.traits
+        assert set(graph.traits) == set(STATEFUL_FAMILIES)
 
-    def test_none_preferred_gives_empty_graph(self):
-        """preferred_families=None → empty base, no families imposed on the model."""
-        hardware = shapes.region("us-east-1")
+    def test_no_plans_gives_empty_graph(self):
         graph = FamilyGraph.build(
-            excuses=[],
-            hardware=hardware,
-            preferred_families=None,
+            excuses=[], hardware=shapes.region("us-east-1"), plans=[]
         )
         assert len(graph.traits) == 0
         assert len(graph.edges) == 0
 
+    def test_current_shape_family_is_a_node(self):
+        excuse = Excuse(
+            instance="r5d.2xlarge",
+            drive="gp3",
+            reason="too small",
+            tags=[ExcuseTag.current_shape],
+        )
+        graph = FamilyGraph.build(
+            excuses=[excuse],
+            hardware=shapes.region("us-east-1"),
+            plans=_plans_on("r6a"),
+        )
+        assert set(graph.traits) == {"r5d", "r6a"}
+
     def test_m_times_n_edges(self):
         """Graph has exactly n*(n-1) directed edges for n families."""
-        hardware = shapes.region("us-east-1")
         graph = FamilyGraph.build(
             excuses=[],
-            hardware=hardware,
-            preferred_families=STATEFUL_DATASTORE_FAMILIES,
+            hardware=shapes.region("us-east-1"),
+            plans=_plans_on(*STATEFUL_FAMILIES),
         )
         n = len(graph.traits)
         assert len(graph.edges) == n * (n - 1)
 
-    def test_edges_use_bottleneck_enum(self):
-        hardware = shapes.region("us-east-1")
+    def test_i4i_disk_bottleneck_suggests_alternatives(self):
         graph = FamilyGraph.build(
             excuses=[],
-            hardware=hardware,
-            preferred_families=STATEFUL_DATASTORE_FAMILIES,
+            hardware=shapes.region("us-east-1"),
+            plans=_plans_on(*STATEFUL_FAMILIES),
+        )
+        excuse = Excuse(
+            instance="i4i.4xlarge",
+            drive="gp3",
+            reason="Cluster too large",
+            bottleneck=Bottleneck.disk_capacity,
+        )
+        to_families = {a.to_family for a in graph.suggest_alternatives(excuse)}
+        assert "i3en" in to_families
+        assert "r7a" in to_families
+
+    def test_edges_use_bottleneck_enum(self):
+        graph = FamilyGraph.build(
+            excuses=[],
+            hardware=shapes.region("us-east-1"),
+            plans=_plans_on(*STATEFUL_FAMILIES),
         )
         for edge in graph.edges:
             for b in edge.improves + edge.degrades:

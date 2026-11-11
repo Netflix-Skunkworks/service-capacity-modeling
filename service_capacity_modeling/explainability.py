@@ -54,7 +54,6 @@ import json
 import re
 from typing import Any
 from typing import Dict
-from typing import FrozenSet
 from typing import List
 from typing import NamedTuple
 from typing import Optional
@@ -228,22 +227,24 @@ class FamilyGraph(ExcludeUnsetModel):
         cls,
         excuses: Sequence[Excuse],
         hardware: Hardware,
-        preferred_families: Optional[FrozenSet[str]],
+        plans: Sequence[CapacityPlan],
     ) -> FamilyGraph:
         """Build an M×N FamilyGraph from derived hardware traits.
 
-        All edge attributes (cost, memory, disk_capacity, disk_iops, generation)
-        are derived at runtime from FamilyTrait values — no hardcoded trade-off
-        tables. The current cluster's family is always included even if it falls
-        outside preferred_families, so consumers always see why their current
-        shape was rejected.
-
-        The graph is always populated from preferred_families. If preferred_families
-        is None (model has no declared preference) the base is empty, so only the
-        current cluster's family appears as a node (if current_clusters is set).
-        This prevents stateless models from inheriting storage-optimized families.
+        Nodes are the families of the returned plans plus the current cluster's
+        family, so consumers see the trade-offs between what was recommended
+        and what they run today. All edge attributes (cost, memory,
+        disk_capacity, disk_iops, generation) are derived at runtime from
+        FamilyTrait values, with no hardcoded trade-off tables.
         """
-        base = preferred_families if preferred_families is not None else frozenset()
+        base = {
+            cluster.instance.family
+            for plan in plans
+            for cluster in (
+                *plan.candidate_clusters.zonal,
+                *plan.candidate_clusters.regional,
+            )
+        }
         current_shape_families: Set[str] = {
             e.instance.rsplit(".", 1)[0]
             for e in excuses
@@ -281,44 +282,6 @@ class FamilyGraph(ExcludeUnsetModel):
                 )
 
         return cls(traits=traits, edges=edges)
-
-
-# Default preferred family set for stateful datastores (Cassandra, Kafka, EVCache).
-# Covers the full decision space: one representative per
-# {memory-class × storage-class × generation-tier}.
-# Not appropriate for stateless services (DGW, Java apps) — those models
-# should override preferred_families() with compute/general families only.
-# "n"-suffix (enhanced-network) families are intentionally excluded.
-STATEFUL_DATASTORE_FAMILIES: FrozenSet[str] = frozenset(
-    {
-        "c6a",
-        "c7a",  # compute-optimized EBS (~1.9 GiB/vCPU)
-        "m6a",
-        "m7a",  # general-purpose EBS (~3.8 GiB/vCPU)
-        "m6id",  # general-purpose local NVMe (~3.8 GiB/vCPU)
-        "r6a",
-        "r7a",  # memory-optimized EBS (~7.6 GiB/vCPU)
-        "r5d",
-        "r6id",  # memory-optimized local NVMe (~7.6–8.0 GiB/vCPU)
-        "i4i",
-        "i3en",  # storage-optimized local NVMe
-    }
-)
-
-# Preferred family set for stateless services (DGW, Java apps, NodeQuark).
-# EBS-only: no local NVMe (storage density is irrelevant), no storage-optimized
-# families (i4i/i3en). Covers the compute × memory × generation axes.
-# Models override preferred_families() to return this set.
-STATELESS_SERVICE_FAMILIES: FrozenSet[str] = frozenset(
-    {
-        "c6a",
-        "c7a",  # compute-optimized EBS (~1.9 GiB/vCPU) — CPU-bound services
-        "m6a",
-        "m7a",  # general-purpose EBS (~3.8 GiB/vCPU) — balanced workloads
-        "r6a",
-        "r7a",  # memory-optimized EBS (~7.6 GiB/vCPU) — heap-heavy services
-    }
-)
 
 
 # Return type of Excuse.dedupe_key(); see that method for why these fields.

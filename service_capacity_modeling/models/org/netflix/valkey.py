@@ -2,7 +2,6 @@ import math
 from decimal import Decimal
 from typing import Any
 from typing import Dict
-from typing import FrozenSet
 from typing import NamedTuple
 from typing import Optional
 from typing import Tuple
@@ -451,10 +450,6 @@ class NflxValkeyCapacityModel(CapacityModel):
     @staticmethod
     def extra_model_arguments_schema() -> Dict[str, Any]:
         return NflxValkeyArguments.model_json_schema()
-
-    @staticmethod
-    def preferred_families() -> Optional[FrozenSet[str]]:
-        return frozenset(("cache.r7g", "cache.r8g"))
 
     @staticmethod
     def allowed_platforms() -> Tuple[Platform, ...]:

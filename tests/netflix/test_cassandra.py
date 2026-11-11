@@ -971,15 +971,8 @@ class TestCassandraThroughput:
         )[0]
         high_writes_result = cap_plan.candidate_clusters.zonal[0]
 
-        # With attached disks requested, stay in stateful datastore families.
-        assert high_writes_result.instance.family in {
-            "c6a",
-            "c7a",
-            "m6a",
-            "m7a",
-            "r6a",
-            "r7a",
-        }
+        # With attached disks required, pick an EBS-only family.
+        assert high_writes_result.instance.drive is None
         required_nodes = high_writes_result.cluster_params["required_nodes_by_type"]
         assert high_writes_result.count == required_nodes["cpu"]
         assert required_nodes["disk_capacity"] <= high_writes_result.count
@@ -1212,6 +1205,7 @@ class TestCassandraCurrentCapacity:
                 "require_local_disks": True,
                 "ephemeral_maintenance_regret": 0,
             },
+            instance_families=["i4i"],
         )[0]
         result = cap_plan.candidate_clusters.zonal[0]
         counts = result.cluster_params["required_nodes_by_type"]
