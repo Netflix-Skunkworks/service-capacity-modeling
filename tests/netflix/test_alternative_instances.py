@@ -87,10 +87,12 @@ def test_alternatives_run_the_layout_cheapest_first_within_the_limits(
 ):
     model = planner.models[name]
     own_costs = _own_costs(model, desires, args)
-    plans = _plan(name, desires, args).plans
+    result = _plan(name, desires, args)
+    plans = result.plans
     assert any(planned_cluster(p).alternative_instances for p in plans)
     for plan in plans:
         cluster = planned_cluster(plan)
+        explained = result.alternative_plans_by_model[name][cluster.instance.name]
         own_cost = own_costs[cluster.instance.name]
         assert _cluster_cost(plan) <= own_cost * 1.2 + 1e-6
         families = {cluster.instance.family}
@@ -106,6 +108,11 @@ def test_alternatives_run_the_layout_cheapest_first_within_the_limits(
             costs.append(_cluster_cost(alternative))
         assert costs == sorted(costs)
         assert all(c <= own_cost * 1.5 + 1e-6 for c in costs)
+        # The explained alternative plans are the ones the cluster lists.
+        assert [planned_cluster(p).instance for p in explained] == list(
+            cluster.alternative_instances
+        )
+        assert [_cluster_cost(p) for p in explained] == pytest.approx(costs)
 
 
 def test_the_node_cap_ignores_service_costs():

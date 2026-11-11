@@ -104,8 +104,9 @@ def choose_alternative_instances(
     own_plans: Dict[str, CapacityPlan],
     plans_by_layout: Sequence[Dict[str, CapacityPlan]],
     options: AlternativeInstanceOptions,
-) -> Tuple[List[CapacityPlan], List[Excuse]]:
-    """Each primary type's plan at a shared layout, listing its alternatives.
+) -> Tuple[List[CapacityPlan], Dict[str, List[CapacityPlan]], List[Excuse]]:
+    """Each primary type's plan at a shared layout, listing its alternatives,
+    and each primary type's alternative plans at that layout, in launch order.
 
     ``own_plans`` maps each instance type to its single-type plan, best rank first.
     ``plans_by_layout`` maps, per layout in the model's preference order, each type
@@ -116,6 +117,7 @@ def choose_alternative_instances(
     """
     rank = {name: i for i, name in enumerate(own_plans)}
     chosen: List[CapacityPlan] = []
+    alternative_plans: Dict[str, List[CapacityPlan]] = {}
     excuses: List[Excuse] = []
     for name, plan in own_plans.items():
         max_plan_cost = _cost(plan) * (1 + options.max_plan_cost_increase)
@@ -155,4 +157,5 @@ def choose_alternative_instances(
         primary, alternatives = best
         instances = [planned_cluster(p).instance for p in alternatives]
         chosen.append(_with_alternatives(primary, instances))
-    return chosen, excuses
+        alternative_plans[name] = alternatives
+    return chosen, alternative_plans, excuses
