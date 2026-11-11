@@ -21,6 +21,7 @@ from service_capacity_modeling.interface import AVG_ITEM_SIZE_BYTES
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import BufferIntent
+from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
@@ -33,6 +34,7 @@ from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import NodeCountContext
@@ -566,6 +568,52 @@ def usable_memory_gib(
     than size a cluster out of it.
     """
     return instance.ram_gib - reserve_memory(instance.ram_gib)
+
+
+def check_cluster_size_requirement(
+    instance: Instance,
+    drive: Drive,
+    cluster: ClusterCapacity,
+    required_cluster_size: Optional[int],
+    context: Optional[Dict[str, Any]] = None,
+) -> Optional[Excuse]:
+    """Return a ``cluster_size`` excuse when the zone's planned count differs
+    from ``required_cluster_size``, or None when it matches or is unset.
+
+    Models raise their minimum count to the required size first, so a mismatch
+    means the workload needs more nodes than required. The excuse names the
+    resource that set the count when the cluster records it, and includes any
+    model-specific ``context``."""
+    if required_cluster_size is None or cluster.count == required_cluster_size:
+        return None
+    node_counts = cluster.node_count_context
+    required_nodes_by_type = (
+        {k.value: v for k, v in node_counts.required_nodes_by_type.items()}
+        if node_counts is not None
+        else {}
+    )
+    resource_bottleneck = (
+        node_counts.resource_bottleneck.value
+        if node_counts is not None and node_counts.resource_bottleneck is not None
+        else "unknown"
+    )
+    return Excuse(
+        instance=instance.name,
+        drive=drive.name,
+        reason=(
+            f"Cluster size {cluster.count} "
+            f"(resource bottleneck: {resource_bottleneck}) "
+            f"!= required {required_cluster_size}"
+        ),
+        context={
+            "computed_count": cluster.count,
+            "required_cluster_size": required_cluster_size,
+            "required_nodes_by_type": required_nodes_by_type,
+            "resource_bottleneck": resource_bottleneck,
+            **(context or {}),
+        },
+        bottleneck=Bottleneck.cluster_size,
+    )
 
 
 # pylint: disable=too-many-locals

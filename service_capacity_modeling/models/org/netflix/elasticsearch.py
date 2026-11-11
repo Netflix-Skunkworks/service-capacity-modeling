@@ -5,6 +5,7 @@ from typing import Callable
 from typing import Dict
 from typing import Optional
 from typing import Tuple
+from typing import Union
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -22,6 +23,7 @@ from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
@@ -36,6 +38,7 @@ from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.common import check_cluster_size_requirement
 from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -180,6 +183,11 @@ class NflxElasticsearchArguments(BaseModel):
         default=1000,
         description="How many disk IOs should be allowed to hit disk per instance",
     )
+    required_cluster_size: Optional[int] = Field(
+        default=None,
+        description="Require data node zonal clusters to be this size (force "
+        "vertical scaling)",
+    )
 
 
 class NflxElasticsearchDataCapacityModel(CapacityModel):
@@ -204,7 +212,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         context: RegionContext,
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
-    ) -> Optional[CapacityPlan]:
+    ) -> Union[CapacityPlan, Excuse, None]:
         copies_per_region: int = _target_rf(
             desires, extra_model_arguments.get("copies_per_region", None)
         )
@@ -305,6 +313,9 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             max_local_data_per_node_gib=max_local_data_per_node_gib,
         )
         min_count = math.ceil(needed_disk_gib / max_data_per_node_gib)
+        required_cluster_size: Optional[int] = extra_model_arguments.get(
+            "required_cluster_size"
+        )
 
         data_cluster = compute_stateful_zone(
             instance=instance,
@@ -321,9 +332,14 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             ),
             # Elasticsearch clusters can auto-balance via shard placement
             cluster_size=lambda x: x,
-            min_count=min_count,
+            min_count=max(min_count, required_cluster_size or 0),
             reserve_memory=reserve_memory,
         )
+        excuse = check_cluster_size_requirement(
+            instance, drive, data_cluster, required_cluster_size
+        )
+        if excuse is not None:
+            return excuse
         data_cluster.cluster_type = "elasticsearch-data"
 
         # Communicate to the actual provision that if we want reduced RF
