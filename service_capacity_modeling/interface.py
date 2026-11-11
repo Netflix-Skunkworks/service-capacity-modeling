@@ -1495,7 +1495,7 @@ class CapacityRegretParameters(ExcludeUnsetModel):
 
 
 ###############################################################################
-#                     Explainability: Excuses & Family Graph                  #
+#                           Explainability: Excuses                           #
 ###############################################################################
 
 
@@ -1503,8 +1503,7 @@ class CapacityRegretParameters(ExcludeUnsetModel):
 class Bottleneck(StrEnum):
     """Resource dimensions that can constrain or improve a capacity plan.
 
-    Used by Excuse (what's limiting this shape) and FamilyEdge
-    (what improves/degrades when switching families).
+    Used by Excuse (what's limiting this shape).
     """
 
     cpu = "cpu"

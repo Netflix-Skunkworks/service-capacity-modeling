@@ -34,7 +34,6 @@ from service_capacity_modeling.explainability import count_sample_excuses
 from service_capacity_modeling.explainability import deduplicate_excuses
 from service_capacity_modeling.explainability import ExplainedPlans
 from service_capacity_modeling.explainability import ExplainedUncertainPlans
-from service_capacity_modeling.explainability import FamilyGraph
 from service_capacity_modeling.explainability import considered_alternative_summaries
 from service_capacity_modeling.explainability import merge_regret_candidates_positional
 from service_capacity_modeling.explainability import MergedRegretCandidate
@@ -791,7 +790,7 @@ class CapacityPlanner:
         max_results_per_family: int = 1,
         planner_arguments: Optional[PlannerArguments] = None,
     ) -> ExplainedPlans:
-        """Like plan_certain() but returns excuses and family graph too."""
+        """Like plan_certain() but returns excuses too."""
         if model_name not in self._models:
             raise ValueError(
                 f"model_name={model_name} does not exist. "
@@ -849,21 +848,9 @@ class CapacityPlanner:
             for model, excuses in raw_excuses_by_model.items()
             if excuses
         }
-        all_excuses = [
-            excuse for excuses in excuses_by_model.values() for excuse in excuses
-        ]
-
-        # Build M×N FamilyGraph from hardware traits over the families of the
-        # returned plans and the current cluster.
-        # Use shapes.region() directly — we only need the hardware catalog, not
-        # a full RegionContext (which would do unnecessary deep-copies of services).
-        hardware = self._shapes.region(region)
-        graph = FamilyGraph.build(all_excuses, hardware, plans)
-
         return ExplainedPlans(
             plans=plans,
             excuses_by_model=excuses_by_model,
-            family_graph=graph,
         )
 
     def _plan_certain(  # pylint: disable=too-many-positional-arguments
@@ -1203,7 +1190,7 @@ class CapacityPlanner:
         planner_arguments: Optional[PlannerArguments] = None,
         instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]] = None,
     ) -> ExplainedUncertainPlans:
-        """Like plan() but returns excuses and family graph too."""
+        """Like plan() but returns excuses too."""
         uncertain_result = self._plan_uncertain(
             model_name=model_name,
             region=region,
@@ -1234,20 +1221,12 @@ class CapacityPlanner:
         )
 
         excuses_by_model = uncertain_result.plan.explanation.excuses_by_model
-        all_excuses = [
-            excuse for excuses in excuses_by_model.values() for excuse in excuses
-        ]
         excuse_summary = count_sample_excuses(uncertain_result.all_sample_excuses)
-        hardware = self._shapes.region(region)
-        graph = FamilyGraph.build(
-            all_excuses, hardware, uncertain_result.plan.least_regret
-        )
 
         return ExplainedUncertainPlans(
             plan=uncertain_result.plan,
             excuses_by_model=excuses_by_model,
             excuse_summary=excuse_summary,
-            family_graph=graph,
             least_regret_summaries=least_regret_summaries,
             considered_alternatives=considered_alternatives,
         )

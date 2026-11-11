@@ -1,4 +1,4 @@
-"""Tests for core explainability types: Excuse, FamilyTrait, FamilyEdge, FamilyGraph.
+"""Tests for core explainability types.
 
 These tests verify library-level contracts with no model-specific logic.
 Model integration tests live in tests/netflix/test_<model>_explainability.py.
@@ -9,22 +9,14 @@ import pytest
 from service_capacity_modeling.explainability import (
     count_sample_excuses,
     deduplicate_excuses,
-    FamilyEdge,
-    FamilyGraph,
-    FamilyTrait,
     SampledExcuse,
 )
-from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import (
     Bottleneck,
-    CapacityPlan,
-    Clusters,
     ExcuseSummary,
     Excuse,
     ExcuseTag,
-    Requirements,
     SampleRef,
-    ZoneClusterCapacity,
 )
 from service_capacity_modeling.models.utils import compute_excuse_tags
 
@@ -180,114 +172,6 @@ class TestExcuseModel:
         ]
 
 
-class TestFamilyTrait:
-    """Test FamilyTrait.from_instance() derivation."""
-
-    def test_from_instance_local_disk(self):
-        hardware = shapes.region("us-east-1")
-        inst = hardware.instances["i4i.8xlarge"]
-        trait = FamilyTrait.from_instance(inst)
-        assert trait.family == "i4i"
-        assert trait.has_local_disk is True
-        assert trait.memory_gib_per_vcpu == pytest.approx(7.63, abs=0.1)
-        assert trait.local_disk_gib_per_vcpu is not None
-        assert trait.local_disk_gib_per_vcpu > 200
-
-    def test_from_instance_ebs(self):
-        hardware = shapes.region("us-east-1")
-        r6a_inst = next(
-            inst for inst in hardware.instances.values() if inst.family == "r6a"
-        )
-        trait = FamilyTrait.from_instance(r6a_inst)
-        assert trait.family == "r6a"
-        assert trait.has_local_disk is False
-        assert trait.local_disk_gib_per_vcpu is None
-        assert trait.drive_type is None
-        assert trait.memory_gib_per_vcpu > 7.0
-
-    def test_ratios_constant_across_sizes(self):
-        hardware = shapes.region("us-east-1")
-        i4i_traits = [
-            FamilyTrait.from_instance(inst)
-            for inst in hardware.instances.values()
-            if inst.family == "i4i" and inst.cpu >= 4
-        ]
-        assert len(i4i_traits) >= 2
-        ratios = {t.memory_gib_per_vcpu for t in i4i_traits}
-        assert len(ratios) == 1
-
-
-class TestFamilyGraph:
-    """Test FamilyGraph.suggest_alternatives."""
-
-    def test_suggest_alternatives_finds_edges(self):
-        graph = FamilyGraph(
-            edges=[
-                FamilyEdge(
-                    from_family="i4i",
-                    to_family="i3en",
-                    trade_off="4x disk/node",
-                    improves=[Bottleneck.disk_capacity],
-                    degrades=[Bottleneck.disk_iops],
-                ),
-                FamilyEdge(
-                    from_family="i4i",
-                    to_family="r7a",
-                    trade_off="EBS, unlimited disk",
-                    improves=[Bottleneck.disk_capacity, Bottleneck.memory],
-                    degrades=[Bottleneck.disk_iops],
-                ),
-            ],
-        )
-        excuse = Excuse(
-            instance="i4i.2xlarge",
-            drive="gp3",
-            reason="Cluster too large",
-            bottleneck=Bottleneck.disk_capacity,
-        )
-        alts = graph.suggest_alternatives(excuse)
-        assert len(alts) == 2
-        assert {a.to_family for a in alts} == {"i3en", "r7a"}
-
-    def test_suggest_alternatives_no_bottleneck(self):
-        graph = FamilyGraph(
-            edges=[
-                FamilyEdge(
-                    from_family="i4i",
-                    to_family="i3en",
-                    trade_off="x",
-                    improves=[Bottleneck.disk_capacity],
-                ),
-            ],
-        )
-        excuse = Excuse(instance="i4i.2xlarge", drive="gp3", reason="test")
-        assert graph.suggest_alternatives(excuse) == []
-
-    def test_suggest_alternatives_no_matching_edges(self):
-        graph = FamilyGraph(
-            edges=[
-                FamilyEdge(
-                    from_family="m6id",
-                    to_family="m7a",
-                    trade_off="x",
-                    improves=[Bottleneck.disk_capacity],
-                ),
-            ],
-        )
-        excuse = Excuse(
-            instance="i4i.2xlarge",
-            drive="gp3",
-            reason="test",
-            bottleneck=Bottleneck.disk_capacity,
-        )
-        assert graph.suggest_alternatives(excuse) == []
-
-    def test_empty_graph(self):
-        graph = FamilyGraph()
-        assert not graph.traits
-        assert not graph.edges
-
-
 @pytest.mark.parametrize(
     "excuse_inst, current_inst, expected_tags",
     [
@@ -300,97 +184,3 @@ class TestFamilyGraph:
 )
 def test_compute_excuse_tags(excuse_inst, current_inst, expected_tags):
     assert compute_excuse_tags(excuse_inst, current_inst) == expected_tags
-
-
-STATEFUL_FAMILIES = ("i4i", "i3en", "r6a", "r7a", "m6id", "c7a")
-
-
-def _plans_on(*families: str) -> list:
-    """One minimal plan per family, on that family's first instance."""
-    hardware = shapes.region("us-east-1")
-    plans = []
-    for family in families:
-        instance = next(i for i in hardware.instances.values() if i.family == family)
-        plans.append(
-            CapacityPlan(
-                requirements=Requirements(),
-                candidate_clusters=Clusters(
-                    annual_costs={},
-                    zonal=[
-                        ZoneClusterCapacity(
-                            cluster_type="test", count=3, instance=instance
-                        )
-                    ],
-                ),
-            )
-        )
-    return plans
-
-
-class TestFamilyGraphBuild:
-    """Test FamilyGraph.build() construction from hardware data."""
-
-    def test_nodes_are_plan_families(self):
-        graph = FamilyGraph.build(
-            excuses=[],
-            hardware=shapes.region("us-east-1"),
-            plans=_plans_on(*STATEFUL_FAMILIES),
-        )
-        assert set(graph.traits) == set(STATEFUL_FAMILIES)
-
-    def test_no_plans_gives_empty_graph(self):
-        graph = FamilyGraph.build(
-            excuses=[], hardware=shapes.region("us-east-1"), plans=[]
-        )
-        assert len(graph.traits) == 0
-        assert len(graph.edges) == 0
-
-    def test_current_shape_family_is_a_node(self):
-        excuse = Excuse(
-            instance="r5d.2xlarge",
-            drive="gp3",
-            reason="too small",
-            tags=[ExcuseTag.current_shape],
-        )
-        graph = FamilyGraph.build(
-            excuses=[excuse],
-            hardware=shapes.region("us-east-1"),
-            plans=_plans_on("r6a"),
-        )
-        assert set(graph.traits) == {"r5d", "r6a"}
-
-    def test_m_times_n_edges(self):
-        """Graph has exactly n*(n-1) directed edges for n families."""
-        graph = FamilyGraph.build(
-            excuses=[],
-            hardware=shapes.region("us-east-1"),
-            plans=_plans_on(*STATEFUL_FAMILIES),
-        )
-        n = len(graph.traits)
-        assert len(graph.edges) == n * (n - 1)
-
-    def test_i4i_disk_bottleneck_suggests_alternatives(self):
-        graph = FamilyGraph.build(
-            excuses=[],
-            hardware=shapes.region("us-east-1"),
-            plans=_plans_on(*STATEFUL_FAMILIES),
-        )
-        excuse = Excuse(
-            instance="i4i.4xlarge",
-            drive="gp3",
-            reason="Cluster too large",
-            bottleneck=Bottleneck.disk_capacity,
-        )
-        to_families = {a.to_family for a in graph.suggest_alternatives(excuse)}
-        assert "i3en" in to_families
-        assert "r7a" in to_families
-
-    def test_edges_use_bottleneck_enum(self):
-        graph = FamilyGraph.build(
-            excuses=[],
-            hardware=shapes.region("us-east-1"),
-            plans=_plans_on(*STATEFUL_FAMILIES),
-        )
-        for edge in graph.edges:
-            for b in edge.improves + edge.degrades:
-                assert isinstance(b, Bottleneck)
