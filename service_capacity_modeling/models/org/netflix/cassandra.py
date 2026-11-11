@@ -1673,12 +1673,12 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         else None,
     )
     if size_excuse is not None:
-        assert required_cluster_size is not None
         deployed_iops_floor = reported_io_calibration.get(
             "deployed_topology_min_count_floor"
         )
         if (
-            isinstance(deployed_iops_floor, int)
+            required_cluster_size is not None
+            and isinstance(deployed_iops_floor, int)
             and deployed_iops_floor > required_cluster_size
         ):
             return size_excuse.model_copy(
