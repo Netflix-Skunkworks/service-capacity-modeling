@@ -222,6 +222,7 @@ class TestStorageScalingConstraints:
             num_results=20,
             desires=desires,
             extra_model_arguments=EXTRA_MODEL_ARGS,
+            instance_families=["i3en"],
         )
         result = cap_plan[0].candidate_clusters.zonal[0]
         result_storage = result.count * get_drive_size_gib(result)
@@ -656,6 +657,7 @@ class TestStorageAndCPUIntegration:
             desires=desires,
             num_results=20,
             extra_model_arguments=EXTRA_MODEL_ARGS,
+            instance_families=["c7a"],
         )
         result = cap_plan[0].candidate_clusters.zonal[0]
         result_cores = result.count * result.instance.cpu

@@ -6,7 +6,6 @@ from functools import lru_cache
 from typing import Any
 from typing import Callable
 from typing import Dict
-from typing import FrozenSet
 from typing import List
 from typing import Literal
 from typing import Optional
@@ -38,7 +37,6 @@ from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import DriveType
 from service_capacity_modeling.interface import Bottleneck
-from service_capacity_modeling.explainability import STATEFUL_DATASTORE_FAMILIES
 from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
@@ -2194,10 +2192,6 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
     @staticmethod
     def allowed_cloud_drives() -> Tuple[Optional[str], ...]:
         return ("gp3",)
-
-    @staticmethod
-    def preferred_families() -> Optional[FrozenSet[str]]:
-        return STATEFUL_DATASTORE_FAMILIES
 
     @staticmethod
     def get_required_cluster_size(

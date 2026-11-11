@@ -87,14 +87,6 @@ class PlannerArguments(ExcludeUnsetModel):
         "Higher values expose within-family size trade-offs "
         "(e.g., 8×xlarge vs 2×4xlarge).",
     )
-    preferred_family_penalty: float = Field(
-        default=0.15,
-        description="Rank inflation applied to plans using families outside "
-        "model.preferred_families(). A non-preferred family must be this fraction "
-        "cheaper on penalty-adjusted compute cost to rank above a preferred "
-        "alternative. "
-        "Set to 0.0 to evaluate all families by pure cost.",
-    )
 
 
 class _CertainResult(ExcludeUnsetModel):
@@ -861,14 +853,12 @@ class CapacityPlanner:
             excuse for excuses in excuses_by_model.values() for excuse in excuses
         ]
 
-        # Build M×N FamilyGraph from hardware traits. preferred_families comes
-        # from the model (None → empty base, only the current cluster's family).
-        # Current cluster's family is always included regardless of preferred set.
+        # Build M×N FamilyGraph from hardware traits over the families of the
+        # returned plans and the current cluster.
         # Use shapes.region() directly — we only need the hardware catalog, not
         # a full RegionContext (which would do unnecessary deep-copies of services).
         hardware = self._shapes.region(region)
-        model = self._models[model_name]
-        graph = FamilyGraph.build(all_excuses, hardware, model.preferred_families())
+        graph = FamilyGraph.build(all_excuses, hardware, plans)
 
         return ExplainedPlans(
             plans=plans,
@@ -895,7 +885,6 @@ class CapacityPlanner:
 
         plans: List[CapacityPlan] = []
         excuses: List[Excuse] = []
-        pref_families = model.preferred_families()
         current_inst = current_instance_name(desires)
         for instance, drive, context in self.generate_scenarios(
             model, region, desires, num_regions, lifecycles, instance_families, drives
@@ -908,21 +897,6 @@ class CapacityPlanner:
                 extra_model_arguments=extra_model_arguments,
             ):
                 case CapacityPlan() as plan:
-                    if (
-                        pref_families is not None
-                        and instance.family not in pref_families
-                        and pargs.preferred_family_penalty > 0
-                    ):
-                        service_cost = sum(
-                            s.annual_cost for s in plan.candidate_clusters.services
-                        )
-                        ranked_compute_cost = plan.rank - service_cost
-                        plan = plan.model_copy(
-                            update={
-                                "rank": plan.rank
-                                + ranked_compute_cost * pargs.preferred_family_penalty
-                            }
-                        )
                     plans.append(plan)
                 case Excuse() as excuse:
                     tags = compute_excuse_tags(excuse.instance, current_inst)
@@ -1265,8 +1239,9 @@ class CapacityPlanner:
         ]
         excuse_summary = count_sample_excuses(uncertain_result.all_sample_excuses)
         hardware = self._shapes.region(region)
-        model = self._models[model_name]
-        graph = FamilyGraph.build(all_excuses, hardware, model.preferred_families())
+        graph = FamilyGraph.build(
+            all_excuses, hardware, uncertain_result.plan.least_regret
+        )
 
         return ExplainedUncertainPlans(
             plan=uncertain_result.plan,

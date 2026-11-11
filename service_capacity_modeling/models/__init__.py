@@ -1,7 +1,6 @@
 from typing import Any
 from typing import Callable
 from typing import Dict
-from typing import FrozenSet
 from typing import List
 from typing import Optional
 from typing import Sequence
@@ -212,23 +211,6 @@ class CapacityModel:
         """
         # quiet pylint
         (_, _, _, _, _) = (instance, drive, context, desires, extra_model_arguments)
-        return None
-
-    @staticmethod
-    def preferred_families() -> Optional[FrozenSet[str]]:
-        """Instance families this model prefers for capacity planning.
-
-        Returns None if the model has no family preference (graph will contain
-        only the current cluster's family, and no rank bias is applied).
-        Override to declare the model's preferred family set. The planner uses
-        this for two purposes — both are automatic and require no per-model code:
-
-        1. Family graph topology: nodes in plan_certain_explained().family_graph
-           come from this set (plus the current cluster's family).
-        2. Rank bias: plans using families outside this set receive a 15%
-           rank inflation on compute cost. A non-preferred family must be
-           ~15% cheaper on compute to rank above a preferred one.
-        """
         return None
 
     @staticmethod
