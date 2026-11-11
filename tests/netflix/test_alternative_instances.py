@@ -207,19 +207,31 @@ def test_a_composed_plan_needs_every_role():
     assert result.excuses_by_model["org.netflix.elasticsearch.node"]
 
 
-def test_grown_elasticsearch_plans_rank_by_cost():
-    """Elasticsearch data plans have rank 0, so plans that grew to reach more
-    families still order by cost."""
-    plans = _plan(
-        "org.netflix.elasticsearch.node",
-        ELASTICSEARCH,
-        {},
-        min_alternatives=2,
-        max_alternative_cost_increase=0.2,
-    ).plans
-    costs = [p.candidate_clusters.total_annual_cost for p in plans]
-    assert len(plans) > 1
-    assert costs == sorted(costs)
+def test_plans_with_more_alternatives_rank_first():
+    """Plans order by alternative count, then the model's rank and cost, so
+    the top plan has the most alternatives any type reaches."""
+    scenario = SCENARIOS["cassandra_small_high_qps_local"]
+    args = (scenario["model"], scenario["desires"], scenario["extra_args"])
+    plans = _plan(*args, min_alternatives=0).plans
+    order = [
+        (
+            -len(planned_cluster(p).alternative_instances),
+            p.rank,
+            p.candidate_clusters.total_annual_cost,
+        )
+        for p in plans
+    ]
+    assert order == sorted(order)
+    top = planner.plan_certain(
+        model_name=scenario["model"],
+        region=scenario["region"],
+        desires=scenario["desires"],
+        extra_model_arguments=scenario["extra_args"],
+        planner_arguments=PlannerArguments(
+            alternative_instances=AlternativeInstanceOptions()
+        ),
+    )[0]
+    assert len(planned_cluster(top).alternative_instances) == -order[0][0]
 
 
 def test_a_type_that_cannot_reach_the_minimum_is_excused():

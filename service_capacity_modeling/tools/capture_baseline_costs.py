@@ -1068,35 +1068,15 @@ def capture_alternative_instances(
     }
 
 
-# The cluster params a shared layout fixes: Cassandra's per-zone settings and
-# the read-only KV layout. The snapshot leaves out the other params, which are
-# model internals the single-type baselines already cover.
-_ALTERNATIVE_LAYOUT_PARAMS = frozenset(
-    (
-        "cassandra.compaction.min_threshold",
-        "read-only-kv.replica_count",
-        "read-only-kv.partitions_per_node",
-    )
-)
-
-
 def _capture_alternatives_plan(plan: CapacityPlan) -> dict[str, Any]:
-    """The alternative types, node counts, drives, layout params and cost."""
+    """The alternative types, node counts, drives, cluster params and cost."""
     snapshot = _capture_candidate(plan.candidate_clusters)
-    clusters = []
-    for cluster in snapshot["clusters"]:
-        params = {
-            k: v
-            for k, v in cluster.pop("cluster_params", {}).items()
-            if k in _ALTERNATIVE_LAYOUT_PARAMS
-        }
-        clusters.append({**cluster, **({"cluster_params": params} if params else {})})
     cluster = planned_cluster(plan)
     return {
         "primary_instance_type": cluster.instance.name,
         "alternative_instances": [i.name for i in cluster.alternative_instances],
         "total_annual_cost": snapshot["total_annual_cost"],
-        "clusters": clusters,
+        "clusters": snapshot["clusters"],
     }
 
 

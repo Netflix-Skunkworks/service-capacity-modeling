@@ -1602,7 +1602,15 @@ def _plan_alternative_instances(
     chosen, alternative_plans, excuses = choose_alternative_instances(
         own_plans, plans_by_layout, options
     )
-    chosen.sort(key=lambda p: (p.rank, p.candidate_clusters.total_annual_cost))
+    # More alternative types protect against more shortages, so they rank
+    # ahead of the model's own rank and cost.
+    chosen.sort(
+        key=lambda p: (
+            -len(planned_cluster(p).alternative_instances),
+            p.rank,
+            p.candidate_clusters.total_annual_cost,
+        )
+    )
     return chosen, alternative_plans, excuses
 
 
