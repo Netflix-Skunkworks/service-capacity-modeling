@@ -76,16 +76,9 @@ class TestPlanCertainExplained:
         for excuse in typed_excuses:
             assert isinstance(excuse.bottleneck, Bottleneck)
 
-    def test_family_graph_is_deprecated_and_empty(self, explained_plans):
-        # Callers still read and serialize the field, so it stays, empty.
-        assert explained_plans.model_dump()["family_graph"] == {
-            "traits": {},
-            "edges": [],
-        }
-
 
 class TestPlanExplained:
-    """Test that plan_explained() returns excuses, family graph, and plan."""
+    """Test that plan_explained() returns excuses and plan."""
 
     @pytest.fixture(scope="class")
     def explained_uncertain(self):

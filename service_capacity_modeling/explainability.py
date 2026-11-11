@@ -4,7 +4,6 @@
 
 This module contains ExplainedPlans and ExplainedUncertainPlans, types used
 to explain *why* the planner rejected certain instance/drive combinations.
-FamilyTrait, FamilyEdge and FamilyGraph are deprecated and always empty.
 
 Core contract types (Bottleneck, Excuse) live in interface.py because they
 are part of the CapacityModel.capacity_plan() return type.
@@ -66,7 +65,6 @@ from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import ExcuseSummary
-from service_capacity_modeling.interface import DriveType
 from service_capacity_modeling.interface import ExcludeUnsetModel
 from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import Interval
@@ -75,42 +73,6 @@ from service_capacity_modeling.interface import UncertainCapacityPlan
 from service_capacity_modeling.interface import SampleRef
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models.common import merge_plan
-
-
-class FamilyTrait(ExcludeUnsetModel):
-    """Deprecated: the planner no longer builds a family graph.
-
-    Kept so callers that construct or deserialize FamilyGraph keep working.
-    """
-
-    family: str
-    memory_gib_per_vcpu: float
-    has_local_disk: bool
-    local_disk_gib_per_vcpu: Optional[float] = None
-    drive_type: Optional[DriveType] = None
-    cost_per_vcpu_annual: Optional[float] = None
-
-
-class FamilyEdge(ExcludeUnsetModel):
-    """Deprecated: the planner no longer builds a family graph."""
-
-    from_family: str
-    to_family: str
-    trade_off: Optional[str] = None
-    improves: List[Bottleneck] = []
-    degrades: List[Bottleneck] = []
-
-
-class FamilyGraph(ExcludeUnsetModel):
-    """Deprecated: always empty, and will be removed.
-
-    The graph compared families by per-vCPU ratios and the digit in the family
-    name, so it disagreed with the per-node checks that actually reject a
-    type, such as a RAM floor per node. Excuses explain each rejection.
-    """
-
-    traits: Dict[str, FamilyTrait] = {}
-    edges: List[FamilyEdge] = []
 
 
 # Return type of Excuse.dedupe_key(); see that method for why these fields.
@@ -475,7 +437,7 @@ def considered_alternative_summaries(
 
 
 class ExplainedPlans(ExcludeUnsetModel):
-    """Plans + sub-model excuses + family context.
+    """Plans + sub-model excuses.
 
     Structured data for programmatic consumers. Serialize with
     .model_dump() / .model_dump_json().
@@ -483,12 +445,10 @@ class ExplainedPlans(ExcludeUnsetModel):
 
     plans: Sequence[CapacityPlan]
     excuses_by_model: Dict[str, Sequence[Excuse]] = Field(default_factory=dict)
-    # Deprecated: always empty.
-    family_graph: FamilyGraph = FamilyGraph()
 
 
 class ExplainedUncertainPlans(ExcludeUnsetModel):
-    """Uncertain plans + sub-model excuses + family context.
+    """Uncertain plans + sub-model excuses.
 
     Mirrors ExplainedPlans but wraps UncertainCapacityPlan instead
     of deterministic plans. Returned by plan_explained().
@@ -497,7 +457,5 @@ class ExplainedUncertainPlans(ExcludeUnsetModel):
     plan: UncertainCapacityPlan
     excuses_by_model: Dict[str, Sequence[Excuse]] = Field(default_factory=dict)
     excuse_summary: Sequence[ExcuseSummary] = Field(default_factory=list)
-    # Deprecated: always empty.
-    family_graph: FamilyGraph = FamilyGraph()
     least_regret_summaries: Sequence[RegretPlanSummary] = Field(default_factory=list)
     considered_alternatives: Sequence[RegretPlanSummary] = Field(default_factory=list)

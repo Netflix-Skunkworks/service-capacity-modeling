@@ -34,7 +34,6 @@ from service_capacity_modeling.explainability import count_sample_excuses
 from service_capacity_modeling.explainability import deduplicate_excuses
 from service_capacity_modeling.explainability import ExplainedPlans
 from service_capacity_modeling.explainability import ExplainedUncertainPlans
-from service_capacity_modeling.explainability import FamilyGraph
 from service_capacity_modeling.explainability import considered_alternative_summaries
 from service_capacity_modeling.explainability import merge_regret_candidates_positional
 from service_capacity_modeling.explainability import MergedRegretCandidate
@@ -791,7 +790,7 @@ class CapacityPlanner:
         max_results_per_family: int = 1,
         planner_arguments: Optional[PlannerArguments] = None,
     ) -> ExplainedPlans:
-        """Like plan_certain() but returns excuses and family graph too."""
+        """Like plan_certain() but returns excuses too."""
         if model_name not in self._models:
             raise ValueError(
                 f"model_name={model_name} does not exist. "
@@ -852,7 +851,6 @@ class CapacityPlanner:
         return ExplainedPlans(
             plans=plans,
             excuses_by_model=excuses_by_model,
-            family_graph=FamilyGraph(traits={}, edges=[]),
         )
 
     def _plan_certain(  # pylint: disable=too-many-positional-arguments
@@ -1192,7 +1190,7 @@ class CapacityPlanner:
         planner_arguments: Optional[PlannerArguments] = None,
         instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]] = None,
     ) -> ExplainedUncertainPlans:
-        """Like plan() but returns excuses and family graph too."""
+        """Like plan() but returns excuses too."""
         uncertain_result = self._plan_uncertain(
             model_name=model_name,
             region=region,
@@ -1229,7 +1227,6 @@ class CapacityPlanner:
             plan=uncertain_result.plan,
             excuses_by_model=excuses_by_model,
             excuse_summary=excuse_summary,
-            family_graph=FamilyGraph(traits={}, edges=[]),
             least_regret_summaries=least_regret_summaries,
             considered_alternatives=considered_alternatives,
         )
