@@ -5,6 +5,7 @@ from typing import List
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
+from typing import TYPE_CHECKING
 from typing import Union
 
 from pydantic import BaseModel
@@ -28,6 +29,10 @@ from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models.common import cluster_infra_cost
+
+if TYPE_CHECKING:
+    from service_capacity_modeling.demand import Demand
+    from service_capacity_modeling.demand import NodeRules
 
 # Shared constant for rank penalty metadata in cluster_params.
 # Models store penalty values (coefficients or dollar amounts) under this key.
@@ -211,6 +216,23 @@ class CapacityModel:
         """
         # quiet pylint
         (_, _, _, _, _) = (instance, drive, context, desires, extra_model_arguments)
+        return None
+
+    @staticmethod
+    def demand(  # pylint: disable=unused-argument
+        drive: Drive,
+        context: RegionContext,
+        desires: CapacityDesires,
+        extra_model_arguments: Dict[str, Any],
+    ) -> Optional[Tuple["Demand", "NodeRules"]]:
+        """What the workload needs on this drive, independent of instance.
+
+        Models that implement this let the planner size any shape with
+        ``service_capacity_modeling.demand.fit`` and attach alternatives: other
+        instance types that can host a returned plan's exact layout. The
+        default None keeps the model on the per-instance ``capacity_plan``
+        path only.
+        """
         return None
 
     @staticmethod

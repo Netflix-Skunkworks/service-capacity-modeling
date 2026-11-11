@@ -1,17 +1,19 @@
-"""Demand-driven planning: models state requirements, one fitter picks shapes.
+"""Demand-driven planning: models state requirements, one fitter sizes shapes.
 
-Sketch of an alternative architecture. Today the planner calls every model
-once per (instance, drive), and each model sizes that one shape itself. Here a
-model never sees an instance:
+A model that implements ``CapacityModel.demand`` never sizes an instance
+itself. It returns:
 
-1. ``DemandModel.demand(desires, drive)`` returns a per-zone ``Demand`` (what
-   the workload needs, as intervals) and ``NodeRules`` (the few constraints
-   that depend on the node itself).
-2. ``fit`` turns demand into a node count for any shape: the count is set by
-   the most constrained resource (the "binding" dimension).
-3. ``plan`` fits every shape, picks the cheapest as the primary, and lists
-   alternatives: other shapes that can stand in for a primary node at the
-   same count.
+- ``Demand``: what the workload needs for one cluster scope (a zone, or the
+  region for regional clusters), as intervals, independent of any instance.
+- ``NodeRules``: the few constraints that depend on the node, such as memory
+  reserved from node RAM, a cap on data per node, hard rejections, and, when
+  node count is not a simple ceiling, a ``layout`` rule (for example partition
+  placement).
+
+``fit`` sizes any shape against that demand. Because the same demand and
+rules size every shape, the planner can ask a second question cheaply: which
+other shapes can host the *same layout* as a chosen plan? Those are the
+plan's alternatives, used as fallbacks when the primary type is unavailable.
 
 CPU is measured in normalized compute units (NCU). One NCU is one core of
 ``default_reference_shape`` (2.3 GHz, IPC 1.0). A vCPU on another instance is
@@ -19,11 +21,9 @@ worth ``cpu_ghz * cpu_ipc_scale / 2.3`` NCU, the same conversion as
 ``normalize_cores``. An m6id.2xlarge (8 vCPU at 3.5 GHz, IPC 1.15) supplies
 14 NCU; an m7a.2xlarge (8 vCPU at 3.7 GHz, IPC 1.95) supplies about 25.
 
-Demand intervals carry two meanings. ``mid`` sizes the primary. ``low`` is
-the floor every node must meet, so any shape at or above ``low / count`` on
-every dimension can replace a primary node, whether as an ICE fallback, in a
-temporarily mixed fleet, or as a container request. A wider gap between
-``low`` and ``mid`` allows weaker fallbacks and costs more primary capacity.
+``mid`` sizes a plan. ``low`` is the floor a shape must meet to stand in for
+the primary at the primary's layout. A wider gap between ``low`` and ``mid``
+allows weaker fallbacks and costs more primary capacity.
 """
 
 from __future__ import annotations
@@ -31,25 +31,24 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from dataclasses import field
+from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import Iterable
 from typing import List
 from typing import Optional
-from typing import Protocol
-from typing import Sequence
 from typing import Tuple
 from typing import Union
 
+from service_capacity_modeling.enum_utils import StrEnum
+from service_capacity_modeling.interface import AlternativeInstance
 from service_capacity_modeling.interface import Bottleneck
-from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import DriveType
 from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
-from service_capacity_modeling.enum_utils import StrEnum
 
 
 class Resource(StrEnum):
@@ -68,7 +67,7 @@ _BOTTLENECK: Dict[Resource, Bottleneck] = {
     Resource.disk_gib: Bottleneck.disk_capacity,
 }
 
-# The resources in a fixed order, so the binding dimension is deterministic.
+# The resources in a fixed order, so the binding resource is deterministic.
 DIMENSIONS: Tuple[Resource, ...] = (
     Resource.ncu,
     Resource.mem_gib,
@@ -76,18 +75,20 @@ DIMENSIONS: Tuple[Resource, ...] = (
     Resource.network_mbps,
 )
 
+Amounts = Dict[Resource, float]
+
 
 @dataclass(frozen=True)
 class Demand:
-    """What one zone of the workload needs, independent of any instance."""
+    """What one cluster scope needs, independent of any instance."""
 
     ncu: Interval
     mem_gib: Interval
     disk_gib: Interval
     network_mbps: Interval
 
-    def at(self, point: str) -> Dict[Resource, float]:
-        """Demand per dimension at ``point`` ("low", "mid" or "high")."""
+    def at(self, point: str) -> Amounts:
+        """Demand per resource at ``point`` ("low", "mid" or "high")."""
         return {
             Resource.ncu: getattr(self.ncu, point),
             Resource.mem_gib: getattr(self.mem_gib, point),
@@ -96,13 +97,32 @@ class Demand:
         }
 
 
+@dataclass(frozen=True)
+class Layout:
+    """How a cluster is laid out: the node count plus model-specific placement.
+
+    ``params`` holds whatever a layout rule needs to check that another shape
+    can host the same placement, and is copied into ``cluster_params``.
+    """
+
+    count: int
+    params: Dict[str, Any] = field(default_factory=dict)
+    # What each node actually carries when that is not demand / count, for
+    # example a replicated partition placement. Omitted resources use
+    # demand / count.
+    need_per_node: Dict[Resource, float] = field(default_factory=dict)
+
+
+# (instance, need, supply per node, pinned layout or None) -> layout or a
+# number-free reason the shape cannot host it.
+LayoutRule = Callable[
+    [Instance, Amounts, Amounts, Optional[Layout]], Union[Layout, str]
+]
+
+
 def _no_reserve(instance: Instance) -> float:
     del instance
     return 0.0
-
-
-def _any_count(count: int) -> int:
-    return count
 
 
 def _accept_all(instance: Instance, drive: Drive) -> Optional[str]:
@@ -114,34 +134,19 @@ def _accept_all(instance: Instance, drive: Drive) -> Optional[str]:
 class NodeRules:
     """Constraints that depend on the node, not on total demand.
 
-    Keep this small. Every rule here is model knowledge the fitter must apply
-    to shapes the model never saw. If a model needs many rules, re-running the
-    model per shape is the better design for it.
+    Keep this small. Every rule here is model knowledge the fitter applies to
+    shapes the model never saw.
     """
 
-    # Memory the node uses before the workload sees any, e.g. heap, OS and
-    # sidecars. A function of the node because heap is often sized from RAM.
+    # Memory the node uses before the workload sees any (OS, heap, sidecars).
     reserve_mem_gib: Callable[[Instance], float] = _no_reserve
-    # Cap on data per node, e.g. to bound streaming time when a node is replaced.
+    # Effective cap on data per node, buffer already applied.
     max_data_per_node_gib: float = math.inf
-    # Round the raw count, e.g. to an even number or a power of two.
-    cluster_size: Callable[[int], int] = _any_count
     min_count: int = 1
-    # Hard rejections, returning a reason without numbers, e.g. a RAM floor.
+    # Hard rejections, returning a number-free reason.
     rejects: Callable[[Instance, Drive], Optional[str]] = _accept_all
-
-
-class DemandModel(Protocol):
-    """What a model implements in this design instead of ``capacity_plan``."""
-
-    def demand(
-        self, desires: CapacityDesires, drive: Drive
-    ) -> Optional[Tuple[Demand, NodeRules]]:
-        """Per-zone demand on this kind of drive, or None if it cannot run there.
-
-        Demand depends on the drive, not the instance: working sets that must
-        stay in RAM shrink as drive read latency falls.
-        """
+    # Node count from need and supply when it is not the largest ceiling.
+    layout: Optional[LayoutRule] = None
 
 
 def ncu_per_node(instance: Instance) -> float:
@@ -151,15 +156,13 @@ def ncu_per_node(instance: Instance) -> float:
     return instance.cpu * speed / (reference.cpu_ghz * reference.cpu_ipc_scale)
 
 
-def supply(instance: Instance, drive: Drive, rules: NodeRules) -> Dict[Resource, float]:
-    """What one node supplies to the workload on each dimension."""
+def supply(instance: Instance, drive: Drive, rules: NodeRules) -> Amounts:
+    """What one node supplies to the workload on each resource."""
     if drive.drive_type == DriveType.attached_ssd:
-        # Attached volumes grow on demand, so only the data cap and the
-        # volume's own limit bound capacity.
         disk_gib = min(rules.max_data_per_node_gib, float(drive.max_scale_size_gib))
     else:
         local = instance.drive.size_gib if instance.drive is not None else 0
-        disk_gib = min(rules.max_data_per_node_gib, float(local))
+        disk_gib = min(rules.max_data_per_node_gib, local)
     return {
         Resource.ncu: ncu_per_node(instance),
         Resource.mem_gib: max(0.0, instance.ram_gib - rules.reserve_mem_gib(instance)),
@@ -174,180 +177,141 @@ class Fit:
 
     instance: Instance
     drive: Drive
-    count: int
+    layout: Layout
     binding: Resource
-    need_per_node: Dict[Resource, float]
-    supply_per_node: Dict[Resource, float]
-    annual_cost: float
+    need_per_node: Amounts
+    supply_per_node: Amounts
+
+    @property
+    def count(self) -> int:
+        return self.layout.count
+
+    @property
+    def annual_cost(self) -> float:
+        cost = self.instance.annual_cost
+        if self.drive.drive_type == DriveType.attached_ssd:
+            # Capacity only; IOPS and throughput pricing are not modeled here.
+            disk = self.need_per_node[Resource.disk_gib]
+            cost += disk * self.drive.annual_cost_per_gib
+        return cost * self.count
 
 
-def _annual_cost(
-    instance: Instance, drive: Drive, count: int, disk_per_node_gib: float
-) -> float:
-    cost = instance.annual_cost
-    if drive.drive_type == DriveType.attached_ssd:
-        # Capacity only. IOPS and throughput pricing would come from NodeRules.
-        cost += disk_per_node_gib * drive.annual_cost_per_gib
-    return cost * count
+def _ceiling_layout(
+    need: Amounts, have: Amounts, rules: NodeRules, pinned: Optional[Layout]
+) -> Union[Layout, str]:
+    if pinned is not None:
+        short = [d for d in DIMENSIONS if have[d] * pinned.count < need[d]]
+        if short:
+            return f"Cannot host the layout: {short[0].value}"
+        return pinned
+    raw = max(math.ceil(need[d] / have[d]) if need[d] > 0 else 0 for d in DIMENSIONS)
+    return Layout(count=max(raw, rules.min_count))
 
 
-def fit(
+def fit(  # pylint: disable=too-many-positional-arguments
     demand: Demand,
     rules: NodeRules,
     instance: Instance,
     drive: Drive,
-    count: Optional[int] = None,
+    pinned: Optional[Layout] = None,
+    point: Optional[str] = None,
 ) -> Union[Fit, Excuse]:
     """Size ``instance`` for ``demand``, or explain why it cannot serve it.
 
-    With ``count`` unset, returns the smallest count that meets ``mid`` demand.
-    With ``count`` set, checks whether that many nodes meet ``low`` demand,
-    which is how a shape qualifies as an alternative at the primary's count.
+    Without ``pinned``, returns the smallest layout that meets demand at
+    ``point`` (default ``mid``). With ``pinned``, checks that ``instance`` can
+    host that exact layout at ``point`` (default ``low``), which is how a
+    shape qualifies as an alternative.
     """
-    name, drive_name = instance.name, drive.name
+    point = point or ("mid" if pinned is None else "low")
     reason = rules.rejects(instance, drive)
     if reason is not None:
-        return Excuse(instance=name, drive=drive_name, reason=reason)
+        return Excuse(instance=instance.name, drive=drive.name, reason=reason)
 
+    need = demand.at(point)
     have = supply(instance, drive, rules)
     for dim in DIMENSIONS:
-        if have[dim] <= 0:
+        if have[dim] <= 0 < need[dim]:
             return Excuse(
-                instance=name,
-                drive=drive_name,
+                instance=instance.name,
+                drive=drive.name,
                 reason=f"Supplies no {dim.value}",
                 bottleneck=_BOTTLENECK.get(dim),
             )
 
-    if count is None:
-        need = demand.at("mid")
-        by_dim = {dim: math.ceil(need[dim] / have[dim]) for dim in DIMENSIONS}
-        raw = max(by_dim.values())
-        count = max(rules.cluster_size(raw), rules.min_count)
-        binding = max(DIMENSIONS, key=lambda d: by_dim[d])
+    if rules.layout is not None:
+        layout = rules.layout(instance, need, have, pinned)
     else:
-        need = demand.at("low")
-        short = [d for d in DIMENSIONS if have[d] * count < need[d]]
-        if short:
-            return Excuse(
-                instance=name,
-                drive=drive_name,
-                reason=f"Below the per-node {short[0].value} floor",
-                context={
-                    "count": count,
-                    "need_per_node": need[short[0]] / count,
-                    "supply_per_node": have[short[0]],
-                },
-                bottleneck=_BOTTLENECK.get(short[0]),
-            )
-        binding = max(DIMENSIONS, key=lambda d: need[d] / have[d])
+        layout = _ceiling_layout(need, have, rules, pinned)
+    if isinstance(layout, str):
+        short: Optional[Resource] = next(
+            (d for d in DIMENSIONS if d.value in layout), None
+        )
+        return Excuse(
+            instance=instance.name,
+            drive=drive.name,
+            reason=layout,
+            context={
+                "count": pinned.count if pinned else None,
+                "supply_per_node": {d.value: have[d] for d in DIMENSIONS},
+            },
+            bottleneck=_BOTTLENECK.get(short) if short else None,
+        )
 
-    need_per_node = {dim: need[dim] / count for dim in DIMENSIONS}
+    need_per_node = {
+        d: layout.need_per_node.get(d, need[d] / layout.count) for d in DIMENSIONS
+    }
+    binding = max(
+        DIMENSIONS,
+        key=lambda d: need_per_node[d] / have[d] if have[d] > 0 else 0.0,
+    )
     return Fit(
         instance=instance,
         drive=drive,
-        count=count,
+        layout=layout,
         binding=binding,
         need_per_node=need_per_node,
         supply_per_node=have,
-        annual_cost=_annual_cost(
-            instance, drive, count, need_per_node[Resource.disk_gib]
-        ),
     )
 
 
-@dataclass(frozen=True)
-class DemandPlan:
-    """The primary shape, the shapes that can stand in for it, and why others can't."""
-
-    demand: Demand
-    primary: Fit
-    alternatives: List[Fit] = field(default_factory=list)
-    excuses: List[Excuse] = field(default_factory=list)
-
-
-def _compatible(instance: Instance, drive: Drive) -> bool:
-    if drive.drive_type == DriveType.attached_ssd:
-        return (
-            not drive.compatible_families
-            or instance.family in drive.compatible_families
-        )
-    return instance.drive is not None and instance.drive.name == drive.name
-
-
-def plan(
-    model: DemandModel,
-    desires: CapacityDesires,
-    instances: Iterable[Instance],
-    drives: Sequence[Drive],
-    max_alternatives: int = 3,
-) -> Optional[DemandPlan]:
-    """Fit every shape, pick the cheapest as primary, then list alternatives.
-
-    Demand is computed once per drive, not once per instance. Alternatives
-    share the primary's drive and count, are at most one per family, and are
-    ordered by cost.
-    """
-    instances = list(instances)
-    excuses: List[Excuse] = []
-    best = _cheapest(model, desires, instances, drives, excuses)
-    if best is None:
-        return None
-    primary, demand, rules = best
-    alternatives = _alternatives(primary, demand, rules, instances, excuses)
-    return DemandPlan(
-        demand=demand,
-        primary=primary,
-        alternatives=alternatives[:max_alternatives],
-        excuses=excuses,
-    )
-
-
-def _cheapest(
-    model: DemandModel,
-    desires: CapacityDesires,
-    instances: List[Instance],
-    drives: Sequence[Drive],
-    excuses: List[Excuse],
-) -> Optional[Tuple[Fit, Demand, NodeRules]]:
-    """Cheapest fit across every drive and instance, with the demand behind it."""
-    best: Optional[Tuple[Fit, Demand, NodeRules]] = None
-    for drive in drives:
-        stated = model.demand(desires, drive)
-        if stated is None:
-            continue
-        demand, rules = stated
-        for instance in instances:
-            if not _compatible(instance, drive):
-                continue
-            result = fit(demand, rules, instance, drive)
-            if isinstance(result, Excuse):
-                excuses.append(result)
-            elif best is None or result.annual_cost < best[0].annual_cost:
-                best = (result, demand, rules)
-    return best
-
-
-def _alternatives(
-    primary: Fit,
+def fit_all(  # pylint: disable=too-many-positional-arguments
     demand: Demand,
     rules: NodeRules,
-    instances: List[Instance],
-    excuses: List[Excuse],
-) -> List[Fit]:
-    """Other families that meet the floor at the primary's drive and count."""
-    alternatives: Dict[str, Fit] = {}
+    instances: Iterable[Instance],
+    pinned: Optional[Layout] = None,
+    point: Optional[str] = None,
+    drive: Optional[Drive] = None,
+) -> Tuple[List[Fit], List[Excuse]]:
+    """Fit every instance; fits are ordered cheapest first.
+
+    This is the entry point for callers that choose shapes themselves, for
+    example an autoscaler that holds the node count fixed and picks a type for
+    a target NCU. ``drive`` is the attached drive; without it each instance
+    uses its own local drive and instances without one are skipped.
+    """
+    fits: List[Fit] = []
+    excuses: List[Excuse] = []
     for instance in instances:
-        if instance.family == primary.instance.family:
+        node_drive = drive or instance.drive
+        if node_drive is None:
             continue
-        if not _compatible(instance, primary.drive):
-            continue
-        result = fit(demand, rules, instance, primary.drive, count=primary.count)
+        result = fit(demand, rules, instance, node_drive, pinned=pinned, point=point)
         if isinstance(result, Excuse):
             excuses.append(result)
-            continue
-        kept = alternatives.get(instance.family)
-        if kept is None or result.annual_cost < kept.annual_cost:
-            alternatives[instance.family] = result
+        else:
+            fits.append(result)
+    fits.sort(key=lambda f: f.annual_cost)
+    return fits, excuses
 
-    return sorted(alternatives.values(), key=lambda f: f.annual_cost)
+
+def to_alternative(result: Fit) -> AlternativeInstance:
+    """The planner-facing record of an alternative."""
+    return AlternativeInstance(
+        instance=result.instance.name,
+        count=result.count,
+        annual_cost=result.annual_cost,
+        binding=result.binding.value,
+        need_per_node={d.value: v for d, v in result.need_per_node.items()},
+        supply_per_node={d.value: v for d, v in result.supply_per_node.items()},
+    )

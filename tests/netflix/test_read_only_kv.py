@@ -19,6 +19,7 @@ from service_capacity_modeling.capacity_planner import PlannerArguments
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
@@ -28,6 +29,7 @@ from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
+from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionClusterCapacity
@@ -906,7 +908,9 @@ class TestReadOnlyKVPartitionAwareAlgorithm:
             args=NflxReadOnlyKVArguments(total_num_partitions=64),
         )
 
-        assert plan is None
+        # The rejection is now explained instead of silent.
+        assert isinstance(plan, Excuse)
+        assert plan.bottleneck == Bottleneck.memory
 
     def test_zero_state_returns_no_plan(self, sst_memory_desires):
         desires = sst_memory_desires.model_copy(deep=True)

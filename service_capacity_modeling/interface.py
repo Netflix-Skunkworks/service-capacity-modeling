@@ -1369,12 +1369,32 @@ class NodeCountContext(ExcludeUnsetModel):
         )
 
 
+class AlternativeInstance(ExcludeUnsetModel):
+    """An instance type that can host a cluster's exact layout in its place.
+
+    Used as a fallback when the primary type is unavailable. Each node of the
+    alternative meets the demand floor, so the cluster can also run a mix of
+    the primary and its alternatives.
+    """
+
+    instance: str
+    count: int
+    annual_cost: float
+    # The resource closest to its per-node limit.
+    binding: str
+    need_per_node: Dict[str, float] = {}
+    supply_per_node: Dict[str, float] = {}
+
+
 class ClusterCapacity(ExcludeUnsetModel):
     cluster_type: str
 
     count: int
     instance: Instance
     attached_drives: Sequence[Drive] = ()
+    # Other instance types that can host this exact layout, cheapest first.
+    # Only set for models that state their demand (CapacityModel.demand).
+    alternatives: Sequence[AlternativeInstance] = ()
     # When provisioning services we might need to signal they
     # should have certain configuration, for example flags that
     # affect durability shut off
