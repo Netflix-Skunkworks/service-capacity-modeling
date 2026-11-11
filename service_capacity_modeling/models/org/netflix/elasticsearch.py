@@ -38,7 +38,7 @@ from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
-from service_capacity_modeling.models.common import required_cluster_size_excuse
+from service_capacity_modeling.models.common import check_cluster_size_requirement
 from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -335,7 +335,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             min_count=max(min_count, required_cluster_size or 0),
             reserve_memory=reserve_memory,
         )
-        excuse = required_cluster_size_excuse(
+        excuse = check_cluster_size_requirement(
             instance, drive, data_cluster, required_cluster_size
         )
         if excuse is not None:

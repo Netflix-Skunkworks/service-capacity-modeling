@@ -66,7 +66,7 @@ from service_capacity_modeling.models.common import get_effective_disk_per_node_
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import upsert_params
-from service_capacity_modeling.models.common import required_cluster_size_excuse
+from service_capacity_modeling.models.common import check_cluster_size_requirement
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
@@ -1663,7 +1663,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
 
     # Sometimes we don't want modify cluster topology, so only allow
     # topologies that match the desired zone size
-    size_excuse = required_cluster_size_excuse(
+    size_excuse = check_cluster_size_requirement(
         instance,
         drive,
         cluster,

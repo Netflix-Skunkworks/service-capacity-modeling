@@ -570,14 +570,15 @@ def usable_memory_gib(
     return instance.ram_gib - reserve_memory(instance.ram_gib)
 
 
-def required_cluster_size_excuse(
+def check_cluster_size_requirement(
     instance: Instance,
     drive: Drive,
     cluster: ClusterCapacity,
     required_cluster_size: Optional[int],
     context: Optional[Dict[str, Any]] = None,
 ) -> Optional[Excuse]:
-    """Reject a zone whose planned count differs from ``required_cluster_size``.
+    """Return a ``cluster_size`` excuse when the zone's planned count differs
+    from ``required_cluster_size``, or None when it matches or is unset.
 
     Models raise their minimum count to the required size first, so a mismatch
     means the workload needs more nodes than required. The excuse names the

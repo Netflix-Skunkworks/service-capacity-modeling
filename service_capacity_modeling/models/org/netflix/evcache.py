@@ -48,7 +48,7 @@ from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
-from service_capacity_modeling.models.common import required_cluster_size_excuse
+from service_capacity_modeling.models.common import check_cluster_size_requirement
 from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -465,7 +465,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         adjusted_disk_io_needed=adjusted_disk_io_needed,
         read_write_ratio=read_write_ratio,
     )
-    excuse = required_cluster_size_excuse(
+    excuse = check_cluster_size_requirement(
         instance, drive, cluster, required_cluster_size
     )
     if excuse is not None:
