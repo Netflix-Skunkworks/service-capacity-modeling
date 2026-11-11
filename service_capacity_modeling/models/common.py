@@ -570,6 +570,17 @@ def usable_memory_gib(
     return instance.ram_gib - reserve_memory(instance.ram_gib)
 
 
+def zone_size_layouts(plans: Sequence[CapacityPlan]) -> List[Dict[str, Any]]:
+    """One ``required_cluster_size`` layout per distinct zone size of the
+    single-type plans, fewest nodes first.
+
+    For models that give every node in a zone an equal share of the work, a
+    type that runs ``n`` nodes per zone also runs any larger count, so a set of
+    types first shares the largest of their own counts."""
+    sizes = sorted({plan.candidate_clusters.zonal[0].count for plan in plans})
+    return [{"required_cluster_size": size} for size in sizes]
+
+
 def check_cluster_size_requirement(
     instance: Instance,
     drive: Drive,

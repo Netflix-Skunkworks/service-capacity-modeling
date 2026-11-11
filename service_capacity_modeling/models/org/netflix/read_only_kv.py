@@ -18,10 +18,12 @@ from typing import Any
 from typing import Dict
 from typing import List
 from typing import Optional
+from typing import Sequence
 from typing import Tuple
 
 from pydantic import BaseModel
 from pydantic import Field
+from pydantic import model_validator
 
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
@@ -59,10 +61,14 @@ from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
     CapacityProblem,
+    plan_at_layout,
     search_for_min_nodes,
 )
 
 logger = logging.getLogger(__name__)
+
+# (partitions_per_node, replica_count)
+ReadOnlyKVLayout = Tuple[int, int]
 
 
 def _compute_penalties(
@@ -87,6 +93,18 @@ class NflxReadOnlyKVArguments(BaseModel):
     disk space for additional replicas in compute-heavy workloads.
     """
 
+    required_partitions_per_node: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Plan exactly this many partitions per node. Set together "
+        "with required_replica_count.",
+    )
+    required_replica_count: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Plan exactly this many copies of the data. Set together "
+        "with required_partitions_per_node.",
+    )
     min_replica_count: int = Field(
         default=2,
         description="Minimum number of data replicas. "
@@ -128,6 +146,16 @@ class NflxReadOnlyKVArguments(BaseModel):
         "Adds penalty * max(0, (normalized_size - 4) / 4) * cost to the "
         "effective sort cost. Set to 0 to disable.",
     )
+
+    @model_validator(mode="after")
+    def _layout_set_together(self) -> "NflxReadOnlyKVArguments":
+        if (self.required_partitions_per_node is None) != (
+            self.required_replica_count is None
+        ):
+            raise ValueError(
+                "Set required_partitions_per_node and required_replica_count together"
+            )
+        return self
 
 
 # TODO: Data-block working set estimation remains disabled because
@@ -201,6 +229,7 @@ def _compute_read_only_kv_regional_cluster(
     sst_memory_overhead_ratio: float,
     memory_buffer_ratio: float,
     reserved_memory_gib: float,
+    layout: Optional[ReadOnlyKVLayout] = None,
 ) -> Optional[RegionClusterCapacity]:
     """Compute the regional cluster configuration using the partition-aware algorithm.
 
@@ -223,6 +252,8 @@ def _compute_read_only_kv_regional_cluster(
         sst_memory_overhead_ratio: Active resident SST memory estimate
         memory_buffer_ratio: Memory buffer ratio for headroom
         reserved_memory_gib: Total memory reserved outside SST table readers
+        layout: Plan exactly this layout instead of searching for the fewest
+            nodes
 
     Returns:
         RegionClusterCapacity or None if configuration is not viable
@@ -264,7 +295,11 @@ def _compute_read_only_kv_regional_cluster(
         max_nodes=args.max_regional_size,
     )
 
-    result = search_for_min_nodes(problem)
+    result = (
+        search_for_min_nodes(problem)
+        if layout is None
+        else plan_at_layout(problem, *layout)
+    )
     if result is None:
         return None
 
@@ -331,6 +366,7 @@ def _estimate_read_only_kv_cluster(
     instance: Instance,
     desires: CapacityDesires,
     args: NflxReadOnlyKVArguments,
+    layout: Optional[ReadOnlyKVLayout] = None,
 ) -> Optional[CapacityPlan]:
     """Main function to estimate read-only KV cluster configuration.
 
@@ -342,6 +378,8 @@ def _estimate_read_only_kv_cluster(
         instance: The compute instance being considered (must have local disk)
         desires: User's capacity desires
         args: Read-only KV specific arguments
+        layout: Plan exactly this layout instead of searching for the fewest
+            nodes
 
     Returns:
         CapacityPlan or None if configuration is not viable
@@ -413,6 +451,7 @@ def _estimate_read_only_kv_cluster(
         sst_memory_overhead_ratio=sst_memory_overhead_ratio,
         memory_buffer_ratio=memory_buffer_ratio,
         reserved_memory_gib=reserved_memory_gib,
+        layout=layout,
     )
 
     if cluster is None:
@@ -505,11 +544,52 @@ class NflxReadOnlyKVCapacityModel(CapacityModel, CostAwareModel):
         _ = drive
         _ = context
 
+        layout = None
+        # The arguments validator requires both or neither.
+        if (
+            args.required_partitions_per_node is not None
+            and args.required_replica_count is not None
+        ):
+            layout = (args.required_partitions_per_node, args.required_replica_count)
         return _estimate_read_only_kv_cluster(
             instance=instance,
             desires=desires,
             args=args,
+            layout=layout,
         )
+
+    @staticmethod
+    def candidate_layouts(
+        plans: Sequence[CapacityPlan],
+    ) -> Optional[Sequence[Dict[str, Any]]]:
+        """Every pair of the types' own partitions per node and the replica
+        counts up to the largest any type chose, fewest nodes first, then more
+        replicas and denser nodes, as the search breaks ties. A type that runs
+        a layout also runs one with fewer partitions per node or more
+        replicas, up to the node limit."""
+        params = [plan.candidate_clusters.regional[0].cluster_params for plan in plans]
+        if not params:
+            return []
+        partitions = params[0]["read-only-kv.total_num_partitions"]
+        densities = {p["read-only-kv.partitions_per_node"] for p in params}
+        most_replicas = max(p["read-only-kv.replica_count"] for p in params)
+        min_replicas = params[0]["read-only-kv.min_replica_count"]
+        layouts: List[ReadOnlyKVLayout] = [
+            (ppn, rf)
+            for ppn in densities
+            for rf in range(min_replicas, most_replicas + 1)
+        ]
+        layouts.sort(
+            key=lambda layout: (
+                max(math.ceil(partitions / layout[0]) * layout[1], 2),
+                -layout[1],
+                -layout[0],
+            )
+        )
+        return [
+            {"required_partitions_per_node": ppn, "required_replica_count": rf}
+            for ppn, rf in layouts
+        ]
 
     @staticmethod
     def description() -> str:

@@ -1369,6 +1369,47 @@ class NodeCountContext(ExcludeUnsetModel):
         )
 
 
+class AlternativeInstanceOptions(ExcludeUnsetModel):
+    """How the planner picks alternative instance types for each plan."""
+
+    min_alternatives: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        description="Fewest alternative types a plan must have. Primary types "
+        "that cannot reach this within the cost limits are left out; 0 keeps "
+        "plans with no alternatives.",
+    )
+    max_alternatives: int = Field(
+        default=3,
+        ge=1,
+        le=5,
+        description="Most alternative instance types to attach to one plan.",
+    )
+    max_plan_cost_increase: float = Field(
+        default=0.2,
+        ge=0,
+        description="How much more the cluster at the shared layout may cost "
+        "than the primary type's own cluster, as a fraction: 0.2 allows 20% "
+        "more. Cluster cost leaves out services such as network and backup.",
+    )
+    max_alternative_cost_increase: float = Field(
+        default=0.5,
+        ge=0,
+        description="How much more the cluster may cost with every node on one "
+        "alternative type than the primary type's own cluster, as a fraction: "
+        "0.5 allows 50% more. An alternative can stay in place until the next "
+        "instance refresh, so this can be a steady-state cost, not only a "
+        "shortage cost.",
+    )
+
+    @model_validator(mode="after")
+    def _min_within_max(self) -> "AlternativeInstanceOptions":
+        if self.min_alternatives > self.max_alternatives:
+            raise ValueError("min_alternatives exceeds max_alternatives")
+        return self
+
+
 class ClusterCapacity(ExcludeUnsetModel):
     cluster_type: str
 
@@ -1382,6 +1423,10 @@ class ClusterCapacity(ExcludeUnsetModel):
     # Override for models with non-standard cost calculation (e.g., Aurora
     # has shared storage so drive cost isn't multiplied by count)
     annual_cost_override: Optional[float] = None
+    # Instances the cluster's autoscaling group may launch when the primary
+    # instance is short, in launch order. Each runs this cluster's layout.
+    # Set only when alternative instances are planned.
+    alternative_instances: Sequence[Instance] = ()
 
     @property
     def node_count_context(self) -> Optional[NodeCountContext]:

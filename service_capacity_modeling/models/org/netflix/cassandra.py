@@ -9,6 +9,7 @@ from typing import Dict
 from typing import List
 from typing import Literal
 from typing import Optional
+from typing import Sequence
 from typing import Set
 from typing import Tuple
 from typing import Union
@@ -68,6 +69,7 @@ from service_capacity_modeling.models.common import check_cluster_size_requireme
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
+from service_capacity_modeling.models.common import zone_size_layouts
 from service_capacity_modeling.models.common import zonal_requirements_from_current
 from service_capacity_modeling.models.org.netflix.cassandra_memory import (
     DEFAULT_MAX_PAGE_CACHE_GIB,
@@ -2192,6 +2194,12 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
     @staticmethod
     def allowed_cloud_drives() -> Tuple[Optional[str], ...]:
         return ("gp3",)
+
+    @staticmethod
+    def candidate_layouts(
+        plans: Sequence[CapacityPlan],
+    ) -> Optional[Sequence[Dict[str, Any]]]:
+        return zone_size_layouts(plans)
 
     @staticmethod
     def get_required_cluster_size(

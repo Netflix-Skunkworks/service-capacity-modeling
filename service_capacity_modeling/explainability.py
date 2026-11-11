@@ -655,6 +655,12 @@ class ExplainedPlans(ExcludeUnsetModel):
     plans: Sequence[CapacityPlan]
     excuses_by_model: Dict[str, Sequence[Excuse]] = Field(default_factory=dict)
     family_graph: FamilyGraph = FamilyGraph()
+    # With PlannerArguments.alternative_instances: per model, each returned
+    # primary instance type's alternative plans at its plan's layout, in the
+    # order the cluster lists them.
+    alternative_plans_by_model: Dict[str, Dict[str, Sequence[CapacityPlan]]] = Field(
+        default_factory=dict
+    )
 
 
 class ExplainedUncertainPlans(ExcludeUnsetModel):

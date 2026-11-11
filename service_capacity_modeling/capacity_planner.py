@@ -46,6 +46,7 @@ from service_capacity_modeling.explainability import summaries_for_least_regret
 from service_capacity_modeling.explainability import summarize_regret_candidates
 from service_capacity_modeling.interface import Hardware
 from service_capacity_modeling.interface import Instance
+from service_capacity_modeling.interface import AlternativeInstanceOptions
 from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import interval
 from service_capacity_modeling.interface import Lifecycle
@@ -64,6 +65,10 @@ from service_capacity_modeling.models import ChildDesiresConfig
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.common import merge_plan
+from service_capacity_modeling.models.alternative_instances import (
+    choose_alternative_instances,
+)
+from service_capacity_modeling.models.alternative_instances import planned_cluster
 from service_capacity_modeling.models.org import netflix
 from service_capacity_modeling.models.utils import compute_excuse_tags
 from service_capacity_modeling.models.utils import current_instance_name
@@ -87,6 +92,11 @@ class PlannerArguments(ExcludeUnsetModel):
         "Higher values expose within-family size trade-offs "
         "(e.g., 8×xlarge vs 2×4xlarge).",
     )
+    alternative_instances: Optional[AlternativeInstanceOptions] = Field(
+        default=None,
+        description="Give each plan alternative instance types that run the same "
+        "layout, for models that define candidate_layouts. Certain planning only.",
+    )
 
 
 class _CertainResult(ExcludeUnsetModel):
@@ -94,6 +104,7 @@ class _CertainResult(ExcludeUnsetModel):
 
     plans: Sequence[CapacityPlan]
     excuses: Sequence[Excuse] = []
+    alternative_plans: Dict[str, Sequence[CapacityPlan]] = {}
 
 
 class _UncertainResult(ExcludeUnsetModel):
@@ -810,6 +821,7 @@ class CapacityPlanner:
 
         all_plans: List[Sequence[CapacityPlan]] = []
         raw_excuses_by_model: Dict[str, List[Excuse]] = {}
+        alternative_plans_by_model: Dict[str, Dict[str, Sequence[CapacityPlan]]] = {}
 
         for sub_model, sub_desires in self._sub_models(
             model_name=model_name,
@@ -834,15 +846,38 @@ class CapacityPlanner:
                 drives=drives,
                 planner_arguments=pargs,
             )
-            if sub_result.plans:
+            # With alternatives, a role whose every type was excused leaves no
+            # complete composed plan, so zip() below yields none. A composed
+            # parent plans nothing and excuses nothing, so it is still skipped.
+            if sub_result.plans or (
+                pargs.alternative_instances is not None and sub_result.excuses
+            ):
                 all_plans.append(sub_result.plans)
             raw_excuses_by_model.setdefault(sub_model, []).extend(sub_result.excuses)
+            if sub_result.alternative_plans:
+                alternative_plans_by_model[sub_model] = sub_result.alternative_plans
 
         plans = (
             [functools.reduce(merge_plan, composed) for composed in zip(*all_plans)]
             if all_plans
             else []
         )
+
+        # Composition can return fewer plans than a role planned, so keep only
+        # the explanations for primary types in the returned plans.
+        returned = {
+            cluster.instance.name
+            for plan in plans
+            for cluster in (
+                *plan.candidate_clusters.regional,
+                *plan.candidate_clusters.zonal,
+            )
+        }
+        alternative_plans_by_model = {
+            model: kept
+            for model, by_primary in alternative_plans_by_model.items()
+            if (kept := {n: a for n, a in by_primary.items() if n in returned})
+        }
 
         excuses_by_model = {
             model: deduplicate_excuses(excuses)
@@ -864,6 +899,7 @@ class CapacityPlanner:
             plans=plans,
             excuses_by_model=excuses_by_model,
             family_graph=graph,
+            alternative_plans_by_model=alternative_plans_by_model,
         )
 
     def _plan_certain(  # pylint: disable=too-many-positional-arguments
@@ -885,10 +921,12 @@ class CapacityPlanner:
 
         plans: List[CapacityPlan] = []
         excuses: List[Excuse] = []
+        scenarios: List[Tuple[Instance, Drive, RegionContext]] = []
         current_inst = current_instance_name(desires)
         for instance, drive, context in self.generate_scenarios(
             model, region, desires, num_regions, lifecycles, instance_families, drives
         ):
+            scenarios.append((instance, drive, context))
             match model.capacity_plan(
                 instance=instance,
                 drive=drive,
@@ -909,12 +947,29 @@ class CapacityPlanner:
         # lowest cost first
         plans.sort(key=lambda p: (p.rank, p.candidate_clusters.total_annual_cost))
 
+        alternative_plans: Dict[str, List[CapacityPlan]] = {}
+        if pargs.alternative_instances is not None:
+            plans, alternative_plans, dropped = _plan_alternative_instances(
+                model,
+                plans,
+                scenarios,
+                desires,
+                extra_model_arguments,
+                pargs.alternative_instances,
+            )
+            for excuse in dropped:
+                tags = compute_excuse_tags(excuse.instance, current_inst)
+                excuses.append(
+                    excuse.model_copy(update={"tags": tags}) if tags else excuse
+                )
+
         num_results = num_results or self._default_num_results
         return _CertainResult(
             plans=reduce_by_family(
                 plans, max_results_per_family=pargs.max_results_per_family
             )[:num_results],
             excuses=excuses,
+            alternative_plans=alternative_plans,
         )
 
     def _get_model_costs(
@@ -1272,6 +1327,8 @@ class CapacityPlanner:
         instance_filters_by_model: Optional[Dict[str, Optional[Sequence[str]]]] = None,
     ) -> _UncertainResult:
         extra_model_arguments = dict(extra_model_arguments or {})
+        if planner_arguments is not None and planner_arguments.alternative_instances:
+            raise ValueError("alternative_instances supports certain planning only")
         pargs = planner_arguments or PlannerArguments(
             max_results_per_family=max_results_per_family
         )
@@ -1498,6 +1555,63 @@ class CapacityPlanner:
                 queue.append((modify_child_desires(child_desires), child_model))
 
             yield sub_model, sub_desires
+
+
+def _best_plan_per_instance(plans: Sequence[CapacityPlan]) -> Dict[str, CapacityPlan]:
+    """Each instance type's best plan, best rank first."""
+    best: Dict[str, CapacityPlan] = {}
+    for plan in sorted(
+        plans, key=lambda p: (p.rank, p.candidate_clusters.total_annual_cost)
+    ):
+        best.setdefault(planned_cluster(plan).instance.name, plan)
+    return best
+
+
+# pylint: disable-next=too-many-positional-arguments
+def _plan_alternative_instances(
+    model: CapacityModel,
+    plans: List[CapacityPlan],
+    scenarios: Sequence[Tuple[Instance, Drive, RegionContext]],
+    desires: CapacityDesires,
+    extra_model_arguments: Dict[str, Any],
+    options: AlternativeInstanceOptions,
+) -> Tuple[List[CapacityPlan], Dict[str, List[CapacityPlan]], List[Excuse]]:
+    """Replace each instance type's plans with its plan at a shared layout that
+    lists alternative instances, and return each type's alternative plans.
+    Models without layouts pass through unchanged."""
+    own_plans = _best_plan_per_instance(plans)
+    layouts = model.candidate_layouts(list(own_plans.values()))
+    if layouts is None:
+        return plans, {}, []
+    # Arguments the caller set win over the layout; None means not set.
+    caller_args = {k: v for k, v in extra_model_arguments.items() if v is not None}
+    plans_by_layout = []
+    for layout in layouts:
+        at_layout = []
+        for instance, drive, context in scenarios:
+            plan = model.capacity_plan(
+                instance=instance,
+                drive=drive,
+                context=context,
+                desires=desires,
+                extra_model_arguments={**layout, **caller_args},
+            )
+            if isinstance(plan, CapacityPlan):
+                at_layout.append(plan)
+        plans_by_layout.append(_best_plan_per_instance(at_layout))
+    chosen, alternative_plans, excuses = choose_alternative_instances(
+        own_plans, plans_by_layout, options
+    )
+    # More alternative types protect against more shortages, so they rank
+    # ahead of the model's own rank and cost.
+    chosen.sort(
+        key=lambda p: (
+            -len(planned_cluster(p).alternative_instances),
+            p.rank,
+            p.candidate_clusters.total_annual_cost,
+        )
+    )
+    return chosen, alternative_plans, excuses
 
 
 planner = CapacityPlanner()
