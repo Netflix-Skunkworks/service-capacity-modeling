@@ -849,21 +849,10 @@ class CapacityPlanner:
             for model, excuses in raw_excuses_by_model.items()
             if excuses
         }
-        all_excuses = [
-            excuse for excuses in excuses_by_model.values() for excuse in excuses
-        ]
-
-        # Build M×N FamilyGraph from hardware traits over the families of the
-        # returned plans and the current cluster.
-        # Use shapes.region() directly — we only need the hardware catalog, not
-        # a full RegionContext (which would do unnecessary deep-copies of services).
-        hardware = self._shapes.region(region)
-        graph = FamilyGraph.build(all_excuses, hardware, plans)
-
         return ExplainedPlans(
             plans=plans,
             excuses_by_model=excuses_by_model,
-            family_graph=graph,
+            family_graph=FamilyGraph(traits={}, edges=[]),
         )
 
     def _plan_certain(  # pylint: disable=too-many-positional-arguments
@@ -1234,20 +1223,13 @@ class CapacityPlanner:
         )
 
         excuses_by_model = uncertain_result.plan.explanation.excuses_by_model
-        all_excuses = [
-            excuse for excuses in excuses_by_model.values() for excuse in excuses
-        ]
         excuse_summary = count_sample_excuses(uncertain_result.all_sample_excuses)
-        hardware = self._shapes.region(region)
-        graph = FamilyGraph.build(
-            all_excuses, hardware, uncertain_result.plan.least_regret
-        )
 
         return ExplainedUncertainPlans(
             plan=uncertain_result.plan,
             excuses_by_model=excuses_by_model,
             excuse_summary=excuse_summary,
-            family_graph=graph,
+            family_graph=FamilyGraph(traits={}, edges=[]),
             least_regret_summaries=least_regret_summaries,
             considered_alternatives=considered_alternatives,
         )

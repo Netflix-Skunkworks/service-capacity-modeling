@@ -34,8 +34,8 @@ Existing style examples to follow narrowly:
   loose `Any` typing, vague singular names for list values, and implicit empty
   behavior when the new code needs a clearer failure mode.
 - `service_capacity_modeling/capacity_planner.py::plan_certain_explained`
-  accumulates `all_plans` and `all_excuses` in one pass, then builds the final
-  merged plans and family graph without extra one-use wrappers.
+  accumulates `all_plans` and excuses in one pass, then builds the final
+  merged plans without extra one-use wrappers.
 - `service_capacity_modeling/models/common.py::cluster_infra_cost` keeps simple
   filtering and cost accumulation local instead of introducing helper
   functions for each branch.
