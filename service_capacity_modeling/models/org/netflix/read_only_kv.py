@@ -181,7 +181,7 @@ def _sst_memory_settings(
     return args.sst_memory_overhead_ratio, memory_buffer.ratio
 
 
-def _reject_shape(instance: Instance, drive: Drive) -> Optional[str]:
+def _reject_shape(instance: Instance, drive: Optional[Drive]) -> Optional[str]:
     del drive
     # Minimum 30 GiB RAM: allows 32 GiB-class shapes in the hardware catalog
     # while keeping enough memory for RocksDB block cache and working set.
@@ -596,7 +596,7 @@ class NflxReadOnlyKVCapacityModel(CapacityModel, CostAwareModel):
 
     @staticmethod
     def demand(
-        drive: Drive,
+        drive: Optional[Drive],
         context: RegionContext,
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],

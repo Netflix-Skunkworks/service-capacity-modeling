@@ -742,11 +742,14 @@ class CapacityPlanner:
         model_name: str,
         region: str,
         desires: CapacityDesires,
-        drive: Drive,
+        drive: Optional[Drive] = None,
         extra_model_arguments: Optional[Dict[str, Any]] = None,
         num_regions: int = 3,
     ) -> Optional[Tuple[Demand, NodeRules]]:
         """A model's stated demand on ``drive``, with its default desires applied.
+
+        ``drive`` is the attached drive; models that size against each
+        instance's local disk ignore it, so leave it None for them.
 
         For callers that choose shapes themselves with ``demand.fit_all``, for
         example an autoscaler that holds the node count fixed. Returns None

@@ -220,7 +220,7 @@ class CapacityModel:
 
     @staticmethod
     def demand(  # pylint: disable=unused-argument
-        drive: Drive,
+        drive: Optional[Drive],
         context: RegionContext,
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],

@@ -317,6 +317,26 @@ def test_fixed_count_caller_gets_alternatives_from_allowed_families():
         assert f.annual_cost <= primary.annual_cost * 1.5
 
 
+def test_shape_without_a_drive_is_excused_not_skipped():
+    stated = planner.demand(
+        model_name="org.netflix.read-only-kv",
+        region="us-east-1",
+        desires=READ_ONLY_KV,
+        extra_model_arguments=READ_ONLY_KV_ARGS,
+    )
+    assert stated is not None
+    demand, rules = stated
+    shapes_ = [HARDWARE.instances[n] for n in ("m6i.4xlarge", "m6id.4xlarge")]
+    assert shapes_[0].drive is None
+
+    fits, excuses = fit_all(demand, rules, shapes_)
+
+    assert [f.instance.name for f in fits] == ["m6id.4xlarge"]
+    assert [(e.instance, e.reason) for e in excuses] == [
+        ("m6i.4xlarge", "Read-only KV requires local disks")
+    ]
+
+
 def test_existing_cluster_keeps_whole_core_count():
     """Converting the model's cores to NCU and back must not add a core."""
     desires = READ_ONLY_KV.model_copy(deep=True)

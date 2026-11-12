@@ -137,7 +137,7 @@ def _no_reserve(instance: Instance) -> float:
     return 0.0
 
 
-def _accept_all(instance: Instance, drive: Drive) -> Optional[str]:
+def _accept_all(instance: Instance, drive: Optional[Drive]) -> Optional[str]:
     del instance, drive
     return None
 
@@ -156,8 +156,9 @@ class NodeRules:
     reserve_mem_gib: Callable[[Instance], float] = _no_reserve
     # Effective cap on data per node, buffer already applied.
     max_data_per_node_gib: float = math.inf
-    # Hard rejections, returning a number-free reason.
-    rejects: Callable[[Instance, Drive], Optional[str]] = _accept_all
+    # Hard rejections, returning a number-free reason. The drive is None
+    # when the instance has no local drive and none is attached.
+    rejects: Callable[[Instance, Optional[Drive]], Optional[str]] = _accept_all
 
 
 def ncu_per_node(instance: Instance) -> float:
@@ -230,19 +231,34 @@ def fit(
     demand: Demand,
     rules: NodeRules,
     instance: Instance,
-    drive: Drive,
+    drive: Optional[Drive] = None,
     pinned: Optional[Layout] = None,
 ) -> Union[Fit, Excuse]:
     """Size ``instance`` for ``demand``, or explain why it cannot serve it.
 
-    Without ``pinned``, returns the layout rule's smallest layout. With
-    ``pinned``, checks that ``instance`` can host that exact layout, which is
-    how a shape qualifies as an alternative.
+    ``drive`` is the attached drive; without it the instance uses its own
+    local drive. Without ``pinned``, returns the layout rule's smallest
+    layout. With ``pinned``, checks that ``instance`` can host that exact
+    layout, which is how a shape qualifies as an alternative.
     """
-    reason = rules.rejects(instance, drive)
+    node_drive = drive or instance.drive
+    reason = rules.rejects(instance, node_drive)
+    if node_drive is None:
+        reason = reason or "Has no local drive and none is attached"
+        return Excuse(instance=instance.name, drive="none", reason=reason)
     if reason is not None:
-        return Excuse(instance=instance.name, drive=drive.name, reason=reason)
+        return Excuse(instance=instance.name, drive=node_drive.name, reason=reason)
+    return _fit_on(demand, rules, instance, node_drive, pinned)
 
+
+def _fit_on(
+    demand: Demand,
+    rules: NodeRules,
+    instance: Instance,
+    drive: Drive,
+    pinned: Optional[Layout],
+) -> Union[Fit, Excuse]:
+    """``fit`` once the shape has a drive and no hard rejection."""
     need = demand.mid()
     have = supply(instance, drive, rules)
     for dim in DIMENSIONS:
@@ -319,16 +335,13 @@ def fit_all(
     This is the entry point for callers that choose shapes themselves, for
     example an autoscaler that holds the node count fixed and picks a type for
     a target NCU with its own ranking. ``drive`` is the attached drive;
-    without it each instance uses its own local drive and instances without
-    one are skipped.
+    without it each instance uses its own local drive, and an instance with
+    neither gets an excuse.
     """
     fits: List[Fit] = []
     excuses: List[Excuse] = []
     for instance in instances:
-        node_drive = drive or instance.drive
-        if node_drive is None:
-            continue
-        result = fit(demand, rules, instance, node_drive, pinned=pinned)
+        result = fit(demand, rules, instance, drive, pinned=pinned)
         if isinstance(result, Excuse):
             excuses.append(result)
         else:
