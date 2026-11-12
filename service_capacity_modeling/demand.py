@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from dataclasses import replace
 from dataclasses import field
 from typing import Any
 from typing import Callable
@@ -42,6 +43,7 @@ from typing import Union
 from service_capacity_modeling.enum_utils import StrEnum
 from service_capacity_modeling.interface import AlternativeInstance
 from service_capacity_modeling.interface import Bottleneck
+from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import DriveType
@@ -79,7 +81,10 @@ Amounts = Dict[Resource, float]
 
 @dataclass(frozen=True)
 class Demand:
-    """What one cluster scope needs, independent of any instance."""
+    """What one cluster scope needs, independent of any instance.
+
+    Each resource is an interval, but ``fit`` uses only ``mid``.
+    """
 
     ncu: Interval
     mem_gib: Interval
@@ -94,6 +99,12 @@ class Demand:
             Resource.disk_gib: self.disk_gib.mid,
             Resource.network_mbps: self.network_mbps.mid,
         }
+
+    def with_ncu(self, ncu: float) -> Demand:
+        """This demand with the caller's own CPU need, for example an
+        autoscaler's minimum. Callers rank fits against a target themselves
+        with ``fit_all(key=...)``."""
+        return replace(self, ncu=certain_float(ncu))
 
 
 @dataclass(frozen=True)

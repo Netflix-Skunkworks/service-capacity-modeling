@@ -1,5 +1,3 @@
-import dataclasses
-
 import pytest
 
 from service_capacity_modeling.capacity_planner import PlannerArguments
@@ -23,7 +21,6 @@ from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import CurrentClusters
 from service_capacity_modeling.interface import CurrentRegionClusterCapacity
 from service_capacity_modeling.interface import Excuse
-from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 
 HARDWARE = shapes.region("us-east-1")
@@ -176,7 +173,7 @@ def test_fixed_count_caller_picks_types_for_a_target():
         extra_model_arguments=READ_ONLY_KV_ARGS,
     )[0].candidate_clusters.regional[0]
     # The caller brings its own CPU target and pins only the node count.
-    demand = dataclasses.replace(demand, ncu=Interval(low=100, mid=140, high=180))
+    demand = demand.with_ncu(140)
     local = [i for i in HARDWARE.instances.values() if i.drive is not None]
 
     fits, excuses = fit_all(demand, rules, local, pinned=Layout(primary.count))
@@ -206,7 +203,7 @@ def test_count_only_pin_names_the_short_resource():
     )
     assert stated is not None
     demand, rules = stated
-    demand = dataclasses.replace(demand, ncu=certain_float(63))
+    demand = demand.with_ncu(63)
     m6id = HARDWARE.instances["m6id.2xlarge"]
 
     excuse = fit(demand, rules, m6id, m6id.drive, pinned=Layout(4))
@@ -230,7 +227,7 @@ def test_count_only_pin_honors_a_partitions_per_node_cap():
     )
     assert stated is not None
     demand, rules = stated
-    demand = dataclasses.replace(demand, ncu=certain_float(63))
+    demand = demand.with_ncu(63)
     r6id = HARDWARE.instances["r6id.4xlarge"]
 
     def placed(pinned: Layout) -> tuple:
@@ -247,7 +244,9 @@ def test_count_only_pin_honors_a_partitions_per_node_cap():
     assert placed(capped) == (6, 3)
 
 
-def test_fit_all_ranks_by_the_callers_key():
+def test_autoscaler_fits_at_its_minimum_and_ranks_against_its_target():
+    """An autoscaler with a min/target NCU range: every fit serves the
+    minimum, and the caller's key ranks them against the target."""
     stated = planner.demand(
         model_name="org.netflix.read-only-kv",
         region="us-east-1",
@@ -257,17 +256,23 @@ def test_fit_all_ranks_by_the_callers_key():
     )
     assert stated is not None
     demand, rules = stated
-    demand = dataclasses.replace(demand, ncu=certain_float(60))
+    minimum = demand.with_ncu(80)
     m6id = [HARDWARE.instances[f"m6id.{size}xlarge"] for size in ("2", "4")]
 
-    def ncu_from_170(f: Fit) -> float:
-        return abs(f.supply_per_node[Resource.ncu] * f.count - 170)
+    def regret(target: float):
+        def key(f: Fit) -> float:
+            supplied = f.supply_per_node[Resource.ncu] * f.count
+            miss = supplied - target
+            return (-4.0 * miss if miss < 0 else miss) / target
 
-    cheapest, _ = fit_all(demand, rules, m6id, pinned=Layout(6))
-    nearest, _ = fit_all(demand, rules, m6id, pinned=Layout(6), key=ncu_from_170)
+        return key
 
-    assert [f.instance.name for f in cheapest] == ["m6id.2xlarge", "m6id.4xlarge"]
-    assert [f.instance.name for f in nearest] == ["m6id.4xlarge", "m6id.2xlarge"]
+    # Six nodes supply 84 NCU (2xlarge) or 168 NCU (4xlarge); both meet 80.
+    near_95, _ = fit_all(minimum, rules, m6id, pinned=Layout(6), key=regret(95))
+    near_170, _ = fit_all(minimum, rules, m6id, pinned=Layout(6), key=regret(170))
+
+    assert [f.instance.name for f in near_95] == ["m6id.2xlarge", "m6id.4xlarge"]
+    assert [f.instance.name for f in near_170] == ["m6id.4xlarge", "m6id.2xlarge"]
 
 
 def test_existing_cluster_keeps_whole_core_count():
