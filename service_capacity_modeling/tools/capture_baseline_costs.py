@@ -27,7 +27,9 @@ from itertools import islice
 from pathlib import Path
 from typing import Any, cast
 
+from service_capacity_modeling.capacity_planner import PlannerArguments
 from service_capacity_modeling.capacity_planner import planner
+from service_capacity_modeling.interface import AlternativeOptions
 from service_capacity_modeling.interface import (
     AccessConsistency,
     Buffer,
@@ -35,6 +37,7 @@ from service_capacity_modeling.interface import (
     BufferIntent,
     Buffers,
     CapacityDesires,
+    CapacityPlan,
     certain_float,
     Drive,
     certain_int,
@@ -1033,6 +1036,80 @@ UNCERTAIN_SCENARIOS: dict[str, dict[str, Any]] = {
     },
 }
 
+
+def capture_alternatives(
+    model_name: str,
+    region: str,
+    desires: CapacityDesires,
+    extra_args: dict[str, Any] | None = None,
+    scenario_name: str = "",
+) -> dict[str, Any]:
+    """Capture the top plans with the default alternative options."""
+    try:
+        plans = planner.plan_certain(
+            model_name=model_name,
+            region=region,
+            desires=desires,
+            extra_model_arguments=extra_args or {},
+            num_results=3,
+            planner_arguments=PlannerArguments(alternatives=AlternativeOptions()),
+        )
+    except (ValueError, KeyError, AttributeError) as e:
+        return _capture_error(scenario_name, e, model_name, region, desires)
+    return {
+        "scenario": scenario_name,
+        "model": model_name,
+        "region": region,
+        "service_tier": desires.service_tier,
+        "plans": [_capture_alternatives_plan(p) for p in plans],
+    }
+
+
+def _capture_alternatives_plan(plan: CapacityPlan) -> dict[str, Any]:
+    """The primary cluster and the alternative types, counts and costs."""
+    snapshot = _capture_candidate(plan.candidate_clusters)
+    clusters = plan.candidate_clusters
+    main = (clusters.regional or clusters.zonal)[0]
+    return {
+        "primary_instance_type": main.instance.name,
+        "alternatives": [
+            {
+                "instance": a.instance,
+                "count": a.count,
+                "annual_cost": round(a.annual_cost, 2),
+            }
+            for a in main.alternatives
+        ],
+        "total_annual_cost": snapshot["total_annual_cost"],
+        "clusters": snapshot["clusters"],
+    }
+
+
+# Each planning path: read-only KV states its demand; the rest are re-planned.
+ALTERNATIVE_SCENARIOS: dict[str, dict[str, Any]] = {
+    name: SCENARIOS[name]
+    for name in (
+        "cassandra_small_high_qps_local",
+        "cassandra_high_writes_ebs",
+        "evcache_small_no_replication",
+        "kafka_100mib_throughput",
+        "read_only_kv_medium",
+    )
+}
+ALTERNATIVE_SCENARIOS["elasticsearch_data_small"] = {
+    "model": "org.netflix.elasticsearch.node",
+    "region": "us-east-1",
+    "desires": CapacityDesires(
+        service_tier=1,
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_int(10_000),
+            estimated_write_per_second=certain_int(5_000),
+        ),
+        data_shape=DataShape(estimated_state_size_gib=certain_int(2_000)),
+    ),
+    "extra_args": None,
+}
+
 if __name__ == "__main__":
     # Capture all scenarios
     results = []
@@ -1083,6 +1160,21 @@ if __name__ == "__main__":
     output_dir = Path(__file__).parent / "data"
     output_file = output_dir / "baseline_costs.json"
     _write_json_snapshot(output_file, results)
+
+    alternative_results = []
+    for scenario_name, scenario in ALTERNATIVE_SCENARIOS.items():
+        print(f"Capturing alternatives: {scenario_name}...")
+        result = capture_alternatives(
+            scenario["model"],
+            scenario["region"],
+            scenario["desires"],
+            scenario["extra_args"],
+            scenario_name,
+        )
+        alternative_results.append(result)
+        if "error" in result:
+            print(f"  ERROR: {result['error']}")
+    _write_json_snapshot(output_dir / "baseline_alternatives.json", alternative_results)
 
     uncertain_output_file = output_dir / "baseline_uncertain.json"
     cost_preservation_stats = CostPreservationStats()
