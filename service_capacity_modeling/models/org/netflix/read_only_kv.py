@@ -19,11 +19,14 @@ from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Tuple
+from typing import Union
 
 from pydantic import BaseModel
 from pydantic import Field
+from pydantic import model_validator
 
 from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
@@ -36,6 +39,7 @@ from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
+from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
@@ -59,6 +63,11 @@ from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
     CapacityProblem,
+    CapacityResult,
+    count_shortfall,
+    layout_shortfall,
+    plan_at_count,
+    plan_at_layout,
     search_for_min_nodes,
 )
 
@@ -128,6 +137,48 @@ class NflxReadOnlyKVArguments(BaseModel):
         "Adds penalty * max(0, (normalized_size - 4) / 4) * cost to the "
         "effective sort cost. Set to 0 to disable.",
     )
+    required_cluster_size: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Plan exactly this many nodes instead of the fewest. With "
+        "no pinned layout, uses the densest partition layout that fits on "
+        "that count. Shapes that cannot host it are excused.",
+    )
+    partitions_per_node: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Pin the partition layout: partitions on each node. Set "
+        "with replica_count, for example to check that another instance type "
+        "can host an existing cluster's layout.",
+    )
+    replica_count: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Pin the partition layout: complete data copies. Set "
+        "with partitions_per_node.",
+    )
+    max_partitions_per_node: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Most partitions any node may hold, on top of the disk "
+        "and memory limits.",
+    )
+    needed_cores: Optional[float] = Field(
+        default=None,
+        gt=0,
+        description="CPU need in cores of desires.reference_shape, replacing "
+        "the estimate from the query pattern, for example an autoscaler's own "
+        "minimum. Compute buffers are not applied to it.",
+    )
+
+    @model_validator(mode="after")
+    def layout_pin_is_complete(self) -> "NflxReadOnlyKVArguments":
+        """A pinned layout needs both its density and its replica count."""
+        if (self.partitions_per_node is None) != (self.replica_count is None):
+            raise ValueError(
+                "partitions_per_node and replica_count must be set together"
+            )
+        return self
 
 
 # TODO: Data-block working set estimation remains disabled because
@@ -140,6 +191,7 @@ def _estimate_read_only_kv_requirement(
     desires: CapacityDesires,
     sst_memory_overhead_ratio: float,
     memory_buffer_ratio: float,
+    needed_cores: Optional[float] = None,
 ) -> CapacityRequirement:
     """Estimate the capacity requirement for the read-only KV regional cluster.
 
@@ -153,6 +205,7 @@ def _estimate_read_only_kv_requirement(
         desires: User's capacity desires
         sst_memory_overhead_ratio: Resident SST memory as a ratio of SST data
         memory_buffer_ratio: Memory headroom applied to the SST estimate
+        needed_cores: Caller's CPU need in reference cores, used as given
 
     Returns:
         CapacityRequirement for the regional cluster
@@ -164,8 +217,9 @@ def _estimate_read_only_kv_requirement(
 
     # CPU calculation using sqrt staffing model (independent of replicas)
     # Apply buffer first, then normalize to target instance shape
-    needed_cores = math.ceil(sqrt_staffed_cores(desires) * compute_buffer.ratio)
-    needed_cores = normalize_cores(
+    if needed_cores is None:
+        needed_cores = math.ceil(sqrt_staffed_cores(desires) * compute_buffer.ratio)
+    instance_cores = normalize_cores(
         core_count=needed_cores,
         target_shape=instance,
         reference_shape=desires.reference_shape,
@@ -183,7 +237,7 @@ def _estimate_read_only_kv_requirement(
     return CapacityRequirement(
         requirement_type=NflxReadOnlyKVCapacityModel.cluster_type,
         reference_shape=desires.reference_shape,
-        cpu_cores=certain_int(needed_cores),
+        cpu_cores=certain_int(instance_cores),
         mem_gib=certain_float(needed_sst_memory_gib),
         disk_gib=certain_float(0),  # Disk computed via partition-aware algorithm
         network_mbps=certain_float(needed_network_mbps),
@@ -201,7 +255,7 @@ def _compute_read_only_kv_regional_cluster(
     sst_memory_overhead_ratio: float,
     memory_buffer_ratio: float,
     reserved_memory_gib: float,
-) -> Optional[RegionClusterCapacity]:
+) -> Union[RegionClusterCapacity, Excuse, None]:
     """Compute the regional cluster configuration using the partition-aware algorithm.
 
     Partition-aware algorithm (local disks only):
@@ -225,7 +279,8 @@ def _compute_read_only_kv_regional_cluster(
         reserved_memory_gib: Total memory reserved outside SST table readers
 
     Returns:
-        RegionClusterCapacity or None if configuration is not viable
+        RegionClusterCapacity, an Excuse when a pinned layout or node count
+        does not fit, or None if no configuration is viable
     """
     # Only support instances with local disks
     if instance.drive is None:
@@ -262,11 +317,19 @@ def _compute_read_only_kv_regional_cluster(
         cpu_needed=total_needed_cores,
         min_rf=args.min_replica_count,
         max_nodes=args.max_regional_size,
+        max_partitions_per_node=args.max_partitions_per_node,
     )
 
-    result = search_for_min_nodes(problem)
+    result = _place_partitions(problem, args)
     if result is None:
         return None
+    if isinstance(result, str):
+        return Excuse(
+            instance=instance.name,
+            drive=instance.drive.name,
+            reason=result,
+            bottleneck=_pin_shortfall(problem, args),
+        )
 
     cluster = RegionClusterCapacity(
         cluster_type="read-only-kv",
@@ -327,11 +390,43 @@ def _compute_read_only_kv_regional_cluster(
     return cluster
 
 
+def _place_partitions(
+    problem: CapacityProblem, args: NflxReadOnlyKVArguments
+) -> Union[CapacityResult, str, None]:
+    """The layout for ``problem``: the pinned layout, the densest one on the
+    required node count, or the search's fewest nodes. A pin that does not
+    fit returns why; a search that finds nothing returns None."""
+    count = args.required_cluster_size
+    if args.partitions_per_node is not None and args.replica_count is not None:
+        result = plan_at_layout(problem, args.partitions_per_node, args.replica_count)
+        if result is None or count not in (None, result.node_count):
+            return (
+                f"Cannot host {args.partitions_per_node} partitions per node "
+                f"at {args.replica_count} replicas"
+                + ("" if count is None else f" on {count} nodes")
+            )
+        return result
+    if count is not None:
+        return plan_at_count(problem, count) or f"Cannot host {count} nodes"
+    return search_for_min_nodes(problem)
+
+
+def _pin_shortfall(
+    problem: CapacityProblem, args: NflxReadOnlyKVArguments
+) -> Optional[Bottleneck]:
+    """The resource that keeps a shape from hosting the pinned layout or
+    node count."""
+    if args.partitions_per_node is not None and args.replica_count is not None:
+        return layout_shortfall(problem, args.partitions_per_node, args.replica_count)
+    assert args.required_cluster_size is not None
+    return count_shortfall(problem, args.required_cluster_size)
+
+
 def _estimate_read_only_kv_cluster(
     instance: Instance,
     desires: CapacityDesires,
     args: NflxReadOnlyKVArguments,
-) -> Optional[CapacityPlan]:
+) -> Union[CapacityPlan, Excuse, None]:
     """Main function to estimate read-only KV cluster configuration.
 
     Note: Only supports instances with local disks. EBS is not supported
@@ -344,7 +439,8 @@ def _estimate_read_only_kv_cluster(
         args: Read-only KV specific arguments
 
     Returns:
-        CapacityPlan or None if configuration is not viable
+        CapacityPlan, an Excuse when a pinned layout or node count does not
+        fit, or None if configuration is not viable
     """
 
     # Validate instance constraints
@@ -389,6 +485,7 @@ def _estimate_read_only_kv_cluster(
         desires=desires,
         sst_memory_overhead_ratio=sst_memory_overhead_ratio,
         memory_buffer_ratio=memory_buffer_ratio,
+        needed_cores=args.needed_cores,
     )
 
     # Compute disk buffer values inline (not via context)
@@ -415,8 +512,8 @@ def _estimate_read_only_kv_cluster(
         reserved_memory_gib=reserved_memory_gib,
     )
 
-    if cluster is None:
-        return None
+    if cluster is None or isinstance(cluster, Excuse):
+        return cluster
 
     replica_count = int(cluster.cluster_params["read-only-kv.replica_count"])
     regional_requirement = per_copy_requirement.model_copy(
@@ -497,7 +594,7 @@ class NflxReadOnlyKVCapacityModel(CapacityModel, CostAwareModel):
         context: RegionContext,
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
-    ) -> Optional[CapacityPlan]:
+    ) -> Union[CapacityPlan, Excuse, None]:
         args = NflxReadOnlyKVArguments.model_validate(extra_model_arguments)
 
         # drive and context are unused: read-only KV uses instance.drive
