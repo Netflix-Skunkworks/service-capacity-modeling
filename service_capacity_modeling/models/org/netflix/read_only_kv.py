@@ -279,7 +279,10 @@ def _host_pinned(problem: CapacityProblem, pinned: Layout) -> Union[Layout, str]
     if ppn is None or rf is None:
         result = _place_at_count(problem, pinned.count)
         if result is None:
-            return f"No partition placement fits {pinned.count} nodes"
+            return (
+                f"Cannot host {pinned.count} nodes: "
+                f"{_short_at_count(problem, pinned.count)}"
+            )
     else:
         result = plan_at_layout(problem, int(ppn), int(rf))
         if result is None or result.node_count != pinned.count:
@@ -308,6 +311,21 @@ def _place_at_count(problem: CapacityProblem, count: int) -> Optional[CapacityRe
         if result is not None and result.node_count == count:
             return result
     return None
+
+
+def _short_at_count(problem: CapacityProblem, count: int) -> str:
+    """Why no placement fits ``count`` nodes: the resource that blocks the
+    densest layout whose partitions fit on disk and in memory, or, if none
+    fits, the sparsest layout's short resource."""
+    reason = "node count"
+    for nodes_for_one_copy in range(1, count + 1):
+        if count % nodes_for_one_copy:
+            continue
+        ppn = math.ceil(problem.n_partitions / nodes_for_one_copy)
+        reason = _short_resource(problem, ppn, count // nodes_for_one_copy)
+        if reason not in (str(Resource.disk_gib), str(Resource.mem_gib)):
+            return reason
+    return reason
 
 
 def _short_resource(problem: CapacityProblem, ppn: int, rf: int) -> str:

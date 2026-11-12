@@ -15,6 +15,7 @@ from service_capacity_modeling.demand import Resource
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import AlternativeOptions
+from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
@@ -191,6 +192,28 @@ def test_fixed_count_caller_picks_types_for_a_target():
     assert [f.annual_cost for f in fits] == sorted(f.annual_cost for f in fits)
     # Every rejection names the resource that did not fit.
     assert excuses and all(e.reason for e in excuses)
+
+
+def test_count_only_pin_names_the_short_resource():
+    """A count the shape cannot host names what ran short, here CPU: 4 nodes
+    of 14 NCU cannot serve 63 NCU at any partition placement."""
+    stated = planner.demand(
+        model_name="org.netflix.read-only-kv",
+        region="us-east-1",
+        desires=READ_ONLY_KV,
+        drive=GP3,
+        extra_model_arguments=READ_ONLY_KV_ARGS,
+    )
+    assert stated is not None
+    demand, rules = stated
+    demand = dataclasses.replace(demand, ncu=certain_float(63))
+    m6id = HARDWARE.instances["m6id.2xlarge"]
+
+    excuse = fit(demand, rules, m6id, m6id.drive, pinned=Layout(4))
+
+    assert isinstance(excuse, Excuse)
+    assert excuse.reason == "Cannot host 4 nodes: ncu"
+    assert excuse.bottleneck == Bottleneck.cpu
 
 
 def test_existing_cluster_keeps_whole_core_count():
