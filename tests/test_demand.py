@@ -216,6 +216,37 @@ def test_count_only_pin_names_the_short_resource():
     assert excuse.bottleneck == Bottleneck.cpu
 
 
+def test_count_only_pin_honors_a_partitions_per_node_cap():
+    """A caller can cap partitions per node, so a deploy never puts more data
+    on a node than the plan it came from."""
+    small = READ_ONLY_KV.model_copy(deep=True)
+    small.data_shape.estimated_state_size_gib = certain_int(48)
+    stated = planner.demand(
+        model_name="org.netflix.read-only-kv",
+        region="us-east-1",
+        desires=small,
+        drive=GP3,
+        extra_model_arguments=READ_ONLY_KV_ARGS,
+    )
+    assert stated is not None
+    demand, rules = stated
+    demand = dataclasses.replace(demand, ncu=certain_float(63))
+    r6id = HARDWARE.instances["r6id.4xlarge"]
+
+    def placed(pinned: Layout) -> tuple:
+        sized = fit(demand, rules, r6id, r6id.drive, pinned=pinned)
+        assert isinstance(sized, Fit), sized
+        params = sized.layout.params
+        return (
+            params["read-only-kv.partitions_per_node"],
+            params["read-only-kv.replica_count"],
+        )
+
+    assert placed(Layout(6)) == (12, 6)
+    capped = Layout(6, params={"read-only-kv.max_partitions_per_node": 6})
+    assert placed(capped) == (6, 3)
+
+
 def test_existing_cluster_keeps_whole_core_count():
     """Converting the model's cores to NCU and back must not add a core."""
     desires = READ_ONLY_KV.model_copy(deep=True)

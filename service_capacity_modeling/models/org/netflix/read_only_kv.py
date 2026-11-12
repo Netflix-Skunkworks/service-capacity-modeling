@@ -17,6 +17,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 from typing import Dict
+from typing import Iterator
 from typing import List
 from typing import Optional
 from typing import Tuple
@@ -273,15 +274,23 @@ def _carried_per_node(problem: CapacityProblem, ppn: int) -> Dict[Resource, floa
 
 def _host_pinned(problem: CapacityProblem, pinned: Layout) -> Union[Layout, str]:
     """Whether this shape can host the pinned layout, under the same rules as
-    the search. A pin with only a count gets the placement that fits it."""
+    the search. A pin with only a count gets the densest placement that fits
+    it, holding at most ``read-only-kv.max_partitions_per_node`` partitions
+    per node when the pin sets it."""
     ppn = pinned.params.get("read-only-kv.partitions_per_node")
     rf = pinned.params.get("read-only-kv.replica_count")
     if ppn is None or rf is None:
-        result = _place_at_count(problem, pinned.count)
+        max_ppn = pinned.params.get("read-only-kv.max_partitions_per_node")
+        placements = list(
+            _placements_at_count(
+                problem, pinned.count, None if max_ppn is None else int(max_ppn)
+            )
+        )
+        result = _place_at_count(problem, pinned.count, placements)
         if result is None:
             return (
                 f"Cannot host {pinned.count} nodes: "
-                f"{_short_at_count(problem, pinned.count)}"
+                f"{_short_at_count(problem, placements)}"
             )
     else:
         result = plan_at_layout(problem, int(ppn), int(rf))
@@ -300,29 +309,38 @@ def _host_pinned(problem: CapacityProblem, pinned: Layout) -> Union[Layout, str]
     )
 
 
-def _place_at_count(problem: CapacityProblem, count: int) -> Optional[CapacityResult]:
-    """The placement on exactly ``count`` nodes with the fewest nodes per copy,
-    which leaves the most replicas for CPU and availability."""
+def _placements_at_count(
+    problem: CapacityProblem, count: int, max_ppn: Optional[int]
+) -> Iterator[Tuple[int, int]]:
+    """(partitions per node, replicas) for each way to split ``count`` nodes
+    into equal copies, densest first, skipping any above ``max_ppn``."""
     for nodes_for_one_copy in range(1, count + 1):
         if count % nodes_for_one_copy:
             continue
         ppn = math.ceil(problem.n_partitions / nodes_for_one_copy)
-        result = plan_at_layout(problem, ppn, count // nodes_for_one_copy)
+        if max_ppn is None or ppn <= max_ppn:
+            yield ppn, count // nodes_for_one_copy
+
+
+def _place_at_count(
+    problem: CapacityProblem, count: int, placements: List[Tuple[int, int]]
+) -> Optional[CapacityResult]:
+    """The first of ``placements`` that fits exactly ``count`` nodes. Densest
+    first leaves the most replicas for CPU and availability."""
+    for ppn, rf in placements:
+        result = plan_at_layout(problem, ppn, rf)
         if result is not None and result.node_count == count:
             return result
     return None
 
 
-def _short_at_count(problem: CapacityProblem, count: int) -> str:
-    """Why no placement fits ``count`` nodes: the resource that blocks the
-    densest layout whose partitions fit on disk and in memory, or, if none
-    fits, the sparsest layout's short resource."""
+def _short_at_count(problem: CapacityProblem, placements: List[Tuple[int, int]]) -> str:
+    """Why none of ``placements`` fits: the resource that blocks the densest
+    one whose partitions fit on disk and in memory, or, if none does, the
+    sparsest one's short resource."""
     reason = "node count"
-    for nodes_for_one_copy in range(1, count + 1):
-        if count % nodes_for_one_copy:
-            continue
-        ppn = math.ceil(problem.n_partitions / nodes_for_one_copy)
-        reason = _short_resource(problem, ppn, count // nodes_for_one_copy)
+    for ppn, rf in placements:
+        reason = _short_resource(problem, ppn, rf)
         if reason not in (str(Resource.disk_gib), str(Resource.mem_gib)):
             return reason
     return reason
