@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from pydantic import Field
 
 from service_capacity_modeling.demand import Amounts
+from service_capacity_modeling.demand import cores_for_ncu
 from service_capacity_modeling.demand import Demand
 from service_capacity_modeling.demand import fit
 from service_capacity_modeling.demand import Layout
@@ -68,6 +69,10 @@ from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
     CapacityProblem,
+    CapacityResult,
+    max_partitions_per_node,
+    plan_at_layout,
+    replicas_needed,
     search_for_min_nodes,
 )
 
@@ -193,6 +198,12 @@ class _PartitionLayout:
 
     args: NflxReadOnlyKVArguments
     memory_placement: bool
+    # The model's own CPU demand, kept in whole cores of the shape it was
+    # measured on so an unchanged demand converts to cores exactly as the
+    # model always has. A caller-supplied NCU converts with cores_for_ncu.
+    ncu: float
+    reference_cores: int
+    reference_shape: Instance
 
     def __call__(
         self,
@@ -203,12 +214,13 @@ class _PartitionLayout:
     ) -> Union[Layout, str]:
         partition_gib = need[Resource.disk_gib] / self.args.total_num_partitions
         memory_per_partition = need[Resource.mem_gib] / self.args.total_num_partitions
-        # CPU is placed in whole cores of this shape, matching normalize_cores.
-        cpu_needed = normalize_cores(
-            core_count=need[Resource.ncu],
-            target_shape=instance,
-            reference_shape=default_reference_shape,
-        )
+        # CPU is placed in whole cores of this shape.
+        if need[Resource.ncu] == self.ncu:
+            cpu_needed = normalize_cores(
+                self.reference_cores, instance, self.reference_shape
+            )
+        else:
+            cpu_needed = cores_for_ncu(need[Resource.ncu], instance)
         problem = CapacityProblem(
             n_partitions=self.args.total_num_partitions,
             partition_size_gib=partition_gib,
@@ -260,23 +272,54 @@ def _carried_per_node(problem: CapacityProblem, ppn: int) -> Dict[Resource, floa
 
 
 def _host_pinned(problem: CapacityProblem, pinned: Layout) -> Union[Layout, str]:
-    """Whether this shape can host the pinned placement node for node."""
-    ppn = int(pinned.params["read-only-kv.partitions_per_node"])
-    carried = _carried_per_node(problem, ppn)
-    if carried[Resource.disk_gib] > problem.disk_per_node_gib:
-        return "Cannot host the layout: disk_gib"
-    if (
-        problem.memory_per_node_gib is not None
-        and carried[Resource.mem_gib] > problem.memory_per_node_gib
-    ):
-        return "Cannot host the layout: mem_gib"
-    if problem.cpu_per_node * pinned.count < problem.cpu_needed:
-        return "Cannot host the layout: ncu"
+    """Whether this shape can host the pinned layout, under the same rules as
+    the search. A pin with only a count gets the placement that fits it."""
+    ppn = pinned.params.get("read-only-kv.partitions_per_node")
+    rf = pinned.params.get("read-only-kv.replica_count")
+    if ppn is None or rf is None:
+        result = _place_at_count(problem, pinned.count)
+        if result is None:
+            return f"No partition placement fits {pinned.count} nodes"
+    else:
+        result = plan_at_layout(problem, int(ppn), int(rf))
+        if result is None or result.node_count != pinned.count:
+            return (
+                f"Cannot host the layout: {_short_resource(problem, int(ppn), int(rf))}"
+            )
     return Layout(
-        count=pinned.count,
-        params={k: pinned.params[k] for k in _LAYOUT_KEYS},
-        need_per_node=carried,
+        count=result.node_count,
+        params={
+            "read-only-kv.replica_count": result.replica_count,
+            "read-only-kv.partitions_per_node": result.partitions_per_node,
+            "read-only-kv.nodes_for_one_copy": result.nodes_for_one_copy,
+        },
+        need_per_node=_carried_per_node(problem, result.partitions_per_node),
     )
+
+
+def _place_at_count(problem: CapacityProblem, count: int) -> Optional[CapacityResult]:
+    """The placement on exactly ``count`` nodes with the fewest nodes per copy,
+    which leaves the most replicas for CPU and availability."""
+    for nodes_for_one_copy in range(1, count + 1):
+        if count % nodes_for_one_copy:
+            continue
+        ppn = math.ceil(problem.n_partitions / nodes_for_one_copy)
+        result = plan_at_layout(problem, ppn, count // nodes_for_one_copy)
+        if result is not None and result.node_count == count:
+            return result
+    return None
+
+
+def _short_resource(problem: CapacityProblem, ppn: int, rf: int) -> str:
+    """Why a shape cannot host ``ppn`` partitions per node at ``rf`` replicas."""
+    disk_ppn, memory_ppn = max_partitions_per_node(problem)
+    if ppn > disk_ppn:
+        return Resource.disk_gib.value
+    if memory_ppn is not None and ppn > memory_ppn:
+        return Resource.mem_gib.value
+    if rf < replicas_needed(problem, math.ceil(problem.n_partitions / ppn)):
+        return Resource.ncu.value
+    return "node count"
 
 
 def read_only_kv_demand(
@@ -327,7 +370,11 @@ def read_only_kv_demand(
         max_data_per_node_gib=args.max_data_per_node_gib * disk_buffer.ratio,
         rejects=_reject_shape,
         layout=_PartitionLayout(
-            args=args, memory_placement=sst_memory_overhead_ratio > 0
+            args=args,
+            memory_placement=sst_memory_overhead_ratio > 0,
+            ncu=ncu,
+            reference_cores=reference_cores,
+            reference_shape=desires.reference_shape,
         ),
     )
     return demand, rules

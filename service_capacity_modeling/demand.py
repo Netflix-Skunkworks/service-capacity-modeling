@@ -157,6 +157,20 @@ def ncu_per_node(instance: Instance) -> float:
     return instance.cpu * speed / (reference.cpu_ghz * reference.cpu_ipc_scale)
 
 
+def cores_for_ncu(ncu: float, instance: Instance) -> int:
+    """Whole vCPUs of ``instance`` that supply ``ncu``.
+
+    Demand usually reaches NCU from whole cores of another shape, so the exact
+    answer is often an integer that float division lands just above. The
+    relative tolerance keeps that from rounding up a whole extra core.
+    """
+    cores = (
+        ncu * default_reference_shape.cpu_ghz * default_reference_shape.cpu_ipc_scale
+    )
+    cores /= instance.cpu_ghz * instance.cpu_ipc_scale
+    return max(1, math.ceil(cores * (1 - 1e-9)))
+
+
 def supply(instance: Instance, drive: Drive, rules: NodeRules) -> Amounts:
     """What one node supplies to the workload on each resource."""
     if drive.drive_type == DriveType.attached_ssd:
@@ -262,6 +276,23 @@ def fit(  # pylint: disable=too-many-positional-arguments
     need_per_node = {
         d: layout.need_per_node.get(d, need[d] / layout.count) for d in DIMENSIONS
     }
+    # A layout rule decides placement, but every node must still supply what it
+    # carries on every resource, including ones the rule does not model.
+    short = next(
+        (d for d in DIMENSIONS if need_per_node[d] > have[d] * (1 + 1e-9)), None
+    )
+    if short is not None:
+        return Excuse(
+            instance=instance.name,
+            drive=drive.name,
+            reason=f"Cannot host the layout: {short.value}",
+            context={
+                "count": layout.count,
+                "need_per_node": need_per_node[short],
+                "supply_per_node": have[short],
+            },
+            bottleneck=_BOTTLENECK.get(short),
+        )
     binding = max(
         DIMENSIONS,
         key=lambda d: need_per_node[d] / have[d] if have[d] > 0 else 0.0,
