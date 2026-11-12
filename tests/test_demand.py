@@ -247,6 +247,29 @@ def test_count_only_pin_honors_a_partitions_per_node_cap():
     assert placed(capped) == (6, 3)
 
 
+def test_fit_all_ranks_by_the_callers_key():
+    stated = planner.demand(
+        model_name="org.netflix.read-only-kv",
+        region="us-east-1",
+        desires=READ_ONLY_KV,
+        drive=GP3,
+        extra_model_arguments=READ_ONLY_KV_ARGS,
+    )
+    assert stated is not None
+    demand, rules = stated
+    demand = dataclasses.replace(demand, ncu=certain_float(60))
+    m6id = [HARDWARE.instances[f"m6id.{size}xlarge"] for size in ("2", "4")]
+
+    def ncu_from_170(f: Fit) -> float:
+        return abs(f.supply_per_node[Resource.ncu] * f.count - 170)
+
+    cheapest, _ = fit_all(demand, rules, m6id, pinned=Layout(6))
+    nearest, _ = fit_all(demand, rules, m6id, pinned=Layout(6), key=ncu_from_170)
+
+    assert [f.instance.name for f in cheapest] == ["m6id.2xlarge", "m6id.4xlarge"]
+    assert [f.instance.name for f in nearest] == ["m6id.4xlarge", "m6id.2xlarge"]
+
+
 def test_existing_cluster_keeps_whole_core_count():
     """Converting the model's cores to NCU and back must not add a core."""
     desires = READ_ONLY_KV.model_copy(deep=True)

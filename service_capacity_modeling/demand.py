@@ -292,13 +292,17 @@ def fit_all(
     instances: Iterable[Instance],
     pinned: Optional[Layout] = None,
     drive: Optional[Drive] = None,
+    *,
+    key: Callable[[Fit], Any] = lambda f: f.annual_cost,
 ) -> Tuple[List[Fit], List[Excuse]]:
-    """Fit every instance; fits are ordered cheapest first.
+    """Fit every instance; fits are ordered by ``key``, cheapest first by
+    default.
 
     This is the entry point for callers that choose shapes themselves, for
     example an autoscaler that holds the node count fixed and picks a type for
-    a target NCU. ``drive`` is the attached drive; without it each instance
-    uses its own local drive and instances without one are skipped.
+    a target NCU with its own ranking. ``drive`` is the attached drive;
+    without it each instance uses its own local drive and instances without
+    one are skipped.
     """
     fits: List[Fit] = []
     excuses: List[Excuse] = []
@@ -311,7 +315,7 @@ def fit_all(
             excuses.append(result)
         else:
             fits.append(result)
-    fits.sort(key=lambda f: f.annual_cost)
+    fits.sort(key=key)
     return fits, excuses
 
 
