@@ -7,14 +7,21 @@ when multiple valid configurations have the same node count.
 
 Key principle: Minimize cost first, then prefer fault tolerance among plans with
 the same cost.
+
+Besides the search, a caller can place partitions at a fixed layout
+(``plan_at_layout``) or on exactly some number of nodes (``plan_at_count``),
+and ask which resource blocks a layout that does not fit.
 """
 
 import math
 from typing import Optional
+from typing import Tuple
 
 from pydantic import BaseModel
 from pydantic import Field
 from pydantic import model_validator
+
+from service_capacity_modeling.interface import Bottleneck
 
 
 class CapacityProblem(BaseModel):
@@ -29,6 +36,8 @@ class CapacityProblem(BaseModel):
     cpu_needed: int  # Total CPU cores needed
     min_rf: int  # Minimum replication factor
     max_nodes: int  # Maximum allowed nodes in cluster
+    # Most partitions any node may hold, on top of disk and memory limits.
+    max_partitions_per_node: Optional[int] = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def memory_constraints_are_complete(self) -> "CapacityProblem":
@@ -59,6 +68,112 @@ def _partitions_that_fit(capacity_gib: float, partition_size_gib: float) -> int:
     return math.floor(math.nextafter(fit, math.inf))
 
 
+def partition_limits(problem: CapacityProblem) -> Tuple[int, Optional[int]]:
+    """The most partitions one node holds by disk and, when placement uses
+    memory, by memory."""
+    disk_ppn = _partitions_that_fit(
+        problem.disk_per_node_gib, problem.partition_size_gib
+    )
+    memory_ppn = None
+    # CapacityProblem's validator requires both memory values or neither.
+    if (
+        problem.memory_per_partition_gib is not None
+        and problem.memory_per_node_gib is not None
+    ):
+        memory_ppn = _partitions_that_fit(
+            problem.memory_per_node_gib, problem.memory_per_partition_gib
+        )
+    return disk_ppn, memory_ppn
+
+
+def _max_partitions_per_node(problem: CapacityProblem) -> int:
+    """The most partitions a node may hold under every limit."""
+    disk_ppn, memory_ppn = partition_limits(problem)
+    limits = [disk_ppn, memory_ppn, problem.max_partitions_per_node]
+    return min(limit for limit in limits if limit is not None)
+
+
+def replicas_needed(problem: CapacityProblem, nodes_for_one_copy: int) -> int:
+    """The fewest replicas that meet the minimum RF and the CPU requirement."""
+    return max(
+        problem.min_rf,
+        math.ceil(problem.cpu_needed / (nodes_for_one_copy * problem.cpu_per_node)),
+    )
+
+
+def plan_at_layout(
+    problem: CapacityProblem, partitions_per_node: int, replica_count: int
+) -> Optional[CapacityResult]:
+    """The configuration at exactly this layout, or None if it does not fit."""
+    if not 1 <= partitions_per_node <= _max_partitions_per_node(problem):
+        return None
+    nodes_for_one_copy = math.ceil(problem.n_partitions / partitions_per_node)
+    if replica_count < replicas_needed(problem, nodes_for_one_copy):
+        return None
+    # Ensure at least 2 nodes for availability
+    node_count = max(nodes_for_one_copy * replica_count, 2)
+    if node_count > problem.max_nodes:
+        return None
+    disk_ppn, memory_ppn = partition_limits(problem)
+    return CapacityResult(
+        node_count=node_count,
+        replica_count=replica_count,
+        partitions_per_node=partitions_per_node,
+        nodes_for_one_copy=nodes_for_one_copy,
+        max_partitions_per_node_by_disk=disk_ppn,
+        max_partitions_per_node_by_memory=memory_ppn,
+    )
+
+
+def _layouts_at_count(count: int, n_partitions: int) -> list[Tuple[int, int]]:
+    """(partitions per node, replicas) for each way to split ``count`` nodes
+    into equal copies, densest first."""
+    layouts = []
+    for nodes_for_one_copy in range(1, count + 1):
+        if count % nodes_for_one_copy == 0:
+            ppn = math.ceil(n_partitions / nodes_for_one_copy)
+            layouts.append((ppn, count // nodes_for_one_copy))
+    return layouts
+
+
+def plan_at_count(problem: CapacityProblem, count: int) -> Optional[CapacityResult]:
+    """The densest layout on exactly ``count`` nodes, or None if none fits.
+    Densest first leaves the most replicas for CPU and availability."""
+    for ppn, rf in _layouts_at_count(count, problem.n_partitions):
+        result = plan_at_layout(problem, ppn, rf)
+        if result is not None and result.node_count == count:
+            return result
+    return None
+
+
+def layout_shortfall(
+    problem: CapacityProblem, partitions_per_node: int, replica_count: int
+) -> Optional[Bottleneck]:
+    """The resource that keeps a node from hosting this layout, or None when
+    the limit is the node count or the partition cap instead."""
+    disk_ppn, memory_ppn = partition_limits(problem)
+    if partitions_per_node > disk_ppn:
+        return Bottleneck.disk_capacity
+    if memory_ppn is not None and partitions_per_node > memory_ppn:
+        return Bottleneck.memory
+    nodes_for_one_copy = math.ceil(problem.n_partitions / partitions_per_node)
+    if replica_count < replicas_needed(problem, nodes_for_one_copy):
+        return Bottleneck.cpu
+    return None
+
+
+def count_shortfall(problem: CapacityProblem, count: int) -> Optional[Bottleneck]:
+    """Why no layout fits on exactly ``count`` nodes: the resource that blocks
+    the densest layout whose partitions fit on disk and in memory, else the
+    sparsest layout's resource."""
+    shortfall = None
+    for ppn, rf in _layouts_at_count(count, problem.n_partitions):
+        shortfall = layout_shortfall(problem, ppn, rf)
+        if shortfall not in (Bottleneck.disk_capacity, Bottleneck.memory):
+            return shortfall
+    return shortfall
+
+
 def search_for_min_nodes(
     problem: CapacityProblem,
 ) -> Optional[CapacityResult]:
@@ -75,17 +190,8 @@ def search_for_min_nodes(
         CapacityResult with the lowest node count, or None if no valid
         configuration exists within the constraints.
     """
-    disk_ppn = _partitions_that_fit(
-        problem.disk_per_node_gib, problem.partition_size_gib
-    )
-    memory_ppn = None
-    if problem.memory_per_partition_gib is not None:
-        assert problem.memory_per_node_gib is not None
-        memory_ppn = _partitions_that_fit(
-            problem.memory_per_node_gib, problem.memory_per_partition_gib
-        )
-
-    max_ppn = min(disk_ppn, memory_ppn) if memory_ppn is not None else disk_ppn
+    disk_ppn, memory_ppn = partition_limits(problem)
+    max_ppn = _max_partitions_per_node(problem)
     if max_ppn < 1:
         return None
 
@@ -93,12 +199,7 @@ def search_for_min_nodes(
     ppn = max_ppn
     while ppn > 0:
         nodes_for_one_copy = math.ceil(problem.n_partitions / ppn)
-
-        # Calculate minimum RF for CPU
-        rf = max(
-            problem.min_rf,
-            math.ceil(problem.cpu_needed / (nodes_for_one_copy * problem.cpu_per_node)),
-        )
+        rf = replicas_needed(problem, nodes_for_one_copy)
         # Ensure at least 2 nodes for availability
         total_nodes = max(nodes_for_one_copy * rf, 2)
 
