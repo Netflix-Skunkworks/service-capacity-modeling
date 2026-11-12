@@ -64,6 +64,21 @@ def test_ceiling_layout_counts_the_binding_resource():
     assert isinstance(weaker, Excuse)  # 6 x 14 NCU is below the 120 floor
 
 
+def test_alternatives_meet_mid_unless_caller_accepts_low():
+    demand = Demand(
+        ncu=Interval(low=120, mid=140, high=160),
+        mem_gib=certain_float(60),
+        disk_gib=certain_float(600),
+        network_mbps=certain_float(1000),
+    )
+    m5 = HARDWARE.instances["m5.4xlarge"]  # 21.6 NCU: 6 nodes give 129
+
+    assert isinstance(fit(demand, NodeRules(), m5, GP3, pinned=Layout(6)), Excuse)
+    assert isinstance(
+        fit(demand, NodeRules(), m5, GP3, pinned=Layout(6), point="low"), Fit
+    )
+
+
 def test_planner_lists_alternatives_that_host_the_same_partition_layout():
     plan = planner.plan_certain(
         model_name="org.netflix.read-only-kv",

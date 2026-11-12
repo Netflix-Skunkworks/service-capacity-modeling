@@ -21,9 +21,10 @@ worth ``cpu_ghz * cpu_ipc_scale / 2.3`` NCU, the same conversion as
 ``normalize_cores``. An m6id.2xlarge (8 vCPU at 3.5 GHz, IPC 1.15) supplies
 14 NCU; an m7a.2xlarge (8 vCPU at 3.7 GHz, IPC 1.95) supplies about 25.
 
-``mid`` sizes a plan. ``low`` is the floor a shape must meet to stand in for
-the primary at the primary's layout. A wider gap between ``low`` and ``mid``
-allows weaker fallbacks and costs more primary capacity.
+``mid`` sizes a plan and is also the bar an alternative must meet at the
+primary's layout, so a fallback never serves less than the plan targets. A
+caller that accepts weaker fallbacks passes ``point="low"`` explicitly and
+sizes the primary with enough headroom to cover the gap.
 """
 
 from __future__ import annotations
@@ -219,11 +220,11 @@ def fit(  # pylint: disable=too-many-positional-arguments
     """Size ``instance`` for ``demand``, or explain why it cannot serve it.
 
     Without ``pinned``, returns the smallest layout that meets demand at
-    ``point`` (default ``mid``). With ``pinned``, checks that ``instance`` can
-    host that exact layout at ``point`` (default ``low``), which is how a
-    shape qualifies as an alternative.
+    ``point``. With ``pinned``, checks that ``instance`` can host that exact
+    layout at ``point``, which is how a shape qualifies as an alternative.
+    ``point`` defaults to ``mid`` in both cases.
     """
-    point = point or ("mid" if pinned is None else "low")
+    point = point or "mid"
     reason = rules.rejects(instance, drive)
     if reason is not None:
         return Excuse(instance=instance.name, drive=drive.name, reason=reason)
