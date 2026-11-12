@@ -6,9 +6,8 @@ itself. It returns:
 - ``Demand``: what the workload needs for one cluster scope (a zone, or the
   region for regional clusters), as intervals, independent of any instance.
 - ``NodeRules``: the few constraints that depend on the node, such as memory
-  reserved from node RAM, a cap on data per node, hard rejections, and, when
-  node count is not a simple ceiling, a ``layout`` rule (for example partition
-  placement).
+  reserved from node RAM, a cap on data per node, hard rejections, and the
+  ``layout`` rule that turns need and supply into a node count and placement.
 
 ``fit`` sizes any shape against that demand. Because the same demand and
 rules size every shape, the planner can ask a second question cheaply: which
@@ -21,10 +20,9 @@ worth ``cpu_ghz * cpu_ipc_scale / 2.3`` NCU, the same conversion as
 ``normalize_cores``. An m6id.2xlarge (8 vCPU at 3.5 GHz, IPC 1.15) supplies
 14 NCU; an m7a.2xlarge (8 vCPU at 3.7 GHz, IPC 1.95) supplies about 25.
 
-``mid`` sizes a plan and is also the bar an alternative must meet at the
-primary's layout, so a fallback never serves less than the plan targets. A
-caller that accepts weaker fallbacks passes ``point="low"`` explicitly and
-sizes the primary with enough headroom to cover the gap.
+``fit`` sizes and checks at the demand's ``mid``, so an alternative never
+serves less than the plan targets. Models that do not state demand still get
+alternatives: the planner plans them again on each shape at the same count.
 """
 
 from __future__ import annotations
@@ -88,13 +86,13 @@ class Demand:
     disk_gib: Interval
     network_mbps: Interval
 
-    def at(self, point: str) -> Amounts:
-        """Demand per resource at ``point`` ("low", "mid" or "high")."""
+    def mid(self) -> Amounts:
+        """Demand per resource at each interval's ``mid``."""
         return {
-            Resource.ncu: getattr(self.ncu, point),
-            Resource.mem_gib: getattr(self.mem_gib, point),
-            Resource.disk_gib: getattr(self.disk_gib, point),
-            Resource.network_mbps: getattr(self.network_mbps, point),
+            Resource.ncu: self.ncu.mid,
+            Resource.mem_gib: self.mem_gib.mid,
+            Resource.disk_gib: self.disk_gib.mid,
+            Resource.network_mbps: self.network_mbps.mid,
         }
 
 
@@ -139,15 +137,14 @@ class NodeRules:
     shapes the model never saw.
     """
 
+    # Node count and placement from need and supply, or a pinned layout check.
+    layout: LayoutRule
     # Memory the node uses before the workload sees any (OS, heap, sidecars).
     reserve_mem_gib: Callable[[Instance], float] = _no_reserve
     # Effective cap on data per node, buffer already applied.
     max_data_per_node_gib: float = math.inf
-    min_count: int = 1
     # Hard rejections, returning a number-free reason.
     rejects: Callable[[Instance, Drive], Optional[str]] = _accept_all
-    # Node count from need and supply when it is not the largest ceiling.
-    layout: Optional[LayoutRule] = None
 
 
 def ncu_per_node(instance: Instance) -> float:
@@ -211,39 +208,24 @@ class Fit:
         return cost * self.count
 
 
-def _ceiling_layout(
-    need: Amounts, have: Amounts, rules: NodeRules, pinned: Optional[Layout]
-) -> Union[Layout, str]:
-    if pinned is not None:
-        short = [d for d in DIMENSIONS if have[d] * pinned.count < need[d]]
-        if short:
-            return f"Cannot host the layout: {short[0].value}"
-        return pinned
-    raw = max(math.ceil(need[d] / have[d]) if need[d] > 0 else 0 for d in DIMENSIONS)
-    return Layout(count=max(raw, rules.min_count))
-
-
-def fit(  # pylint: disable=too-many-positional-arguments
+def fit(
     demand: Demand,
     rules: NodeRules,
     instance: Instance,
     drive: Drive,
     pinned: Optional[Layout] = None,
-    point: Optional[str] = None,
 ) -> Union[Fit, Excuse]:
     """Size ``instance`` for ``demand``, or explain why it cannot serve it.
 
-    Without ``pinned``, returns the smallest layout that meets demand at
-    ``point``. With ``pinned``, checks that ``instance`` can host that exact
-    layout at ``point``, which is how a shape qualifies as an alternative.
-    ``point`` defaults to ``mid`` in both cases.
+    Without ``pinned``, returns the layout rule's smallest layout. With
+    ``pinned``, checks that ``instance`` can host that exact layout, which is
+    how a shape qualifies as an alternative.
     """
-    point = point or "mid"
     reason = rules.rejects(instance, drive)
     if reason is not None:
         return Excuse(instance=instance.name, drive=drive.name, reason=reason)
 
-    need = demand.at(point)
+    need = demand.mid()
     have = supply(instance, drive, rules)
     for dim in DIMENSIONS:
         if have[dim] <= 0 < need[dim]:
@@ -254,10 +236,7 @@ def fit(  # pylint: disable=too-many-positional-arguments
                 bottleneck=_BOTTLENECK.get(dim),
             )
 
-    if rules.layout is not None:
-        layout = rules.layout(instance, need, have, pinned)
-    else:
-        layout = _ceiling_layout(need, have, rules, pinned)
+    layout = rules.layout(instance, need, have, pinned)
     if isinstance(layout, str):
         short: Optional[Resource] = next(
             (d for d in DIMENSIONS if d.value in layout), None
@@ -307,12 +286,11 @@ def fit(  # pylint: disable=too-many-positional-arguments
     )
 
 
-def fit_all(  # pylint: disable=too-many-positional-arguments
+def fit_all(
     demand: Demand,
     rules: NodeRules,
     instances: Iterable[Instance],
     pinned: Optional[Layout] = None,
-    point: Optional[str] = None,
     drive: Optional[Drive] = None,
 ) -> Tuple[List[Fit], List[Excuse]]:
     """Fit every instance; fits are ordered cheapest first.
@@ -328,7 +306,7 @@ def fit_all(  # pylint: disable=too-many-positional-arguments
         node_drive = drive or instance.drive
         if node_drive is None:
             continue
-        result = fit(demand, rules, instance, node_drive, pinned=pinned, point=point)
+        result = fit(demand, rules, instance, node_drive, pinned=pinned)
         if isinstance(result, Excuse):
             excuses.append(result)
         else:

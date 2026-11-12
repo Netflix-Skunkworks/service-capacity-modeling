@@ -227,11 +227,12 @@ class CapacityModel:
     ) -> Optional[Tuple["Demand", "NodeRules"]]:
         """What the workload needs on this drive, independent of instance.
 
-        Models that implement this let the planner size any shape with
-        ``service_capacity_modeling.demand.fit`` and attach alternatives: other
-        instance types that can host a returned plan's exact layout. The
-        default None keeps the model on the per-instance ``capacity_plan``
-        path only.
+        Models that implement this let callers size any shape with
+        ``service_capacity_modeling.demand.fit``, including with their own
+        demand (for example a CPU target in NCU), and the planner checks
+        alternatives with ``fit`` instead of planning each shape again. The
+        default None is fine for most models: the planner then finds
+        alternatives by re-running ``capacity_plan`` at the plan's node count.
         """
         return None
 

@@ -2,6 +2,7 @@ import dataclasses
 
 import pytest
 
+from service_capacity_modeling.capacity_planner import PlannerArguments
 from service_capacity_modeling.capacity_planner import planner
 from service_capacity_modeling.demand import Demand
 from service_capacity_modeling.demand import fit
@@ -13,6 +14,7 @@ from service_capacity_modeling.demand import NodeRules
 from service_capacity_modeling.demand import Resource
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import AlternativeOptions
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
@@ -39,6 +41,16 @@ READ_ONLY_KV = CapacityDesires(
     data_shape=DataShape(estimated_state_size_gib=certain_int(1000)),
 )
 READ_ONLY_KV_ARGS = {"total_num_partitions": 12}
+CASSANDRA = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=certain_int(100_000),
+        estimated_write_per_second=certain_int(100_000),
+        estimated_mean_read_latency_ms=certain_float(0.5),
+        estimated_mean_write_latency_ms=certain_float(0.4),
+    ),
+    data_shape=DataShape(estimated_state_size_gib=certain_int(10)),
+)
 
 
 def test_ncu_normalizes_cpu_speed():
@@ -48,39 +60,18 @@ def test_ncu_normalizes_cpu_speed():
     )
 
 
-def test_ceiling_layout_counts_the_binding_resource():
-    demand = Demand(
-        ncu=Interval(low=120, mid=140, high=160),
-        mem_gib=Interval(low=60, mid=90, high=120),
-        disk_gib=Interval(low=600, mid=800, high=1000),
-        network_mbps=Interval(low=1000, mid=2000, high=3000),
-    )
-    rules = NodeRules(reserve_mem_gib=lambda _: 4)
-
-    m7a = fit(demand, rules, HARDWARE.instances["m7a.2xlarge"], GP3)
-    weaker = fit(
-        demand, rules, HARDWARE.instances["m6id.2xlarge"], GP3, pinned=Layout(6)
-    )
-
-    assert isinstance(m7a, Fit)
-    assert m7a.count == 6  # ceil(140 / 25.1); memory needs only ceil(90 / 26.5)
-    assert m7a.binding == Resource.ncu
-    assert isinstance(weaker, Excuse)  # 6 x 14 NCU is below the 120 floor
+WITH_ALTERNATIVES = PlannerArguments(alternatives=AlternativeOptions())
 
 
-def test_alternatives_meet_mid_unless_caller_accepts_low():
-    demand = Demand(
-        ncu=Interval(low=120, mid=140, high=160),
-        mem_gib=certain_float(60),
-        disk_gib=certain_float(600),
-        network_mbps=certain_float(1000),
-    )
-    m5 = HARDWARE.instances["m5.4xlarge"]  # 21.6 NCU: 6 nodes give 129
+def test_alternatives_are_off_by_default():
+    plan = planner.plan_certain(
+        model_name="org.netflix.read-only-kv",
+        region="us-east-1",
+        desires=READ_ONLY_KV,
+        extra_model_arguments=READ_ONLY_KV_ARGS,
+    )[0]
 
-    assert isinstance(fit(demand, NodeRules(), m5, GP3, pinned=Layout(6)), Excuse)
-    assert isinstance(
-        fit(demand, NodeRules(), m5, GP3, pinned=Layout(6), point="low"), Fit
-    )
+    assert not plan.candidate_clusters.regional[0].alternatives
 
 
 def test_planner_lists_alternatives_that_host_the_same_partition_layout():
@@ -89,6 +80,7 @@ def test_planner_lists_alternatives_that_host_the_same_partition_layout():
         region="us-east-1",
         desires=READ_ONLY_KV,
         extra_model_arguments=READ_ONLY_KV_ARGS,
+        planner_arguments=WITH_ALTERNATIVES,
     )[0]
     cluster = plan.candidate_clusters.regional[0]
     params = cluster.cluster_params
@@ -104,6 +96,65 @@ def test_planner_lists_alternatives_that_host_the_same_partition_layout():
         assert alt.supply_per_node["disk_gib"] >= ppn * partition_gib
         # ...and each node supplies the CPU the layout needs from it.
         assert alt.supply_per_node["ncu"] >= alt.need_per_node["ncu"]
+
+
+def test_fit_sizes_every_shape_like_the_model():
+    """The demand path must agree with the model's own per-shape plan."""
+    plans = planner.plan_certain(
+        model_name="org.netflix.read-only-kv",
+        region="us-east-1",
+        desires=READ_ONLY_KV,
+        extra_model_arguments=READ_ONLY_KV_ARGS,
+        num_results=1000,
+        planner_arguments=PlannerArguments(max_results_per_family=100),
+    )
+    stated = planner.demand(
+        model_name="org.netflix.read-only-kv",
+        region="us-east-1",
+        desires=READ_ONLY_KV,
+        drive=HARDWARE.instances["i4i.2xlarge"].drive,
+        extra_model_arguments=READ_ONLY_KV_ARGS,
+    )
+    assert stated is not None and len(plans) > 10
+    demand, rules = stated
+    for plan in plans:
+        cluster = plan.candidate_clusters.regional[0]
+        sized = fit(demand, rules, cluster.instance, cluster.instance.drive)
+        assert isinstance(sized, Fit), cluster.instance.name
+        assert sized.count == cluster.count, cluster.instance.name
+
+
+def test_models_without_demand_get_alternatives_by_planning_again():
+    plan = planner.plan_certain(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=CASSANDRA,
+        planner_arguments=WITH_ALTERNATIVES,
+    )[0]
+    zones = plan.candidate_clusters.zonal
+    primary = zones[0]
+
+    assert primary.alternatives
+    assert all(z.alternatives == primary.alternatives for z in zones)
+    families = [HARDWARE.instances[a.instance].family for a in primary.alternatives]
+    assert primary.instance.family not in families
+    assert len(set(families)) == len(families)
+    costs = [a.annual_cost for a in primary.alternatives]
+    assert costs == sorted(costs)
+    for alt in primary.alternatives:
+        assert alt.count == primary.count
+        assert alt.annual_cost <= primary.annual_cost * 1.5
+        assert alt.binding is None
+
+
+def test_alternatives_are_certain_planning_only():
+    with pytest.raises(ValueError, match="certain planning only"):
+        planner.plan(
+            model_name="org.netflix.cassandra",
+            region="us-east-1",
+            desires=CASSANDRA,
+            planner_arguments=WITH_ALTERNATIVES,
+        )
 
 
 def test_fixed_count_caller_picks_types_for_a_target():

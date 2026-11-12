@@ -1373,17 +1373,39 @@ class AlternativeInstance(ExcludeUnsetModel):
     """An instance type that can host a cluster's exact layout in its place.
 
     Used as a fallback when the primary type is unavailable. Each node of the
-    alternative meets the demand floor, so the cluster can also run a mix of
-    the primary and its alternatives.
+    alternative carries the primary's per-node share at the same node count,
+    so the cluster can also run a mix of the primary and its alternatives.
     """
 
     instance: str
     count: int
     annual_cost: float
-    # The resource closest to its per-node limit.
-    binding: str
+    # Set only for models that state their demand (CapacityModel.demand):
+    # the resource closest to its per-node limit, and each node's need and
+    # supply in demand.Resource units.
+    binding: Optional[str] = None
     need_per_node: Dict[str, float] = {}
     supply_per_node: Dict[str, float] = {}
+
+
+class AlternativeOptions(ExcludeUnsetModel):
+    """How the planner picks alternative instance types for each plan."""
+
+    max_alternatives: int = Field(
+        default=3,
+        ge=1,
+        le=5,
+        description="Most alternative types to list per cluster, at most one "
+        "per instance family, cheapest first.",
+    )
+    max_cost_increase: float = Field(
+        default=0.5,
+        ge=0,
+        description="How much more a cluster running only the alternative may "
+        "cost than the primary cluster, as a fraction: 0.5 allows 50% more. A "
+        "fallback can stay in place until the next instance refresh, so this "
+        "can be a steady-state cost.",
+    )
 
 
 class ClusterCapacity(ExcludeUnsetModel):
@@ -1393,7 +1415,7 @@ class ClusterCapacity(ExcludeUnsetModel):
     instance: Instance
     attached_drives: Sequence[Drive] = ()
     # Other instance types that can host this exact layout, cheapest first.
-    # Only set for models that state their demand (CapacityModel.demand).
+    # Set only when PlannerArguments.alternatives is.
     alternatives: Sequence[AlternativeInstance] = ()
     # When provisioning services we might need to signal they
     # should have certain configuration, for example flags that
