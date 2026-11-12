@@ -314,11 +314,11 @@ def _short_resource(problem: CapacityProblem, ppn: int, rf: int) -> str:
     """Why a shape cannot host ``ppn`` partitions per node at ``rf`` replicas."""
     disk_ppn, memory_ppn = max_partitions_per_node(problem)
     if ppn > disk_ppn:
-        return Resource.disk_gib.value
+        return str(Resource.disk_gib)
     if memory_ppn is not None and ppn > memory_ppn:
-        return Resource.mem_gib.value
+        return str(Resource.mem_gib)
     if rf < replicas_needed(problem, math.ceil(problem.n_partitions / ppn)):
-        return Resource.ncu.value
+        return str(Resource.ncu)
     return "node count"
 
 
