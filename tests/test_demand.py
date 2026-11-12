@@ -2,6 +2,7 @@ import pytest
 
 from service_capacity_modeling.capacity_planner import PlannerArguments
 from service_capacity_modeling.capacity_planner import planner
+from service_capacity_modeling.demand import alternatives
 from service_capacity_modeling.demand import Demand
 from service_capacity_modeling.demand import fit
 from service_capacity_modeling.demand import Fit
@@ -134,6 +135,18 @@ def test_models_without_demand_get_alternatives_by_planning_again():
 
     assert primary.alternatives
     assert all(z.alternatives == primary.alternatives for z in zones)
+    allowed = [HARDWARE.instances[primary.alternatives[-1].instance].family]
+    only = planner.plan_certain(
+        model_name="org.netflix.cassandra",
+        region="us-east-1",
+        desires=CASSANDRA,
+        planner_arguments=PlannerArguments(
+            alternatives=AlternativeOptions(families=allowed)
+        ),
+    )[0].candidate_clusters.zonal[0]
+    assert [HARDWARE.instances[a.instance].family for a in only.alternatives] == (
+        allowed
+    )
     families = [HARDWARE.instances[a.instance].family for a in primary.alternatives]
     assert primary.instance.family not in families
     assert len(set(families)) == len(families)
@@ -261,8 +274,7 @@ def test_autoscaler_fits_at_its_minimum_and_ranks_against_its_target():
 
     def regret(target: float):
         def key(f: Fit) -> float:
-            supplied = f.supply_per_node[Resource.ncu] * f.count
-            miss = supplied - target
+            miss = f.ncu - target
             return (-4.0 * miss if miss < 0 else miss) / target
 
         return key
@@ -273,6 +285,36 @@ def test_autoscaler_fits_at_its_minimum_and_ranks_against_its_target():
 
     assert [f.instance.name for f in near_95] == ["m6id.2xlarge", "m6id.4xlarge"]
     assert [f.instance.name for f in near_170] == ["m6id.4xlarge", "m6id.2xlarge"]
+
+
+def test_fixed_count_caller_gets_alternatives_from_allowed_families():
+    small = READ_ONLY_KV.model_copy(deep=True)
+    small.data_shape.estimated_state_size_gib = certain_int(48)
+    stated = planner.demand(
+        model_name="org.netflix.read-only-kv",
+        region="us-east-1",
+        desires=small,
+        drive=GP3,
+        extra_model_arguments=READ_ONLY_KV_ARGS,
+    )
+    assert stated is not None
+    demand, rules = stated
+    demand = demand.with_ncu(168)
+    m6id = HARDWARE.instances["m6id.4xlarge"]
+    primary = fit(demand, rules, m6id, m6id.drive, pinned=Layout(6))
+    assert isinstance(primary, Fit)
+    local = [i for i in HARDWARE.instances.values() if i.drive is not None]
+
+    every, _ = alternatives(primary, demand, rules, local, AlternativeOptions())
+    allowed = AlternativeOptions(families=["r6id", "m5d"])
+    chosen, excuses = alternatives(primary, demand, rules, local, allowed)
+
+    assert any(f.instance.family not in ("r6id", "m5d") for f in every)
+    assert chosen and {f.instance.family for f in chosen} <= {"r6id", "m5d"}
+    assert excuses and all(e.reason for e in excuses)
+    for f in chosen:
+        assert f.layout.params == primary.layout.params
+        assert f.annual_cost <= primary.annual_cost * 1.5
 
 
 def test_existing_cluster_keeps_whole_core_count():

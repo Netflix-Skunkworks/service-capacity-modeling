@@ -1406,6 +1406,12 @@ class AlternativeOptions(ExcludeUnsetModel):
         "fallback can stay in place until the next instance refresh, so this "
         "can be a steady-state cost.",
     )
+    families: Optional[List[str]] = Field(
+        default=None,
+        description="Only these instance families may be alternatives, for "
+        "example the families an operator has images and reservations for. "
+        "None allows every family.",
+    )
 
 
 class ClusterCapacity(ExcludeUnsetModel):

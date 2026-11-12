@@ -38,10 +38,12 @@ from typing import Iterable
 from typing import List
 from typing import Optional
 from typing import Tuple
+from typing import TypeVar
 from typing import Union
 
 from service_capacity_modeling.enum_utils import StrEnum
 from service_capacity_modeling.interface import AlternativeInstance
+from service_capacity_modeling.interface import AlternativeOptions
 from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import default_reference_shape
@@ -210,6 +212,11 @@ class Fit:
         return self.layout.count
 
     @property
+    def ncu(self) -> float:
+        """NCU the whole cluster supplies."""
+        return self.supply_per_node[Resource.ncu] * self.count
+
+    @property
     def annual_cost(self) -> float:
         cost = self.instance.annual_cost
         if self.drive.drive_type == DriveType.attached_ssd:
@@ -328,6 +335,64 @@ def fit_all(
             fits.append(result)
     fits.sort(key=key)
     return fits, excuses
+
+
+T = TypeVar("T")
+
+
+def choose_alternatives(
+    primary: Instance,
+    primary_cost: float,
+    candidates: Iterable[T],
+    describe: Callable[[T], Tuple[Instance, float]],
+    options: AlternativeOptions,
+) -> List[T]:
+    """The candidates ``options`` keeps as alternatives to ``primary``: one
+    per other allowed family, within the cost cap, cheapest first.
+    ``describe`` gives each candidate's instance and annual cost."""
+    max_cost = primary_cost * (1 + options.max_cost_increase)
+    by_family: Dict[str, Tuple[float, T]] = {}
+    for candidate in candidates:
+        instance, cost = describe(candidate)
+        family = instance.family
+        if family == primary.family or cost > max_cost:
+            continue
+        if options.families is not None and family not in options.families:
+            continue
+        kept = by_family.get(family)
+        if kept is None or cost < kept[0]:
+            by_family[family] = (cost, candidate)
+    ranked = sorted(by_family.values(), key=lambda kept: kept[0])
+    return [candidate for _, candidate in ranked[: options.max_alternatives]]
+
+
+def alternatives(
+    primary: Fit,
+    demand: Demand,
+    rules: NodeRules,
+    instances: Iterable[Instance],
+    options: AlternativeOptions,
+) -> Tuple[List[Fit], List[Excuse]]:
+    """Shapes that host ``primary``'s exact layout, chosen as the planner
+    chooses them, plus why each shape that cannot host it was rejected.
+    ``primary`` comes from ``fit``; with an attached drive, every
+    alternative uses that drive too."""
+    is_attached = primary.drive.drive_type in (
+        DriveType.attached_ssd,
+        DriveType.attached_hdd,
+    )
+    attached = primary.drive if is_attached else None
+    fits, excuses = fit_all(
+        demand, rules, instances, pinned=primary.layout, drive=attached
+    )
+    chosen = choose_alternatives(
+        primary.instance,
+        primary.annual_cost,
+        fits,
+        lambda f: (f.instance, f.annual_cost),
+        options,
+    )
+    return chosen, excuses
 
 
 def to_alternative(result: Fit) -> AlternativeInstance:

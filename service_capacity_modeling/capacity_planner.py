@@ -17,6 +17,7 @@ from typing import Tuple
 from typing import TypeVar
 from pydantic import Field
 
+from service_capacity_modeling.demand import choose_alternatives
 from service_capacity_modeling.demand import Demand
 from service_capacity_modeling.demand import Fit
 from service_capacity_modeling.demand import fit
@@ -231,18 +232,15 @@ def _with_alternatives(  # pylint: disable=too-many-positional-arguments
             model, main, desires, extra_model_arguments, scenarios
         )
 
-    family = {i.name: i.family for i, _, _ in scenarios}
-    max_cost = main.annual_cost * (1 + options.max_cost_increase)
-    by_family: Dict[str, AlternativeInstance] = {}
-    for alt in found:
-        other = family[alt.instance]
-        if other == main.instance.family or alt.annual_cost > max_cost:
-            continue
-        kept = by_family.get(other)
-        if kept is None or alt.annual_cost < kept.annual_cost:
-            by_family[other] = alt
-    alternatives = sorted(by_family.values(), key=lambda a: a.annual_cost)
-    update = {"alternatives": alternatives[: options.max_alternatives]}
+    instance = {i.name: i for i, _, _ in scenarios}
+    alternatives = choose_alternatives(
+        main.instance,
+        main.annual_cost,
+        found,
+        lambda a: (instance[a.instance], a.annual_cost),
+        options,
+    )
+    update = {"alternatives": alternatives}
 
     def attach(found_in: Sequence[ClusterCapacityT]) -> List[ClusterCapacityT]:
         if not found_in or found_in[0] is not main:
