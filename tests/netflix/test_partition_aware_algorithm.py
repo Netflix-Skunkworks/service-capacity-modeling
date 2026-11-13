@@ -195,8 +195,8 @@ class TestAlgorithmBasics:
                 max_nodes=100,
             )
 
-    def test_tiny_partitions_preserve_maximum_packing(self):
-        """Packing above the partition count is one equivalent search candidate."""
+    def test_partitions_per_node_never_exceeds_the_partition_count(self):
+        """A node with room for 140,000 tiny partitions still holds all 12."""
         problem = CapacityProblem(
             n_partitions=12,
             partition_size_gib=0.1,
@@ -212,7 +212,7 @@ class TestAlgorithmBasics:
         assert result is not None
         assert result.node_count == 2
         assert result.nodes_for_one_copy == 1
-        assert result.partitions_per_node == 140_000
+        assert result.partitions_per_node == 12
 
 
 class TestPlanSelection:
@@ -426,7 +426,7 @@ class TestAlgorithmProperties:
             -result.replica_count,
             -result.partitions_per_node,
         )
-        for ppn in range(max_ppn, 0, -1):
+        for ppn in range(min(max_ppn, problem.n_partitions), 0, -1):
             base = math.ceil(problem.n_partitions / ppn)
             rf = max(
                 problem.min_rf,
@@ -458,7 +458,7 @@ class TestEdgeCases:
     def test_single_partition(self):
         """Algorithm handles single partition correctly.
 
-        With 1 partition and max_ppn=5, algorithm starts from ppn=5 (max).
+        With 1 partition and max_ppn=5, the node holds the one partition.
         base=ceil(1/5)=1, which triggers special case.
         """
         problem = CapacityProblem(
@@ -473,8 +473,7 @@ class TestEdgeCases:
         result = search_for_min_nodes(problem)
 
         assert result is not None
-        # Equal-cost plans retain the densest partition packing.
-        assert result.partitions_per_node == 5
+        assert result.partitions_per_node == 1
         assert result.nodes_for_one_copy == 1
         assert result.replica_count == 2  # min_rf (2*16=32 >= 32 cpu_needed)
         assert result.node_count == 2  # max(2, rf)
