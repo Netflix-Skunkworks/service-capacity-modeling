@@ -1486,7 +1486,7 @@
           "read-only-kv.min_replica_count": 4,
           "read-only-kv.nodes_for_cpu": 5,
           "read-only-kv.nodes_for_one_copy": 1,
-          "read-only-kv.partitions_per_node": 102,
+          "read-only-kv.partitions_per_node": 16,
           "read-only-kv.replica_count": 5,
           "read-only-kv.total_num_partitions": 16
         },

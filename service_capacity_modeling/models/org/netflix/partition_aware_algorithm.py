@@ -196,7 +196,9 @@ def search_for_min_nodes(
         return None
 
     best_candidate: Optional[tuple[int, int, int, int]] = None
-    ppn = max_ppn
+    # A node holds at most every partition. Reporting more would make a
+    # pinned copy of this layout demand disk for partitions that don't exist.
+    ppn = min(max_ppn, problem.n_partitions)
     while ppn > 0:
         nodes_for_one_copy = math.ceil(problem.n_partitions / ppn)
         rf = replicas_needed(problem, nodes_for_one_copy)
