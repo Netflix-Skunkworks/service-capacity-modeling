@@ -17,6 +17,11 @@ from .identifier import nflx_identifier_capacity_model
 from .kafka import nflx_kafka_capacity_model
 from .key_value import nflx_key_value_capacity_model
 from .read_only_kv import nflx_read_only_kv_capacity_model
+from .raw_hollow import nflx_raw_hollow_capacity_model
+from .raw_hollow import nflx_raw_hollow_explorer_capacity_model
+from .raw_hollow import nflx_raw_hollow_logkeeper_capacity_model
+from .raw_hollow import nflx_raw_hollow_producer_capacity_model
+from .raw_hollow import nflx_raw_hollow_writer_capacity_model
 from .postgres import nflx_postgres_capacity_model
 from .rds import nflx_rds_capacity_model
 from .search import nflx_search_capacity_model
@@ -52,5 +57,10 @@ def models() -> Dict[str, Any]:
         "org.netflix.graphkv": nflx_graphkv_capacity_model,
         "org.netflix.identifier": nflx_identifier_capacity_model,
         "org.netflix.read-only-kv": nflx_read_only_kv_capacity_model,
+        "org.netflix.raw-hollow": nflx_raw_hollow_capacity_model,
+        "org.netflix.raw-hollow.logkeeper": nflx_raw_hollow_logkeeper_capacity_model,
+        "org.netflix.raw-hollow.writer": nflx_raw_hollow_writer_capacity_model,
+        "org.netflix.raw-hollow.producer": nflx_raw_hollow_producer_capacity_model,
+        "org.netflix.raw-hollow.explorer": nflx_raw_hollow_explorer_capacity_model,
         "org.netflix.search": nflx_search_capacity_model,
     }
