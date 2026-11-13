@@ -9,24 +9,16 @@ from typing import Callable
 from typing import cast
 from typing import Dict
 from typing import Generator
+from typing import Iterable
 from typing import List
 from typing import Optional
 from typing import Sequence
 from typing import Set
 from typing import Tuple
-from typing import TypeVar
 from pydantic import Field
 
-from service_capacity_modeling.demand import choose_alternatives
-from service_capacity_modeling.demand import Demand
-from service_capacity_modeling.demand import Fit
-from service_capacity_modeling.demand import fit
-from service_capacity_modeling.demand import Layout
-from service_capacity_modeling.demand import NodeRules
-from service_capacity_modeling.demand import to_alternative
 from service_capacity_modeling.hardware import HardwareShapes
 from service_capacity_modeling.hardware import shapes
-from service_capacity_modeling.interface import AlternativeInstance
 from service_capacity_modeling.interface import AlternativeOptions
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
@@ -110,9 +102,6 @@ class _CertainResult(ExcludeUnsetModel):
     excuses: Sequence[Excuse] = []
 
 
-ClusterCapacityT = TypeVar("ClusterCapacityT", bound=ClusterCapacity)
-
-
 def _main_cluster(plan: CapacityPlan) -> Optional[ClusterCapacity]:
     """The cluster alternatives replace: the first regional, else first zonal."""
     clusters = plan.candidate_clusters
@@ -125,59 +114,23 @@ def _drive_shapes(cluster: ClusterCapacity) -> List[Tuple[str, int]]:
     return [(d.name, d.size_gib) for d in cluster.attached_drives]
 
 
-def _fit_alternatives(  # pylint: disable=too-many-positional-arguments
-    model: CapacityModel,
-    main: ClusterCapacity,
-    desires: CapacityDesires,
-    extra_model_arguments: Dict[str, Any],
-    scenarios: Sequence[Tuple[Instance, Drive, RegionContext]],
-) -> Optional[List[AlternativeInstance]]:
-    """Shapes that host ``main``'s layout, checked with ``fit`` against the
-    model's stated demand; None when the model does not state demand."""
-    attached = main.attached_drives[0] if main.attached_drives else None
-    drive = attached or main.instance.drive
-    context = next((c for i, _, c in scenarios if i.name == main.instance.name), None)
-    if drive is None or context is None:
-        return None
-    stated = model.demand(
-        drive=drive,
-        context=context,
-        desires=desires,
-        extra_model_arguments=extra_model_arguments,
-    )
-    if stated is None:
-        return None
-    demand, rules = stated
-    pinned = Layout(count=main.count, params=dict(main.cluster_params))
-    found: List[AlternativeInstance] = []
-    checked: Set[str] = set()
-    for instance, _, _ in scenarios:
-        candidate_drive = attached or instance.drive
-        if instance.name in checked or candidate_drive is None:
-            continue
-        checked.add(instance.name)
-        result = fit(demand, rules, instance, candidate_drive, pinned=pinned)
-        if isinstance(result, Fit):
-            found.append(to_alternative(result))
-    return found
-
-
 def _replanned_alternatives(  # pylint: disable=too-many-positional-arguments
     model: CapacityModel,
     main: ClusterCapacity,
     desires: CapacityDesires,
     extra_model_arguments: Dict[str, Any],
     scenarios: Sequence[Tuple[Instance, Drive, RegionContext]],
-) -> List[AlternativeInstance]:
-    """Shapes that host ``main``'s layout, found by planning each shape again
-    with ``required_cluster_size`` pinned to ``main``'s count.
+) -> List[Tuple[Instance, float]]:
+    """Other instance types that run ``main`` with their cluster cost, found
+    by planning each type again with ``model.same_layout_arguments(main)``.
 
-    Models treat that argument as a floor or ignore it, so a shape qualifies
-    only when its plan lands on exactly ``main``'s count with the same drives.
+    Some models treat those arguments as a floor or ignore them, so a type
+    qualifies only when its plan lands on exactly ``main``'s node count with
+    the same attached drives.
     """
-    pinned_args = {**extra_model_arguments, "required_cluster_size": main.count}
+    pinned_args = {**extra_model_arguments, **model.same_layout_arguments(main)}
     drives = _drive_shapes(main)
-    found: List[AlternativeInstance] = []
+    found: List[Tuple[Instance, float]] = []
     for instance, drive, context in scenarios:
         if instance.family == main.instance.family:
             continue
@@ -197,14 +150,30 @@ def _replanned_alternatives(  # pylint: disable=too-many-positional-arguments
             or _drive_shapes(cluster) != drives
         ):
             continue
-        found.append(
-            AlternativeInstance(
-                instance=instance.name,
-                count=cluster.count,
-                annual_cost=cluster.annual_cost,
-            )
-        )
+        found.append((instance, cluster.annual_cost))
     return found
+
+
+def _choose_alternatives(
+    primary: ClusterCapacity,
+    candidates: Iterable[Tuple[Instance, float]],
+    options: AlternativeOptions,
+) -> List[Instance]:
+    """The candidates ``options`` keeps: the cheapest type per other allowed
+    family, within the cost cap, cheapest first."""
+    max_cost = primary.annual_cost * (1 + options.max_cost_increase)
+    by_family: Dict[str, Tuple[float, Instance]] = {}
+    for instance, cost in candidates:
+        family = instance.family
+        if family == primary.instance.family or cost > max_cost:
+            continue
+        if options.families is not None and family not in options.families:
+            continue
+        kept = by_family.get(family)
+        if kept is None or cost < kept[0]:
+            by_family[family] = (cost, instance)
+    ranked = sorted(by_family.values(), key=lambda kept: kept[0])
+    return [instance for _, instance in ranked[: options.max_alternatives]]
 
 
 def _with_alternatives(  # pylint: disable=too-many-positional-arguments
@@ -216,33 +185,17 @@ def _with_alternatives(  # pylint: disable=too-many-positional-arguments
     options: AlternativeOptions,
 ) -> CapacityPlan:
     """Attach instance types that can run the plan's main cluster at its
-    exact node count, to every zone of that cluster.
-
-    A model that states its demand (``CapacityModel.demand``) is checked
-    shape by shape with ``fit``. Any other model is planned again on each
-    shape. Either way the list keeps one type per other family, cheapest
-    first, within ``options``.
-    """
+    exact node count and layout, to every zone of that cluster."""
     main = _main_cluster(plan)
     if main is None:
         return plan
-    found = _fit_alternatives(model, main, desires, extra_model_arguments, scenarios)
-    if found is None:
-        found = _replanned_alternatives(
-            model, main, desires, extra_model_arguments, scenarios
-        )
-
-    instance = {i.name: i for i, _, _ in scenarios}
-    alternatives = choose_alternatives(
-        main.instance,
-        main.annual_cost,
-        found,
-        lambda a: (instance[a.instance], a.annual_cost),
-        options,
+    found = _replanned_alternatives(
+        model, main, desires, extra_model_arguments, scenarios
     )
+    alternatives = _choose_alternatives(main, found, options)
     update = {"alternatives": alternatives}
 
-    def attach(found_in: Sequence[ClusterCapacityT]) -> List[ClusterCapacityT]:
+    def attach(found_in: Sequence[ClusterCapacity]) -> List[ClusterCapacity]:
         if not found_in or found_in[0] is not main:
             return list(found_in)
         return [
@@ -736,36 +689,6 @@ class CapacityPlanner:
 
     def instance(self, name: str, region: Optional[str] = None) -> Instance:
         return self.hardware_shapes.instance(name, region=region)
-
-    def demand(  # pylint: disable=too-many-positional-arguments
-        self,
-        model_name: str,
-        region: str,
-        desires: CapacityDesires,
-        drive: Optional[Drive] = None,
-        extra_model_arguments: Optional[Dict[str, Any]] = None,
-        num_regions: int = 3,
-    ) -> Optional[Tuple[Demand, NodeRules]]:
-        """A model's stated demand on ``drive``, with its default desires applied.
-
-        ``drive`` is the attached drive; models that size against each
-        instance's local disk ignore it, so leave it None for them.
-
-        For callers that choose shapes themselves with ``demand.fit_all``, for
-        example an autoscaler that holds the node count fixed. Returns None
-        when the model does not implement ``CapacityModel.demand``.
-        """
-        if model_name not in self._models:
-            raise ValueError(f"model_name={model_name} does not exist")
-        model = self._models[model_name]
-        args = dict(extra_model_arguments or {})
-        desires = desires.model_copy(deep=True)
-        _resolve_cluster_instances(desires)
-        merged = desires.merge_with(model.default_desires(desires, args))
-        _, context = self._prepare_context(region, num_regions)
-        return model.demand(
-            drive=drive, context=context, desires=merged, extra_model_arguments=args
-        )
 
     def _prepare_context(
         self,

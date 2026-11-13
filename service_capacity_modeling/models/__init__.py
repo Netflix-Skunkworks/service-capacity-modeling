@@ -5,7 +5,6 @@ from typing import List
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
-from typing import TYPE_CHECKING
 from typing import Union
 
 from pydantic import BaseModel
@@ -29,10 +28,6 @@ from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models.common import cluster_infra_cost
-
-if TYPE_CHECKING:
-    from service_capacity_modeling.demand import Demand
-    from service_capacity_modeling.demand import NodeRules
 
 # Shared constant for rank penalty metadata in cluster_params.
 # Models store penalty values (coefficients or dollar amounts) under this key.
@@ -219,22 +214,13 @@ class CapacityModel:
         return None
 
     @staticmethod
-    def demand(  # pylint: disable=unused-argument
-        drive: Optional[Drive],
-        context: RegionContext,
-        desires: CapacityDesires,
-        extra_model_arguments: Dict[str, Any],
-    ) -> Optional[Tuple["Demand", "NodeRules"]]:
-        """What the workload needs on this drive, independent of instance.
-
-        Models that implement this let callers size any shape with
-        ``service_capacity_modeling.demand.fit``, including with their own
-        demand (for example a CPU target in NCU), and the planner checks
-        alternatives with ``fit`` instead of planning each shape again. The
-        default None is fine for most models: the planner then finds
-        alternatives by re-running ``capacity_plan`` at the plan's node count.
+    def same_layout_arguments(cluster: ClusterCapacity) -> Dict[str, Any]:
+        """Extra model arguments that make another instance type plan
+        ``cluster``'s exact node count and layout. The planner adds them when
+        it looks for alternative instance types. Override this when a model's
+        layout has more to it than the node count.
         """
-        return None
+        return {"required_cluster_size": cluster.count}
 
     @staticmethod
     def plan_for_regret(plan: CapacityPlan) -> CapacityPlan:

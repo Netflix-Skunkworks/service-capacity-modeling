@@ -14,10 +14,8 @@ Key characteristics:
 
 import logging
 import math
-from dataclasses import dataclass
 from typing import Any
 from typing import Dict
-from typing import Iterator
 from typing import List
 from typing import Optional
 from typing import Tuple
@@ -25,27 +23,22 @@ from typing import Union
 
 from pydantic import BaseModel
 from pydantic import Field
+from pydantic import model_validator
 
-from service_capacity_modeling.demand import Amounts
-from service_capacity_modeling.demand import cores_for_ncu
-from service_capacity_modeling.demand import Demand
-from service_capacity_modeling.demand import fit
-from service_capacity_modeling.demand import Layout
-from service_capacity_modeling.demand import NodeRules
-from service_capacity_modeling.demand import Resource
 from service_capacity_modeling.interface import AccessPattern
+from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import Buffer
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRegretParameters
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import DataShape
-from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Drive
 from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import FixedInterval
@@ -63,17 +56,19 @@ from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models import RANK_PENALTIES
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
+from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import normalize_cores
-from service_capacity_modeling.models.common import normalize_cores_float
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
+from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
     CapacityProblem,
     CapacityResult,
-    max_partitions_per_node,
+    count_shortfall,
+    layout_shortfall,
+    plan_at_count,
     plan_at_layout,
-    replicas_needed,
     search_for_min_nodes,
 )
 
@@ -143,354 +138,248 @@ class NflxReadOnlyKVArguments(BaseModel):
         "Adds penalty * max(0, (normalized_size - 4) / 4) * cost to the "
         "effective sort cost. Set to 0 to disable.",
     )
+    required_cluster_size: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Plan exactly this many nodes instead of the fewest. With "
+        "no pinned layout, uses the densest partition layout that fits on "
+        "that count. Shapes that cannot host it are excused.",
+    )
+    partitions_per_node: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Pin the partition layout: partitions on each node. Set "
+        "with replica_count, for example to check that another instance type "
+        "can host an existing cluster's layout.",
+    )
+    replica_count: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Pin the partition layout: complete data copies. Set "
+        "with partitions_per_node.",
+    )
+    max_partitions_per_node: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Most partitions any node may hold, on top of the disk "
+        "and memory limits.",
+    )
+    needed_cores: Optional[float] = Field(
+        default=None,
+        gt=0,
+        description="CPU need in cores of desires.reference_shape, replacing "
+        "the estimate from the query pattern, for example an autoscaler's own "
+        "minimum. Compute buffers are not applied to it.",
+    )
+
+    @model_validator(mode="after")
+    def layout_pin_is_complete(self) -> "NflxReadOnlyKVArguments":
+        """A pinned layout needs both its density and its replica count."""
+        if (self.partitions_per_node is None) != (self.replica_count is None):
+            raise ValueError(
+                "partitions_per_node and replica_count must be set together"
+            )
+        return self
 
 
 # TODO: Data-block working set estimation remains disabled because
 # working_set_from_drive_and_slo does not work well for large OODM datasets.
 # Resident SST table-reader memory is modeled separately as a percentage of data.
 
-# Layout keys a fallback must reproduce exactly to host the same placement.
-_LAYOUT_KEYS = (
-    "read-only-kv.replica_count",
-    "read-only-kv.partitions_per_node",
-    "read-only-kv.nodes_for_one_copy",
-)
 
+def _estimate_read_only_kv_requirement(
+    instance: Instance,
+    desires: CapacityDesires,
+    sst_memory_overhead_ratio: float,
+    memory_buffer_ratio: float,
+    needed_cores: Optional[float] = None,
+) -> CapacityRequirement:
+    """Estimate the capacity requirement for the read-only KV regional cluster.
 
-def _sst_memory_settings(
-    desires: CapacityDesires, args: NflxReadOnlyKVArguments
-) -> Optional[Tuple[float, float]]:
-    """(sst_memory_overhead_ratio, memory_buffer_ratio), or None if invalid."""
-    has_explicit_memory_buffer = any(
-        BufferComponent.memory in buffer.components
-        for buffer in desires.buffers.desired.values()
-    )
-    if args.sst_memory_overhead_ratio <= 0 or not has_explicit_memory_buffer:
-        return 0.0, 1.0
-    # WFS buffer names are decorative and may change during conversion. An
-    # explicit memory component is the durable opt-in signal. Do not inherit
-    # generic storage headroom: disk-only placement remains the cost-optimal
-    # default until a workload asks the model to reserve SST metadata memory.
-    memory_buffer = buffer_for_components(
-        buffers=desires.buffers,
-        components=[BufferComponent.memory],
-        component_fallbacks={},
-    )
-    if memory_buffer.ratio <= 0:
-        return None
-    return args.sst_memory_overhead_ratio, memory_buffer.ratio
+    Note: For the partition-aware algorithm, we calculate requirements for one
+    complete data copy. The actual replica count is determined by the cluster
+    computation based on partition placement and compute needs. Cluster parameters
+    report the resulting total SST memory across all replicas.
 
+    Args:
+        instance: The compute instance being considered
+        desires: User's capacity desires
+        sst_memory_overhead_ratio: Resident SST memory as a ratio of SST data
+        memory_buffer_ratio: Memory headroom applied to the SST estimate
+        needed_cores: Caller's CPU need in reference cores, used as given
 
-def _reject_shape(instance: Instance, drive: Optional[Drive]) -> Optional[str]:
-    del drive
-    # Minimum 30 GiB RAM: allows 32 GiB-class shapes in the hardware catalog
-    # while keeping enough memory for RocksDB block cache and working set.
-    if instance.cpu < 2 or instance.ram_gib < 30:
-        return "Too small for read-only KV"
-    # EBS not supported: partition-aware algorithm relies on fixed disk capacity
-    if instance.drive is None:
-        return "Read-only KV requires local disks"
-    return None
-
-
-@dataclass(frozen=True)
-class _PartitionLayout:
-    """Places partitions on nodes for one shape; the read-only KV layout rule."""
-
-    args: NflxReadOnlyKVArguments
-    memory_placement: bool
-    # The model's own CPU demand, kept in whole cores of the shape it was
-    # measured on so an unchanged demand converts to cores exactly as the
-    # model always has. A caller-supplied NCU converts with cores_for_ncu.
-    ncu: float
-    reference_cores: int
-    reference_shape: Instance
-
-    def __call__(
-        self,
-        instance: Instance,
-        need: Amounts,
-        have: Amounts,
-        pinned: Optional[Layout],
-    ) -> Union[Layout, str]:
-        partition_gib = need[Resource.disk_gib] / self.args.total_num_partitions
-        memory_per_partition = need[Resource.mem_gib] / self.args.total_num_partitions
-        # CPU is placed in whole cores of this shape.
-        if need[Resource.ncu] == self.ncu:
-            cpu_needed = normalize_cores(
-                self.reference_cores, instance, self.reference_shape
-            )
-        else:
-            cpu_needed = cores_for_ncu(need[Resource.ncu], instance)
-        problem = CapacityProblem(
-            n_partitions=self.args.total_num_partitions,
-            partition_size_gib=partition_gib,
-            disk_per_node_gib=have[Resource.disk_gib],
-            memory_per_partition_gib=(
-                memory_per_partition if self.memory_placement else None
-            ),
-            memory_per_node_gib=(
-                have[Resource.mem_gib] if self.memory_placement else None
-            ),
-            cpu_per_node=instance.cpu,
-            cpu_needed=cpu_needed,
-            min_rf=self.args.min_replica_count,
-            max_nodes=self.args.max_regional_size,
-        )
-        if pinned is not None:
-            return _host_pinned(problem, pinned)
-        result = search_for_min_nodes(problem)
-        if result is None:
-            return "No partition placement fits"
-        params: Dict[str, Any] = {
-            "read-only-kv.replica_count": result.replica_count,
-            "read-only-kv.partitions_per_node": result.partitions_per_node,
-            "read-only-kv.nodes_for_one_copy": result.nodes_for_one_copy,
-            "read-only-kv.nodes_for_cpu": math.ceil(cpu_needed / instance.cpu),
-            "read-only-kv.cpu_needed": cpu_needed,
-            "read-only-kv.max_partitions_per_node_by_disk": (
-                result.max_partitions_per_node_by_disk
-            ),
-            "read-only-kv.max_partitions_per_node_by_memory": (
-                result.max_partitions_per_node_by_memory
-            ),
-        }
-        return Layout(
-            count=result.node_count,
-            params=params,
-            need_per_node=_carried_per_node(problem, result.partitions_per_node),
-        )
-
-
-def _carried_per_node(problem: CapacityProblem, ppn: int) -> Dict[Resource, float]:
-    """Disk and memory one node holds. ``ppn`` can exceed the partition count
-    when one node fits every partition, so a node holds at most all of them."""
-    placed = min(ppn, problem.n_partitions)
-    return {
-        Resource.disk_gib: placed * problem.partition_size_gib,
-        Resource.mem_gib: placed * (problem.memory_per_partition_gib or 0.0),
-    }
-
-
-def _host_pinned(problem: CapacityProblem, pinned: Layout) -> Union[Layout, str]:
-    """Whether this shape can host the pinned layout, under the same rules as
-    the search. A pin with only a count gets the densest placement that fits
-    it, holding at most ``read-only-kv.max_partitions_per_node`` partitions
-    per node when the pin sets it."""
-    ppn = pinned.params.get("read-only-kv.partitions_per_node")
-    rf = pinned.params.get("read-only-kv.replica_count")
-    if ppn is None or rf is None:
-        max_ppn = pinned.params.get("read-only-kv.max_partitions_per_node")
-        placements = list(
-            _placements_at_count(
-                problem, pinned.count, None if max_ppn is None else int(max_ppn)
-            )
-        )
-        result = _place_at_count(problem, pinned.count, placements)
-        if result is None:
-            return (
-                f"Cannot host {pinned.count} nodes: "
-                f"{_short_at_count(problem, placements)}"
-            )
-    else:
-        result = plan_at_layout(problem, int(ppn), int(rf))
-        if result is None or result.node_count != pinned.count:
-            return (
-                f"Cannot host the layout: {_short_resource(problem, int(ppn), int(rf))}"
-            )
-    return Layout(
-        count=result.node_count,
-        params={
-            "read-only-kv.replica_count": result.replica_count,
-            "read-only-kv.partitions_per_node": result.partitions_per_node,
-            "read-only-kv.nodes_for_one_copy": result.nodes_for_one_copy,
-        },
-        need_per_node=_carried_per_node(problem, result.partitions_per_node),
-    )
-
-
-def _placements_at_count(
-    problem: CapacityProblem, count: int, max_ppn: Optional[int]
-) -> Iterator[Tuple[int, int]]:
-    """(partitions per node, replicas) for each way to split ``count`` nodes
-    into equal copies, densest first, skipping any above ``max_ppn``."""
-    for nodes_for_one_copy in range(1, count + 1):
-        if count % nodes_for_one_copy:
-            continue
-        ppn = math.ceil(problem.n_partitions / nodes_for_one_copy)
-        if max_ppn is None or ppn <= max_ppn:
-            yield ppn, count // nodes_for_one_copy
-
-
-def _place_at_count(
-    problem: CapacityProblem, count: int, placements: List[Tuple[int, int]]
-) -> Optional[CapacityResult]:
-    """The first of ``placements`` that fits exactly ``count`` nodes. Densest
-    first leaves the most replicas for CPU and availability."""
-    for ppn, rf in placements:
-        result = plan_at_layout(problem, ppn, rf)
-        if result is not None and result.node_count == count:
-            return result
-    return None
-
-
-def _short_at_count(problem: CapacityProblem, placements: List[Tuple[int, int]]) -> str:
-    """Why none of ``placements`` fits: the resource that blocks the densest
-    one whose partitions fit on disk and in memory, or, if none does, the
-    sparsest one's short resource."""
-    reason = "node count"
-    for ppn, rf in placements:
-        reason = _short_resource(problem, ppn, rf)
-        if reason not in (str(Resource.disk_gib), str(Resource.mem_gib)):
-            return reason
-    return reason
-
-
-def _short_resource(problem: CapacityProblem, ppn: int, rf: int) -> str:
-    """Why a shape cannot host ``ppn`` partitions per node at ``rf`` replicas."""
-    disk_ppn, memory_ppn = max_partitions_per_node(problem)
-    if ppn > disk_ppn:
-        return str(Resource.disk_gib)
-    if memory_ppn is not None and ppn > memory_ppn:
-        return str(Resource.mem_gib)
-    if rf < replicas_needed(problem, math.ceil(problem.n_partitions / ppn)):
-        return str(Resource.ncu)
-    return "node count"
-
-
-def read_only_kv_demand(
-    desires: CapacityDesires, args: NflxReadOnlyKVArguments
-) -> Optional[Tuple[Demand, NodeRules]]:
-    """Demand for one complete data copy, plus the partition layout rule.
-
-    The replica count is an output: the layout rule places partitions and adds
-    replicas for CPU. Disk and memory demand are per copy.
+    Returns:
+        CapacityRequirement for the regional cluster
     """
-    unreplicated_data_gib = desires.data_shape.estimated_state_size_gib.mid
-    if unreplicated_data_gib <= 0:
-        return None
-    memory = _sst_memory_settings(desires, args)
-    if memory is None:
-        return None
-    sst_memory_overhead_ratio, memory_buffer_ratio = memory
-
+    # Get compute buffer for CPU calculation
     compute_buffer = buffer_for_components(
         buffers=desires.buffers, components=[BufferComponent.cpu]
     )
-    disk_buffer = buffer_for_components(
-        buffers=desires.buffers, components=[BufferComponent.disk]
-    )
-    # CPU uses the sqrt staffing model (independent of replicas). Apply the
-    # buffer in whole reference cores, then express them as NCU.
-    reference_cores = math.ceil(sqrt_staffed_cores(desires) * compute_buffer.ratio)
-    ncu = normalize_cores_float(
-        core_count=reference_cores,
-        target_shape=default_reference_shape,
+
+    # CPU calculation using sqrt staffing model (independent of replicas)
+    # Apply buffer first, then normalize to target instance shape
+    if needed_cores is None:
+        needed_cores = math.ceil(sqrt_staffed_cores(desires) * compute_buffer.ratio)
+    instance_cores = normalize_cores(
+        core_count=needed_cores,
+        target_shape=instance,
         reference_shape=desires.reference_shape,
     )
-    reserved_memory_gib = max(
-        args.reserved_memory_gib,
-        desires.data_shape.reserved_instance_app_mem_gib
-        + desires.data_shape.reserved_instance_system_mem_gib,
+
+    needed_sst_memory_gib = (
+        desires.data_shape.estimated_state_size_gib.mid
+        * sst_memory_overhead_ratio
+        * memory_buffer_ratio
     )
-    demand = Demand(
-        ncu=certain_float(ncu),
-        mem_gib=certain_float(
-            unreplicated_data_gib * sst_memory_overhead_ratio * memory_buffer_ratio
-        ),
-        disk_gib=certain_float(unreplicated_data_gib * disk_buffer.ratio),
-        network_mbps=certain_float(simple_network_mbps(desires)),
+
+    # Network calculation (read-only, so only outbound read traffic)
+    needed_network_mbps = simple_network_mbps(desires)
+
+    return CapacityRequirement(
+        requirement_type=NflxReadOnlyKVCapacityModel.cluster_type,
+        reference_shape=desires.reference_shape,
+        cpu_cores=certain_int(instance_cores),
+        mem_gib=certain_float(needed_sst_memory_gib),
+        disk_gib=certain_float(0),  # Disk computed via partition-aware algorithm
+        network_mbps=certain_float(needed_network_mbps),
+        context={},
     )
-    rules = NodeRules(
-        reserve_mem_gib=lambda _: reserved_memory_gib,
-        max_data_per_node_gib=args.max_data_per_node_gib * disk_buffer.ratio,
-        rejects=_reject_shape,
-        layout=_PartitionLayout(
-            args=args,
-            memory_placement=sst_memory_overhead_ratio > 0,
-            ncu=ncu,
-            reference_cores=reference_cores,
-            reference_shape=desires.reference_shape,
-        ),
-    )
-    return demand, rules
 
 
-def _estimate_read_only_kv_cluster(
+# pylint: disable-next=too-many-positional-arguments
+def _compute_read_only_kv_regional_cluster(
     instance: Instance,
-    desires: CapacityDesires,
+    requirement: CapacityRequirement,
     args: NflxReadOnlyKVArguments,
-) -> Union[CapacityPlan, Excuse, None]:
-    """Size one shape from the model's demand and build its plan."""
-    stated = read_only_kv_demand(desires, args)
-    if stated is None:
-        return None
-    demand, rules = stated
-    # Local disks only: size against the instance's own drive, not the
-    # attached drive the planner pairs it with.
+    partition_size_with_buffer_gib: float,
+    disk_buffer_ratio: float,
+    sst_memory_overhead_ratio: float,
+    memory_buffer_ratio: float,
+    reserved_memory_gib: float,
+) -> Union[RegionClusterCapacity, Excuse, None]:
+    """Compute the regional cluster configuration using the partition-aware algorithm.
+
+    Partition-aware algorithm (local disks only):
+    1. Calculate independent disk and resident SST memory partition ceilings.
+    2. Evaluate each distinct nodes-per-copy placement below those ceilings.
+    3. Calculate the replica count required by minimum RF and CPU for each placement.
+    4. Select the fewest nodes, then prefer higher RF and denser packing on ties.
+
+    Note: Only supports local disks. EBS/attached disk is not supported because:
+    - EBS disk is provisioned exactly for data needs (no spare space)
+    - The partition-aware algorithm relies on leveraging spare disk capacity
+
+    Args:
+        instance: The compute instance being considered (must have local disk)
+        requirement: Calculated capacity requirement
+        args: Read-only KV specific arguments
+        partition_size_with_buffer_gib: Size of one partition with disk buffer applied
+        disk_buffer_ratio: Disk buffer ratio for headroom
+        sst_memory_overhead_ratio: Active resident SST memory estimate
+        memory_buffer_ratio: Memory buffer ratio for headroom
+        reserved_memory_gib: Total memory reserved outside SST table readers
+
+    Returns:
+        RegionClusterCapacity, an Excuse when a pinned layout or node count
+        does not fit, or None if no configuration is viable
+    """
+    # Only support instances with local disks
     if instance.drive is None:
+        return None
+
+    total_needed_cores = math.ceil(requirement.cpu_cores.mid)
+
+    effective_disk_per_node = get_effective_disk_per_node_gib(
+        instance=instance,
+        drive=instance.drive,
+        disk_buffer_ratio=disk_buffer_ratio,
+        max_local_data_per_node_gib=args.max_data_per_node_gib,
+    )
+
+    sst_memory_per_partition_gib = requirement.mem_gib.mid / args.total_num_partitions
+    available_sst_memory_per_node_gib = None
+    if sst_memory_overhead_ratio > 0:
+        usable_memory_per_node_gib = usable_memory_gib(
+            instance, lambda _: reserved_memory_gib
+        )
+        if usable_memory_per_node_gib <= 0:
+            return None
+        available_sst_memory_per_node_gib = usable_memory_per_node_gib
+
+    problem = CapacityProblem(
+        n_partitions=args.total_num_partitions,
+        partition_size_gib=partition_size_with_buffer_gib,
+        disk_per_node_gib=effective_disk_per_node,
+        memory_per_partition_gib=(
+            sst_memory_per_partition_gib if sst_memory_overhead_ratio > 0 else None
+        ),
+        memory_per_node_gib=available_sst_memory_per_node_gib,
+        cpu_per_node=instance.cpu,
+        cpu_needed=total_needed_cores,
+        min_rf=args.min_replica_count,
+        max_nodes=args.max_regional_size,
+        max_partitions_per_node=args.max_partitions_per_node,
+    )
+
+    result = _place_partitions(problem, args)
+    if result is None:
+        return None
+    if isinstance(result, str):
         return Excuse(
             instance=instance.name,
-            drive="none",
-            reason="Read-only KV requires local disks",
+            drive=instance.drive.name,
+            reason=result,
+            bottleneck=_pin_shortfall(problem, args),
         )
-    result = fit(demand, rules, instance, instance.drive)
-    if isinstance(result, Excuse):
-        return result
-
-    params = result.layout.params
-    replica_count = int(params["read-only-kv.replica_count"])
-    cpu_needed = int(params["read-only-kv.cpu_needed"])
-    memory_placement = demand.mem_gib.mid > 0
-    sst_memory_settings = _sst_memory_settings(desires, args)
-    assert sst_memory_settings is not None
-    sst_memory_overhead_ratio, memory_buffer_ratio = sst_memory_settings
 
     cluster = RegionClusterCapacity(
         cluster_type="read-only-kv",
-        count=result.count,
+        count=result.node_count,
         instance=instance,
         attached_drives=tuple(),  # No attached drives
     )
-    cluster_params: Dict[str, Any] = {
+
+    # Add cluster parameters for provisioning
+    params: Dict[str, Any] = {
         "read-only-kv.total_num_partitions": args.total_num_partitions,
         "read-only-kv.min_replica_count": args.min_replica_count,
-        "read-only-kv.replica_count": replica_count,
-        "read-only-kv.partitions_per_node": params["read-only-kv.partitions_per_node"],
-        "read-only-kv.nodes_for_one_copy": params["read-only-kv.nodes_for_one_copy"],
-        "read-only-kv.nodes_for_cpu": params["read-only-kv.nodes_for_cpu"],
-        EFFECTIVE_DISK_PER_NODE_GIB: result.supply_per_node[Resource.disk_gib],
+        "read-only-kv.replica_count": result.replica_count,
+        "read-only-kv.partitions_per_node": result.partitions_per_node,
+        "read-only-kv.nodes_for_one_copy": result.nodes_for_one_copy,
+        "read-only-kv.nodes_for_cpu": math.ceil(total_needed_cores / instance.cpu),
+        EFFECTIVE_DISK_PER_NODE_GIB: effective_disk_per_node,
     }
-    if memory_placement:
-        per_copy = demand.mem_gib.mid
-        cluster_params.update(
+    if sst_memory_overhead_ratio > 0:
+        params.update(
             {
                 "read-only-kv.sst_memory_placement_enabled": True,
                 "read-only-kv.sst_memory_overhead_ratio": sst_memory_overhead_ratio,
                 "read-only-kv.memory_buffer_ratio": memory_buffer_ratio,
-                "read-only-kv.reserved_memory_per_node_gib": rules.reserve_mem_gib(
-                    instance
-                ),
+                "read-only-kv.reserved_memory_per_node_gib": reserved_memory_gib,
                 "read-only-kv.buffered_sst_memory_per_partition_gib": (
-                    per_copy / args.total_num_partitions
+                    sst_memory_per_partition_gib
                 ),
                 "read-only-kv.estimated_sst_memory_per_copy_gib": (
-                    per_copy / memory_buffer_ratio
+                    requirement.mem_gib.mid / memory_buffer_ratio
                 ),
-                "read-only-kv.buffered_sst_memory_per_copy_gib": per_copy,
-                "read-only-kv.total_buffered_sst_memory_gib": per_copy * replica_count,
+                "read-only-kv.buffered_sst_memory_per_copy_gib": (
+                    requirement.mem_gib.mid
+                ),
+                "read-only-kv.total_buffered_sst_memory_gib": (
+                    requirement.mem_gib.mid * result.replica_count
+                ),
                 "read-only-kv.available_sst_memory_per_node_gib": (
-                    result.supply_per_node[Resource.mem_gib]
+                    available_sst_memory_per_node_gib
                 ),
-                "read-only-kv.max_partitions_per_node_by_disk": params[
-                    "read-only-kv.max_partitions_per_node_by_disk"
-                ],
-                "read-only-kv.max_partitions_per_node_by_memory": params[
-                    "read-only-kv.max_partitions_per_node_by_memory"
-                ],
+                "read-only-kv.max_partitions_per_node_by_disk": (
+                    result.max_partitions_per_node_by_disk
+                ),
+                "read-only-kv.max_partitions_per_node_by_memory": (
+                    result.max_partitions_per_node_by_memory
+                ),
             }
         )
-    upsert_params(cluster, cluster_params)
+    upsert_params(cluster, params)
 
     penalties = _compute_penalties(
         instance=instance,
@@ -499,14 +388,137 @@ def _estimate_read_only_kv_cluster(
     if penalties:
         upsert_params(cluster, {RANK_PENALTIES: penalties})
 
-    regional_requirement = CapacityRequirement(
-        requirement_type=NflxReadOnlyKVCapacityModel.cluster_type,
-        reference_shape=desires.reference_shape,
-        cpu_cores=certain_int(cpu_needed),
-        mem_gib=demand.mem_gib.scale(replica_count),
-        disk_gib=certain_float(0),  # Disk computed via partition-aware algorithm
-        network_mbps=demand.network_mbps,
-        context={},
+    return cluster
+
+
+def _place_partitions(
+    problem: CapacityProblem, args: NflxReadOnlyKVArguments
+) -> Union[CapacityResult, str, None]:
+    """The layout for ``problem``: the pinned layout, the densest one on the
+    required node count, or the search's fewest nodes. A pin that does not
+    fit returns why; a search that finds nothing returns None."""
+    count = args.required_cluster_size
+    if args.partitions_per_node is not None and args.replica_count is not None:
+        result = plan_at_layout(problem, args.partitions_per_node, args.replica_count)
+        if result is None or count not in (None, result.node_count):
+            return (
+                f"Cannot host {args.partitions_per_node} partitions per node "
+                f"at {args.replica_count} replicas"
+                + ("" if count is None else f" on {count} nodes")
+            )
+        return result
+    if count is not None:
+        return plan_at_count(problem, count) or f"Cannot host {count} nodes"
+    return search_for_min_nodes(problem)
+
+
+def _pin_shortfall(
+    problem: CapacityProblem, args: NflxReadOnlyKVArguments
+) -> Optional[Bottleneck]:
+    """The resource that keeps a shape from hosting the pinned layout or
+    node count."""
+    if args.partitions_per_node is not None and args.replica_count is not None:
+        return layout_shortfall(problem, args.partitions_per_node, args.replica_count)
+    assert args.required_cluster_size is not None
+    return count_shortfall(problem, args.required_cluster_size)
+
+
+def _estimate_read_only_kv_cluster(
+    instance: Instance,
+    desires: CapacityDesires,
+    args: NflxReadOnlyKVArguments,
+) -> Union[CapacityPlan, Excuse, None]:
+    """Main function to estimate read-only KV cluster configuration.
+
+    Note: Only supports instances with local disks. EBS is not supported
+    because the partition-aware algorithm relies on fixed disk capacity to
+    calculate partition placement.
+
+    Args:
+        instance: The compute instance being considered (must have local disk)
+        desires: User's capacity desires
+        args: Read-only KV specific arguments
+
+    Returns:
+        CapacityPlan, an Excuse when a pinned layout or node count does not
+        fit, or None if configuration is not viable
+    """
+
+    # Validate instance constraints
+    # Minimum 30 GiB RAM: allows 32 GiB-class shapes in the hardware catalog
+    # while keeping enough memory for RocksDB block cache and working set.
+    if instance.cpu < 2 or instance.ram_gib < 30:
+        return None
+
+    # Only support instances with local disks
+    # EBS not supported: partition-aware algorithm relies on fixed disk capacity
+    if instance.drive is None:
+        return None
+
+    unreplicated_data_gib = desires.data_shape.estimated_state_size_gib.mid
+    if unreplicated_data_gib <= 0:
+        return None
+
+    has_explicit_memory_buffer = any(
+        BufferComponent.memory in buffer.components
+        for buffer in desires.buffers.desired.values()
+    )
+    sst_memory_overhead_ratio = 0.0
+    memory_buffer_ratio = 1.0
+    if args.sst_memory_overhead_ratio > 0 and has_explicit_memory_buffer:
+        # WFS buffer names are decorative and may change during conversion. An
+        # explicit memory component is the durable opt-in signal. Do not inherit
+        # generic storage headroom: disk-only placement remains the cost-optimal
+        # default until a workload asks the model to reserve SST metadata memory.
+        memory_buffer = buffer_for_components(
+            buffers=desires.buffers,
+            components=[BufferComponent.memory],
+            component_fallbacks={},
+        )
+        memory_buffer_ratio = memory_buffer.ratio
+        if memory_buffer_ratio <= 0:
+            return None
+        sst_memory_overhead_ratio = args.sst_memory_overhead_ratio
+
+    # Calculate requirements
+    per_copy_requirement = _estimate_read_only_kv_requirement(
+        instance=instance,
+        desires=desires,
+        sst_memory_overhead_ratio=sst_memory_overhead_ratio,
+        memory_buffer_ratio=memory_buffer_ratio,
+        needed_cores=args.needed_cores,
+    )
+
+    # Compute disk buffer values inline (not via context)
+    disk_buffer = buffer_for_components(
+        buffers=desires.buffers, components=[BufferComponent.disk]
+    )
+    partition_size_gib = unreplicated_data_gib / args.total_num_partitions
+    partition_size_with_buffer_gib = partition_size_gib * disk_buffer.ratio
+    reserved_memory_gib = max(
+        args.reserved_memory_gib,
+        desires.data_shape.reserved_instance_app_mem_gib
+        + desires.data_shape.reserved_instance_system_mem_gib,
+    )
+
+    # Compute cluster
+    cluster = _compute_read_only_kv_regional_cluster(
+        instance=instance,
+        requirement=per_copy_requirement,
+        args=args,
+        partition_size_with_buffer_gib=partition_size_with_buffer_gib,
+        disk_buffer_ratio=disk_buffer.ratio,
+        sst_memory_overhead_ratio=sst_memory_overhead_ratio,
+        memory_buffer_ratio=memory_buffer_ratio,
+        reserved_memory_gib=reserved_memory_gib,
+    )
+
+    if cluster is None or isinstance(cluster, Excuse):
+        return cluster
+
+    replica_count = int(cluster.cluster_params["read-only-kv.replica_count"])
+    regional_requirement = per_copy_requirement.model_copy(
+        update={"mem_gib": per_copy_requirement.mem_gib.scale(replica_count)}
     )
 
     # Build cost breakdown using cluster_costs (consistent with CostAwareModel)
@@ -514,6 +526,7 @@ def _estimate_read_only_kv_cluster(
         service_type=NflxReadOnlyKVCapacityModel.service_name,
         regional_clusters=[cluster],
     )
+
     clusters = Clusters(
         annual_costs=rokv_costs,
         zonal=[],
@@ -523,6 +536,7 @@ def _estimate_read_only_kv_cluster(
     penalty_ratio = sum(
         cluster.cluster_params.get(RANK_PENALTIES, {}).values(),
     )
+
     return CapacityPlan(
         requirements=Requirements(regional=[regional_requirement]),
         candidate_clusters=clusters,
@@ -586,7 +600,8 @@ class NflxReadOnlyKVCapacityModel(CapacityModel, CostAwareModel):
 
         # drive and context are unused: read-only KV uses instance.drive
         # (local disks only) and is not zone-balanced.
-        _ = (drive, context)
+        _ = drive
+        _ = context
 
         return _estimate_read_only_kv_cluster(
             instance=instance,
@@ -595,15 +610,15 @@ class NflxReadOnlyKVCapacityModel(CapacityModel, CostAwareModel):
         )
 
     @staticmethod
-    def demand(
-        drive: Optional[Drive],
-        context: RegionContext,
-        desires: CapacityDesires,
-        extra_model_arguments: Dict[str, Any],
-    ) -> Optional[Tuple[Demand, NodeRules]]:
-        _ = (drive, context)
-        args = NflxReadOnlyKVArguments.model_validate(extra_model_arguments)
-        return read_only_kv_demand(desires, args)
+    def same_layout_arguments(cluster: ClusterCapacity) -> Dict[str, Any]:
+        """The node count plus the partition placement, so an alternative
+        holds the same partitions on each node at the same replica count."""
+        params = cluster.cluster_params
+        return {
+            "required_cluster_size": cluster.count,
+            "partitions_per_node": params["read-only-kv.partitions_per_node"],
+            "replica_count": params["read-only-kv.replica_count"],
+        }
 
     @staticmethod
     def description() -> str:

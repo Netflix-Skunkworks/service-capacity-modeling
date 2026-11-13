@@ -1066,26 +1066,19 @@ def capture_alternatives(
 
 
 def _capture_alternatives_plan(plan: CapacityPlan) -> dict[str, Any]:
-    """The primary cluster and the alternative types, counts and costs."""
+    """The primary cluster and its alternative instance types."""
     snapshot = _capture_candidate(plan.candidate_clusters)
     clusters = plan.candidate_clusters
     main = (clusters.regional or clusters.zonal)[0]
     return {
         "primary_instance_type": main.instance.name,
-        "alternatives": [
-            {
-                "instance": a.instance,
-                "count": a.count,
-                "annual_cost": round(a.annual_cost, 2),
-            }
-            for a in main.alternatives
-        ],
+        "alternatives": [a.name for a in main.alternatives],
         "total_annual_cost": snapshot["total_annual_cost"],
         "clusters": snapshot["clusters"],
     }
 
 
-# Each planning path: read-only KV states its demand; the rest are re-planned.
+# Read-only KV pins its partition layout; the other models pin only the count.
 ALTERNATIVE_SCENARIOS: dict[str, dict[str, Any]] = {
     name: SCENARIOS[name]
     for name in (

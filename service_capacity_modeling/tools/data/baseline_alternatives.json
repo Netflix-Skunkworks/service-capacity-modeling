@@ -4,16 +4,8 @@
     "plans": [
       {
         "alternatives": [
-          {
-            "annual_cost": 7707.0,
-            "count": 3,
-            "instance": "c6id.4xlarge"
-          },
-          {
-            "annual_cost": 9379.92,
-            "count": 3,
-            "instance": "m6id.4xlarge"
-          }
+          "c6id.4xlarge",
+          "m6id.4xlarge"
         ],
         "clusters": [
           {
@@ -115,21 +107,9 @@
       },
       {
         "alternatives": [
-          {
-            "annual_cost": 7377.0,
-            "count": 3,
-            "instance": "c5d.4xlarge"
-          },
-          {
-            "annual_cost": 9379.92,
-            "count": 3,
-            "instance": "m6id.4xlarge"
-          },
-          {
-            "annual_cost": 11321.01,
-            "count": 3,
-            "instance": "m6idn.4xlarge"
-          }
+          "c5d.4xlarge",
+          "m6id.4xlarge",
+          "m6idn.4xlarge"
         ],
         "clusters": [
           {
@@ -231,21 +211,9 @@
       },
       {
         "alternatives": [
-          {
-            "annual_cost": 7377.0,
-            "count": 3,
-            "instance": "c5d.4xlarge"
-          },
-          {
-            "annual_cost": 7707.0,
-            "count": 3,
-            "instance": "c6id.4xlarge"
-          },
-          {
-            "annual_cost": 11321.01,
-            "count": 3,
-            "instance": "m6idn.4xlarge"
-          }
+          "c5d.4xlarge",
+          "c6id.4xlarge",
+          "m6idn.4xlarge"
         ],
         "clusters": [
           {
@@ -355,21 +323,9 @@
     "plans": [
       {
         "alternatives": [
-          {
-            "annual_cost": 20950.2,
-            "count": 5,
-            "instance": "c8a.4xlarge"
-          },
-          {
-            "annual_cost": 22516.65,
-            "count": 5,
-            "instance": "m7a.4xlarge"
-          },
-          {
-            "annual_cost": 23318.45,
-            "count": 5,
-            "instance": "m8a.4xlarge"
-          }
+          "c8a.4xlarge",
+          "m7a.4xlarge",
+          "m8a.4xlarge"
         ],
         "clusters": [
           {
@@ -501,21 +457,9 @@
       },
       {
         "alternatives": [
-          {
-            "annual_cost": 20261.65,
-            "count": 5,
-            "instance": "c7a.4xlarge"
-          },
-          {
-            "annual_cost": 22516.65,
-            "count": 5,
-            "instance": "m7a.4xlarge"
-          },
-          {
-            "annual_cost": 23318.45,
-            "count": 5,
-            "instance": "m8a.4xlarge"
-          }
+          "c7a.4xlarge",
+          "m7a.4xlarge",
+          "m8a.4xlarge"
         ],
         "clusters": [
           {
@@ -647,21 +591,9 @@
       },
       {
         "alternatives": [
-          {
-            "annual_cost": 20261.65,
-            "count": 5,
-            "instance": "c7a.4xlarge"
-          },
-          {
-            "annual_cost": 20950.2,
-            "count": 5,
-            "instance": "c8a.4xlarge"
-          },
-          {
-            "annual_cost": 23318.45,
-            "count": 5,
-            "instance": "m8a.4xlarge"
-          }
+          "c7a.4xlarge",
+          "c8a.4xlarge",
+          "m8a.4xlarge"
         ],
         "clusters": [
           {
@@ -801,21 +733,9 @@
     "plans": [
       {
         "alternatives": [
-          {
-            "annual_cost": 14378.0,
-            "count": 14,
-            "instance": "c6a.2xlarge"
-          },
-          {
-            "annual_cost": 15470.98,
-            "count": 14,
-            "instance": "r8a.xlarge"
-          },
-          {
-            "annual_cost": 15978.62,
-            "count": 14,
-            "instance": "c6i.2xlarge"
-          }
+          "c6a.2xlarge",
+          "r8a.xlarge",
+          "c6i.2xlarge"
         ],
         "clusters": [
           {
@@ -887,21 +807,9 @@
       },
       {
         "alternatives": [
-          {
-            "annual_cost": 12628.8,
-            "count": 15,
-            "instance": "m8a.xlarge"
-          },
-          {
-            "annual_cost": 15214.95,
-            "count": 15,
-            "instance": "c5a.2xlarge"
-          },
-          {
-            "annual_cost": 15405.0,
-            "count": 15,
-            "instance": "c6a.2xlarge"
-          }
+          "m8a.xlarge",
+          "c5a.2xlarge",
+          "c6a.2xlarge"
         ],
         "clusters": [
           {
@@ -973,21 +881,9 @@
       },
       {
         "alternatives": [
-          {
-            "annual_cost": 14837.29,
-            "count": 13,
-            "instance": "c6i.2xlarge"
-          },
-          {
-            "annual_cost": 15539.29,
-            "count": 13,
-            "instance": "m6a.2xlarge"
-          },
-          {
-            "annual_cost": 15578.29,
-            "count": 13,
-            "instance": "c7i.2xlarge"
-          }
+          "c6i.2xlarge",
+          "m6a.2xlarge",
+          "c7i.2xlarge"
         ],
         "clusters": [
           {
@@ -1067,11 +963,7 @@
     "plans": [
       {
         "alternatives": [
-          {
-            "annual_cost": 5171.88,
-            "count": 6,
-            "instance": "i7ie.large"
-          }
+          "i7ie.large"
         ],
         "clusters": [
           {
@@ -1143,21 +1035,9 @@
       },
       {
         "alternatives": [
-          {
-            "annual_cost": 4498.02,
-            "count": 6,
-            "instance": "i3en.large"
-          },
-          {
-            "annual_cost": 6936.0,
-            "count": 6,
-            "instance": "i3.xlarge"
-          },
-          {
-            "annual_cost": 7261.98,
-            "count": 6,
-            "instance": "i4i.xlarge"
-          }
+          "i3en.large",
+          "i3.xlarge",
+          "i4i.xlarge"
         ],
         "clusters": [
           {
@@ -1229,21 +1109,9 @@
       },
       {
         "alternatives": [
-          {
-            "annual_cost": 6268.0,
-            "count": 2,
-            "instance": "r5.xlarge"
-          },
-          {
-            "annual_cost": 6351.34,
-            "count": 2,
-            "instance": "r6i.xlarge"
-          },
-          {
-            "annual_cost": 6438.0,
-            "count": 2,
-            "instance": "r7i.xlarge"
-          }
+          "r5.xlarge",
+          "r6i.xlarge",
+          "r7i.xlarge"
         ],
         "clusters": [
           {
@@ -1332,16 +1200,8 @@
     "plans": [
       {
         "alternatives": [
-          {
-            "annual_cost": 15978.24,
-            "count": 12,
-            "instance": "i7i.xlarge"
-          },
-          {
-            "annual_cost": 20698.08,
-            "count": 12,
-            "instance": "i7ie.xlarge"
-          }
+          "i7i.xlarge",
+          "i7ie.xlarge"
         ],
         "clusters": [
           {
@@ -1366,21 +1226,9 @@
       },
       {
         "alternatives": [
-          {
-            "annual_cost": 14526.0,
-            "count": 6,
-            "instance": "i4i.2xlarge"
-          },
-          {
-            "annual_cost": 15978.24,
-            "count": 6,
-            "instance": "i7i.2xlarge"
-          },
-          {
-            "annual_cost": 18759.84,
-            "count": 6,
-            "instance": "m6id.4xlarge"
-          }
+          "i4i.2xlarge",
+          "i7i.2xlarge",
+          "m6id.4xlarge"
         ],
         "clusters": [
           {
@@ -1405,16 +1253,8 @@
       },
       {
         "alternatives": [
-          {
-            "annual_cost": 14526.0,
-            "count": 6,
-            "instance": "i4i.2xlarge"
-          },
-          {
-            "annual_cost": 20692.86,
-            "count": 6,
-            "instance": "i7ie.2xlarge"
-          }
+          "i4i.2xlarge",
+          "i7ie.2xlarge"
         ],
         "clusters": [
           {
@@ -1447,11 +1287,7 @@
     "plans": [
       {
         "alternatives": [
-          {
-            "annual_cost": 3448.81,
-            "count": 1,
-            "instance": "i7ie.2xlarge"
-          }
+          "i7ie.2xlarge"
         ],
         "clusters": [
           {
@@ -1523,21 +1359,9 @@
       },
       {
         "alternatives": [
-          {
-            "annual_cost": 2999.0,
-            "count": 1,
-            "instance": "i3en.2xlarge"
-          },
-          {
-            "annual_cost": 4624.33,
-            "count": 1,
-            "instance": "i3.4xlarge"
-          },
-          {
-            "annual_cost": 4841.67,
-            "count": 1,
-            "instance": "i4i.4xlarge"
-          }
+          "i3en.2xlarge",
+          "i3.4xlarge",
+          "i4i.4xlarge"
         ],
         "clusters": [
           {
@@ -1609,21 +1433,9 @@
       },
       {
         "alternatives": [
-          {
-            "annual_cost": 4841.32,
-            "count": 4,
-            "instance": "i4i.xlarge"
-          },
-          {
-            "annual_cost": 5326.08,
-            "count": 4,
-            "instance": "i7i.xlarge"
-          },
-          {
-            "annual_cost": 5998.68,
-            "count": 4,
-            "instance": "i3en.xlarge"
-          }
+          "i4i.xlarge",
+          "i7i.xlarge",
+          "i3en.xlarge"
         ],
         "clusters": [
           {

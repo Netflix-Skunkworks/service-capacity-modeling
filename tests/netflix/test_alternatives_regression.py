@@ -1,4 +1,4 @@
-"""Regression snapshot for alternative instance types on both planning paths."""
+"""Regression snapshot for alternative instance types."""
 
 import json
 from importlib import resources
@@ -13,7 +13,7 @@ from service_capacity_modeling.tools.capture_baseline_costs import (
 )
 
 _BASELINE_HELP = (
-    "Review the change in alternative types, counts, or cost, then refresh with: "
+    "Review the change in alternative types or cluster details, then refresh with: "
     "tox -e capture-baseline"
 )
 
@@ -32,22 +32,12 @@ def _shape(plan: dict[str, Any]) -> dict[str, Any]:
     """Everything but costs, which are compared with a tolerance."""
     return {
         "primary_instance_type": plan["primary_instance_type"],
-        "alternatives": [
-            {k: v for k, v in alt.items() if k != "annual_cost"}
-            for alt in plan["alternatives"]
-        ],
+        "alternatives": plan["alternatives"],
         "clusters": [
             {k: v for k, v in cluster.items() if k != "annual_cost"}
             for cluster in plan["clusters"]
         ],
     }
-
-
-def _costs(plan: dict[str, Any]) -> list[float]:
-    return [
-        plan["total_annual_cost"],
-        *(a["annual_cost"] for a in plan["alternatives"]),
-    ]
 
 
 @pytest.mark.parametrize("scenario_name", list(ALTERNATIVE_SCENARIOS))
@@ -71,6 +61,6 @@ def test_alternatives_baseline(
         _shape(p) for p in expected["plans"]
     ], _BASELINE_HELP
     for actual_plan, expected_plan in zip(actual["plans"], expected["plans"]):
-        assert _costs(actual_plan) == pytest.approx(_costs(expected_plan), rel=0.01), (
-            _BASELINE_HELP
-        )
+        assert actual_plan["total_annual_cost"] == pytest.approx(
+            expected_plan["total_annual_cost"], rel=0.01
+        ), _BASELINE_HELP
