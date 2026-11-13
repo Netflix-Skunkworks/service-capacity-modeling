@@ -23,7 +23,11 @@
           "maximum_value": 1.2
         }
       },
-      "lifecycle": "alpha"
+      "lifecycle": "alpha",
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "m8id.xlarge": {
       "name": "m8id.xlarge",
@@ -48,7 +52,11 @@
           "maximum_value": 1.2
         }
       },
-      "lifecycle": "alpha"
+      "lifecycle": "alpha",
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "m8id.2xlarge": {
       "name": "m8id.2xlarge",
@@ -73,7 +81,11 @@
           "maximum_value": 1.2
         }
       },
-      "lifecycle": "alpha"
+      "lifecycle": "alpha",
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "m8id.4xlarge": {
       "name": "m8id.4xlarge",
@@ -98,7 +110,11 @@
           "maximum_value": 1.2
         }
       },
-      "lifecycle": "alpha"
+      "lifecycle": "alpha",
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "m8id.8xlarge": {
       "name": "m8id.8xlarge",
@@ -123,7 +139,11 @@
           "maximum_value": 1.2
         }
       },
-      "lifecycle": "alpha"
+      "lifecycle": "alpha",
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "m8id.12xlarge": {
       "name": "m8id.12xlarge",
@@ -148,7 +168,11 @@
           "maximum_value": 1.2
         }
       },
-      "lifecycle": "alpha"
+      "lifecycle": "alpha",
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "m8id.16xlarge": {
       "name": "m8id.16xlarge",
@@ -173,7 +197,11 @@
           "maximum_value": 1.2
         }
       },
-      "lifecycle": "alpha"
+      "lifecycle": "alpha",
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "m8id.24xlarge": {
       "name": "m8id.24xlarge",
@@ -198,7 +226,11 @@
           "maximum_value": 1.2
         }
       },
-      "lifecycle": "alpha"
+      "lifecycle": "alpha",
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "m8id.32xlarge": {
       "name": "m8id.32xlarge",
@@ -223,7 +255,11 @@
           "maximum_value": 1.2
         }
       },
-      "lifecycle": "alpha"
+      "lifecycle": "alpha",
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "m8id.48xlarge": {
       "name": "m8id.48xlarge",
@@ -248,7 +284,11 @@
           "maximum_value": 1.2
         }
       },
-      "lifecycle": "alpha"
+      "lifecycle": "alpha",
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "m8id.96xlarge": {
       "name": "m8id.96xlarge",
@@ -273,7 +313,11 @@
           "maximum_value": 1.2
         }
       },
-      "lifecycle": "alpha"
+      "lifecycle": "alpha",
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     }
   }
 }
