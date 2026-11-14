@@ -9,6 +9,7 @@ from typing import Callable
 from typing import cast
 from typing import Dict
 from typing import Generator
+from typing import Iterable
 from typing import List
 from typing import Optional
 from typing import Sequence
@@ -18,6 +19,7 @@ from pydantic import Field
 
 from service_capacity_modeling.hardware import HardwareShapes
 from service_capacity_modeling.hardware import shapes
+from service_capacity_modeling.interface import AlternativeOptions
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRegretParameters
@@ -86,6 +88,11 @@ class PlannerArguments(ExcludeUnsetModel):
         "Higher values expose within-family size trade-offs "
         "(e.g., 8×xlarge vs 2×4xlarge).",
     )
+    alternatives: Optional[AlternativeOptions] = Field(
+        default=None,
+        description="List, on each plan's main cluster, other instance types "
+        "that can run it at the same node count. Certain planning only.",
+    )
 
 
 class _CertainResult(ExcludeUnsetModel):
@@ -93,6 +100,120 @@ class _CertainResult(ExcludeUnsetModel):
 
     plans: Sequence[CapacityPlan]
     excuses: Sequence[Excuse] = []
+
+
+def _main_cluster(plan: CapacityPlan) -> Optional[ClusterCapacity]:
+    """The cluster alternatives replace: the first regional, else first zonal."""
+    clusters = plan.candidate_clusters
+    found = clusters.regional or clusters.zonal
+    return found[0] if found else None
+
+
+def _drive_shapes(cluster: ClusterCapacity) -> List[Tuple[str, int]]:
+    """The attached drives one launch template fixes for every instance type."""
+    return [(d.name, d.size_gib) for d in cluster.attached_drives]
+
+
+def _replanned_alternatives(  # pylint: disable=too-many-positional-arguments
+    model: CapacityModel,
+    main: ClusterCapacity,
+    desires: CapacityDesires,
+    extra_model_arguments: Dict[str, Any],
+    scenarios: Sequence[Tuple[Instance, Drive, RegionContext]],
+) -> List[Tuple[Instance, float]]:
+    """Other instance types that run ``main`` with their cluster cost, found
+    by planning each type again with ``model.same_layout_arguments(main)``.
+
+    Some models treat those arguments as a floor or ignore them, so a type
+    qualifies only when its plan lands on exactly ``main``'s node count with
+    the same attached drives.
+    """
+    pinned_args = {**extra_model_arguments, **model.same_layout_arguments(main)}
+    drives = _drive_shapes(main)
+    found: List[Tuple[Instance, float]] = []
+    for instance, drive, context in scenarios:
+        if instance.family == main.instance.family:
+            continue
+        plan = model.capacity_plan(
+            instance=instance,
+            drive=drive,
+            context=context,
+            desires=desires,
+            extra_model_arguments=pinned_args,
+        )
+        if not isinstance(plan, CapacityPlan):
+            continue
+        cluster = _main_cluster(plan)
+        if (
+            cluster is None
+            or cluster.count != main.count
+            or _drive_shapes(cluster) != drives
+        ):
+            continue
+        found.append((instance, cluster.annual_cost))
+    return found
+
+
+def _choose_alternatives(
+    primary: ClusterCapacity,
+    candidates: Iterable[Tuple[Instance, float]],
+    options: AlternativeOptions,
+) -> List[Instance]:
+    """The candidates ``options`` keeps: the cheapest type per other allowed
+    family, within the cost cap, cheapest first."""
+    max_cost = primary.annual_cost * (1 + options.max_cost_increase)
+    by_family: Dict[str, Tuple[float, Instance]] = {}
+    for instance, cost in candidates:
+        family = instance.family
+        if family == primary.instance.family or cost > max_cost:
+            continue
+        if options.families is not None and family not in options.families:
+            continue
+        kept = by_family.get(family)
+        if kept is None or cost < kept[0]:
+            by_family[family] = (cost, instance)
+    ranked = sorted(by_family.values(), key=lambda kept: kept[0])
+    return [instance for _, instance in ranked[: options.max_alternatives]]
+
+
+def _with_alternatives(  # pylint: disable=too-many-positional-arguments
+    model: CapacityModel,
+    plan: CapacityPlan,
+    desires: CapacityDesires,
+    extra_model_arguments: Dict[str, Any],
+    scenarios: Sequence[Tuple[Instance, Drive, RegionContext]],
+    options: AlternativeOptions,
+) -> CapacityPlan:
+    """Attach instance types that can run the plan's main cluster at its
+    exact node count and layout, to every zone of that cluster."""
+    main = _main_cluster(plan)
+    if main is None:
+        return plan
+    found = _replanned_alternatives(
+        model, main, desires, extra_model_arguments, scenarios
+    )
+    alternatives = _choose_alternatives(main, found, options)
+    update = {"alternatives": alternatives}
+
+    def attach(found_in: Sequence[ClusterCapacity]) -> List[ClusterCapacity]:
+        if not found_in or found_in[0] is not main:
+            return list(found_in)
+        return [
+            c.model_copy(update=update) if c.cluster_type == main.cluster_type else c
+            for c in found_in
+        ]
+
+    clusters = plan.candidate_clusters
+    return plan.model_copy(
+        update={
+            "candidate_clusters": clusters.model_copy(
+                update={
+                    "zonal": attach(clusters.zonal),
+                    "regional": attach(clusters.regional),
+                }
+            )
+        }
+    )
 
 
 class _UncertainResult(ExcludeUnsetModel):
@@ -873,9 +994,11 @@ class CapacityPlanner:
         plans: List[CapacityPlan] = []
         excuses: List[Excuse] = []
         current_inst = current_instance_name(desires)
+        scenarios: List[Tuple[Instance, Drive, RegionContext]] = []
         for instance, drive, context in self.generate_scenarios(
             model, region, desires, num_regions, lifecycles, instance_families, drives
         ):
+            scenarios.append((instance, drive, context))
             match model.capacity_plan(
                 instance=instance,
                 drive=drive,
@@ -897,12 +1020,22 @@ class CapacityPlanner:
         plans.sort(key=lambda p: (p.rank, p.candidate_clusters.total_annual_cost))
 
         num_results = num_results or self._default_num_results
-        return _CertainResult(
-            plans=reduce_by_family(
-                plans, max_results_per_family=pargs.max_results_per_family
-            )[:num_results],
-            excuses=excuses,
-        )
+        kept = reduce_by_family(
+            plans, max_results_per_family=pargs.max_results_per_family
+        )[:num_results]
+        if pargs.alternatives is not None:
+            kept = [
+                _with_alternatives(
+                    model,
+                    plan,
+                    desires,
+                    extra_model_arguments,
+                    scenarios,
+                    pargs.alternatives,
+                )
+                for plan in kept
+            ]
+        return _CertainResult(plans=kept, excuses=excuses)
 
     def _get_model_costs(
         self,
@@ -1254,6 +1387,8 @@ class CapacityPlanner:
         pargs = planner_arguments or PlannerArguments(
             max_results_per_family=max_results_per_family
         )
+        if pargs.alternatives is not None:
+            raise ValueError("alternatives supports certain planning only")
 
         if not all(0 <= p <= 100 for p in percentiles):
             raise ValueError("percentiles must be an integer in the range [0, 100]")

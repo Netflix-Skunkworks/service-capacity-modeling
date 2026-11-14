@@ -214,6 +214,20 @@ class CapacityModel:
         return None
 
     @staticmethod
+    def same_layout_arguments(cluster: ClusterCapacity) -> Dict[str, Any]:
+        """The extra_model_arguments that force this model to plan
+        ``cluster``'s node count and layout on any other instance type.
+
+        The planner merges them over the caller's arguments and plans each
+        other type again to find alternatives. The default pins only the node
+        count: ``{"required_cluster_size": cluster.count}``. Override it when
+        the layout is more than the count. Read-only KV also pins how
+        partitions sit on the nodes: ``{"required_cluster_size": 12,
+        "partitions_per_node": 4, "replica_count": 3}``.
+        """
+        return {"required_cluster_size": cluster.count}
+
+    @staticmethod
     def plan_for_regret(plan: CapacityPlan) -> CapacityPlan:
         """Return the plan uncertain regret should price for this sample.
 

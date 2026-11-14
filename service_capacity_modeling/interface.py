@@ -1369,12 +1369,42 @@ class NodeCountContext(ExcludeUnsetModel):
         )
 
 
+class AlternativeOptions(ExcludeUnsetModel):
+    """How the planner picks alternative instance types for each plan."""
+
+    max_alternatives: int = Field(
+        default=3,
+        ge=1,
+        le=5,
+        description="Most alternative types to list per cluster, at most one "
+        "per instance family, cheapest first.",
+    )
+    max_cost_increase: float = Field(
+        default=0.5,
+        ge=0,
+        description="How much more a cluster running only the alternative may "
+        "cost than the primary cluster, as a fraction: 0.5 allows 50% more. A "
+        "fallback can stay in place until the next instance refresh, so this "
+        "can be a steady-state cost.",
+    )
+    families: Optional[List[str]] = Field(
+        default=None,
+        description="Only these instance families may be alternatives, for "
+        "example the families an operator has images and reservations for. "
+        "None allows every family.",
+    )
+
+
 class ClusterCapacity(ExcludeUnsetModel):
     cluster_type: str
 
     count: int
     instance: Instance
     attached_drives: Sequence[Drive] = ()
+    # Other instance types that can run this cluster at the same node count
+    # and layout, cheapest first, for when the primary type is unavailable.
+    # Set only when PlannerArguments.alternatives is.
+    alternatives: Sequence[Instance] = ()
     # When provisioning services we might need to signal they
     # should have certain configuration, for example flags that
     # affect durability shut off

@@ -33,6 +33,7 @@ from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import CapacityRegretParameters
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
@@ -607,6 +608,17 @@ class NflxReadOnlyKVCapacityModel(CapacityModel, CostAwareModel):
             desires=desires,
             args=args,
         )
+
+    @staticmethod
+    def same_layout_arguments(cluster: ClusterCapacity) -> Dict[str, Any]:
+        """The node count plus the partition placement, so an alternative
+        holds the same partitions on each node at the same replica count."""
+        params = cluster.cluster_params
+        return {
+            "required_cluster_size": cluster.count,
+            "partitions_per_node": params["read-only-kv.partitions_per_node"],
+            "replica_count": params["read-only-kv.replica_count"],
+        }
 
     @staticmethod
     def description() -> str:
