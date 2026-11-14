@@ -37,7 +37,6 @@ from service_capacity_modeling.interface import (
     BufferIntent,
     Buffers,
     CapacityDesires,
-    CapacityPlan,
     certain_float,
     Drive,
     certain_int,
@@ -56,6 +55,9 @@ BASELINE_UNCERTAIN_NUM_RESULTS = 3
 BASELINE_UNCERTAIN_SNAPSHOT_FORMAT = "seeded-scipy-cost-preserve-v2"
 BASELINE_UNCERTAIN_COST_REL_TOLERANCE = 0.01
 BASELINE_UNCERTAIN_COST_ABS_TOLERANCE = 1.0
+# Certain baselines list each plan's alternative instance types, so a change
+# in which types can run a cluster shows up in the snapshot.
+BASELINE_PLANNER_ARGUMENTS = PlannerArguments(alternatives=AlternativeOptions())
 COST_KEYS = frozenset(("annual_cost", "total_annual_cost", "instance_cost"))
 BASELINE_UNCERTAIN_SNAPSHOT_NOTE = (
     "Uses the planner's seeded SciPy uncertainty sampling. When regenerating "
@@ -347,6 +349,9 @@ def _format_cluster(cluster: ClusterCapacity, deployment: str) -> dict[str, Any]
             drives.append(f"{drive.name} : {size_gib}GB")
         info["attached_drives"] = sorted(drives)
 
+    if cluster.alternatives:
+        info["alternatives"] = [a.name for a in cluster.alternatives]
+
     # Add cluster_params if present (e.g., replica_count, partitions_per_node)
     if cluster.cluster_params:
         info["cluster_params"] = _round_cost_leaves(
@@ -413,6 +418,7 @@ def capture_costs(
             desires=desires,
             num_results=1,
             extra_model_arguments=extra_args or {},
+            planner_arguments=BASELINE_PLANNER_ARGUMENTS,
         )
 
         if not cap_plans:
@@ -1036,73 +1042,6 @@ UNCERTAIN_SCENARIOS: dict[str, dict[str, Any]] = {
     },
 }
 
-
-def capture_alternatives(
-    model_name: str,
-    region: str,
-    desires: CapacityDesires,
-    extra_args: dict[str, Any] | None = None,
-    scenario_name: str = "",
-) -> dict[str, Any]:
-    """Capture the top plans with the default alternative options."""
-    try:
-        plans = planner.plan_certain(
-            model_name=model_name,
-            region=region,
-            desires=desires,
-            extra_model_arguments=extra_args or {},
-            num_results=3,
-            planner_arguments=PlannerArguments(alternatives=AlternativeOptions()),
-        )
-    except (ValueError, KeyError, AttributeError) as e:
-        return _capture_error(scenario_name, e, model_name, region, desires)
-    return {
-        "scenario": scenario_name,
-        "model": model_name,
-        "region": region,
-        "service_tier": desires.service_tier,
-        "plans": [_capture_alternatives_plan(p) for p in plans],
-    }
-
-
-def _capture_alternatives_plan(plan: CapacityPlan) -> dict[str, Any]:
-    """The primary cluster and its alternative instance types."""
-    snapshot = _capture_candidate(plan.candidate_clusters)
-    clusters = plan.candidate_clusters
-    main = (clusters.regional or clusters.zonal)[0]
-    return {
-        "primary_instance_type": main.instance.name,
-        "alternatives": [a.name for a in main.alternatives],
-        "total_annual_cost": snapshot["total_annual_cost"],
-        "clusters": snapshot["clusters"],
-    }
-
-
-# Read-only KV pins its partition layout; the other models pin only the count.
-ALTERNATIVE_SCENARIOS: dict[str, dict[str, Any]] = {
-    name: SCENARIOS[name]
-    for name in (
-        "cassandra_small_high_qps_local",
-        "cassandra_high_writes_ebs",
-        "evcache_small_no_replication",
-        "kafka_100mib_throughput",
-        "read_only_kv_medium",
-    )
-}
-ALTERNATIVE_SCENARIOS["elasticsearch_data_small"] = {
-    "model": "org.netflix.elasticsearch.node",
-    "region": "us-east-1",
-    "desires": CapacityDesires(
-        service_tier=1,
-        query_pattern=QueryPattern(
-            estimated_read_per_second=certain_int(10_000),
-            estimated_write_per_second=certain_int(5_000),
-        ),
-        data_shape=DataShape(estimated_state_size_gib=certain_int(2_000)),
-    ),
-    "extra_args": None,
-}
-
 if __name__ == "__main__":
     # Capture all scenarios
     results = []
@@ -1153,21 +1092,6 @@ if __name__ == "__main__":
     output_dir = Path(__file__).parent / "data"
     output_file = output_dir / "baseline_costs.json"
     _write_json_snapshot(output_file, results)
-
-    alternative_results = []
-    for scenario_name, scenario in ALTERNATIVE_SCENARIOS.items():
-        print(f"Capturing alternatives: {scenario_name}...")
-        result = capture_alternatives(
-            scenario["model"],
-            scenario["region"],
-            scenario["desires"],
-            scenario["extra_args"],
-            scenario_name,
-        )
-        alternative_results.append(result)
-        if "error" in result:
-            print(f"  ERROR: {result['error']}")
-    _write_json_snapshot(output_dir / "baseline_alternatives.json", alternative_results)
 
     uncertain_output_file = output_dir / "baseline_uncertain.json"
     cost_preservation_stats = CostPreservationStats()
