@@ -215,10 +215,15 @@ class CapacityModel:
 
     @staticmethod
     def same_layout_arguments(cluster: ClusterCapacity) -> Dict[str, Any]:
-        """Extra model arguments that make another instance type plan
-        ``cluster``'s exact node count and layout. The planner adds them when
-        it looks for alternative instance types. Override this when a model's
-        layout has more to it than the node count.
+        """The extra_model_arguments that force this model to plan
+        ``cluster``'s node count and layout on any other instance type.
+
+        The planner merges them over the caller's arguments and plans each
+        other type again to find alternatives. The default pins only the node
+        count: ``{"required_cluster_size": cluster.count}``. Override it when
+        the layout is more than the count. Read-only KV also pins how
+        partitions sit on the nodes: ``{"required_cluster_size": 12,
+        "partitions_per_node": 4, "replica_count": 3}``.
         """
         return {"required_cluster_size": cluster.count}
 
