@@ -246,7 +246,22 @@ def normalize_cores(
     # cores or threads depending on context). The public API keeps "cores"
     # for backwards compatibility; _normalize_cpu is the shared private
     # implementation with the preferred naming.
-    return max(1, math.ceil(_normalize_cpu(core_count, target_shape, reference_shape)))
+    return max(
+        1,
+        ceil_ignoring_float_error(
+            _normalize_cpu(core_count, target_shape, reference_shape)
+        ),
+    )
+
+
+def ceil_ignoring_float_error(value: float) -> int:
+    """Ceil a need without adding a unit for float error.
+
+    Converting cores between shapes multiplies by a speed ratio, so an exact
+    whole number can come out a few ulps over (966 * 4/7 is
+    552.0000000000001) and a plain ceil adds a core, and sometimes a node.
+    """
+    return math.ceil(value * (1 - 1e-9))
 
 
 def normalize_cores_float(
@@ -1344,7 +1359,7 @@ def zonal_requirements_from_current(
             current_capacity=current_capacity,
             buffers=buffers,
         )
-        normalized_cpu = math.ceil(
+        normalized_cpu = ceil_ignoring_float_error(
             _normalize_cpu(
                 requirement.cpu(instance),
                 instance,

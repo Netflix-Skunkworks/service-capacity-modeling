@@ -270,6 +270,15 @@ def test_normalize_cores():
         assert normalize_cores(16, shape, default_reference_shape) < 13
 
 
+def test_normalize_cores_does_not_round_float_error_up():
+    """966 reference cores is exactly 552 i4i cores (4/7 of a reference core
+    each), but the conversion computes 552.0000000000001."""
+    i4i = shapes.region("us-east-1").instances["i4i.2xlarge"]
+
+    assert normalize_cores(966, i4i, default_reference_shape) == 552
+    assert normalize_cores(967, i4i, default_reference_shape) == 553
+
+
 def test_normalize_cores_6_7():
     """Note this is rather fragile to the exact math of normalize_cores
 
