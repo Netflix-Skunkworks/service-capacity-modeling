@@ -9,6 +9,7 @@ from typing import Dict
 from typing import List
 from typing import Literal
 from typing import Optional
+from typing import Sequence
 from typing import Set
 from typing import Tuple
 from typing import Union
@@ -32,6 +33,7 @@ from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import Clusters
 from service_capacity_modeling.interface import Consistency
+from service_capacity_modeling.interface import ClusterCapacity
 from service_capacity_modeling.interface import CurrentClusterCapacity
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Drive
@@ -453,6 +455,15 @@ _CASSANDRA_SERIALIZATION_AMPLIFICATION = 1.42
 # Configurable via backup_retention_days in extra_model_arguments for clusters
 # with different compaction strategies (TWCS) or aggressive TTLs.
 _DEFAULT_BACKUP_RETENTION_DAYS = 14.0
+
+# Atlas series per Cassandra node, measured on a 96-node-per-region prod
+# cluster with 11 application tables (Nov 2026): every table reports about 208
+# cass.cf.* series on every node, and each node also reports about 4,085
+# node-level series plus 52 system-keyspace tables. Atlas bills per distinct
+# series, so node count and table count drive the cost.
+_ATLAS_SERIES_PER_TABLE = 208
+_ATLAS_SYSTEM_TABLES = 52
+_ATLAS_SERIES_PER_NODE = 4085 + _ATLAS_SYSTEM_TABLES * _ATLAS_SERIES_PER_TABLE
 
 # Known Cassandra write size defaults (from default_desires() and interface.py).
 # Used to detect whether estimated_mean_write_size_bytes was user-supplied or
@@ -1001,6 +1012,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
     max_ebs_iops_per_node: int = CASSANDRA_MAX_EBS_IOPS_PER_NODE,
     min_ebs_throughput_mib_per_s: int = CASSANDRA_MIN_EBS_THROUGHPUT_MIB_PER_S,
     max_ebs_throughput_mib_per_s: int = CASSANDRA_MAX_EBS_THROUGHPUT_MIB_PER_S,
+    table_count: int = 10,
 ) -> Union[CapacityPlan, Excuse, None]:
     drive_name = drive.name
 
@@ -1748,6 +1760,14 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
 
     cluster.cluster_type = NflxCassandraCapacityModel.cluster_type
     zonal_clusters = [cluster] * zones_per_region
+    cap_services.extend(
+        NflxCassandraCapacityModel.node_service_costs(
+            service_type=NflxCassandraCapacityModel.service_name,
+            context=context,
+            extra_model_arguments={"table_count": table_count},
+            zonal_clusters=zonal_clusters,
+        )
+    )
 
     # Account for the clusters, backup, and network costs
     cluster_costs = NflxCassandraCapacityModel.cluster_costs(
@@ -1981,6 +2001,13 @@ class NflxCassandraArguments(BaseModel):
         "heap and base reserves. Normal page cache is a per-node layout target, "
         "not an aggregate node-count requirement; explicit memory-preserve can "
         "still make existing page cache hard.",
+    )
+    table_count: int = Field(
+        default=10,
+        ge=0,
+        description="Application (non-system) tables in the cluster. Every node "
+        "reports per-table metrics for each table, so this scales the "
+        "atlas.series cost. Supply the real count; the default is a placeholder.",
     )
     backup_retention_days: Optional[float] = Field(
         default=None,
@@ -2449,6 +2476,42 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
 
         return services
 
+    @classmethod
+    def node_service_costs(
+        cls,
+        service_type: str,
+        context: RegionContext,
+        extra_model_arguments: Dict[str, Any],
+        zonal_clusters: Sequence[ClusterCapacity] = (),
+        regional_clusters: Sequence[ClusterCapacity] = (),
+    ) -> List[ServiceCapacity]:
+        """Price this region's Atlas series: nodes x series per node."""
+        # Public pricing lists atlas.series at $0 so the shape survives for a
+        # runtime price override; an unpriced service adds no cost line.
+        atlas = context.services.get("atlas.series")
+        if atlas is None or atlas.annual_cost_per_series == 0:
+            return []
+        args = NflxCassandraArguments.from_extra_model_arguments(extra_model_arguments)
+        node_count = sum(
+            cluster.count
+            for cluster in zonal_clusters
+            if cluster.cluster_type == cls.cluster_type
+        )
+        series_per_node = (
+            _ATLAS_SERIES_PER_NODE + args.table_count * _ATLAS_SERIES_PER_TABLE
+        )
+        return [
+            ServiceCapacity(
+                service_type=f"{service_type}.atlas.series",
+                annual_cost=atlas.annual_cost_per_series * node_count * series_per_node,
+                service_params={
+                    "node_count": node_count,
+                    "table_count": args.table_count,
+                    "series_per_node": series_per_node,
+                },
+            )
+        ]
+
     @staticmethod
     def capacity_plan(
         instance: Instance,
@@ -2530,6 +2593,7 @@ class NflxCassandraCapacityModel(CapacityModel, CostAwareModel):
             max_ebs_iops_per_node=args.max_ebs_iops_per_node,
             min_ebs_throughput_mib_per_s=(args.min_ebs_throughput_mib_per_s),
             max_ebs_throughput_mib_per_s=(args.max_ebs_throughput_mib_per_s),
+            table_count=args.table_count,
         )
 
         return result

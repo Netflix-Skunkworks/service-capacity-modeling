@@ -40,6 +40,9 @@
       "net.intra.region": {
         "annual_cost_per_gib": 0.02
       },
+      "atlas.series": {
+        "annual_cost_per_series": 0
+      },
       "dynamo.standard": {
         "annual_cost_per_gib": 3,
         "annual_cost_per_read_io": 0.00013,
