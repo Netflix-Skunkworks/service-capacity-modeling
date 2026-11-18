@@ -1,5 +1,5 @@
 """
-Tests for placing a partitioned dataset on nodes.
+Tests for placing a dataset's partitions on nodes.
 
 These tests verify the core algorithm behavior, especially minimizing node count
 while preferring higher replication factors (RF) for cost-equivalent plans.
@@ -15,18 +15,18 @@ from hypothesis import strategies as st
 from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
     Layout,
-    PartitionedRequirement,
+    PlacementRequirement,
     place,
     Placement,
 )
-from service_capacity_modeling.models.placement import NodeAllocatable
-from service_capacity_modeling.models.placement import Unschedulable
+from service_capacity_modeling.models.placement import NodeResources
+from service_capacity_modeling.models.placement import DoesNotFit
 
-Problem = Tuple[PartitionedRequirement, NodeAllocatable]
+Problem = Tuple[PlacementRequirement, NodeResources]
 
 
 def _fewest(
-    requirement: PartitionedRequirement, node: NodeAllocatable
+    requirement: PlacementRequirement, node: NodeResources
 ) -> Optional[Placement]:
     """The unpinned placement, or None when nothing fits."""
     placed = place(requirement, node)
@@ -58,7 +58,7 @@ def valid_problems(draw):
         min_rf, math.ceil(cpu_needed / (n_partitions * cpu_per_node))
     )
 
-    requirement = PartitionedRequirement(
+    requirement = PlacementRequirement(
         partitions=n_partitions,
         disk_gib_per_partition=partition_size_gib,
         memory_gib_per_partition=memory_per_partition_gib,
@@ -66,7 +66,7 @@ def valid_problems(draw):
         min_replicas=min_rf,
         max_nodes=max_nodes,
     )
-    node = NodeAllocatable(
+    node = NodeResources(
         ncu=cpu_per_node,
         disk_gib=disk_per_node_gib,
         memory_gib=memory_per_node_gib,
@@ -79,14 +79,14 @@ class TestAlgorithmBasics:
 
     def test_returns_none_when_partition_too_large(self):
         """Algorithm returns None when a single partition doesn't fit on disk."""
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=10,
             disk_gib_per_partition=1000,  # 1TB partition
             ncu=32,
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=500,  # Only 500GB disk
             ncu=16,
         )
@@ -95,14 +95,14 @@ class TestAlgorithmBasics:
 
     def test_returns_none_when_exceeds_max_nodes(self):
         """Algorithm returns None when no configuration fits within max_nodes."""
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=100,
             disk_gib_per_partition=500,
             ncu=1000,  # Needs many nodes for CPU
             min_replicas=2,
             max_nodes=10,  # Very restrictive
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=1000,  # 2 partitions per node
             ncu=8,
         )
@@ -111,14 +111,14 @@ class TestAlgorithmBasics:
 
     def test_simple_case_returns_valid_result(self):
         """Algorithm returns a valid result for a simple case."""
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=10,
             disk_gib_per_partition=100,
             ncu=32,  # 2 nodes worth of CPU
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=500,  # 5 partitions per node
             ncu=16,
         )
@@ -130,7 +130,7 @@ class TestAlgorithmBasics:
 
     def test_memory_limits_partitions_per_node_independently_from_disk(self):
         """Memory can limit partition placement while disk remains unchanged."""
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=10,
             disk_gib_per_partition=100,
             memory_gib_per_partition=25,
@@ -138,7 +138,7 @@ class TestAlgorithmBasics:
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=500,
             memory_gib=50,
             ncu=16,
@@ -153,7 +153,7 @@ class TestAlgorithmBasics:
         assert result.max_partitions_per_node_by_memory == 2
 
     def test_exact_float_boundary_keeps_valid_partition_fit(self):
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=188,
             disk_gib_per_partition=1,
             memory_gib_per_partition=53.39 / 47,
@@ -161,7 +161,7 @@ class TestAlgorithmBasics:
             min_replicas=2,
             max_nodes=8,
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=10_000,
             memory_gib=53.39,
             ncu=16,
@@ -175,7 +175,7 @@ class TestAlgorithmBasics:
 
     def test_returns_none_when_partition_exceeds_node_memory(self):
         """Algorithm rejects a partition that cannot fit in node memory."""
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=10,
             disk_gib_per_partition=100,
             memory_gib_per_partition=60,
@@ -183,7 +183,7 @@ class TestAlgorithmBasics:
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=500,
             memory_gib=50,
             ncu=16,
@@ -193,7 +193,7 @@ class TestAlgorithmBasics:
 
     def test_memory_driven_nodes_reduce_cpu_replica_count(self):
         """Memory-driven nodes replace replicas that were needed only for CPU."""
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=8,
             disk_gib_per_partition=100,
             memory_gib_per_partition=25,
@@ -201,7 +201,7 @@ class TestAlgorithmBasics:
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=500,
             memory_gib=50,
             ncu=1,
@@ -216,7 +216,7 @@ class TestAlgorithmBasics:
 
     def test_memory_demand_on_a_node_without_memory_names_memory(self):
         """A node that offers no memory cannot host memory-placed partitions."""
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=10,
             disk_gib_per_partition=100,
             memory_gib_per_partition=25,
@@ -224,15 +224,15 @@ class TestAlgorithmBasics:
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeAllocatable(ncu=16, disk_gib=500)
+        node = NodeResources(ncu=16, disk_gib=500)
 
         placed = place(requirement, node)
 
-        assert isinstance(placed, Unschedulable)
-        assert placed.insufficient == [Bottleneck.memory]
+        assert isinstance(placed, DoesNotFit)
+        assert placed.bottlenecks == [Bottleneck.memory]
 
     def test_a_partition_too_big_for_disk_and_memory_names_both(self):
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=10,
             disk_gib_per_partition=100,
             memory_gib_per_partition=25,
@@ -240,23 +240,23 @@ class TestAlgorithmBasics:
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeAllocatable(ncu=16, disk_gib=50, memory_gib=10)
+        node = NodeResources(ncu=16, disk_gib=50, memory_gib=10)
 
         placed = place(requirement, node)
 
-        assert isinstance(placed, Unschedulable)
-        assert placed.insufficient == [Bottleneck.disk_capacity, Bottleneck.memory]
+        assert isinstance(placed, DoesNotFit)
+        assert placed.bottlenecks == [Bottleneck.disk_capacity, Bottleneck.memory]
 
     def test_partitions_per_node_never_exceeds_the_partition_count(self):
         """A node with room for 140,000 tiny partitions still holds all 12."""
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=12,
             disk_gib_per_partition=0.1,
             ncu=16,
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=14_000,
             ncu=16,
         )
@@ -274,14 +274,14 @@ class TestPlanSelection:
 
     def test_chooses_max_ppn_when_it_minimizes_nodes(self):
         """Dense packing minimizes nodes when the minimum RF dominates."""
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=100,
             disk_gib_per_partition=100,
             ncu=64,  # 4 nodes worth
             min_replicas=2,
             max_nodes=1000,  # Relaxed constraint
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=1000,  # max_ppn = 10
             ncu=16,
         )
@@ -303,14 +303,14 @@ class TestPlanSelection:
 
         The lower RF plan saves one node while satisfying the minimum RF.
         """
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=200,
             disk_gib_per_partition=575,
             ncu=3200,
             min_replicas=2,
             max_nodes=10000,
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=2048,  # max_ppn = 3
             ncu=16,
         )
@@ -323,14 +323,14 @@ class TestPlanSelection:
 
     def test_returns_none_when_every_ppn_exceeds_limit(self):
         """Algorithm returns None when no partition density fits the node limit."""
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=21,
             disk_gib_per_partition=200,
             ncu=160,  # Need RF=4 at PPn=10
             min_replicas=2,
             max_nodes=10,  # Restrictive
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=2000,  # max_ppn = 10
             ncu=8,
         )
@@ -346,14 +346,14 @@ class TestPlanSelection:
 
     def test_selects_cheapest_valid_configuration(self):
         """Algorithm evaluates valid configurations instead of returning the first."""
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=100,
             disk_gib_per_partition=100,
             ncu=800,  # Need 50 nodes
             min_replicas=2,
             max_nodes=60,
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=500,  # max_ppn = 5
             ncu=16,
         )
@@ -369,14 +369,14 @@ class TestPlanSelection:
 
     def test_prefers_higher_rf_for_equal_node_count(self):
         """Prefer higher RF when two configurations use the same node count."""
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=30,
             disk_gib_per_partition=100,
             ncu=80,  # 5 nodes worth
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=1500,  # max_ppn = 15
             ncu=16,
         )
@@ -405,14 +405,14 @@ class TestPlanSelection:
             "partition_aware_algorithm.math.ceil",
             counting_ceil,
         )
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=1_000_000,
             disk_gib_per_partition=1,
             ncu=10_000,
             min_replicas=2,
             max_nodes=1_000_000_000,
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=100_000,
             ncu=16,
         )
@@ -529,14 +529,14 @@ class TestEdgeCases:
         With 1 partition and max_ppn=5, the node holds the one partition.
         base=ceil(1/5)=1, which triggers special case.
         """
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=1,
             disk_gib_per_partition=100,
             ncu=32,
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=500,  # max_ppn = 5
             ncu=16,
         )
@@ -550,14 +550,14 @@ class TestEdgeCases:
 
     def test_min_rf_one(self):
         """Algorithm works with min_rf=1."""
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=10,
             disk_gib_per_partition=100,
             ncu=16,  # 1 node worth
             min_replicas=1,
             max_nodes=100,
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=1000,
             ncu=16,
         )
@@ -568,7 +568,7 @@ class TestEdgeCases:
 
     def test_exact_fit(self):
         """Algorithm handles exact fit scenarios."""
-        requirement = PartitionedRequirement(
+        requirement = PlacementRequirement(
             partitions=10,
             disk_gib_per_partition=100,
             memory_gib_per_partition=10,
@@ -576,7 +576,7 @@ class TestEdgeCases:
             min_replicas=2,
             max_nodes=4,  # Exactly fits 2 nodes * 2 RF
         )
-        node = NodeAllocatable(
+        node = NodeResources(
             disk_gib=500,  # Exactly 5 partitions per node
             memory_gib=50,
             ncu=16,
@@ -595,7 +595,7 @@ class TestEdgeCases:
 class TestPins:
     """Placing at a pinned layout or node count."""
 
-    DEMAND = PartitionedRequirement(
+    DEMAND = PlacementRequirement(
         partitions=12,
         disk_gib_per_partition=100,
         ncu=64,
@@ -604,7 +604,7 @@ class TestPins:
     )
 
     def test_a_layout_that_fits_is_placed_as_pinned(self):
-        node = NodeAllocatable(ncu=16, disk_gib=400)
+        node = NodeResources(ncu=16, disk_gib=400)
         layout = Layout(partitions_per_node=3, replica_count=2)
 
         placed = place(self.DEMAND, node, layout=layout)
@@ -613,23 +613,23 @@ class TestPins:
         assert (placed.node_count, placed.partitions_per_node) == (8, 3)
 
     def test_a_layout_that_overfills_disk_names_disk(self):
-        node = NodeAllocatable(ncu=16, disk_gib=250)
+        node = NodeResources(ncu=16, disk_gib=250)
         layout = Layout(partitions_per_node=3, replica_count=2)
 
         placed = place(self.DEMAND, node, layout=layout)
 
-        assert isinstance(placed, Unschedulable)
-        assert placed.insufficient == [Bottleneck.disk_capacity]
+        assert isinstance(placed, DoesNotFit)
+        assert placed.bottlenecks == [Bottleneck.disk_capacity]
 
     def test_a_layout_short_on_every_resource_names_each(self):
         requirement = self.DEMAND.model_copy(update={"memory_gib_per_partition": 25})
-        node = NodeAllocatable(ncu=16, disk_gib=250, memory_gib=50)
+        node = NodeResources(ncu=16, disk_gib=250, memory_gib=50)
         layout = Layout(partitions_per_node=3, replica_count=1)
 
         placed = place(requirement, node, layout=layout)
 
-        assert isinstance(placed, Unschedulable)
-        assert placed.insufficient == [
+        assert isinstance(placed, DoesNotFit)
+        assert placed.bottlenecks == [
             Bottleneck.disk_capacity,
             Bottleneck.memory,
             Bottleneck.cpu,
@@ -638,7 +638,7 @@ class TestPins:
     def test_a_count_uses_the_densest_layout_on_exactly_that_many_nodes(self):
         # All 12 partitions on one node would not fit, so the densest split
         # of 6 nodes is 2 nodes per copy, 3 copies.
-        node = NodeAllocatable(ncu=16, disk_gib=700)
+        node = NodeResources(ncu=16, disk_gib=700)
 
         placed = place(self.DEMAND, node, count=6)
 
@@ -647,22 +647,22 @@ class TestPins:
         assert placed.replica_count == 3
 
     def test_a_count_too_small_for_the_cpu_names_cpu(self):
-        node = NodeAllocatable(ncu=16, disk_gib=1_200)
+        node = NodeResources(ncu=16, disk_gib=1_200)
 
         placed = place(self.DEMAND, node, count=2)
 
-        assert isinstance(placed, Unschedulable)
-        assert placed.insufficient == [Bottleneck.cpu]
+        assert isinstance(placed, DoesNotFit)
+        assert placed.bottlenecks == [Bottleneck.cpu]
 
     def test_a_count_no_split_fits_names_each_resource_of_the_sparsest(self):
         # On 2 nodes, even the sparser split (6 partitions per node, one copy)
         # overfills 250 GiB and has too few copies for the CPU need.
-        node = NodeAllocatable(ncu=16, disk_gib=250)
+        node = NodeResources(ncu=16, disk_gib=250)
 
         placed = place(self.DEMAND, node, count=2)
 
-        assert isinstance(placed, Unschedulable)
-        assert placed.insufficient == [Bottleneck.disk_capacity, Bottleneck.cpu]
+        assert isinstance(placed, DoesNotFit)
+        assert placed.bottlenecks == [Bottleneck.disk_capacity, Bottleneck.cpu]
 
 
 def test_a_cpu_need_on_a_whole_number_of_cores_adds_no_node():
@@ -670,7 +670,7 @@ def test_a_cpu_need_on_a_whole_number_of_cores_adds_no_node():
     node's cores between shapes can leave it an ulp short of 14, which a
     plain ceil turns into a 70th node."""
     node_cores = math.nextafter(14, 0)
-    requirement = PartitionedRequirement(
+    requirement = PlacementRequirement(
         partitions=1,
         disk_gib_per_partition=1,
         ncu=966,
@@ -678,7 +678,7 @@ def test_a_cpu_need_on_a_whole_number_of_cores_adds_no_node():
         max_nodes=1_000,
     )
 
-    placed = place(requirement, NodeAllocatable(ncu=node_cores, disk_gib=100))
+    placed = place(requirement, NodeResources(ncu=node_cores, disk_gib=100))
 
     assert isinstance(placed, Placement)
     assert placed.node_count == 69

@@ -20,8 +20,8 @@ from service_capacity_modeling.models.org.netflix.partition_aware_algorithm impo
     place,
     Placement,
 )
-from service_capacity_modeling.models.placement import NodeAllocatable
-from service_capacity_modeling.models.placement import Unschedulable
+from service_capacity_modeling.models.placement import NodeResources
+from service_capacity_modeling.models.placement import DoesNotFit
 from service_capacity_modeling.models.org.netflix.read_only_kv import (
     _estimate_read_only_kv_cluster,
 )
@@ -103,7 +103,7 @@ def test_a_shape_that_cannot_host_a_pinned_layout_is_excused():
 
     assert isinstance(excuse, Excuse)
     assert excuse.bottleneck == Bottleneck.disk_capacity
-    assert excuse.context == {"insufficient": ["disk_capacity", "cpu"]}
+    assert excuse.context == {"bottlenecks": ["disk_capacity", "cpu"]}
 
 
 def test_a_required_count_names_the_short_resource():
@@ -150,15 +150,15 @@ def test_a_container_size_is_placed_from_the_same_demand():
     requirement = read_only_kv_requirement(desires, args)
     assert requirement is not None
 
-    container = NodeAllocatable(ncu=12, disk_gib=600, memory_gib=40)
+    container = NodeResources(ncu=12, disk_gib=600, memory_gib=40)
     placed = place(requirement, container)
     assert isinstance(placed, Placement)
     assert placed.partitions_per_node * requirement.disk_gib_per_partition <= 600
     assert placed.cpu_utilization <= 1
 
-    too_small = place(requirement, NodeAllocatable(ncu=12, disk_gib=50))
-    assert isinstance(too_small, Unschedulable)
-    assert too_small.insufficient == [Bottleneck.disk_capacity]
+    too_small = place(requirement, NodeResources(ncu=12, disk_gib=50))
+    assert isinstance(too_small, DoesNotFit)
+    assert too_small.bottlenecks == [Bottleneck.disk_capacity]
 
 
 def test_an_ec2_node_places_like_the_model_plans():
