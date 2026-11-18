@@ -1,15 +1,16 @@
 """
-Fit a requirement onto nodes of any shape.
+Estimate how many nodes of any shape a requirement needs.
 
 A model states what a workload needs once, without picking a shape (a
-requirement). A node states what it offers after reservations
-(``NodeSupply``): an EC2 instance, a container size, or anything else with
-CPU, memory, disk and network. Placement answers how many of those nodes
-meet the requirement, or names every resource that keeps them from it (a
-``Shortfall``).
+requirement, like summed Kubernetes resource requests). A node states what
+it offers after reservations (``NodeAllocatable``, like a Kubernetes node's
+allocatable resources): an EC2 instance, a container size, or anything else
+with CPU, memory, disk and network. ``estimate_zone_nodes`` answers how many
+of those nodes meet the requirement, or returns ``Unschedulable`` with every
+resource the node is insufficient on.
 
 CPU on both sides is counted in NCUs (normalized compute units, see
-``cpu_to_ncu``), so one requirement can be placed on any shape.
+``cpu_to_ncu``), so one requirement can be estimated on any shape.
 """
 
 import math
@@ -35,7 +36,7 @@ def ceil_ignoring_float_error(value: float) -> int:
     return math.ceil(value * (1 - 1e-9))
 
 
-class NodeSupply(BaseModel):
+class NodeAllocatable(BaseModel):
     """What one node offers after reservations."""
 
     ncu: float = Field(gt=0, description="NCUs (normalized compute units).")
@@ -62,15 +63,16 @@ class NodeSupply(BaseModel):
     )
 
 
-class Shortfall(BaseModel):
-    """Why nothing fits: a reason, and every resource that blocks it.
+class Unschedulable(BaseModel):
+    """Why no count of these nodes fits: a reason, and every resource the
+    node is insufficient on.
 
-    Each placer lists ``bottlenecks`` in a fixed order. The list is empty when
-    the limit is not a resource, such as a node count.
+    Each caller lists ``insufficient`` in a fixed order. The list is empty
+    when the limit is not a resource, such as a node count.
     """
 
     reason: str
-    bottlenecks: List[Bottleneck] = Field(default_factory=list)
+    insufficient: List[Bottleneck] = Field(default_factory=list)
 
 
 class ZoneRequirement(BaseModel):
@@ -93,7 +95,7 @@ class ZoneRequirement(BaseModel):
     )
 
 
-class ZonePlacement(BaseModel):
+class ZoneNodeEstimate(BaseModel):
     """How many nodes a zone needs, and how many each resource asked for."""
 
     count: int
@@ -109,14 +111,14 @@ def round_zone_count(  # pylint: disable=too-many-arguments
     count_disk_iops: int,
     cluster_size: Callable[[int], int],
     min_count: int,
-) -> ZonePlacement:
+) -> ZoneNodeEstimate:
     """Take the most nodes any resource needs, round that to a cluster size
     the technology allows, then apply the minimum count."""
     raw_count = max(
         count_cpu, count_memory, count_network, count_disk_capacity, count_disk_iops
     )
     cluster_size_count = cluster_size(raw_count)
-    return ZonePlacement(
+    return ZoneNodeEstimate(
         count=max(cluster_size_count, min_count),
         node_counts=NodeCountContext.from_counts(
             count_cpu=count_cpu,
@@ -130,7 +132,7 @@ def round_zone_count(  # pylint: disable=too-many-arguments
     )
 
 
-def _memory_count(requirement: ZoneRequirement, node: NodeSupply) -> Optional[int]:
+def _memory_count(requirement: ZoneRequirement, node: NodeAllocatable) -> Optional[int]:
     """Nodes for memory and the write buffer, or None if the node has no
     memory for a requirement that needs some."""
     count = 0
@@ -148,13 +150,13 @@ def _memory_count(requirement: ZoneRequirement, node: NodeSupply) -> Optional[in
     return count
 
 
-def place_zone(
+def estimate_zone_nodes(
     requirement: ZoneRequirement,
-    node: NodeSupply,
+    node: NodeAllocatable,
     cluster_size: Callable[[int], int] = lambda count: count,
     min_count: int = 0,
-) -> Union[ZonePlacement, Shortfall]:
-    """Place one zone's ``requirement`` on nodes like ``node``.
+) -> Union[ZoneNodeEstimate, Unschedulable]:
+    """Estimate how many nodes like ``node`` one zone's ``requirement`` needs.
 
     ``cluster_size`` rounds the node count to one the technology allows, such
     as a power of two; ``min_count`` is the floor after rounding.
@@ -172,9 +174,9 @@ def place_zone(
         missing.append(Bottleneck.disk_capacity)
     if missing or count_memory is None:
         names = " or ".join(bottleneck.value for bottleneck in missing)
-        return Shortfall(
+        return Unschedulable(
             reason=f"The node has no {names} for the requirement",
-            bottlenecks=missing,
+            insufficient=missing,
         )
 
     count_network = 0
