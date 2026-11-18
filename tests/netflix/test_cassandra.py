@@ -324,6 +324,30 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             abs=0.02,
         )
 
+    def test_ebs_evidence_calibrates_throughput_with_iops(self):
+        # The deployed cluster peaks far below the modeled IO count. Its
+        # throughput is the same IO count times IO size, so it must not
+        # overflow the 1,000 MiB/s cap and add nodes the IOPS do not need.
+        desires = self._existing_ebs_desires()
+        desires.query_pattern.estimated_read_per_second = certain_int(3_000_000)
+        explained = self._ebs_explained(
+            desires,
+            peak_iops_per_node=8_000,
+            regional_read_per_second=3_000_000,
+            required_cluster_size=64,
+        )
+
+        assert explained.plans, explained.excuses_by_model
+        cluster = explained.plans[0].candidate_clusters.zonal[0]
+        calibration = cluster.cluster_params["cassandra.ebs_io_calibration"]
+        headroom = cluster.cluster_params["cassandra.disk_iops_headroom"]
+        performance = cluster.cluster_params["cassandra.ebs_performance"]
+        assert cluster.count == 64
+        assert calibration["iops_calibration_factor"] < 1
+        assert performance["expected_throughput_mib_per_s_per_node"] == pytest.approx(
+            headroom["expected_peak_iops_per_node"] * 16 / 1024, rel=0.05
+        )
+
     def test_ebs_evidence_uses_planning_sizes_when_observation_omits_them(self):
         desires = self._existing_ebs_desires()
         desires.query_pattern.estimated_mean_read_size_bytes = certain_int(2048)
