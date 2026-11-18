@@ -1464,7 +1464,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
 
     modeled_disk_iops_by_count: Dict[int, float] = {}
     unbuffered_disk_iops_by_count: Dict[int, float] = {}
-    modeled_throughput_by_count: Dict[int, float] = {}
     expected_throughput_by_count: Dict[int, float] = {}
 
     def modeled_disk_ios(_size: float, count: int) -> Tuple[float, float]:
@@ -1517,12 +1516,13 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         # IO count as required_disk_ios. Uncalibrated, a cluster the model
         # overestimates 19x in IOPS also looks 19x over the throughput cap and
         # gets nodes it does not need.
-        modeled_throughput_by_count[count] = (
-            modeled_read_iops * drive.rand_io_size_kib
-            + modeled_write_iops * drive.seq_io_size_kib
-        ) / 1024
         expected_throughput_by_count[count] = (
-            modeled_throughput_by_count[count] * iops_calibration_factor
+            (
+                modeled_read_iops * drive.rand_io_size_kib
+                + modeled_write_iops * drive.seq_io_size_kib
+            )
+            * iops_calibration_factor
+            / 1024
         )
         return max(
             min_ebs_throughput_mib_per_s,
@@ -1611,12 +1611,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             }
         # The drive carries the selected IOPS and throughput; report the
         # throughput demand behind them, before the buffer and floor, and the
-        # cluster's annual drive cost split by what drives it. Modeled is the
-        # raw IO count's throughput; expected applies the IOPS calibration.
+        # cluster's annual drive cost split by what drives it.
         params["cassandra.ebs_performance"] = {
-            "modeled_throughput_mib_per_s_per_node": round(
-                modeled_throughput_by_count[cluster.count], 2
-            ),
             "expected_throughput_mib_per_s_per_node": round(
                 expected_throughput_by_count[cluster.count], 2
             ),

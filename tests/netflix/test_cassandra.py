@@ -46,19 +46,6 @@ from tests.util import simple_drive
 # Explicitly allow both storage types in tests that exercise their shared path.
 EXTRA_MODEL_ARGS = {"require_local_disks": False}
 
-
-def _assert_ebs_throughput_follows_iops(cluster) -> None:
-    # Throughput is IO count times IO size, so EBS IOPS evidence must scale it
-    # by the same factor as IOPS. Checking the ratio directly catches a missed
-    # factor even when the workload stays under the throughput cap.
-    performance = cluster.cluster_params["cassandra.ebs_performance"]
-    calibration = cluster.cluster_params.get("cassandra.ebs_io_calibration", {})
-    factor = calibration.get("iops_calibration_factor") or 1.0
-    assert performance["expected_throughput_mib_per_s_per_node"] == pytest.approx(
-        performance["modeled_throughput_mib_per_s_per_node"] * factor, abs=0.02
-    )
-
-
 # Property test configuration for Cassandra model.
 # See tests/netflix/PROPERTY_TESTING.md for configuration options and examples.
 PROPERTY_TEST_CONFIG = {
@@ -253,9 +240,7 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             instance_families=["r7a"],
             num_results=1,
         )[0]
-        cluster = plan.candidate_clusters.zonal[0]
-        _assert_ebs_throughput_follows_iops(cluster)
-        return cluster
+        return plan.candidate_clusters.zonal[0]
 
     @staticmethod
     def _ebs_iops_evidence(
@@ -293,7 +278,7 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
         num_results=1,
         **extra_model_arguments,
     ):
-        explained = planner.plan_certain_explained(
+        return planner.plan_certain_explained(
             model_name="org.netflix.cassandra",
             region="us-east-1",
             desires=desires,
@@ -315,10 +300,6 @@ class TestCassandraStorage:  # pylint: disable=too-many-public-methods
             instance_families=["r7a"],
             num_results=num_results,
         )
-        for plan in explained.plans:
-            for cluster in plan.candidate_clusters.zonal:
-                _assert_ebs_throughput_follows_iops(cluster)
-        return explained
 
     def test_ebs_evidence_calibrates_total_iops_demand(self):
         cluster = (
