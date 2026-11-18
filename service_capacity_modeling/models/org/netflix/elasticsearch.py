@@ -39,7 +39,7 @@ from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import check_cluster_size_requirement
-from service_capacity_modeling.models.common import place_stateful_zone
+from service_capacity_modeling.models.common import size_stateful_zone
 from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -318,7 +318,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             "required_cluster_size"
         )
 
-        data_cluster = place_stateful_zone(
+        data_cluster = size_stateful_zone(
             ZoneRequirement(
                 ncu=cpu_to_ncu(int(data_requirement.cpu_cores.mid), instance),
                 disk_gib=needed_disk_gib,
