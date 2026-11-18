@@ -46,10 +46,10 @@ from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import utils
 from service_capacity_modeling.models.headroom_strategy import HeadroomStrategy
 from service_capacity_modeling.models.placement import ceil_ignoring_float_error
-from service_capacity_modeling.models.placement import NodeSupply
-from service_capacity_modeling.models.placement import place_zone
+from service_capacity_modeling.models.placement import NodeAllocatable
+from service_capacity_modeling.models.placement import estimate_zone_nodes
 from service_capacity_modeling.models.placement import round_zone_count
-from service_capacity_modeling.models.placement import ZonePlacement
+from service_capacity_modeling.models.placement import ZoneNodeEstimate
 from service_capacity_modeling.models.placement import ZoneRequirement
 from service_capacity_modeling.models.headroom_strategy import (
     QueuingBasedHeadroomStrategy,
@@ -685,12 +685,12 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     )
 
 
-def stateful_node_supply(
+def stateful_node_allocatable(
     instance: Instance,
     reserve_memory: Callable[[float], float] = lambda x: 0,
     write_buffer: Callable[[float], float] = lambda x: 0,
     read_write_ratio: float = 0.0,
-) -> NodeSupply:
+) -> NodeAllocatable:
     """What one node of ``instance`` offers a stateful zone.
 
     Local disk counts as disk; an instance without one offers none, and the
@@ -707,7 +707,7 @@ def stateful_node_supply(
             "a cluster."
         )
     local = instance.drive if _has_local_disk(instance) else None
-    return NodeSupply(
+    return NodeAllocatable(
         ncu=cpu_to_ncu(instance.cpu, instance),
         memory_gib=memory_gib,
         network_mbps=instance.net_mbps,
@@ -751,15 +751,15 @@ def place_stateful_zone(  # pylint: disable=too-many-arguments
 ) -> ZoneClusterCapacity:
     """Size one zone of ``instance`` nodes for ``requirement``.
 
-    ``place_zone`` counts nodes for CPU, memory, network and local disk. On an
+    ``estimate_zone_nodes`` counts nodes for CPU, memory, network and local disk. On an
     instance without local disk, the zone's disk goes on ``drive`` volumes
     sized for the node count the other resources need.
     """
-    node = stateful_node_supply(
+    node = stateful_node_allocatable(
         instance, reserve_memory, write_buffer, read_write_ratio
     )
     on_attached_drives = node.disk_gib == 0
-    placed = place_zone(
+    estimate = estimate_zone_nodes(
         requirement.model_copy(update={"disk_gib": 0, "disk_io_bytes_per_s": 0})
         if on_attached_drives
         else requirement,
@@ -767,13 +767,13 @@ def place_stateful_zone(  # pylint: disable=too-many-arguments
         cluster_size=cluster_size,
         min_count=min_count,
     )
-    # stateful_node_supply rejects a shape with no memory, and an instance
+    # stateful_node_allocatable rejects a shape with no memory, and an instance
     # always has CPU and network, so every requirement places.
-    assert isinstance(placed, ZonePlacement), placed
+    assert isinstance(estimate, ZoneNodeEstimate), estimate
 
     attached_drives: List[Drive] = []
     if on_attached_drives and requirement.disk_gib > 0:
-        by_type = placed.node_counts.required_nodes_by_type
+        by_type = estimate.node_counts.required_nodes_by_type
         attached_drive_plan = _attached_drive_plan(
             drive=drive,
             needed_disk_gib=requirement.disk_gib,
@@ -787,7 +787,7 @@ def place_stateful_zone(  # pylint: disable=too-many-arguments
             max_node_disk_gib=max_node_disk_gib,
         )
         attached_drives = attached_drive_plan.attached_drives
-        placed = round_zone_count(
+        estimate = round_zone_count(
             count_cpu=by_type[NodeCountConstraint.cpu],
             count_memory=by_type[NodeCountConstraint.memory],
             count_network=by_type[NodeCountConstraint.network],
@@ -797,7 +797,7 @@ def place_stateful_zone(  # pylint: disable=too-many-arguments
             min_count=min_count,
         )
 
-    count = placed.count
+    count = estimate.count
     logger.debug(
         "For (ncu, memory_gib, disk_gib) = (%s, %s, %s) need (%s, %s, %s, %s)",
         requirement.ncu,
@@ -816,7 +816,7 @@ def place_stateful_zone(  # pylint: disable=too-many-arguments
         instance=instance,
         attached_drives=attached_drives,
         cluster_params={
-            **placed.node_counts.model_dump(mode="json"),
+            **estimate.node_counts.model_dump(mode="json"),
             **(cluster_params or {}),
         },
     )
