@@ -224,7 +224,8 @@
               "iops": 3900.0,
               "throughput": 2100.0
             },
-            "expected_throughput_mib_per_s_per_node": 115.54
+            "expected_throughput_mib_per_s_per_node": 115.54,
+            "modeled_throughput_mib_per_s_per_node": 115.54
           },
           "cassandra.ebs_volume_strategy": "sampled_demand",
           "cassandra.heap.gib": 15.0,
@@ -265,7 +266,8 @@
               "iops": 3900.0,
               "throughput": 2100.0
             },
-            "expected_throughput_mib_per_s_per_node": 115.54
+            "expected_throughput_mib_per_s_per_node": 115.54,
+            "modeled_throughput_mib_per_s_per_node": 115.54
           },
           "cassandra.ebs_volume_strategy": "sampled_demand",
           "cassandra.heap.gib": 15.0,
@@ -306,7 +308,8 @@
               "iops": 3900.0,
               "throughput": 2100.0
             },
-            "expected_throughput_mib_per_s_per_node": 115.54
+            "expected_throughput_mib_per_s_per_node": 115.54,
+            "modeled_throughput_mib_per_s_per_node": 115.54
           },
           "cassandra.ebs_volume_strategy": "sampled_demand",
           "cassandra.heap.gib": 15.0,
@@ -470,7 +473,8 @@
               "iops": 49920.0,
               "throughput": 26880.0
             },
-            "expected_throughput_mib_per_s_per_node": 215.25
+            "expected_throughput_mib_per_s_per_node": 215.25,
+            "modeled_throughput_mib_per_s_per_node": 215.25
           },
           "cassandra.ebs_volume_strategy": "existing_no_shrink",
           "cassandra.heap.gib": 15.0,
@@ -514,7 +518,8 @@
               "iops": 49920.0,
               "throughput": 26880.0
             },
-            "expected_throughput_mib_per_s_per_node": 215.25
+            "expected_throughput_mib_per_s_per_node": 215.25,
+            "modeled_throughput_mib_per_s_per_node": 215.25
           },
           "cassandra.ebs_volume_strategy": "existing_no_shrink",
           "cassandra.heap.gib": 15.0,
@@ -558,7 +563,8 @@
               "iops": 49920.0,
               "throughput": 26880.0
             },
-            "expected_throughput_mib_per_s_per_node": 215.25
+            "expected_throughput_mib_per_s_per_node": 215.25,
+            "modeled_throughput_mib_per_s_per_node": 215.25
           },
           "cassandra.ebs_volume_strategy": "existing_no_shrink",
           "cassandra.heap.gib": 15.0,
@@ -617,7 +623,8 @@
               "iops": 43680.0,
               "throughput": 23520.0
             },
-            "expected_throughput_mib_per_s_per_node": 167.62
+            "expected_throughput_mib_per_s_per_node": 167.62,
+            "modeled_throughput_mib_per_s_per_node": 167.62
           },
           "cassandra.ebs_volume_strategy": "existing_no_shrink",
           "cassandra.heap.gib": 15.0,
@@ -658,7 +665,8 @@
               "iops": 43680.0,
               "throughput": 23520.0
             },
-            "expected_throughput_mib_per_s_per_node": 167.62
+            "expected_throughput_mib_per_s_per_node": 167.62,
+            "modeled_throughput_mib_per_s_per_node": 167.62
           },
           "cassandra.ebs_volume_strategy": "existing_no_shrink",
           "cassandra.heap.gib": 15.0,
@@ -699,7 +707,8 @@
               "iops": 43680.0,
               "throughput": 23520.0
             },
-            "expected_throughput_mib_per_s_per_node": 167.62
+            "expected_throughput_mib_per_s_per_node": 167.62,
+            "modeled_throughput_mib_per_s_per_node": 167.62
           },
           "cassandra.ebs_volume_strategy": "existing_no_shrink",
           "cassandra.heap.gib": 15.0,
@@ -755,7 +764,8 @@
               "iops": 16380.0,
               "throughput": 8820.0
             },
-            "expected_throughput_mib_per_s_per_node": 223.37
+            "expected_throughput_mib_per_s_per_node": 223.37,
+            "modeled_throughput_mib_per_s_per_node": 223.37
           },
           "cassandra.ebs_volume_strategy": "existing_no_shrink",
           "cassandra.heap.gib": 15.0,
@@ -796,7 +806,8 @@
               "iops": 16380.0,
               "throughput": 8820.0
             },
-            "expected_throughput_mib_per_s_per_node": 223.37
+            "expected_throughput_mib_per_s_per_node": 223.37,
+            "modeled_throughput_mib_per_s_per_node": 223.37
           },
           "cassandra.ebs_volume_strategy": "existing_no_shrink",
           "cassandra.heap.gib": 15.0,
@@ -837,7 +848,8 @@
               "iops": 16380.0,
               "throughput": 8820.0
             },
-            "expected_throughput_mib_per_s_per_node": 223.37
+            "expected_throughput_mib_per_s_per_node": 223.37,
+            "modeled_throughput_mib_per_s_per_node": 223.37
           },
           "cassandra.ebs_volume_strategy": "existing_no_shrink",
           "cassandra.heap.gib": 15.0,
