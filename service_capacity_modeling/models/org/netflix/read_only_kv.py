@@ -67,8 +67,8 @@ from service_capacity_modeling.models.org.netflix.partition_aware_algorithm impo
     place,
     Placement,
 )
-from service_capacity_modeling.models.placement import NodeSupply
-from service_capacity_modeling.models.placement import Shortfall
+from service_capacity_modeling.models.placement import NodeAllocatable
+from service_capacity_modeling.models.placement import Unschedulable
 
 logger = logging.getLogger(__name__)
 
@@ -229,7 +229,7 @@ def read_only_kv_requirement(
     """What the dataset needs, on no particular shape.
 
     Pass it to ``place`` with ``read_only_kv_node(instance, ...)`` for an EC2
-    shape, or with a ``NodeSupply`` for any other node, such as a container
+    shape, or with a ``NodeAllocatable`` for any other node, such as a container
     size. CPU is in NCUs (normalized compute units). ``desires`` must
     already include the model's defaults, as ``capacity_plan`` receives them.
     Returns None when there is no data or the memory buffer is not positive.
@@ -282,7 +282,7 @@ def _reserved_memory_gib(
 
 def read_only_kv_node(
     instance: Instance, desires: CapacityDesires, args: NflxReadOnlyKVArguments
-) -> Optional[NodeSupply]:
+) -> Optional[NodeAllocatable]:
     """What one node of ``instance`` offers the dataset, or None for shapes
     the model does not run on.
 
@@ -296,7 +296,7 @@ def read_only_kv_node(
         buffers=desires.buffers, components=[BufferComponent.disk]
     )
     reserved_gib = _reserved_memory_gib(desires, args)
-    return NodeSupply(
+    return NodeAllocatable(
         ncu=cpu_to_ncu(instance.cpu, instance),
         disk_gib=get_effective_disk_per_node_gib(
             instance=instance,
@@ -310,7 +310,7 @@ def read_only_kv_node(
 
 def _cluster_params(
     requirement: PartitionedRequirement,
-    node: NodeSupply,
+    node: NodeAllocatable,
     placed: Placement,
     memory: _MemoryPlacement,
     reserved_memory_gib: float,
@@ -389,20 +389,20 @@ def _estimate_read_only_kv_cluster(
 
     layout = _pins(args)
     placed = place(requirement, node, layout=layout, count=args.required_cluster_size)
-    if isinstance(placed, Shortfall):
+    if isinstance(placed, Unschedulable):
         if layout is None and args.required_cluster_size is None:
             return None
-        # Excuse holds one bottleneck; when several block the pin, it gets the
-        # first and context lists them all.
-        bottlenecks = placed.bottlenecks
+        # Excuse holds one bottleneck; when the node is insufficient on
+        # several resources, it gets the first and context lists them all.
+        insufficient = placed.insufficient
         return Excuse(
             instance=instance.name,
             drive=instance.drive.name,
             reason=placed.reason,
-            bottleneck=bottlenecks[0] if bottlenecks else None,
+            bottleneck=insufficient[0] if insufficient else None,
             context=(
-                {"bottlenecks": [b.value for b in bottlenecks]}
-                if len(bottlenecks) > 1
+                {"insufficient": [b.value for b in insufficient]}
+                if len(insufficient) > 1
                 else {}
             ),
         )

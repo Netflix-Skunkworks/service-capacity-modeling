@@ -19,14 +19,14 @@ from service_capacity_modeling.models.org.netflix.partition_aware_algorithm impo
     place,
     Placement,
 )
-from service_capacity_modeling.models.placement import NodeSupply
-from service_capacity_modeling.models.placement import Shortfall
+from service_capacity_modeling.models.placement import NodeAllocatable
+from service_capacity_modeling.models.placement import Unschedulable
 
-Problem = Tuple[PartitionedRequirement, NodeSupply]
+Problem = Tuple[PartitionedRequirement, NodeAllocatable]
 
 
 def _fewest(
-    requirement: PartitionedRequirement, node: NodeSupply
+    requirement: PartitionedRequirement, node: NodeAllocatable
 ) -> Optional[Placement]:
     """The unpinned placement, or None when nothing fits."""
     placed = place(requirement, node)
@@ -66,7 +66,7 @@ def valid_problems(draw):
         min_replicas=min_rf,
         max_nodes=max_nodes,
     )
-    node = NodeSupply(
+    node = NodeAllocatable(
         ncu=cpu_per_node,
         disk_gib=disk_per_node_gib,
         memory_gib=memory_per_node_gib,
@@ -86,7 +86,7 @@ class TestAlgorithmBasics:
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=500,  # Only 500GB disk
             ncu=16,
         )
@@ -102,7 +102,7 @@ class TestAlgorithmBasics:
             min_replicas=2,
             max_nodes=10,  # Very restrictive
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=1000,  # 2 partitions per node
             ncu=8,
         )
@@ -118,7 +118,7 @@ class TestAlgorithmBasics:
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=500,  # 5 partitions per node
             ncu=16,
         )
@@ -138,7 +138,7 @@ class TestAlgorithmBasics:
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=500,
             memory_gib=50,
             ncu=16,
@@ -161,7 +161,7 @@ class TestAlgorithmBasics:
             min_replicas=2,
             max_nodes=8,
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=10_000,
             memory_gib=53.39,
             ncu=16,
@@ -183,7 +183,7 @@ class TestAlgorithmBasics:
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=500,
             memory_gib=50,
             ncu=16,
@@ -201,7 +201,7 @@ class TestAlgorithmBasics:
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=500,
             memory_gib=50,
             ncu=1,
@@ -224,12 +224,12 @@ class TestAlgorithmBasics:
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeSupply(ncu=16, disk_gib=500)
+        node = NodeAllocatable(ncu=16, disk_gib=500)
 
         placed = place(requirement, node)
 
-        assert isinstance(placed, Shortfall)
-        assert placed.bottlenecks == [Bottleneck.memory]
+        assert isinstance(placed, Unschedulable)
+        assert placed.insufficient == [Bottleneck.memory]
 
     def test_a_partition_too_big_for_disk_and_memory_names_both(self):
         requirement = PartitionedRequirement(
@@ -240,12 +240,12 @@ class TestAlgorithmBasics:
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeSupply(ncu=16, disk_gib=50, memory_gib=10)
+        node = NodeAllocatable(ncu=16, disk_gib=50, memory_gib=10)
 
         placed = place(requirement, node)
 
-        assert isinstance(placed, Shortfall)
-        assert placed.bottlenecks == [Bottleneck.disk_capacity, Bottleneck.memory]
+        assert isinstance(placed, Unschedulable)
+        assert placed.insufficient == [Bottleneck.disk_capacity, Bottleneck.memory]
 
     def test_partitions_per_node_never_exceeds_the_partition_count(self):
         """A node with room for 140,000 tiny partitions still holds all 12."""
@@ -256,7 +256,7 @@ class TestAlgorithmBasics:
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=14_000,
             ncu=16,
         )
@@ -281,7 +281,7 @@ class TestPlanSelection:
             min_replicas=2,
             max_nodes=1000,  # Relaxed constraint
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=1000,  # max_ppn = 10
             ncu=16,
         )
@@ -310,7 +310,7 @@ class TestPlanSelection:
             min_replicas=2,
             max_nodes=10000,
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=2048,  # max_ppn = 3
             ncu=16,
         )
@@ -330,7 +330,7 @@ class TestPlanSelection:
             min_replicas=2,
             max_nodes=10,  # Restrictive
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=2000,  # max_ppn = 10
             ncu=8,
         )
@@ -353,7 +353,7 @@ class TestPlanSelection:
             min_replicas=2,
             max_nodes=60,
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=500,  # max_ppn = 5
             ncu=16,
         )
@@ -376,7 +376,7 @@ class TestPlanSelection:
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=1500,  # max_ppn = 15
             ncu=16,
         )
@@ -412,7 +412,7 @@ class TestPlanSelection:
             min_replicas=2,
             max_nodes=1_000_000_000,
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=100_000,
             ncu=16,
         )
@@ -536,7 +536,7 @@ class TestEdgeCases:
             min_replicas=2,
             max_nodes=100,
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=500,  # max_ppn = 5
             ncu=16,
         )
@@ -557,7 +557,7 @@ class TestEdgeCases:
             min_replicas=1,
             max_nodes=100,
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=1000,
             ncu=16,
         )
@@ -576,7 +576,7 @@ class TestEdgeCases:
             min_replicas=2,
             max_nodes=4,  # Exactly fits 2 nodes * 2 RF
         )
-        node = NodeSupply(
+        node = NodeAllocatable(
             disk_gib=500,  # Exactly 5 partitions per node
             memory_gib=50,
             ncu=16,
@@ -604,7 +604,7 @@ class TestPins:
     )
 
     def test_a_layout_that_fits_is_placed_as_pinned(self):
-        node = NodeSupply(ncu=16, disk_gib=400)
+        node = NodeAllocatable(ncu=16, disk_gib=400)
         layout = Layout(partitions_per_node=3, replica_count=2)
 
         placed = place(self.DEMAND, node, layout=layout)
@@ -613,23 +613,23 @@ class TestPins:
         assert (placed.node_count, placed.partitions_per_node) == (8, 3)
 
     def test_a_layout_that_overfills_disk_names_disk(self):
-        node = NodeSupply(ncu=16, disk_gib=250)
+        node = NodeAllocatable(ncu=16, disk_gib=250)
         layout = Layout(partitions_per_node=3, replica_count=2)
 
         placed = place(self.DEMAND, node, layout=layout)
 
-        assert isinstance(placed, Shortfall)
-        assert placed.bottlenecks == [Bottleneck.disk_capacity]
+        assert isinstance(placed, Unschedulable)
+        assert placed.insufficient == [Bottleneck.disk_capacity]
 
     def test_a_layout_short_on_every_resource_names_each(self):
         requirement = self.DEMAND.model_copy(update={"memory_gib_per_partition": 25})
-        node = NodeSupply(ncu=16, disk_gib=250, memory_gib=50)
+        node = NodeAllocatable(ncu=16, disk_gib=250, memory_gib=50)
         layout = Layout(partitions_per_node=3, replica_count=1)
 
         placed = place(requirement, node, layout=layout)
 
-        assert isinstance(placed, Shortfall)
-        assert placed.bottlenecks == [
+        assert isinstance(placed, Unschedulable)
+        assert placed.insufficient == [
             Bottleneck.disk_capacity,
             Bottleneck.memory,
             Bottleneck.cpu,
@@ -638,7 +638,7 @@ class TestPins:
     def test_a_count_uses_the_densest_layout_on_exactly_that_many_nodes(self):
         # All 12 partitions on one node would not fit, so the densest split
         # of 6 nodes is 2 nodes per copy, 3 copies.
-        node = NodeSupply(ncu=16, disk_gib=700)
+        node = NodeAllocatable(ncu=16, disk_gib=700)
 
         placed = place(self.DEMAND, node, count=6)
 
@@ -647,22 +647,22 @@ class TestPins:
         assert placed.replica_count == 3
 
     def test_a_count_too_small_for_the_cpu_names_cpu(self):
-        node = NodeSupply(ncu=16, disk_gib=1_200)
+        node = NodeAllocatable(ncu=16, disk_gib=1_200)
 
         placed = place(self.DEMAND, node, count=2)
 
-        assert isinstance(placed, Shortfall)
-        assert placed.bottlenecks == [Bottleneck.cpu]
+        assert isinstance(placed, Unschedulable)
+        assert placed.insufficient == [Bottleneck.cpu]
 
     def test_a_count_no_split_fits_names_each_resource_of_the_sparsest(self):
         # On 2 nodes, even the sparser split (6 partitions per node, one copy)
         # overfills 250 GiB and has too few copies for the CPU need.
-        node = NodeSupply(ncu=16, disk_gib=250)
+        node = NodeAllocatable(ncu=16, disk_gib=250)
 
         placed = place(self.DEMAND, node, count=2)
 
-        assert isinstance(placed, Shortfall)
-        assert placed.bottlenecks == [Bottleneck.disk_capacity, Bottleneck.cpu]
+        assert isinstance(placed, Unschedulable)
+        assert placed.insufficient == [Bottleneck.disk_capacity, Bottleneck.cpu]
 
 
 def test_a_cpu_need_on_a_whole_number_of_cores_adds_no_node():
@@ -678,7 +678,7 @@ def test_a_cpu_need_on_a_whole_number_of_cores_adds_no_node():
         max_nodes=1_000,
     )
 
-    placed = place(requirement, NodeSupply(ncu=node_cores, disk_gib=100))
+    placed = place(requirement, NodeAllocatable(ncu=node_cores, disk_gib=100))
 
     assert isinstance(placed, Placement)
     assert placed.node_count == 69

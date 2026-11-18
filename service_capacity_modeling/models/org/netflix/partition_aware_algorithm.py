@@ -3,13 +3,14 @@ Place a partitioned, replicated dataset on nodes of any shape.
 
 A workload states what it needs once, without picking a shape
 (``PartitionedRequirement``). A node states what it offers after reservations
-(``NodeSupply``): an EC2 instance, a container size, or anything else with
+(``NodeAllocatable``): an EC2 instance, a container size, or anything else with
 cores, disk and memory. ``place`` answers how many of those nodes hold the
 data, with how many partitions on each node and how many copies.
 
 Without a pin, ``place`` returns the fewest nodes, then prefers more
 replicas, then denser packing. A caller can instead pin the layout or the
-node count; when the pin does not fit, ``place`` says which resource blocks it.
+node count; when the pin does not fit, ``place`` returns ``Unschedulable``
+with every resource the node is insufficient on.
 
 CPU on both sides is counted in NCUs (normalized compute units, see
 ``cpu_to_ncu``), so a requirement can be placed on any shape without
@@ -28,8 +29,8 @@ from pydantic import Field
 from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.models.placement import (
     ceil_ignoring_float_error,
-    NodeSupply,
-    Shortfall,
+    NodeAllocatable,
+    Unschedulable,
 )
 
 
@@ -73,13 +74,13 @@ class Placement(BaseModel):
     nodes_for_cpu: int
     max_partitions_per_node_by_disk: int
     max_partitions_per_node_by_memory: Optional[int] = None
-    # What the placement uses on each node, comparable with NodeSupply.
+    # What the placement uses on each node, comparable with NodeAllocatable.
     disk_gib_per_node: float
     memory_gib_per_node: float
     cpu_utilization: float
 
 
-# A Shortfall lists disk, then memory, then CPU: whether partitions fit on
+# Unschedulable lists disk, then memory, then CPU: whether partitions fit on
 # a node before whether there are enough copies.
 _ORDER = (Bottleneck.disk_capacity, Bottleneck.memory, Bottleneck.cpu)
 
@@ -98,7 +99,7 @@ class _Fit(BaseModel):
     """One requirement on one node: the per-node partition limits."""
 
     requirement: PartitionedRequirement
-    node: NodeSupply
+    node: NodeAllocatable
 
     @property
     def by_disk(self) -> int:
@@ -157,7 +158,7 @@ class _Fit(BaseModel):
             / (nodes_for_one_copy * rf * self.node.ncu),
         )
 
-    def layout_bottlenecks(self, layout: Layout) -> List[Bottleneck]:
+    def insufficient_for(self, layout: Layout) -> List[Bottleneck]:
         """Every resource that keeps a node from hosting this layout. Empty
         when the limit is the node count or the partition cap instead."""
         found = []
@@ -210,20 +211,20 @@ class _Fit(BaseModel):
 
     def at_pinned_layout(
         self, layout: Layout, count: Optional[int]
-    ) -> Union[Placement, Shortfall]:
+    ) -> Union[Placement, Unschedulable]:
         placed = self.at_layout(layout)
         if placed is not None and count in (None, placed.node_count):
             return placed
         on_count = "" if count is None else f" on {count} nodes"
-        return Shortfall(
+        return Unschedulable(
             reason=f"Cannot host {layout.partitions_per_node} partitions per node "
             f"at {layout.replica_count} replicas{on_count}",
-            bottlenecks=self.layout_bottlenecks(layout),
+            insufficient=self.insufficient_for(layout),
         )
 
-    def at_pinned_count(self, count: int) -> Union[Placement, Shortfall]:
+    def at_pinned_count(self, count: int) -> Union[Placement, Unschedulable]:
         # Blame the densest layout whose partitions fit on disk and in memory,
-        # else the sparsest layout, and name every resource that blocks it.
+        # else the sparsest layout, and list every resource it is insufficient on.
         blamed: Optional[Layout] = None
         for candidate in self.layouts_at_count(count):
             placed = self.at_layout(candidate)
@@ -231,23 +232,23 @@ class _Fit(BaseModel):
                 return placed
             if blamed is None or not self._partitions_fit(blamed):
                 blamed = candidate
-        return Shortfall(
+        return Unschedulable(
             reason=f"Cannot host {count} nodes",
-            bottlenecks=[] if blamed is None else self.layout_bottlenecks(blamed),
+            insufficient=[] if blamed is None else self.insufficient_for(blamed),
         )
 
     def _partitions_fit(self, layout: Layout) -> bool:
         """Whether a node holds this layout's partitions on disk and in memory."""
         return not {Bottleneck.disk_capacity, Bottleneck.memory} & set(
-            self.layout_bottlenecks(layout)
+            self.insufficient_for(layout)
         )
 
-    def unpinned(self) -> Union[Placement, Shortfall]:
+    def unpinned(self) -> Union[Placement, Unschedulable]:
         placed = self.fewest_nodes()
         if placed is not None:
             return placed
         if self.max_partitions_per_node >= 1:
-            return Shortfall(
+            return Unschedulable(
                 reason=f"Needs more than {self.requirement.max_nodes} nodes"
             )
         by_memory = self.by_memory
@@ -256,18 +257,18 @@ class _Fit(BaseModel):
             found.append(Bottleneck.disk_capacity)
         if by_memory is not None and by_memory < 1:
             found.append(Bottleneck.memory)
-        return Shortfall(
+        return Unschedulable(
             reason="One partition does not fit on a node",
-            bottlenecks=_in_order(found),
+            insufficient=_in_order(found),
         )
 
 
 def place(
     requirement: PartitionedRequirement,
-    node: NodeSupply,
+    node: NodeAllocatable,
     layout: Optional[Layout] = None,
     count: Optional[int] = None,
-) -> Union[Placement, Shortfall]:
+) -> Union[Placement, Unschedulable]:
     """Place ``requirement`` on nodes like ``node``.
 
     With ``layout``, use exactly that layout (and, with ``count``, require that
