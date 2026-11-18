@@ -46,7 +46,10 @@ from service_capacity_modeling.models.plan_comparison import (
     ResourceTolerances,
 )
 from service_capacity_modeling import tools as scm_tools
-from service_capacity_modeling.tools.capture_baseline_costs import SCENARIOS
+from service_capacity_modeling.tools.capture_baseline_costs import (
+    BASELINE_PLANNER_ARGUMENTS,
+    SCENARIOS,
+)
 
 # Help message for baseline-related test failures
 _BASELINE_HELP = (
@@ -123,6 +126,14 @@ def _clusters_to_current(cap_plan: CapacityPlan) -> CurrentClusters:
     return CurrentClusters(zonal=current_zonal, regional=current_regional)
 
 
+def _alternative_names(cap_plan: CapacityPlan) -> list[list[str]]:
+    """Each cluster's alternative types, in the baseline's cluster order."""
+    clusters = cap_plan.candidate_clusters
+    return [
+        [a.name for a in c.alternatives] for c in (*clusters.zonal, *clusters.regional)
+    ]
+
+
 class TestBaselineDrift:
     """Test that actual costs match baseline within tolerance."""
 
@@ -149,6 +160,7 @@ class TestBaselineDrift:
             desires=scenario["desires"],
             num_results=1,
             extra_model_arguments=scenario["extra_args"] or {},
+            planner_arguments=BASELINE_PLANNER_ARGUMENTS,
         )
 
         # Baseline records that intentionally produce no results (e.g. the
@@ -182,6 +194,10 @@ class TestBaselineDrift:
             f"Cost keys changed for {scenario_name}: "
             f"added={added}, removed={removed}.\n{_BASELINE_HELP}"
         )
+
+        assert _alternative_names(cap_plan) == [
+            c.get("alternatives", []) for c in baseline["clusters"]
+        ], f"Alternative instance types changed for {scenario_name}.\n{_BASELINE_HELP}"
 
         # For CostAwareModel scenarios, also verify extract_baseline_plan
         # Composite models (like Key-Value) now work via unified routing through

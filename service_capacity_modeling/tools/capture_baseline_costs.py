@@ -27,7 +27,9 @@ from itertools import islice
 from pathlib import Path
 from typing import Any, cast
 
+from service_capacity_modeling.capacity_planner import PlannerArguments
 from service_capacity_modeling.capacity_planner import planner
+from service_capacity_modeling.interface import AlternativeOptions
 from service_capacity_modeling.interface import (
     AccessConsistency,
     Buffer,
@@ -53,6 +55,9 @@ BASELINE_UNCERTAIN_NUM_RESULTS = 3
 BASELINE_UNCERTAIN_SNAPSHOT_FORMAT = "seeded-scipy-cost-preserve-v2"
 BASELINE_UNCERTAIN_COST_REL_TOLERANCE = 0.01
 BASELINE_UNCERTAIN_COST_ABS_TOLERANCE = 1.0
+# Certain baselines list each plan's alternative instance types, so a change
+# in which types can run a cluster shows up in the snapshot.
+BASELINE_PLANNER_ARGUMENTS = PlannerArguments(alternatives=AlternativeOptions())
 COST_KEYS = frozenset(("annual_cost", "total_annual_cost", "instance_cost"))
 BASELINE_UNCERTAIN_SNAPSHOT_NOTE = (
     "Uses the planner's seeded SciPy uncertainty sampling. When regenerating "
@@ -344,6 +349,9 @@ def _format_cluster(cluster: ClusterCapacity, deployment: str) -> dict[str, Any]
             drives.append(f"{drive.name} : {size_gib}GB")
         info["attached_drives"] = sorted(drives)
 
+    if cluster.alternatives:
+        info["alternatives"] = [a.name for a in cluster.alternatives]
+
     # Add cluster_params if present (e.g., replica_count, partitions_per_node)
     if cluster.cluster_params:
         info["cluster_params"] = _round_cost_leaves(
@@ -410,6 +418,7 @@ def capture_costs(
             desires=desires,
             num_results=1,
             extra_model_arguments=extra_args or {},
+            planner_arguments=BASELINE_PLANNER_ARGUMENTS,
         )
 
         if not cap_plans:
