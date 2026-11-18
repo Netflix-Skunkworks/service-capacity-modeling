@@ -30,7 +30,6 @@ from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import upsert_params
-from service_capacity_modeling.models.plan_comparison import to_reference_cores
 
 
 def test_upsert_params_marks_cluster_params_set_for_exclude_unset_serialization():
@@ -286,7 +285,6 @@ def test_cpu_to_ncu():
 
     assert cpu_to_ncu(4, default_reference_shape) == 4
     assert cpu_to_ncu(552, i4i) == pytest.approx(966)
-    assert to_reference_cores(552, i4i) == cpu_to_ncu(552, i4i)
 
 
 def test_normalize_cores_6_7():

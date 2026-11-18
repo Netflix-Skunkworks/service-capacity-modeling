@@ -556,7 +556,7 @@ class Instance(ExcludeUnsetModel):
 # - NCU (normalized compute unit): one vCPU of this shape, 2.3 GHz with
 #   cpu_ipc_scale 1.0. models.common.cpu_to_ncu converts a shape's vCPUs to
 #   NCUs so CPU can be compared and summed across instance types. "Reference
-#   cores" (to_reference_cores) is the older name for NCUs.
+#   cores" is the older name for NCUs.
 # Other "reference_shape" names are not always this shape:
 # CapacityDesires.reference_shape is the shape CPU was measured on, and
 # normalize_cores' reference_shape is the shape it converts from.

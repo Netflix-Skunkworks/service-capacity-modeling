@@ -83,7 +83,6 @@ from service_capacity_modeling.interface import (
     CapacityRequirement,
     ClusterCapacity,
     ExcludeUnsetModel,
-    Instance,
 )
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_disk_size_gib
@@ -484,14 +483,6 @@ class PlanComparisonResult(ExcludeUnsetModel):
         problems = self.get_out_of_tolerance()
         parts = [f"{c.resource.value} {c.ratio:.2f}x" for c in problems]
         return f"Not equivalent: {', '.join(parts)}"
-
-
-def to_reference_cores(core_count: float, instance: Instance) -> float:
-    """Old name for cpu_to_ncu(), kept for existing callers.
-
-    "Reference cores" are NCUs (normalized compute units).
-    """
-    return cpu_to_ncu(core_count, instance)
 
 
 def _find_matching_requirement(
