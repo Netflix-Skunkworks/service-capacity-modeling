@@ -43,7 +43,7 @@ from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models import RANK_PENALTIES
 from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import cpu_to_ncu
-from service_capacity_modeling.models.common import place_stateful_zone
+from service_capacity_modeling.models.common import size_stateful_zone
 from service_capacity_modeling.models.common import DerivedBuffers
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
@@ -453,7 +453,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     # Division can round an exact capacity boundary one ULP above an integer.
     if (min_count_for_data - 1) * max_data_per_node_gib >= needed_disk_gib:
         min_count_for_data -= 1
-    cluster = place_stateful_zone(
+    cluster = size_stateful_zone(
         ZoneRequirement(
             ncu=cpu_to_ncu(math.ceil(requirement.cpu_cores.mid), instance),
             disk_gib=needed_disk_gib,
