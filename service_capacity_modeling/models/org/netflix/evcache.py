@@ -42,7 +42,8 @@ from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models import RANK_PENALTIES
 from service_capacity_modeling.models.common import buffer_for_components
-from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import cpu_to_ncu
+from service_capacity_modeling.models.common import place_stateful_zone
 from service_capacity_modeling.models.common import DerivedBuffers
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
@@ -50,6 +51,7 @@ from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import check_cluster_size_requirement
 from service_capacity_modeling.models.common import upsert_params
+from service_capacity_modeling.models.placement import ZoneRequirement
 from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -451,31 +453,33 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     # Division can round an exact capacity boundary one ULP above an integer.
     if (min_count_for_data - 1) * max_data_per_node_gib >= needed_disk_gib:
         min_count_for_data -= 1
-    cluster = compute_stateful_zone(
-        instance=instance,
-        drive=drive,
-        needed_cores=math.ceil(requirement.cpu_cores.mid),
-        needed_disk_gib=needed_disk_gib,
-        needed_memory_gib=requirement.mem_gib.mid,
+    cluster = place_stateful_zone(
+        ZoneRequirement(
+            ncu=cpu_to_ncu(math.ceil(requirement.cpu_cores.mid), instance),
+            disk_gib=needed_disk_gib,
+            memory_gib=requirement.mem_gib.mid,
+            network_mbps=requirement.network_mbps.mid,
+            disk_io_bytes_per_s=adjusted_disk_io_needed,
+        ),
+        instance,
+        drive,
         reserve_memory=reserve_memory,
-        needed_network_mbps=requirement.network_mbps.mid,
         min_count=max(
             min_count_for_data, min_count_for_cluster, required_cluster_size or 0
         ),
-        adjusted_disk_io_needed=adjusted_disk_io_needed,
         read_write_ratio=read_write_ratio,
+        cluster_type=NflxEVCacheCapacityModel.cluster_type,
+        # Communicate to the actual provision that if we want reduced RF
+        cluster_params={
+            "evcache.copies": copies_per_region,
+            EFFECTIVE_DISK_PER_NODE_GIB: max_data_per_node_gib,
+        },
     )
     excuse = check_cluster_size_requirement(
         instance, drive, cluster, required_cluster_size
     )
     if excuse is not None:
         return excuse
-    # Communicate to the actual provision that if we want reduced RF
-    params = {
-        "evcache.copies": copies_per_region,
-        EFFECTIVE_DISK_PER_NODE_GIB: max_data_per_node_gib,
-    }
-    upsert_params(cluster, params)
 
     # evcache clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as
@@ -511,7 +515,6 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         },
     )
 
-    cluster.cluster_type = NflxEVCacheCapacityModel.cluster_type
     zonal_clusters = [cluster] * copies_per_region
 
     compute_costs = NflxEVCacheCapacityModel.cluster_costs(
