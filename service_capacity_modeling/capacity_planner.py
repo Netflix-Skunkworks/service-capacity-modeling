@@ -941,6 +941,15 @@ class CapacityPlanner:
                 desires=sub_desires,
                 extra_model_arguments=extra_model_arguments,
             )
+            model_services.extend(
+                sub_model.node_service_costs(
+                    service_type=sub_model.service_name,
+                    context=context,
+                    extra_model_arguments=extra_model_arguments,
+                    zonal_clusters=zonal_clusters,
+                    regional_clusters=regional_clusters,
+                )
+            )
             for svc in model_services:
                 costs[svc.service_type] = svc.annual_cost
             services.extend(model_services)

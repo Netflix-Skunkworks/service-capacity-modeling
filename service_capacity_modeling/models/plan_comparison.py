@@ -82,13 +82,12 @@ from service_capacity_modeling.interface import (
     CapacityPlan,
     CapacityRequirement,
     ClusterCapacity,
-    default_reference_shape,
     ExcludeUnsetModel,
     Instance,
 )
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_disk_size_gib
-from service_capacity_modeling.models.common import normalize_cores_float
+from service_capacity_modeling.models.common import cpu_to_ncu
 
 
 @enum_docstrings
@@ -488,16 +487,9 @@ class PlanComparisonResult(ExcludeUnsetModel):
 
 
 def to_reference_cores(core_count: float, instance: Instance) -> float:
-    """Convert instance cores to reference-equivalent cores (float precision).
-
-    Convenience wrapper for normalize_cores_float() with
-    target=default_reference_shape and reference=instance.
-    """
-    return normalize_cores_float(
-        core_count,
-        target_shape=default_reference_shape,
-        reference_shape=instance,
-    )
+    """Same as cpu_to_ncu(); kept for existing callers. Returns NCUs
+    (normalized compute units)."""
+    return cpu_to_ncu(core_count, instance)
 
 
 def _find_matching_requirement(
@@ -537,7 +529,7 @@ def _comparable_disk_per_node_gib(cluster: ClusterCapacity) -> float:
 def _single_cluster_resources(cluster: ClusterCapacity) -> dict[ResourceType, float]:
     """Extract resource totals from a single cluster."""
     return {
-        ResourceType.cpu: to_reference_cores(
+        ResourceType.cpu: cpu_to_ncu(
             cluster.instance.cpu * cluster.count, cluster.instance
         ),
         ResourceType.mem_gib: cluster.instance.ram_gib * cluster.count,
@@ -551,11 +543,11 @@ def _requirement_resources(
 ) -> dict[ResourceType, float]:
     """Extract resource values from a CapacityRequirement.
 
-    CPU cores are normalized from the requirement's reference_shape to
-    default_reference_shape, giving the same basis as cluster CPU.
+    CPU is converted from the requirement's reference_shape to NCUs
+    (normalized compute units), the same basis as cluster CPU.
     """
     return {
-        ResourceType.cpu: to_reference_cores(
+        ResourceType.cpu: cpu_to_ncu(
             requirement.cpu_cores.mid, requirement.reference_shape
         ),
         ResourceType.mem_gib: requirement.mem_gib.mid,
@@ -568,8 +560,8 @@ def _aggregate_resources(plan: CapacityPlan) -> dict[ResourceType, float]:
     """Aggregate resource values from a plan's candidate_clusters.
 
     All resources are computed from candidate_clusters (the actual provisioned
-    instances), NOT from requirements. CPU is normalized to
-    default_reference_shape using IPC and frequency factors for consistent
+    instances), NOT from requirements. CPU is converted to NCUs
+    (normalized compute units) using IPC and frequency factors for consistent
     comparison across different instance types.
     """
     totals: dict[ResourceType, float] = {

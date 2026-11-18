@@ -11,6 +11,9 @@
     "net.intra.region": {
       "name": "Intra-region (within) transfer costs"
     },
+    "atlas.series": {
+      "name": "Atlas time series"
+    },
     "dynamo.standard": {
       "name": "dynamo-standard"
     },
