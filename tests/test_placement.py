@@ -15,9 +15,7 @@ CONTAINER = NodeSupply(ncu=8, memory_gib=32, network_mbps=10_000, disk_gib=500)
 
 def test_each_resource_asks_for_its_own_node_count():
     placed = place_zone(
-        ZoneRequirement(
-            ncu=20, memory_gib=100, network_mbps=25_000, disk_gib=1_600
-        ),
+        ZoneRequirement(ncu=20, memory_gib=100, network_mbps=25_000, disk_gib=1_600),
         CONTAINER,
     )
 
