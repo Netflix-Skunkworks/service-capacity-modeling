@@ -65,7 +65,7 @@ from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
-from service_capacity_modeling.models.common import place_stateful_zone
+from service_capacity_modeling.models.common import size_stateful_zone
 from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import check_cluster_size_requirement
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -1220,7 +1220,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         )
 
     # For existing EBS clusters, raise disk caps to at least the observed
-    # values so _get_min_count and place_stateful_zone don't reject the
+    # values so _get_min_count and size_stateful_zone don't reject the
     # current topology or inflate node count.
     current_zonal = (
         list(desires.current_clusters.zonal)
@@ -1523,7 +1523,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             expected_throughput_by_count[count] * disk_iops_buffer_ratio,
         )
 
-    cluster = place_stateful_zone(
+    cluster = size_stateful_zone(
         ZoneRequirement(
             ncu=cpu_to_ncu(int(requirement.cpu_cores.mid), instance),
             disk_gib=max(needed_disk_gib, initial_ebs_disk_gib or 0),
