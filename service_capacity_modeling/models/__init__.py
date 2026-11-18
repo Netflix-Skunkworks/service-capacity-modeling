@@ -151,6 +151,23 @@ class CostAwareModel:
         )
 
     @classmethod
+    def node_service_costs(  # pylint: disable=unused-argument
+        cls,
+        service_type: str,
+        context: RegionContext,
+        extra_model_arguments: Dict[str, Any],
+        zonal_clusters: Sequence["ClusterCapacity"] = (),
+        regional_clusters: Sequence["ClusterCapacity"] = (),
+    ) -> List[ServiceCapacity]:
+        """Calculate service costs that scale with deployed nodes.
+
+        Unlike service_costs(), these depend on the cluster layout, for
+        example per-node telemetry series. Models must call this for planned
+        clusters; baseline extraction calls it for current clusters.
+        """
+        return []
+
+    @classmethod
     def cluster_costs(
         cls,
         service_type: str,
