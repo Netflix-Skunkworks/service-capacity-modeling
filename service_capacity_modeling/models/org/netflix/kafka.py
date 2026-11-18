@@ -41,13 +41,14 @@ from service_capacity_modeling.interface import ServiceCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models.common import buffer_for_components
-from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import cpu_to_ncu
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
-from service_capacity_modeling.models.common import upsert_params
+from service_capacity_modeling.models.common import place_stateful_zone
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import zonal_requirements_from_current
+from service_capacity_modeling.models.placement import ZoneRequirement
 from service_capacity_modeling.models.org.netflix.iso_date_math import iso_to_seconds
 
 logger = logging.getLogger(__name__)
@@ -388,13 +389,15 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
         max_attached_data_per_node_gib=max_attached_data_per_node_gib,
     )
     min_count_for_data = math.ceil(needed_disk_gib / max_disk_per_node_gib)
-    cluster = compute_stateful_zone(
-        instance=instance,
-        drive=drive,
-        needed_cores=int(requirement.cpu_cores.mid),
-        needed_disk_gib=int(requirement.disk_gib.mid),
-        needed_memory_gib=int(requirement.mem_gib.mid),
-        needed_network_mbps=requirement.network_mbps.mid,
+    cluster = place_stateful_zone(
+        ZoneRequirement(
+            ncu=cpu_to_ncu(int(requirement.cpu_cores.mid), instance),
+            disk_gib=int(requirement.disk_gib.mid),
+            memory_gib=int(requirement.mem_gib.mid),
+            network_mbps=requirement.network_mbps.mid,
+        ),
+        instance,
+        drive,
         # Leave 2x overhead for both reads and writes.
         # Readers are sequential, 100MiB/s read is 100Mib / block_size ios
         # Writers are sequential, 100MiB/s write is 100MiB / block_size ios
@@ -413,14 +416,13 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
         cluster_size=lambda x: x,
         min_count=max(min_count_for_tier, min_count_for_data, required_zone_size or 1),
         reserve_memory=lambda _instance_mem_gib: reserved_mem_gib,
+        cluster_type=NflxKafkaCapacityModel.cluster_type,
+        # Communicate to the actual provision that if we want reduced RF
+        cluster_params={
+            "kafka.copies": copies_per_region,
+            EFFECTIVE_DISK_PER_NODE_GIB: max_disk_per_node_gib,
+        },
     )
-
-    # Communicate to the actual provision that if we want reduced RF
-    params = {
-        "kafka.copies": copies_per_region,
-        EFFECTIVE_DISK_PER_NODE_GIB: max_disk_per_node_gib,
-    }
-    upsert_params(cluster, params)
 
     # This is roughly the disk we would have tried to provision with the current
     # cluster's instance count (or required_zone_size)
@@ -471,7 +473,6 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
             },
         )
 
-    cluster.cluster_type = NflxKafkaCapacityModel.cluster_type
     zonal_clusters = [cluster] * zones_per_region
 
     # Account for the clusters and replication costs
