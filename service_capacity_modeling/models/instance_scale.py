@@ -67,7 +67,7 @@ from service_capacity_modeling.interface import ExcludeUnsetModel
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.plan_comparison import ResourceType
-from service_capacity_modeling.models.plan_comparison import to_reference_cores
+from service_capacity_modeling.models.common import cpu_to_ncu
 
 # Order used to break ties when several dimensions share the max factor, so the
 # reported limiting dimension is deterministic.
@@ -291,8 +291,8 @@ def scale_factors(
     dimensions: Dict[ResourceType, DimensionScale] = {
         ResourceType.cpu: DimensionScale(
             resource=ResourceType.cpu,
-            from_capacity=to_reference_cores(frm.cpu, frm),
-            to_capacity=to_reference_cores(to.cpu, to),
+            from_capacity=cpu_to_ncu(frm.cpu, frm),
+            to_capacity=cpu_to_ncu(to.cpu, to),
         ),
         ResourceType.mem_gib: DimensionScale(
             resource=ResourceType.mem_gib,

@@ -278,6 +278,17 @@ def normalize_cores_float(
     return _normalize_cpu(core_count, target_shape, reference_shape)
 
 
+def cpu_to_ncu(cpu: float, shape: Instance) -> float:
+    """Convert vCPUs of shape to NCUs (normalized compute units).
+
+    One NCU is one vCPU of default_reference_shape (2.3 GHz, cpu_ipc_scale
+    1.0), so NCUs compare and add up across instance types. A vCPU is worth
+    shape.cpu_ghz * shape.cpu_ipc_scale / 2.3 NCUs; cpu_ipc_scale already
+    folds in the hyperthreading factor, so pass vCPUs, not physical cores.
+    """
+    return _normalize_cpu(cpu, default_reference_shape, shape)
+
+
 def _normalize_cpu(
     cpu_count: float,
     target_shape: Instance,

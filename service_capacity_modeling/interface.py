@@ -550,6 +550,9 @@ class Instance(ExcludeUnsetModel):
         return Instance(**self_dict)
 
 
+# One vCPU of this shape is one NCU (normalized compute unit): a 2.3 GHz vCPU
+# with cpu_ipc_scale 1.0. models.common.cpu_to_ncu converts another shape's
+# vCPUs to NCUs so CPU can be compared and summed across instance types.
 default_reference_shape = Instance(
     name="default_reference_shape",
     cpu=4,
