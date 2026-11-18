@@ -23,6 +23,7 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import cpu_to_ncu
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
@@ -271,12 +272,19 @@ def test_normalize_cores():
 
 
 def test_normalize_cores_does_not_round_float_error_up():
-    """966 reference cores is exactly 552 i4i cores (4/7 of a reference core
-    each), but the conversion computes 552.0000000000001."""
+    """966 NCUs is exactly 552 i4i vCPUs (1.75 NCUs each), but the conversion
+    computes 552.0000000000001."""
     i4i = shapes.region("us-east-1").instances["i4i.2xlarge"]
 
     assert normalize_cores(966, i4i, default_reference_shape) == 552
     assert normalize_cores(967, i4i, default_reference_shape) == 553
+
+
+def test_cpu_to_ncu():
+    i4i = shapes.region("us-east-1").instances["i4i.2xlarge"]
+
+    assert cpu_to_ncu(4, default_reference_shape) == 4
+    assert cpu_to_ncu(552, i4i) == pytest.approx(966)
 
 
 def test_normalize_cores_6_7():

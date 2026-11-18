@@ -80,7 +80,7 @@ def _create_plan(
 
     CPU is computed from candidate_clusters, so cpu_cores sets the instance CPU
     with count=1. The instance uses default_reference_shape IPC/GHz for 1:1
-    normalization (cpu_cores directly equals reference-equivalent cores).
+    normalization (cpu_cores directly equals NCUs).
 
     Memory, disk, and network are set on the instance so that cluster-based
     aggregation produces the expected values. Requirements use decoy values
@@ -122,8 +122,8 @@ def _create_plan(
 # -----------------------------------------------------------------------------
 
 
-def _to_ref_cores(core_count, instance):
-    """Test helper: normalize instance cores to reference-equivalent (float)."""
+def _to_ncu(core_count, instance):
+    """Test helper: convert vCPUs of instance to NCUs (float)."""
     return normalize_cores_float(
         core_count,
         target_shape=default_reference_shape,
@@ -141,32 +141,32 @@ class TestNormalizeCoresFloat:
         100 cores @ 2.3 GHz, IPC 1.0 → 100 × (2.3×1.0)/(2.3×1.0) = 100
         """
         instance = _create_instance(cpu=100, cpu_ghz=2.3, cpu_ipc_scale=1.0)
-        assert _to_ref_cores(100, instance) == 100.0
+        assert _to_ncu(100, instance) == 100.0
 
-    def test_faster_instance_gives_more_reference_cores(self):
-        """Faster instance (higher GHz) yields more reference-equivalent cores.
+    def test_faster_instance_gives_more_ncus(self):
+        """Faster instance (higher GHz) yields more NCUs.
 
         100 cores @ 3.0 GHz, IPC 1.0 → 100 × (3.0×1.0)/(2.3×1.0) = 130.4
         """
         instance = _create_instance(cpu=100, cpu_ghz=3.0, cpu_ipc_scale=1.0)
-        result = _to_ref_cores(100, instance)
+        result = _to_ncu(100, instance)
         assert 130.0 < result < 131.0  # 130.43
 
-    def test_higher_ipc_gives_more_reference_cores(self):
-        """Higher IPC yields more reference-equivalent cores.
+    def test_higher_ipc_gives_more_ncus(self):
+        """Higher IPC yields more NCUs.
 
         100 cores @ 2.3 GHz, IPC 2.0 → 100 × (2.3×2.0)/(2.3×1.0) = 200
         """
         instance = _create_instance(cpu=100, cpu_ghz=2.3, cpu_ipc_scale=2.0)
-        assert _to_ref_cores(100, instance) == 200.0
+        assert _to_ncu(100, instance) == 200.0
 
-    def test_slower_instance_gives_fewer_reference_cores(self):
-        """Slower instance (lower GHz or IPC) yields fewer reference-equivalent cores.
+    def test_slower_instance_gives_fewer_ncus(self):
+        """Slower instance (lower GHz or IPC) yields fewer NCUs.
 
         100 cores @ 2.0 GHz, IPC 0.8 → 100 × (2.0×0.8)/(2.3×1.0) = 69.6
         """
         instance = _create_instance(cpu=100, cpu_ghz=2.0, cpu_ipc_scale=0.8)
-        result = _to_ref_cores(100, instance)
+        result = _to_ncu(100, instance)
         assert 69.0 < result < 70.0  # 69.57
 
     def test_returns_float_not_int(self):
@@ -176,7 +176,7 @@ class TestNormalizeCoresFloat:
         normalize_cores would return ceil(33.39) = 34, but we need 33.39
         """
         instance = _create_instance(cpu=32, cpu_ghz=2.4, cpu_ipc_scale=1.0)
-        result = _to_ref_cores(32, instance)
+        result = _to_ncu(32, instance)
         assert isinstance(result, float)
         assert 33.3 < result < 33.5  # 33.39, not 34
 
@@ -527,7 +527,7 @@ class TestComparePlans:
         """CPU comparison normalizes for both GHz and IPC differences.
 
         Normalization formula:
-            ref_cores = cores × (ghz × ipc) / (2.3 × 1.0)
+            ncus = vcpus × (ghz × ipc) / (2.3 × 1.0)
 
         Where 2.3 GHz and IPC 1.0 is the default_reference_shape.
 
@@ -731,7 +731,7 @@ class TestCompareRequirementsStrategy:
         """i3en cluster vs m6id-reference requirement, normalized to default.
 
         Requirement: 100 cores in default_reference_shape (2.3 GHz, IPC 1.0)
-        Cluster: 77 cores @ 3.0 GHz, IPC 1.0 → 77 × 3.0/2.3 = 100.4 ref cores
+        Cluster: 77 cores @ 3.0 GHz, IPC 1.0 → 77 × 3.0/2.3 = 100.4 NCUs
         ratio = 100.4/100 ≈ 1.004 → equivalent
         """
         req_plan = _make_requirement_plan(req_cpu=100)
@@ -890,8 +890,8 @@ class TestCompareRequirementsStrategy:
         )
         assert not result.cpu.is_equivalent
         assert result.cpu.exceeds_upper_bound
-        expected_ref_cores = 64 * 4 * (3.1 / 2.3)
-        assert result.cpu.baseline_value == pytest.approx(expected_ref_cores)
+        expected_ncus = 64 * 4 * (3.1 / 2.3)
+        assert result.cpu.baseline_value == pytest.approx(expected_ncus)
         assert result.cpu.comparison_value == 500.0
 
     def test_over_provisioned(self):

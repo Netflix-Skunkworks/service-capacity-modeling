@@ -229,27 +229,24 @@ def normalize_cores(
     target_shape: Instance,
     reference_shape: Optional[Instance] = None,
 ) -> int:
-    """Calculates equivalent CPU on a target shape relative to a reference.
+    """Convert vCPUs of reference_shape to vCPUs of target_shape, rounded up.
 
-    Converts core_count FROM reference_shape TO target_shape. Returns a
-    ceiling int suitable for provisioning (you can't provision half a core).
+    reference_shape is the shape being converted from; when None it is
+    default_reference_shape, so core_count is in NCUs. Returns a ceiling int
+    suitable for provisioning (you can't provision half a vCPU).
 
-    Takes into account relative core frequency and IPC factor from the hardware
-    description to give a rough estimate of how many equivalent cores you need
-    in a target_shape to have the core_count number of cores on the reference_shape.
+    Uses each shape's clock speed and IPC factor, so this is a rough
+    estimate of how many target_shape vCPUs match core_count reference_shape
+    vCPUs.
 
     Faster target → fewer cores needed; Slower target → more cores needed.
 
     See normalize_cores_float() for a float variant used in comparisons.
     """
-    # "cores" is the legacy naming; we now prefer "cpu" (which could mean
-    # cores or threads depending on context). The public API keeps "cores"
-    # for backwards compatibility; _normalize_cpu is the shared private
-    # implementation with the preferred naming.
     return max(
         1,
         ceil_ignoring_float_error(
-            _normalize_cpu(core_count, target_shape, reference_shape)
+            normalize_cores_float(core_count, target_shape, reference_shape)
         ),
     )
 
@@ -274,21 +271,26 @@ def normalize_cores_float(
     Use this when comparing compute capacity across different instance types
     (e.g., plan comparison, property tests). The ceiling in normalize_cores()
     distorts ratios by up to ~3%, which matters for equivalence checks.
+
+    The core_count vCPUs of reference_shape (default_reference_shape when
+    None) are converted to NCUs, then divided by one target_shape vCPU's NCUs.
     """
-    return _normalize_cpu(core_count, target_shape, reference_shape)
-
-
-def _normalize_cpu(
-    cpu_count: float,
-    target_shape: Instance,
-    reference_shape: Optional[Instance] = None,
-) -> float:
     if reference_shape is None:
         reference_shape = default_reference_shape
+    return cpu_to_ncu(core_count, reference_shape) / cpu_to_ncu(1, target_shape)
 
-    target_speed = target_shape.cpu_ghz * target_shape.cpu_ipc_scale
-    reference_speed = reference_shape.cpu_ghz * reference_shape.cpu_ipc_scale
-    return cpu_count * (reference_speed / target_speed)
+
+def cpu_to_ncu(cpu: float, shape: Instance) -> float:
+    """Convert vCPUs of shape to NCUs (normalized compute units).
+
+    One NCU is one vCPU of default_reference_shape (2.3 GHz, cpu_ipc_scale
+    1.0), so NCUs compare and add up across instance types. A vCPU is worth
+    shape.cpu_ghz * shape.cpu_ipc_scale / 2.3 NCUs; cpu_ipc_scale already
+    folds in the hyperthreading factor, so pass vCPUs, not physical cores.
+    """
+    shape_speed = shape.cpu_ghz * shape.cpu_ipc_scale
+    ncu_speed = default_reference_shape.cpu_ghz * default_reference_shape.cpu_ipc_scale
+    return cpu * (shape_speed / ncu_speed)
 
 
 def _reserved_headroom(
@@ -1360,7 +1362,7 @@ def zonal_requirements_from_current(
             buffers=buffers,
         )
         normalized_cpu = ceil_ignoring_float_error(
-            _normalize_cpu(
+            normalize_cores_float(
                 requirement.cpu(instance),
                 instance,
                 reference_shape,

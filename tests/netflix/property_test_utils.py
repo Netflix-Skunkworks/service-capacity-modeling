@@ -229,7 +229,7 @@ def capacity_desires_for_model(model_name, **overrides):
 
 
 def get_total_cpu(plan):
-    """Get total CPU in reference-equivalent cores from all clusters.
+    """Get total CPU in NCUs from all clusters.
 
     Uses normalize_cores_float() to normalize across instance types, so
     comparisons are meaningful even when plans use different families
