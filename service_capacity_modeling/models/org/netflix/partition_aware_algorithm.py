@@ -42,7 +42,7 @@ class PartitionedRequirement(BaseModel):
         description="Memory one copy of a partition needs, with headroom. "
         "None places partitions by disk only.",
     )
-    cpu_ncu: float = Field(
+    ncu: float = Field(
         ge=0,
         description="NCUs (normalized compute units) to serve all traffic. Any "
         "copy serves reads, so this is spread across every node.",
@@ -55,7 +55,7 @@ class PartitionedRequirement(BaseModel):
 class NodeSupply(BaseModel):
     """What one node offers the dataset after reservations."""
 
-    cpu_ncu: float = Field(gt=0, description="NCUs (normalized compute units).")
+    ncu: float = Field(gt=0, description="NCUs (normalized compute units).")
     disk_gib: float = Field(ge=0)
     memory_gib: float = Field(
         default=0, ge=0, description="Used only when the requirement places memory."
@@ -125,10 +125,10 @@ class _Fit(BaseModel):
 
     def replicas_needed(self, nodes_for_one_copy: int) -> int:
         """The fewest copies that meet the minimum and the CPU need."""
-        cpu_per_copy = nodes_for_one_copy * self.node.cpu_ncu
+        cpu_per_copy = nodes_for_one_copy * self.node.ncu
         return max(
             self.requirement.min_replicas,
-            ceil_ignoring_float_error(self.requirement.cpu_ncu / cpu_per_copy),
+            ceil_ignoring_float_error(self.requirement.ncu / cpu_per_copy),
         )
 
     def at_layout(self, layout: Layout) -> Optional[Placement]:
@@ -150,14 +150,14 @@ class _Fit(BaseModel):
             partitions_per_node=ppn,
             nodes_for_one_copy=nodes_for_one_copy,
             nodes_for_cpu=ceil_ignoring_float_error(
-                self.requirement.cpu_ncu / self.node.cpu_ncu
+                self.requirement.ncu / self.node.ncu
             ),
             max_partitions_per_node_by_disk=self.by_disk,
             max_partitions_per_node_by_memory=self.by_memory,
             disk_gib_per_node=ppn * self.requirement.disk_gib_per_partition,
             memory_gib_per_node=ppn * memory_per_partition,
-            cpu_utilization=self.requirement.cpu_ncu
-            / (nodes_for_one_copy * rf * self.node.cpu_ncu),
+            cpu_utilization=self.requirement.ncu
+            / (nodes_for_one_copy * rf * self.node.ncu),
         )
 
     def layout_shortfall(self, layout: Layout) -> Optional[Bottleneck]:

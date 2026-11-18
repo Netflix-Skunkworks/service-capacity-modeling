@@ -263,7 +263,7 @@ def read_only_kv_requirement(
         partitions=partitions,
         disk_gib_per_partition=data_gib / partitions * disk_buffer.ratio,
         memory_gib_per_partition=memory_per_partition,
-        cpu_ncu=cpu_to_ncu(cpu_cores, desires.reference_shape),
+        ncu=cpu_to_ncu(cpu_cores, desires.reference_shape),
         min_replicas=args.min_replica_count,
         max_nodes=args.max_regional_size,
         max_partitions_per_node=args.max_partitions_per_node,
@@ -297,7 +297,7 @@ def read_only_kv_node(
     )
     reserved_gib = _reserved_memory_gib(desires, args)
     return NodeSupply(
-        cpu_ncu=cpu_to_ncu(instance.cpu, instance),
+        ncu=cpu_to_ncu(instance.cpu, instance),
         disk_gib=get_effective_disk_per_node_gib(
             instance=instance,
             drive=instance.drive,
@@ -424,7 +424,7 @@ def _estimate_read_only_kv_cluster(
         reference_shape=desires.reference_shape,
         cpu_cores=certain_int(
             normalize_cores(
-                core_count=requirement.cpu_ncu,
+                core_count=requirement.ncu,
                 target_shape=instance,
             )
         ),

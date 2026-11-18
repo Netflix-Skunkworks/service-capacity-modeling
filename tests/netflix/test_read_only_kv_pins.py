@@ -148,13 +148,13 @@ def test_a_container_size_is_placed_from_the_same_demand():
     requirement = read_only_kv_requirement(desires, args)
     assert requirement is not None
 
-    container = NodeSupply(cpu_ncu=12, disk_gib=600, memory_gib=40)
+    container = NodeSupply(ncu=12, disk_gib=600, memory_gib=40)
     placed = place(requirement, container)
     assert isinstance(placed, Placement)
     assert placed.partitions_per_node * requirement.disk_gib_per_partition <= 600
     assert placed.cpu_utilization <= 1
 
-    too_small = place(requirement, NodeSupply(cpu_ncu=12, disk_gib=50))
+    too_small = place(requirement, NodeSupply(ncu=12, disk_gib=50))
     assert isinstance(too_small, Shortfall)
     assert too_small.bottleneck == Bottleneck.disk_capacity
 
