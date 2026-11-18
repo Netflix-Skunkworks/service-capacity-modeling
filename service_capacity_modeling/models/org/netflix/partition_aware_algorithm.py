@@ -26,7 +26,11 @@ from pydantic import BaseModel
 from pydantic import Field
 
 from service_capacity_modeling.interface import Bottleneck
-from service_capacity_modeling.models.common import ceil_ignoring_float_error
+from service_capacity_modeling.models.placement import (
+    ceil_ignoring_float_error,
+    NodeSupply,
+    Shortfall,
+)
 
 
 class PartitionedRequirement(BaseModel):
@@ -52,16 +56,6 @@ class PartitionedRequirement(BaseModel):
     max_partitions_per_node: Optional[int] = Field(default=None, ge=1)
 
 
-class NodeSupply(BaseModel):
-    """What one node offers the dataset after reservations."""
-
-    ncu: float = Field(gt=0, description="NCUs (normalized compute units).")
-    disk_gib: float = Field(ge=0)
-    memory_gib: float = Field(
-        default=0, ge=0, description="Used only when the requirement places memory."
-    )
-
-
 class Layout(BaseModel):
     """How partitions sit on nodes: partitions per node and complete copies."""
 
@@ -83,13 +77,6 @@ class Placement(BaseModel):
     disk_gib_per_node: float
     memory_gib_per_node: float
     cpu_utilization: float
-
-
-class Shortfall(BaseModel):
-    """Why nothing fits: a reason, and the blocking resource when one is."""
-
-    reason: str
-    bottleneck: Optional[Bottleneck] = None
 
 
 def _floor(ratio: float) -> int:

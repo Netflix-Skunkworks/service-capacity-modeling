@@ -17,11 +17,11 @@ from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
-    NodeSupply,
     place,
     Placement,
-    Shortfall,
 )
+from service_capacity_modeling.models.placement import NodeSupply
+from service_capacity_modeling.models.placement import Shortfall
 from service_capacity_modeling.models.org.netflix.read_only_kv import (
     _estimate_read_only_kv_cluster,
 )

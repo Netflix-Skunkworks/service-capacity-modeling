@@ -63,12 +63,12 @@ from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
     Layout,
-    NodeSupply,
     PartitionedRequirement,
     place,
     Placement,
-    Shortfall,
 )
+from service_capacity_modeling.models.placement import NodeSupply
+from service_capacity_modeling.models.placement import Shortfall
 
 logger = logging.getLogger(__name__)
 
