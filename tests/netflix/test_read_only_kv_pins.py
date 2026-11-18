@@ -32,7 +32,7 @@ from service_capacity_modeling.models.org.netflix.read_only_kv import (
     NflxReadOnlyKVCapacityModel,
 )
 from service_capacity_modeling.models.org.netflix.read_only_kv import (
-    read_only_kv_demand,
+    read_only_kv_requirement,
 )
 from service_capacity_modeling.models.org.netflix.read_only_kv import (
     read_only_kv_node,
@@ -140,21 +140,21 @@ def test_a_layout_pin_needs_both_density_and_replicas():
 
 def test_a_container_size_is_placed_from_the_same_demand():
     """A node that is not an EC2 shape, such as a container, places the same
-    demand; one too small for a partition says which resource is short."""
+    requirement; one too small for a partition says which resource is short."""
     desires = DESIRES.merge_with(
         NflxReadOnlyKVCapacityModel.default_desires(DESIRES, {})
     )
     args = NflxReadOnlyKVArguments(total_num_partitions=12)
-    demand = read_only_kv_demand(desires, args)
-    assert demand is not None
+    requirement = read_only_kv_requirement(desires, args)
+    assert requirement is not None
 
-    container = NodeSupply(cpu_cores=12, disk_gib=600, memory_gib=40)
-    placed = place(demand, container)
+    container = NodeSupply(cpu_ncu=12, disk_gib=600, memory_gib=40)
+    placed = place(requirement, container)
     assert isinstance(placed, Placement)
-    assert placed.partitions_per_node * demand.disk_gib_per_partition <= 600
+    assert placed.partitions_per_node * requirement.disk_gib_per_partition <= 600
     assert placed.cpu_utilization <= 1
 
-    too_small = place(demand, NodeSupply(cpu_cores=12, disk_gib=50))
+    too_small = place(requirement, NodeSupply(cpu_ncu=12, disk_gib=50))
     assert isinstance(too_small, Shortfall)
     assert too_small.bottleneck == Bottleneck.disk_capacity
 
@@ -164,8 +164,8 @@ def test_an_ec2_node_places_like_the_model_plans():
         NflxReadOnlyKVCapacityModel.default_desires(DESIRES, {})
     )
     args = NflxReadOnlyKVArguments(total_num_partitions=12)
-    demand = read_only_kv_demand(desires, args)
-    assert demand is not None
+    requirement = read_only_kv_requirement(desires, args)
+    assert requirement is not None
     compared = 0
     for name, instance in HARDWARE.instances.items():
         node = read_only_kv_node(instance, desires, args)
@@ -173,7 +173,7 @@ def test_an_ec2_node_places_like_the_model_plans():
         if node is None or not isinstance(plan, CapacityPlan):
             continue
         compared += 1
-        placed = place(demand, node)
+        placed = place(requirement, node)
         assert isinstance(placed, Placement), name
         assert _layout(plan) == {
             "count": placed.node_count,
@@ -185,10 +185,9 @@ def test_an_ec2_node_places_like_the_model_plans():
 
 
 def test_a_cpu_need_on_a_whole_number_of_cores_plans_no_extra_node():
-    """966 reference cores is exactly 552 cores on i4i.2xlarge (4/7 of a
-    reference core per core), so 69 nodes of 8. Converting the need to the
-    shape's cores first gives 552.0000000000001, which rounded up to 553
-    cores and 70 nodes."""
+    """966 NCUs is exactly 552 i4i.2xlarge vCPUs (1.75 NCUs each), so 69
+    nodes of 8. Converting the need to the shape's vCPUs first gives
+    552.0000000000001, which rounded up to 553 vCPUs and 70 nodes."""
     args = NflxReadOnlyKVArguments(
         total_num_partitions=1, min_replica_count=1, needed_cores=966
     )

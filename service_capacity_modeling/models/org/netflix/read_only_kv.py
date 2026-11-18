@@ -53,18 +53,18 @@ from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models import RANK_PENALTIES
 from service_capacity_modeling.models.common import buffer_for_components
+from service_capacity_modeling.models.common import cpu_to_ncu
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import normalize_cores
-from service_capacity_modeling.models.common import normalize_cores_float
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
     Layout,
     NodeSupply,
-    PartitionedDemand,
+    PartitionedRequirement,
     place,
     Placement,
     Shortfall,
@@ -223,14 +223,14 @@ def _memory_placement(
     )
 
 
-def read_only_kv_demand(
+def read_only_kv_requirement(
     desires: CapacityDesires, args: NflxReadOnlyKVArguments
-) -> Optional[PartitionedDemand]:
+) -> Optional[PartitionedRequirement]:
     """What the dataset needs, on no particular shape.
 
     Pass it to ``place`` with ``read_only_kv_node(instance, ...)`` for an EC2
     shape, or with a ``NodeSupply`` for any other node, such as a container
-    size. CPU is in cores of ``desires.reference_shape``. ``desires`` must
+    size. CPU is in NCUs (normalized compute units). ``desires`` must
     already include the model's defaults, as ``capacity_plan`` receives them.
     Returns None when there is no data or the memory buffer is not positive.
     """
@@ -259,11 +259,11 @@ def read_only_kv_demand(
             * memory.memory_buffer_ratio
             / partitions
         )
-    return PartitionedDemand(
+    return PartitionedRequirement(
         partitions=partitions,
         disk_gib_per_partition=data_gib / partitions * disk_buffer.ratio,
         memory_gib_per_partition=memory_per_partition,
-        cpu_cores=cpu_cores,
+        cpu_ncu=cpu_to_ncu(cpu_cores, desires.reference_shape),
         min_replicas=args.min_replica_count,
         max_nodes=args.max_regional_size,
         max_partitions_per_node=args.max_partitions_per_node,
@@ -297,11 +297,7 @@ def read_only_kv_node(
     )
     reserved_gib = _reserved_memory_gib(desires, args)
     return NodeSupply(
-        cpu_cores=normalize_cores_float(
-            instance.cpu,
-            target_shape=desires.reference_shape,
-            reference_shape=instance,
-        ),
+        cpu_ncu=cpu_to_ncu(instance.cpu, instance),
         disk_gib=get_effective_disk_per_node_gib(
             instance=instance,
             drive=instance.drive,
@@ -313,15 +309,15 @@ def read_only_kv_node(
 
 
 def _cluster_params(
-    demand: PartitionedDemand,
+    requirement: PartitionedRequirement,
     node: NodeSupply,
     placed: Placement,
     memory: _MemoryPlacement,
     reserved_memory_gib: float,
 ) -> Dict[str, Any]:
     params: Dict[str, Any] = {
-        "read-only-kv.total_num_partitions": demand.partitions,
-        "read-only-kv.min_replica_count": demand.min_replicas,
+        "read-only-kv.total_num_partitions": requirement.partitions,
+        "read-only-kv.min_replica_count": requirement.min_replicas,
         "read-only-kv.replica_count": placed.replica_count,
         "read-only-kv.partitions_per_node": placed.partitions_per_node,
         "read-only-kv.nodes_for_one_copy": placed.nodes_for_one_copy,
@@ -332,8 +328,8 @@ def _cluster_params(
         EFFECTIVE_DISK_PER_NODE_GIB: node.disk_gib,
     }
     if memory.enabled:
-        assert demand.memory_gib_per_partition is not None
-        per_copy_gib = demand.memory_gib_per_partition * demand.partitions
+        assert requirement.memory_gib_per_partition is not None
+        per_copy_gib = requirement.memory_gib_per_partition * requirement.partitions
         params.update(
             {
                 "read-only-kv.memory_gib_per_node": placed.memory_gib_per_node,
@@ -344,7 +340,7 @@ def _cluster_params(
                 "read-only-kv.memory_buffer_ratio": memory.memory_buffer_ratio,
                 "read-only-kv.reserved_memory_per_node_gib": reserved_memory_gib,
                 "read-only-kv.buffered_sst_memory_per_partition_gib": (
-                    demand.memory_gib_per_partition
+                    requirement.memory_gib_per_partition
                 ),
                 "read-only-kv.estimated_sst_memory_per_copy_gib": (
                     per_copy_gib / memory.memory_buffer_ratio
@@ -379,20 +375,20 @@ def _estimate_read_only_kv_cluster(
     desires: CapacityDesires,
     args: NflxReadOnlyKVArguments,
 ) -> Union[CapacityPlan, Excuse, None]:
-    """Place the dataset's demand on ``instance``.
+    """Place the dataset's requirement on ``instance``.
 
     Returns the plan, an Excuse when a pinned layout or node count does not
     fit, or None when the shape is not viable or nothing fits unpinned.
     """
-    demand = read_only_kv_demand(desires, args)
+    requirement = read_only_kv_requirement(desires, args)
     node = read_only_kv_node(instance, desires, args)
     memory = _memory_placement(desires, args)
-    if demand is None or node is None or memory is None:
+    if requirement is None or node is None or memory is None:
         return None
     assert instance.drive is not None  # read_only_kv_node requires local disks
 
     layout = _pins(args)
-    placed = place(demand, node, layout=layout, count=args.required_cluster_size)
+    placed = place(requirement, node, layout=layout, count=args.required_cluster_size)
     if isinstance(placed, Shortfall):
         if layout is None and args.required_cluster_size is None:
             return None
@@ -410,7 +406,9 @@ def _estimate_read_only_kv_cluster(
         attached_drives=tuple(),  # No attached drives
     )
     reserved_gib = _reserved_memory_gib(desires, args)
-    upsert_params(cluster, _cluster_params(demand, node, placed, memory, reserved_gib))
+    upsert_params(
+        cluster, _cluster_params(requirement, node, placed, memory, reserved_gib)
+    )
     penalties = _compute_penalties(
         instance=instance,
         large_instance_regret=args.large_instance_regret,
@@ -418,15 +416,16 @@ def _estimate_read_only_kv_cluster(
     if penalties:
         upsert_params(cluster, {RANK_PENALTIES: penalties})
 
-    per_copy_memory_gib = (demand.memory_gib_per_partition or 0) * demand.partitions
+    per_copy_memory_gib = (
+        requirement.memory_gib_per_partition or 0
+    ) * requirement.partitions
     regional_requirement = CapacityRequirement(
         requirement_type=NflxReadOnlyKVCapacityModel.cluster_type,
         reference_shape=desires.reference_shape,
         cpu_cores=certain_int(
             normalize_cores(
-                core_count=demand.cpu_cores,
+                core_count=requirement.cpu_ncu,
                 target_shape=instance,
-                reference_shape=desires.reference_shape,
             )
         ),
         mem_gib=certain_float(per_copy_memory_gib * placed.replica_count),

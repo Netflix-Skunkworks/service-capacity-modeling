@@ -2,7 +2,7 @@
 Place a partitioned, replicated dataset on nodes of any shape.
 
 A workload states what it needs once, without picking a shape
-(``PartitionedDemand``). A node states what it offers after reservations
+(``PartitionedRequirement``). A node states what it offers after reservations
 (``NodeSupply``): an EC2 instance, a container size, or anything else with
 cores, disk and memory. ``place`` answers how many of those nodes hold the
 data, with how many partitions on each node and how many copies.
@@ -11,8 +11,9 @@ Without a pin, ``place`` returns the fewest nodes, then prefers more
 replicas, then denser packing. A caller can instead pin the layout or the
 node count; when the pin does not fit, ``place`` says which resource blocks it.
 
-CPU on both sides is counted in the same reference cores, so a demand can be
-placed on any shape without re-deriving it.
+CPU on both sides is counted in NCUs (normalized compute units, see
+``cpu_to_ncu``), so a requirement can be placed on any shape without
+re-deriving it.
 """
 
 import math
@@ -28,7 +29,7 @@ from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.models.common import ceil_ignoring_float_error
 
 
-class PartitionedDemand(BaseModel):
+class PartitionedRequirement(BaseModel):
     """What a partitioned dataset needs, independent of any node shape."""
 
     partitions: int = Field(ge=1)
@@ -41,10 +42,10 @@ class PartitionedDemand(BaseModel):
         description="Memory one copy of a partition needs, with headroom. "
         "None places partitions by disk only.",
     )
-    cpu_cores: float = Field(
+    cpu_ncu: float = Field(
         ge=0,
-        description="Cores to serve all traffic, in reference cores. Any copy "
-        "serves reads, so this is spread across every node.",
+        description="NCUs (normalized compute units) to serve all traffic. Any "
+        "copy serves reads, so this is spread across every node.",
     )
     min_replicas: int = Field(ge=1)
     max_nodes: int = Field(ge=1)
@@ -54,10 +55,10 @@ class PartitionedDemand(BaseModel):
 class NodeSupply(BaseModel):
     """What one node offers the dataset after reservations."""
 
-    cpu_cores: float = Field(gt=0, description="In the demand's reference cores.")
+    cpu_ncu: float = Field(gt=0, description="NCUs (normalized compute units).")
     disk_gib: float = Field(ge=0)
     memory_gib: float = Field(
-        default=0, ge=0, description="Used only when the demand places memory."
+        default=0, ge=0, description="Used only when the requirement places memory."
     )
 
 
@@ -97,33 +98,37 @@ def _floor(ratio: float) -> int:
 
 
 class _Fit(BaseModel):
-    """One demand on one node: the per-node partition limits."""
+    """One requirement on one node: the per-node partition limits."""
 
-    demand: PartitionedDemand
+    requirement: PartitionedRequirement
     node: NodeSupply
 
     @property
     def by_disk(self) -> int:
-        return _floor(self.node.disk_gib / self.demand.disk_gib_per_partition)
+        return _floor(self.node.disk_gib / self.requirement.disk_gib_per_partition)
 
     @property
     def by_memory(self) -> Optional[int]:
-        per_partition = self.demand.memory_gib_per_partition
+        per_partition = self.requirement.memory_gib_per_partition
         if per_partition is None:
             return None
         return _floor(self.node.memory_gib / per_partition)
 
     @property
     def max_partitions_per_node(self) -> int:
-        limits = [self.by_disk, self.by_memory, self.demand.max_partitions_per_node]
+        limits = [
+            self.by_disk,
+            self.by_memory,
+            self.requirement.max_partitions_per_node,
+        ]
         return min(limit for limit in limits if limit is not None)
 
     def replicas_needed(self, nodes_for_one_copy: int) -> int:
         """The fewest copies that meet the minimum and the CPU need."""
-        cpu_per_copy = nodes_for_one_copy * self.node.cpu_cores
+        cpu_per_copy = nodes_for_one_copy * self.node.cpu_ncu
         return max(
-            self.demand.min_replicas,
-            ceil_ignoring_float_error(self.demand.cpu_cores / cpu_per_copy),
+            self.requirement.min_replicas,
+            ceil_ignoring_float_error(self.requirement.cpu_ncu / cpu_per_copy),
         )
 
     def at_layout(self, layout: Layout) -> Optional[Placement]:
@@ -131,28 +136,28 @@ class _Fit(BaseModel):
         ppn, rf = layout.partitions_per_node, layout.replica_count
         if ppn > self.max_partitions_per_node:
             return None
-        nodes_for_one_copy = math.ceil(self.demand.partitions / ppn)
+        nodes_for_one_copy = math.ceil(self.requirement.partitions / ppn)
         if rf < self.replicas_needed(nodes_for_one_copy):
             return None
         # At least 2 nodes for availability.
         node_count = max(nodes_for_one_copy * rf, 2)
-        if node_count > self.demand.max_nodes:
+        if node_count > self.requirement.max_nodes:
             return None
-        memory_per_partition = self.demand.memory_gib_per_partition or 0
+        memory_per_partition = self.requirement.memory_gib_per_partition or 0
         return Placement(
             node_count=node_count,
             replica_count=rf,
             partitions_per_node=ppn,
             nodes_for_one_copy=nodes_for_one_copy,
             nodes_for_cpu=ceil_ignoring_float_error(
-                self.demand.cpu_cores / self.node.cpu_cores
+                self.requirement.cpu_ncu / self.node.cpu_ncu
             ),
             max_partitions_per_node_by_disk=self.by_disk,
             max_partitions_per_node_by_memory=self.by_memory,
-            disk_gib_per_node=ppn * self.demand.disk_gib_per_partition,
+            disk_gib_per_node=ppn * self.requirement.disk_gib_per_partition,
             memory_gib_per_node=ppn * memory_per_partition,
-            cpu_utilization=self.demand.cpu_cores
-            / (nodes_for_one_copy * rf * self.node.cpu_cores),
+            cpu_utilization=self.requirement.cpu_ncu
+            / (nodes_for_one_copy * rf * self.node.cpu_ncu),
         )
 
     def layout_shortfall(self, layout: Layout) -> Optional[Bottleneck]:
@@ -164,7 +169,7 @@ class _Fit(BaseModel):
         if by_memory is not None and layout.partitions_per_node > by_memory:
             return Bottleneck.memory
         nodes_for_one_copy = math.ceil(
-            self.demand.partitions / layout.partitions_per_node
+            self.requirement.partitions / layout.partitions_per_node
         )
         if layout.replica_count < self.replicas_needed(nodes_for_one_copy):
             return Bottleneck.cpu
@@ -174,7 +179,7 @@ class _Fit(BaseModel):
         """Each way to split ``count`` nodes into equal copies, densest first."""
         return [
             Layout(
-                partitions_per_node=math.ceil(self.demand.partitions / per_copy),
+                partitions_per_node=math.ceil(self.requirement.partitions / per_copy),
                 replica_count=count // per_copy,
             )
             for per_copy in range(1, count + 1)
@@ -187,18 +192,18 @@ class _Fit(BaseModel):
         best: Optional[Tuple[int, int, int]] = None
         # A node holds at most every partition. Reporting more would make a
         # pinned copy of this layout ask for disk for partitions that don't exist.
-        ppn = min(self.max_partitions_per_node, self.demand.partitions)
+        ppn = min(self.max_partitions_per_node, self.requirement.partitions)
         while ppn > 0:
-            nodes_for_one_copy = math.ceil(self.demand.partitions / ppn)
+            nodes_for_one_copy = math.ceil(self.requirement.partitions / ppn)
             rf = self.replicas_needed(nodes_for_one_copy)
             nodes = max(nodes_for_one_copy * rf, 2)
-            if nodes <= self.demand.max_nodes:
+            if nodes <= self.requirement.max_nodes:
                 candidate = (nodes, -rf, -ppn)
                 if best is None or candidate < best:
                     best = candidate
             # Every skipped density has the same nodes per copy, so the same
             # replicas and node count; the current density wins their tie.
-            ppn = (self.demand.partitions - 1) // nodes_for_one_copy
+            ppn = (self.requirement.partitions - 1) // nodes_for_one_copy
         if best is None:
             return None
         return self.at_layout(
@@ -237,7 +242,9 @@ class _Fit(BaseModel):
         if placed is not None:
             return placed
         if self.max_partitions_per_node >= 1:
-            return Shortfall(reason=f"Needs more than {self.demand.max_nodes} nodes")
+            return Shortfall(
+                reason=f"Needs more than {self.requirement.max_nodes} nodes"
+            )
         by_memory = self.by_memory
         short_on_memory = by_memory is not None and by_memory < self.by_disk
         return Shortfall(
@@ -249,19 +256,19 @@ class _Fit(BaseModel):
 
 
 def place(
-    demand: PartitionedDemand,
+    requirement: PartitionedRequirement,
     node: NodeSupply,
     layout: Optional[Layout] = None,
     count: Optional[int] = None,
 ) -> Union[Placement, Shortfall]:
-    """Place ``demand`` on nodes like ``node``.
+    """Place ``requirement`` on nodes like ``node``.
 
     With ``layout``, use exactly that layout (and, with ``count``, require that
     node count too). With only ``count``, use the densest layout on exactly
     that many nodes, which leaves the most replicas for CPU and availability.
     With neither, use the fewest nodes.
     """
-    fit = _Fit(demand=demand, node=node)
+    fit = _Fit(requirement=requirement, node=node)
     if layout is not None:
         return fit.at_pinned_layout(layout, count)
     if count is not None:
