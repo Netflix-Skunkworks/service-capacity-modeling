@@ -487,8 +487,10 @@ class PlanComparisonResult(ExcludeUnsetModel):
 
 
 def to_reference_cores(core_count: float, instance: Instance) -> float:
-    """Same as cpu_to_ncu(); kept for existing callers. Returns NCUs
-    (normalized compute units)."""
+    """Old name for cpu_to_ncu(), kept for existing callers.
+
+    "Reference cores" are NCUs (normalized compute units).
+    """
     return cpu_to_ncu(core_count, instance)
 
 

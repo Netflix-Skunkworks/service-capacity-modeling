@@ -229,14 +229,15 @@ def normalize_cores(
     target_shape: Instance,
     reference_shape: Optional[Instance] = None,
 ) -> int:
-    """Calculates equivalent CPU on a target shape relative to a reference.
+    """Convert vCPUs of reference_shape to vCPUs of target_shape, rounded up.
 
-    Converts core_count FROM reference_shape TO target_shape. Returns a
-    ceiling int suitable for provisioning (you can't provision half a core).
+    reference_shape is the shape being converted from; when None it is
+    default_reference_shape, so core_count is in NCUs. Returns a ceiling int
+    suitable for provisioning (you can't provision half a vCPU).
 
-    Takes into account relative core frequency and IPC factor from the hardware
-    description to give a rough estimate of how many equivalent cores you need
-    in a target_shape to have the core_count number of cores on the reference_shape.
+    Uses each shape's clock speed and IPC factor, so this is a rough
+    estimate of how many target_shape vCPUs match core_count reference_shape
+    vCPUs.
 
     Faster target → fewer cores needed; Slower target → more cores needed.
 

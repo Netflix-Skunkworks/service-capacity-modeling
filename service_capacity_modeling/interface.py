@@ -550,9 +550,16 @@ class Instance(ExcludeUnsetModel):
         return Instance(**self_dict)
 
 
-# One vCPU of this shape is one NCU (normalized compute unit): a 2.3 GHz vCPU
-# with cpu_ipc_scale 1.0. models.common.cpu_to_ncu converts another shape's
-# vCPUs to NCUs so CPU can be compared and summed across instance types.
+# CPU units:
+# - vCPU: one hardware thread of a named shape (Instance.cpu). Older names,
+#   such as cpu_cores and normalize_cores, call these "cores".
+# - NCU (normalized compute unit): one vCPU of this shape, 2.3 GHz with
+#   cpu_ipc_scale 1.0. models.common.cpu_to_ncu converts a shape's vCPUs to
+#   NCUs so CPU can be compared and summed across instance types. "Reference
+#   cores" (to_reference_cores) is the older name for NCUs.
+# Other "reference_shape" names are not always this shape:
+# CapacityDesires.reference_shape is the shape CPU was measured on, and
+# normalize_cores' reference_shape is the shape it converts from.
 default_reference_shape = Instance(
     name="default_reference_shape",
     cpu=4,
@@ -1174,6 +1181,11 @@ class CapacityDesires(ExcludeUnsetModel):
 
     @property
     def reference_shape(self) -> Instance:
+        """The shape this workload's CPU figures were measured on.
+
+        The current cluster's instance when one is given, otherwise
+        default_reference_shape. Only in the second case is it the NCU basis.
+        """
         if not self.current_clusters:
             return default_reference_shape
 
@@ -1269,8 +1281,9 @@ class CapacityDesires(ExcludeUnsetModel):
 class CapacityRequirement(ExcludeUnsetModel):
     requirement_type: str
 
-    # cpu_cores was calculated relative to this reference, mostly for
-    # comparing latency to clock frequency
+    # Usually the shape the CPU need was measured on (desires.reference_shape).
+    # Most models count cpu_cores in vCPUs of the candidate instance, not of
+    # this shape.
     reference_shape: Instance = default_reference_shape
     cpu_cores: Interval
     mem_gib: Interval = certain_int(0)
