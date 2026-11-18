@@ -205,7 +205,7 @@ def _estimate_read_only_kv_requirement(
         desires: User's capacity desires
         sst_memory_overhead_ratio: Resident SST memory as a ratio of SST data
         memory_buffer_ratio: Memory headroom applied to the SST estimate
-        needed_cores: Caller's CPU need in NCUs (normalized compute units), as given
+        needed_cores: Caller's CPU need in cores of desires.reference_shape
 
     Returns:
         CapacityRequirement for the regional cluster
