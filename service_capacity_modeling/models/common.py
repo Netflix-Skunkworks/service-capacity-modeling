@@ -242,14 +242,10 @@ def normalize_cores(
 
     See normalize_cores_float() for a float variant used in comparisons.
     """
-    # "cores" is the legacy naming; we now prefer "cpu" (which could mean
-    # cores or threads depending on context). The public API keeps "cores"
-    # for backwards compatibility; _normalize_cpu is the shared private
-    # implementation with the preferred naming.
     return max(
         1,
         ceil_ignoring_float_error(
-            _normalize_cpu(core_count, target_shape, reference_shape)
+            normalize_cores_float(core_count, target_shape, reference_shape)
         ),
     )
 
@@ -274,8 +270,13 @@ def normalize_cores_float(
     Use this when comparing compute capacity across different instance types
     (e.g., plan comparison, property tests). The ceiling in normalize_cores()
     distorts ratios by up to ~3%, which matters for equivalence checks.
+
+    The core_count vCPUs of reference_shape (default_reference_shape when
+    None) are converted to NCUs, then divided by one target_shape vCPU's NCUs.
     """
-    return _normalize_cpu(core_count, target_shape, reference_shape)
+    if reference_shape is None:
+        reference_shape = default_reference_shape
+    return cpu_to_ncu(core_count, reference_shape) / cpu_to_ncu(1, target_shape)
 
 
 def cpu_to_ncu(cpu: float, shape: Instance) -> float:
@@ -286,20 +287,9 @@ def cpu_to_ncu(cpu: float, shape: Instance) -> float:
     shape.cpu_ghz * shape.cpu_ipc_scale / 2.3 NCUs; cpu_ipc_scale already
     folds in the hyperthreading factor, so pass vCPUs, not physical cores.
     """
-    return _normalize_cpu(cpu, default_reference_shape, shape)
-
-
-def _normalize_cpu(
-    cpu_count: float,
-    target_shape: Instance,
-    reference_shape: Optional[Instance] = None,
-) -> float:
-    if reference_shape is None:
-        reference_shape = default_reference_shape
-
-    target_speed = target_shape.cpu_ghz * target_shape.cpu_ipc_scale
-    reference_speed = reference_shape.cpu_ghz * reference_shape.cpu_ipc_scale
-    return cpu_count * (reference_speed / target_speed)
+    shape_speed = shape.cpu_ghz * shape.cpu_ipc_scale
+    ncu_speed = default_reference_shape.cpu_ghz * default_reference_shape.cpu_ipc_scale
+    return cpu * (shape_speed / ncu_speed)
 
 
 def _reserved_headroom(
@@ -1371,7 +1361,7 @@ def zonal_requirements_from_current(
             buffers=buffers,
         )
         normalized_cpu = ceil_ignoring_float_error(
-            _normalize_cpu(
+            normalize_cores_float(
                 requirement.cpu(instance),
                 instance,
                 reference_shape,
