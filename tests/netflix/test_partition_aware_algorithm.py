@@ -15,12 +15,12 @@ from hypothesis import strategies as st
 from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
     Layout,
-    NodeSupply,
     PartitionedRequirement,
     place,
     Placement,
-    Shortfall,
 )
+from service_capacity_modeling.models.placement import NodeSupply
+from service_capacity_modeling.models.placement import Shortfall
 
 Problem = Tuple[PartitionedRequirement, NodeSupply]
 
