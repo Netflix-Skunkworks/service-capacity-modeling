@@ -45,7 +45,7 @@ from service_capacity_modeling.models.common import cpu_to_ncu
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
-from service_capacity_modeling.models.common import place_stateful_zone
+from service_capacity_modeling.models.common import size_stateful_zone
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import zonal_requirements_from_current
 from service_capacity_modeling.models.placement import ZoneRequirement
@@ -389,7 +389,7 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
         max_attached_data_per_node_gib=max_attached_data_per_node_gib,
     )
     min_count_for_data = math.ceil(needed_disk_gib / max_disk_per_node_gib)
-    cluster = place_stateful_zone(
+    cluster = size_stateful_zone(
         ZoneRequirement(
             ncu=cpu_to_ncu(int(requirement.cpu_cores.mid), instance),
             disk_gib=int(requirement.disk_gib.mid),
