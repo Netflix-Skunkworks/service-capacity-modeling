@@ -34,16 +34,17 @@ from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import ChildDesiresConfig
 from service_capacity_modeling.models.common import buffer_for_components
-from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import cpu_to_ncu
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import check_cluster_size_requirement
-from service_capacity_modeling.models.common import upsert_params
+from service_capacity_modeling.models.common import place_stateful_zone
 from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
+from service_capacity_modeling.models.placement import ZoneRequirement
 from service_capacity_modeling.stats import dist_for_interval
 
 logger = logging.getLogger(__name__)
@@ -317,13 +318,15 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             "required_cluster_size"
         )
 
-        data_cluster = compute_stateful_zone(
-            instance=instance,
-            drive=drive,
-            needed_cores=int(data_requirement.cpu_cores.mid),
-            needed_disk_gib=needed_disk_gib,
-            needed_memory_gib=int(data_requirement.mem_gib.mid),
-            needed_network_mbps=data_requirement.network_mbps.mid,
+        data_cluster = place_stateful_zone(
+            ZoneRequirement(
+                ncu=cpu_to_ncu(int(data_requirement.cpu_cores.mid), instance),
+                disk_gib=needed_disk_gib,
+                memory_gib=int(data_requirement.mem_gib.mid),
+                network_mbps=data_requirement.network_mbps.mid,
+            ),
+            instance,
+            drive,
             # Take into account the reads per read
             # from the per node dataset using leveled compaction
             required_disk_ios=lambda size, count: (
@@ -334,20 +337,18 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             cluster_size=lambda x: x,
             min_count=max(min_count, required_cluster_size or 0),
             reserve_memory=reserve_memory,
+            cluster_type="elasticsearch-data",
+            # Communicate to the actual provision that if we want reduced RF
+            cluster_params={
+                "elasticsearch.copies": copies_per_region,
+                EFFECTIVE_DISK_PER_NODE_GIB: max_data_per_node_gib,
+            },
         )
         excuse = check_cluster_size_requirement(
             instance, drive, data_cluster, required_cluster_size
         )
         if excuse is not None:
             return excuse
-        data_cluster.cluster_type = "elasticsearch-data"
-
-        # Communicate to the actual provision that if we want reduced RF
-        params = {
-            "elasticsearch.copies": copies_per_region,
-            EFFECTIVE_DISK_PER_NODE_GIB: max_data_per_node_gib,
-        }
-        upsert_params(data_cluster, params)
 
         # Elasticsearch clusters generally should try to stay under some total number
         # of nodes. Orgs do this for all kinds of reasons such as
