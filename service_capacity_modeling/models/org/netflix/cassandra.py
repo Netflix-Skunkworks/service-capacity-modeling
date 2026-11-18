@@ -57,7 +57,7 @@ from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import (
     ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT,
 )
-from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import cpu_to_ncu
 from service_capacity_modeling.models.common import cloud_gib_for_io
 from service_capacity_modeling.models.common import DerivedBuffers
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
@@ -65,12 +65,14 @@ from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.common import place_stateful_zone
 from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import check_cluster_size_requirement
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
 from service_capacity_modeling.models.common import zonal_requirements_from_current
+from service_capacity_modeling.models.placement import ZoneRequirement
 from service_capacity_modeling.models.org.netflix.cassandra_memory import (
     DEFAULT_MAX_PAGE_CACHE_GIB,
     base_memory_gib,
@@ -1218,7 +1220,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         )
 
     # For existing EBS clusters, raise disk caps to at least the observed
-    # values so _get_min_count and compute_stateful_zone don't reject the
+    # values so _get_min_count and place_stateful_zone don't reject the
     # current topology or inflate node count.
     current_zonal = (
         list(desires.current_clusters.zonal)
@@ -1521,13 +1523,16 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             expected_throughput_by_count[count] * disk_iops_buffer_ratio,
         )
 
-    cluster = compute_stateful_zone(
-        instance=instance,
-        drive=drive,
-        needed_cores=int(requirement.cpu_cores.mid),
-        needed_disk_gib=max(needed_disk_gib, initial_ebs_disk_gib or 0),
-        needed_memory_gib=int(requirement.mem_gib.mid),
-        needed_network_mbps=requirement.network_mbps.mid,
+    cluster = place_stateful_zone(
+        ZoneRequirement(
+            ncu=cpu_to_ncu(int(requirement.cpu_cores.mid), instance),
+            disk_gib=max(needed_disk_gib, initial_ebs_disk_gib or 0),
+            memory_gib=int(requirement.mem_gib.mid),
+            network_mbps=requirement.network_mbps.mid,
+            write_buffer_gib=requirement_estimate.write_buffer_gib,
+        ),
+        instance,
+        drive,
         # Take into account the reads per read
         # from the per node dataset using leveled compaction
         required_disk_ios=required_disk_ios,
@@ -1537,8 +1542,8 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         min_count=min_count,
         reserve_memory=lambda x: x - memory_layout(x).page_cache_capacity_gib,
         write_buffer=lambda x: heap_fn(x) * max_write_buffer_percent * 0.25,
-        required_write_buffer_gib=requirement_estimate.write_buffer_gib,
         max_node_disk_gib=max_node_disk,
+        cluster_type=NflxCassandraCapacityModel.cluster_type,
     )
     sampled_ebs_volume_gib = None
     if initial_ebs_disk_gib is not None and cluster.attached_drives:
@@ -1758,7 +1763,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         },
     )
 
-    cluster.cluster_type = NflxCassandraCapacityModel.cluster_type
     zonal_clusters = [cluster] * zones_per_region
     cap_services.extend(
         NflxCassandraCapacityModel.node_service_costs(
