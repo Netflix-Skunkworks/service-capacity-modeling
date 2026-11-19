@@ -44,7 +44,7 @@ from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
-from service_capacity_modeling.models.placement import ZoneRequirement
+from service_capacity_modeling.models.placement import Requirement
 from service_capacity_modeling.stats import dist_for_interval
 
 logger = logging.getLogger(__name__)
@@ -319,7 +319,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         )
 
         data_cluster = size_stateful_zone(
-            ZoneRequirement(
+            Requirement(
                 ncu=cpu_to_ncu(int(data_requirement.cpu_cores.mid), instance),
                 disk_gib=needed_disk_gib,
                 memory_gib=int(data_requirement.mem_gib.mid),
