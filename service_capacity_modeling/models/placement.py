@@ -155,32 +155,17 @@ class Layout(BaseModel):
     replica_count: int = Field(ge=1)
 
 
-class PartitionPlacement(BaseModel):
-    """How the partitions sit on the nodes, and what bounded them."""
-
-    replica_count: int
-    partitions_per_node: int
-    nodes_for_one_copy: int
-    nodes_for_cpu: int
-    max_partitions_per_node_by_disk: int
-    max_partitions_per_node_by_memory: Optional[int] = None
-    # What the placement uses on each node, comparable with NodeResources.
-    disk_gib_per_node: float
-    memory_gib_per_node: float
-    cpu_utilization: float
-
-
 class Placement(BaseModel):
     """How many nodes the requirement needs, and why.
 
     ``node_counts`` explains an evenly divided requirement: how many nodes
-    each resource asked for. ``partitions`` explains a partitioned one: the
-    layout and what limited it.
+    each resource asked for. ``layout`` explains a partitioned one: how many
+    partitions sit on each node, and how many complete copies there are.
     """
 
     node_count: int
     node_counts: Optional[NodeCountContext] = None
-    partitions: Optional[PartitionPlacement] = None
+    layout: Optional[Layout] = None
 
 
 def round_zone_count(  # pylint: disable=too-many-arguments
@@ -331,17 +316,7 @@ def _place_evenly(
     )
 
 
-# DoesNotFit lists disk, then memory, then CPU: whether partitions fit on
-# a node before whether there are enough copies.
-_ORDER = (Bottleneck.disk_capacity, Bottleneck.memory, Bottleneck.cpu)
-
-
-def _in_order(found: List[Bottleneck]) -> List[Bottleneck]:
-    """Deduplicate ``found`` into disk, memory, CPU order."""
-    return [bottleneck for bottleneck in _ORDER if bottleneck in found]
-
-
-def _floor(ratio: float) -> int:
+def floor_ignoring_float_error(ratio: float) -> int:
     """Floor a capacity ratio without losing an exact fit to float error."""
     return math.floor(math.nextafter(ratio, math.inf))
 
@@ -357,14 +332,16 @@ class _PartitionFit(BaseModel):
 
     @property
     def by_disk(self) -> int:
-        return _floor(self.node.disk_gib / self.partitions.disk_gib_per_partition)
+        return floor_ignoring_float_error(
+            self.node.disk_gib / self.partitions.disk_gib_per_partition
+        )
 
     @property
     def by_memory(self) -> Optional[int]:
         per_partition = self.partitions.memory_gib_per_partition
         if per_partition is None:
             return None
-        return _floor(self.node.memory_gib / per_partition)
+        return floor_ignoring_float_error(self.node.memory_gib / per_partition)
 
     @property
     def max_partitions_per_node(self) -> int:
@@ -397,28 +374,12 @@ class _PartitionFit(BaseModel):
         node_count = max(nodes_for_one_copy * rf, self.min_count)
         if not self._within_max(node_count):
             return None
-        memory_per_partition = self.partitions.memory_gib_per_partition or 0
-        return Placement(
-            node_count=node_count,
-            partitions=PartitionPlacement(
-                replica_count=rf,
-                partitions_per_node=ppn,
-                nodes_for_one_copy=nodes_for_one_copy,
-                nodes_for_cpu=ceil_ignoring_float_error(
-                    self.requirement.ncu / self.node.ncu
-                ),
-                max_partitions_per_node_by_disk=self.by_disk,
-                max_partitions_per_node_by_memory=self.by_memory,
-                disk_gib_per_node=ppn * self.partitions.disk_gib_per_partition,
-                memory_gib_per_node=ppn * memory_per_partition,
-                cpu_utilization=self.requirement.ncu
-                / (nodes_for_one_copy * rf * self.node.ncu),
-            ),
-        )
+        return Placement(node_count=node_count, layout=layout)
 
     def bottlenecks_for(self, layout: Layout) -> List[Bottleneck]:
-        """Every resource that keeps a node from hosting this layout. Empty
-        when the limit is the node count or the partition cap instead."""
+        """Every resource that keeps a node from hosting this layout, in the
+        order disk, memory, CPU. Empty when the limit is the node count or the
+        partition cap instead."""
         found = []
         if layout.partitions_per_node > self.by_disk:
             found.append(Bottleneck.disk_capacity)
@@ -430,7 +391,7 @@ class _PartitionFit(BaseModel):
         )
         if layout.replica_count < self.replicas_needed(nodes_for_one_copy):
             found.append(Bottleneck.cpu)
-        return _in_order(found)
+        return found
 
     def layouts_at_count(self, count: int) -> List[Layout]:
         """Each way to split ``count`` nodes into equal copies, densest first."""
@@ -488,17 +449,11 @@ class _PartitionFit(BaseModel):
             placed = self.at_layout(candidate)
             if placed is not None and placed.node_count == count:
                 return placed
-            if blamed is None or not self._partitions_fit(blamed):
+            if blamed is None or set(self.bottlenecks_for(blamed)) - {Bottleneck.cpu}:
                 blamed = candidate
         return DoesNotFit(
             reason=f"Cannot host {count} nodes",
             bottlenecks=[] if blamed is None else self.bottlenecks_for(blamed),
-        )
-
-    def _partitions_fit(self, layout: Layout) -> bool:
-        """Whether a node holds this layout's partitions on disk and in memory."""
-        return not {Bottleneck.disk_capacity, Bottleneck.memory} & set(
-            self.bottlenecks_for(layout)
         )
 
     def unpinned(self) -> Union[Placement, DoesNotFit]:
@@ -515,5 +470,5 @@ class _PartitionFit(BaseModel):
             found.append(Bottleneck.memory)
         return DoesNotFit(
             reason="One partition does not fit on a node",
-            bottlenecks=_in_order(found),
+            bottlenecks=found,
         )
