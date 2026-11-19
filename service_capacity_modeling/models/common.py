@@ -47,10 +47,10 @@ from service_capacity_modeling.models import utils
 from service_capacity_modeling.models.headroom_strategy import HeadroomStrategy
 from service_capacity_modeling.models.placement import ceil_ignoring_float_error
 from service_capacity_modeling.models.placement import NodeResources
-from service_capacity_modeling.models.placement import place_zone
+from service_capacity_modeling.models.placement import place
+from service_capacity_modeling.models.placement import Placement
+from service_capacity_modeling.models.placement import Requirement
 from service_capacity_modeling.models.placement import round_zone_count
-from service_capacity_modeling.models.placement import ZonePlacement
-from service_capacity_modeling.models.placement import ZoneRequirement
 from service_capacity_modeling.models.headroom_strategy import (
     QueuingBasedHeadroomStrategy,
 )
@@ -664,7 +664,7 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
 ) -> ZoneClusterCapacity:
     """Size one zone from needs in ``instance``'s cores; see size_stateful_zone."""
     return size_stateful_zone(
-        ZoneRequirement(
+        Requirement(
             ncu=cpu_to_ncu(needed_cores, instance),
             memory_gib=needed_memory_gib,
             network_mbps=needed_network_mbps,
@@ -720,7 +720,7 @@ def stateful_node_resources(
 
 
 def size_stateful_zone(  # pylint: disable=too-many-arguments
-    requirement: ZoneRequirement,
+    requirement: Requirement,
     instance: Instance,
     drive: Drive,
     *,
@@ -749,17 +749,22 @@ def size_stateful_zone(  # pylint: disable=too-many-arguments
     # Model parameters reported after the per-resource node counts.
     cluster_params: Optional[Dict[str, Any]] = None,
 ) -> ZoneClusterCapacity:
-    """Size one zone of ``instance`` nodes for ``requirement``.
+    """Size one zone of ``instance`` nodes for an evenly divided ``requirement``.
 
-    ``place_zone`` counts nodes for CPU, memory, network and local disk. On an
+    ``place`` counts nodes for CPU, memory, network and local disk. On an
     instance without local disk, the zone's disk goes on ``drive`` volumes
     sized for the node count the other resources need.
     """
+    if requirement.partitions is not None:
+        raise ValueError(
+            "size_stateful_zone divides the requirement evenly; place a "
+            "partitioned requirement with place()"
+        )
     node = stateful_node_resources(
         instance, reserve_memory, write_buffer, read_write_ratio
     )
     on_attached_drives = node.disk_gib == 0
-    placement = place_zone(
+    placement = place(
         requirement.model_copy(update={"disk_gib": 0, "disk_io_bytes_per_s": 0})
         if on_attached_drives
         else requirement,
@@ -769,7 +774,8 @@ def size_stateful_zone(  # pylint: disable=too-many-arguments
     )
     # stateful_node_resources rejects a shape with no memory, and an instance
     # always has CPU and network, so every requirement places.
-    assert isinstance(placement, ZonePlacement), placement
+    assert isinstance(placement, Placement), placement
+    assert placement.node_counts is not None
 
     attached_drives: List[Drive] = []
     if on_attached_drives and requirement.disk_gib > 0:
@@ -797,7 +803,9 @@ def size_stateful_zone(  # pylint: disable=too-many-arguments
             min_count=min_count,
         )
 
-    count = placement.count
+    # Both placements above divide evenly, so each has node_counts.
+    assert placement.node_counts is not None
+    count = placement.node_count
     logger.debug(
         "For (ncu, memory_gib, disk_gib) = (%s, %s, %s) need (%s, %s, %s, %s)",
         requirement.ncu,
