@@ -33,6 +33,11 @@ def _fewest(
     return placed if isinstance(placed, Placement) else None
 
 
+def _nodes_for_one_copy(requirement: Requirement, placed: Placement) -> int:
+    assert requirement.partitions is not None and placed.layout is not None
+    return math.ceil(requirement.partitions.count / placed.layout.partitions_per_node)
+
+
 @st.composite
 def valid_problems(draw):
     """Generate disk-only and memory-constrained capacity problems."""
@@ -133,7 +138,7 @@ class TestAlgorithmBasics:
 
         assert result is not None
         assert result.node_count <= max_nodes
-        assert result.partitions.replica_count >= requirement.partitions.min_replicas
+        assert result.layout.replica_count >= requirement.partitions.min_replicas
 
     def test_memory_limits_partitions_per_node_independently_from_disk(self):
         """Memory can limit partition placement while disk remains unchanged."""
@@ -156,10 +161,8 @@ class TestAlgorithmBasics:
         result = _fewest(requirement, node, max_nodes)
 
         assert result is not None
-        assert result.partitions.partitions_per_node == 2
-        assert result.partitions.nodes_for_one_copy == 5
-        assert result.partitions.max_partitions_per_node_by_disk == 5
-        assert result.partitions.max_partitions_per_node_by_memory == 2
+        assert result.layout.partitions_per_node == 2
+        assert _nodes_for_one_copy(requirement, result) == 5
 
     def test_exact_float_boundary_keeps_valid_partition_fit(self):
         max_nodes = 8
@@ -181,7 +184,7 @@ class TestAlgorithmBasics:
         result = _fewest(requirement, node, max_nodes)
 
         assert result is not None
-        assert result.partitions.partitions_per_node == 47
+        assert result.layout.partitions_per_node == 47
         assert result.node_count == 8
 
     def test_returns_none_when_partition_exceeds_node_memory(self):
@@ -225,8 +228,8 @@ class TestAlgorithmBasics:
         result = _fewest(requirement, node, max_nodes)
 
         assert result is not None
-        assert result.partitions.nodes_for_one_copy == 4
-        assert result.partitions.replica_count == 3
+        assert _nodes_for_one_copy(requirement, result) == 4
+        assert result.layout.replica_count == 3
         assert result.node_count == 12
 
     def test_memory_demand_on_a_node_without_memory_names_memory(self):
@@ -286,8 +289,8 @@ class TestAlgorithmBasics:
 
         assert result is not None
         assert result.node_count == 2
-        assert result.partitions.nodes_for_one_copy == 1
-        assert result.partitions.partitions_per_node == 12
+        assert _nodes_for_one_copy(requirement, result) == 1
+        assert result.layout.partitions_per_node == 12
 
 
 class TestPlanSelection:
@@ -313,9 +316,9 @@ class TestPlanSelection:
         assert result is not None
         # With max_ppn=10, base=ceil(100/10)=10, cpu_per_copy=160 >= 64
         # So RF=min_rf=2, which fits easily
-        assert result.partitions.partitions_per_node == 10  # Max PPn
-        assert result.partitions.nodes_for_one_copy == 10
-        assert result.partitions.replica_count == 2
+        assert result.layout.partitions_per_node == 10  # Max PPn
+        assert _nodes_for_one_copy(requirement, result) == 10
+        assert result.layout.replica_count == 2
 
     def test_prefers_fewer_nodes_over_higher_rf(self):
         """For CPU-constrained workloads, prefer fewer nodes over higher RF.
@@ -342,8 +345,8 @@ class TestPlanSelection:
         result = _fewest(requirement, node, max_nodes)
 
         assert result is not None
-        assert result.partitions.partitions_per_node == 2
-        assert result.partitions.replica_count == 2
+        assert result.layout.partitions_per_node == 2
+        assert result.layout.replica_count == 2
         assert result.node_count == 200
 
     def test_returns_none_when_every_ppn_exceeds_limit(self):
@@ -392,8 +395,8 @@ class TestPlanSelection:
         result = _fewest(requirement, node, max_nodes)
 
         assert result is not None
-        assert result.partitions.partitions_per_node == 4
-        assert result.partitions.replica_count == 2
+        assert result.layout.partitions_per_node == 4
+        assert result.layout.replica_count == 2
         assert result.node_count == 50
 
     def test_prefers_higher_rf_for_equal_node_count(self):
@@ -418,8 +421,8 @@ class TestPlanSelection:
 
         assert result is not None
         assert result.node_count == 6
-        assert result.partitions.partitions_per_node == 15
-        assert result.partitions.replica_count == 3
+        assert result.layout.partitions_per_node == 15
+        assert result.layout.replica_count == 3
 
     def test_skips_equivalent_partition_densities(self, monkeypatch):
         real_ceil = math.ceil
@@ -453,8 +456,8 @@ class TestPlanSelection:
 
         assert result is not None
         assert result.node_count == 625
-        assert result.partitions.replica_count == 25
-        assert result.partitions.partitions_per_node == 41_666
+        assert result.layout.replica_count == 25
+        assert result.layout.partitions_per_node == 41_666
 
 
 class TestAlgorithmProperties:
@@ -472,28 +475,18 @@ class TestAlgorithmProperties:
         # Node count within limit
         assert result.node_count <= max_nodes
 
-        # RF at least min_rf
-        assert result.partitions.replica_count >= requirement.partitions.min_replicas
+        # RF at least min_rf, and at least one partition per node
+        assert result.layout.partitions_per_node >= 1
+        assert result.layout.replica_count >= requirement.partitions.min_replicas
 
-        # PPn is valid
-        assert (
-            1
-            <= result.partitions.partitions_per_node
-            <= result.partitions.max_partitions_per_node_by_disk
-        )
         used_disk_gib = (
-            result.partitions.partitions_per_node
+            result.layout.partitions_per_node
             * requirement.partitions.disk_gib_per_partition
         )
         assert used_disk_gib <= math.nextafter(node.disk_gib, math.inf)
         if requirement.partitions.memory_gib_per_partition is not None:
-            assert result.partitions.max_partitions_per_node_by_memory is not None
-            assert (
-                result.partitions.partitions_per_node
-                <= result.partitions.max_partitions_per_node_by_memory
-            )
             used_memory_gib = (
-                result.partitions.partitions_per_node
+                result.layout.partitions_per_node
                 * requirement.partitions.memory_gib_per_partition
             )
             assert used_memory_gib <= math.nextafter(node.memory_gib, math.inf)
@@ -501,15 +494,6 @@ class TestAlgorithmProperties:
         # CPU constraint satisfied
         total_cpu = result.node_count * node.ncu
         assert total_cpu >= requirement.ncu
-
-        # Reported per-node use fits what the node offers
-        assert result.partitions.disk_gib_per_node <= math.nextafter(
-            node.disk_gib, math.inf
-        )
-        assert result.partitions.memory_gib_per_node <= math.nextafter(
-            node.memory_gib, math.inf
-        )
-        assert result.partitions.cpu_utilization <= 1
 
     @given(problem=valid_problems())
     @settings(max_examples=500, deadline=None)
@@ -537,8 +521,8 @@ class TestAlgorithmProperties:
 
         result_rank = (
             result.node_count,
-            -result.partitions.replica_count,
-            -result.partitions.partitions_per_node,
+            -result.layout.replica_count,
+            -result.layout.partitions_per_node,
         )
         for ppn in range(min(max_ppn, requirement.partitions.count), 0, -1):
             base = math.ceil(requirement.partitions.count / ppn)
@@ -559,14 +543,14 @@ class TestAlgorithmProperties:
         if result is None:
             return
 
-        if result.partitions.nodes_for_one_copy >= 2:
+        if _nodes_for_one_copy(requirement, result) >= 2:
             expected = (
-                result.partitions.nodes_for_one_copy * result.partitions.replica_count
+                _nodes_for_one_copy(requirement, result) * result.layout.replica_count
             )
             assert result.node_count == expected
         else:
             # Special case: base=1, node_count = max(2, rf)
-            assert result.node_count == max(2, result.partitions.replica_count)
+            assert result.node_count == max(2, result.layout.replica_count)
 
 
 class TestEdgeCases:
@@ -594,9 +578,9 @@ class TestEdgeCases:
         result = _fewest(requirement, node, max_nodes)
 
         assert result is not None
-        assert result.partitions.partitions_per_node == 1
-        assert result.partitions.nodes_for_one_copy == 1
-        assert result.partitions.replica_count == 2  # min_rf (2*16=32 >= 32 cpu_needed)
+        assert result.layout.partitions_per_node == 1
+        assert _nodes_for_one_copy(requirement, result) == 1
+        assert result.layout.replica_count == 2  # min_rf (2*16=32 >= 32 cpu_needed)
         assert result.node_count == 2  # max(2, rf)
 
     def test_min_rf_one(self):
@@ -617,7 +601,7 @@ class TestEdgeCases:
         result = _fewest(requirement, node, max_nodes)
 
         assert result is not None
-        assert result.partitions.replica_count >= 1
+        assert result.layout.replica_count >= 1
 
     def test_exact_fit(self):
         """Algorithm handles exact fit scenarios."""
@@ -640,11 +624,9 @@ class TestEdgeCases:
 
         assert result is not None
         assert result.node_count == 4
-        assert result.partitions.partitions_per_node == 5
-        assert result.partitions.nodes_for_one_copy == 2
-        assert result.partitions.replica_count == 2
-        assert result.partitions.max_partitions_per_node_by_disk == 5
-        assert result.partitions.max_partitions_per_node_by_memory == 5
+        assert result.layout.partitions_per_node == 5
+        assert _nodes_for_one_copy(requirement, result) == 2
+        assert result.layout.replica_count == 2
 
 
 class TestPins:
@@ -669,7 +651,7 @@ class TestPins:
         )
 
         assert isinstance(placed, Placement)
-        assert (placed.node_count, placed.partitions.partitions_per_node) == (8, 3)
+        assert (placed.node_count, placed.layout.partitions_per_node) == (8, 3)
 
     def test_a_layout_that_overfills_disk_names_disk(self):
         node = NodeResources(ncu=16, disk_gib=250)
@@ -712,8 +694,8 @@ class TestPins:
         )
 
         assert isinstance(placed, Placement)
-        assert (placed.node_count, placed.partitions.partitions_per_node) == (6, 6)
-        assert placed.partitions.replica_count == 3
+        assert (placed.node_count, placed.layout.partitions_per_node) == (6, 6)
+        assert placed.layout.replica_count == 3
 
     def test_a_count_too_small_for_the_cpu_names_cpu(self):
         node = NodeResources(ncu=16, disk_gib=1_200)
