@@ -72,7 +72,7 @@ from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
 from service_capacity_modeling.models.common import zonal_requirements_from_current
-from service_capacity_modeling.models.placement import ZoneRequirement
+from service_capacity_modeling.models.placement import Requirement
 from service_capacity_modeling.models.org.netflix.cassandra_memory import (
     DEFAULT_MAX_PAGE_CACHE_GIB,
     base_memory_gib,
@@ -1524,7 +1524,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         )
 
     cluster = size_stateful_zone(
-        ZoneRequirement(
+        Requirement(
             ncu=cpu_to_ncu(int(requirement.cpu_cores.mid), instance),
             disk_gib=max(needed_disk_gib, initial_ebs_disk_gib or 0),
             memory_gib=int(requirement.mem_gib.mid),
