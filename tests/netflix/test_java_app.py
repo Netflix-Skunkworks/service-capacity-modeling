@@ -7,6 +7,7 @@ from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Interval
+from service_capacity_modeling.interface import Lifecycle
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.common import normalize_cores
 from tests.util import Approximation
@@ -82,6 +83,25 @@ def test_java_app_small_but_high_qps():
     )
     assert 15 < normalize_cores(cores, java_result.instance) < 100
     assert 10_000 < java_result.annual_cost < 40_000
+
+
+def test_uncertain_java_app_respects_hardware_filters():
+    result = planner.plan(
+        model_name="org.netflix.stateless-java",
+        region="us-east-1",
+        desires=CapacityDesires(),
+        simulations=1,
+        percentiles=(50,),
+        lifecycles=[Lifecycle.alpha],
+        drives=["gp2"],
+    )
+
+    for plans in (result.least_regret, result.mean, result.percentiles[50]):
+        assert plans
+        for plan in plans:
+            cluster = plan.candidate_clusters.regional[0]
+            assert cluster.instance.lifecycle == Lifecycle.alpha
+            assert [drive.name for drive in cluster.attached_drives] == ["gp2"]
 
 
 def test_uncertain_java_app():
