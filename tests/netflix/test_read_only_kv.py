@@ -7,7 +7,7 @@ A read-only data serving layer backed by RocksDB that:
 - Serves read traffic with low latency
 - Deploys regionally with configurable replication (RF=2 default)
 
-Note: Algorithm-specific tests live in test_partition_aware_algorithm.py.
+Note: Algorithm-specific tests live in tests/test_partitioned_placement.py.
 These tests focus on model integration and E2E behavior.
 """
 

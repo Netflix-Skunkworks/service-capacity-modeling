@@ -16,15 +16,14 @@ from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import QueryPattern
-from service_capacity_modeling.models.org.netflix.partition_aware_algorithm import (
-    place,
-    Placement,
-)
-from service_capacity_modeling.models.placement import NodeResources
 from service_capacity_modeling.models.placement import DoesNotFit
+from service_capacity_modeling.models.placement import NodeResources
+from service_capacity_modeling.models.placement import place
+from service_capacity_modeling.models.placement import Placement
 from service_capacity_modeling.models.org.netflix.read_only_kv import (
     _estimate_read_only_kv_cluster,
 )
+from service_capacity_modeling.models.org.netflix.read_only_kv import MIN_NODES
 from service_capacity_modeling.models.org.netflix.read_only_kv import (
     NflxReadOnlyKVArguments,
 )
@@ -150,13 +149,17 @@ def test_a_container_size_is_placed_from_the_same_demand():
     requirement = read_only_kv_requirement(desires, args)
     assert requirement is not None
 
-    container = NodeResources(ncu=12, disk_gib=600, memory_gib=40)
-    placed = place(requirement, container)
-    assert isinstance(placed, Placement)
-    assert placed.partitions_per_node * requirement.disk_gib_per_partition <= 600
-    assert placed.cpu_utilization <= 1
+    limits = {"min_count": MIN_NODES, "max_count": args.max_regional_size}
 
-    too_small = place(requirement, NodeResources(ncu=12, disk_gib=50))
+    container = NodeResources(ncu=12, disk_gib=600, memory_gib=40)
+    placed = place(requirement, container, **limits)
+    assert isinstance(placed, Placement)
+    assert requirement.partitions is not None and placed.partitions is not None
+    per_partition_gib = requirement.partitions.disk_gib_per_partition
+    assert placed.partitions.partitions_per_node * per_partition_gib <= 600
+    assert placed.partitions.cpu_utilization <= 1
+
+    too_small = place(requirement, NodeResources(ncu=12, disk_gib=50), **limits)
     assert isinstance(too_small, DoesNotFit)
     assert too_small.bottlenecks == [Bottleneck.disk_capacity]
 
@@ -175,13 +178,16 @@ def test_an_ec2_node_places_like_the_model_plans():
         if node is None or not isinstance(plan, CapacityPlan):
             continue
         compared += 1
-        placed = place(requirement, node)
+        placed = place(
+            requirement, node, min_count=MIN_NODES, max_count=args.max_regional_size
+        )
         assert isinstance(placed, Placement), name
+        assert placed.partitions is not None, name
         assert _layout(plan) == {
             "count": placed.node_count,
-            "read-only-kv.partitions_per_node": placed.partitions_per_node,
-            "read-only-kv.replica_count": placed.replica_count,
-            "read-only-kv.nodes_for_one_copy": placed.nodes_for_one_copy,
+            "read-only-kv.partitions_per_node": placed.partitions.partitions_per_node,
+            "read-only-kv.replica_count": placed.partitions.replica_count,
+            "read-only-kv.nodes_for_one_copy": placed.partitions.nodes_for_one_copy,
         }, name
     assert compared > 10
 
