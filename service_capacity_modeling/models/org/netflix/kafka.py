@@ -48,7 +48,7 @@ from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import size_stateful_zone
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import zonal_requirements_from_current
-from service_capacity_modeling.models.placement import ZoneRequirement
+from service_capacity_modeling.models.placement import Requirement
 from service_capacity_modeling.models.org.netflix.iso_date_math import iso_to_seconds
 
 logger = logging.getLogger(__name__)
@@ -390,7 +390,7 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     )
     min_count_for_data = math.ceil(needed_disk_gib / max_disk_per_node_gib)
     cluster = size_stateful_zone(
-        ZoneRequirement(
+        Requirement(
             ncu=cpu_to_ncu(int(requirement.cpu_cores.mid), instance),
             disk_gib=int(requirement.disk_gib.mid),
             memory_gib=int(requirement.mem_gib.mid),
