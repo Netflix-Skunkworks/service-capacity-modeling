@@ -3,6 +3,8 @@
 from typing import Any
 from typing import Dict
 
+import math
+
 import pytest
 from pydantic import ValidationError
 
@@ -154,10 +156,10 @@ def test_a_container_size_is_placed_from_the_same_demand():
     container = NodeResources(ncu=12, disk_gib=600, memory_gib=40)
     placed = place(requirement, container, **limits)
     assert isinstance(placed, Placement)
-    assert requirement.partitions is not None and placed.partitions is not None
+    assert requirement.partitions is not None and placed.layout is not None
     per_partition_gib = requirement.partitions.disk_gib_per_partition
-    assert placed.partitions.partitions_per_node * per_partition_gib <= 600
-    assert placed.partitions.cpu_utilization <= 1
+    assert placed.layout.partitions_per_node * per_partition_gib <= 600
+    assert placed.node_count * container.ncu >= requirement.ncu
 
     too_small = place(requirement, NodeResources(ncu=12, disk_gib=50), **limits)
     assert isinstance(too_small, DoesNotFit)
@@ -182,12 +184,15 @@ def test_an_ec2_node_places_like_the_model_plans():
             requirement, node, min_count=MIN_NODES, max_count=args.max_regional_size
         )
         assert isinstance(placed, Placement), name
-        assert placed.partitions is not None, name
+        assert requirement.partitions is not None, name
+        assert placed.layout is not None, name
         assert _layout(plan) == {
             "count": placed.node_count,
-            "read-only-kv.partitions_per_node": placed.partitions.partitions_per_node,
-            "read-only-kv.replica_count": placed.partitions.replica_count,
-            "read-only-kv.nodes_for_one_copy": placed.partitions.nodes_for_one_copy,
+            "read-only-kv.partitions_per_node": placed.layout.partitions_per_node,
+            "read-only-kv.replica_count": placed.layout.replica_count,
+            "read-only-kv.nodes_for_one_copy": math.ceil(
+                requirement.partitions.count / placed.layout.partitions_per_node
+            ),
         }, name
     assert compared > 10
 

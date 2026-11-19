@@ -61,10 +61,11 @@ from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import usable_memory_gib
+from service_capacity_modeling.models.placement import ceil_ignoring_float_error
 from service_capacity_modeling.models.placement import DoesNotFit
+from service_capacity_modeling.models.placement import floor_ignoring_float_error
 from service_capacity_modeling.models.placement import Layout
 from service_capacity_modeling.models.placement import NodeResources
-from service_capacity_modeling.models.placement import PartitionPlacement
 from service_capacity_modeling.models.placement import Partitions
 from service_capacity_modeling.models.placement import place
 from service_capacity_modeling.models.placement import Requirement
@@ -314,22 +315,29 @@ def read_only_kv_node(
 
 
 def _cluster_params(
-    partitions: Partitions,
+    requirement: Requirement,
     node: NodeResources,
-    placed: PartitionPlacement,
+    layout: Layout,
     memory: _MemoryPlacement,
     reserved_memory_gib: float,
 ) -> Dict[str, Any]:
+    partitions = requirement.partitions
+    assert partitions is not None  # read_only_kv_requirement always sets them
+    ppn = layout.partitions_per_node
+    nodes_for_one_copy = math.ceil(partitions.count / ppn)
     params: Dict[str, Any] = {
         "read-only-kv.total_num_partitions": partitions.count,
         "read-only-kv.min_replica_count": partitions.min_replicas,
-        "read-only-kv.replica_count": placed.replica_count,
-        "read-only-kv.partitions_per_node": placed.partitions_per_node,
-        "read-only-kv.nodes_for_one_copy": placed.nodes_for_one_copy,
-        "read-only-kv.nodes_for_cpu": placed.nodes_for_cpu,
+        "read-only-kv.replica_count": layout.replica_count,
+        "read-only-kv.partitions_per_node": ppn,
+        "read-only-kv.nodes_for_one_copy": nodes_for_one_copy,
+        "read-only-kv.nodes_for_cpu": ceil_ignoring_float_error(
+            requirement.ncu / node.ncu
+        ),
         # What the placement uses on each node.
-        "read-only-kv.disk_gib_per_node": placed.disk_gib_per_node,
-        "read-only-kv.cpu_utilization": placed.cpu_utilization,
+        "read-only-kv.disk_gib_per_node": ppn * partitions.disk_gib_per_partition,
+        "read-only-kv.cpu_utilization": requirement.ncu
+        / (nodes_for_one_copy * layout.replica_count * node.ncu),
         EFFECTIVE_DISK_PER_NODE_GIB: node.disk_gib,
     }
     if memory.enabled:
@@ -337,7 +345,9 @@ def _cluster_params(
         per_copy_gib = partitions.memory_gib_per_partition * partitions.count
         params.update(
             {
-                "read-only-kv.memory_gib_per_node": placed.memory_gib_per_node,
+                "read-only-kv.memory_gib_per_node": (
+                    ppn * partitions.memory_gib_per_partition
+                ),
                 "read-only-kv.sst_memory_placement_enabled": True,
                 "read-only-kv.sst_memory_overhead_ratio": (
                     memory.sst_memory_overhead_ratio
@@ -352,14 +362,18 @@ def _cluster_params(
                 ),
                 "read-only-kv.buffered_sst_memory_per_copy_gib": per_copy_gib,
                 "read-only-kv.total_buffered_sst_memory_gib": (
-                    per_copy_gib * placed.replica_count
+                    per_copy_gib * layout.replica_count
                 ),
                 "read-only-kv.available_sst_memory_per_node_gib": node.memory_gib,
                 "read-only-kv.max_partitions_per_node_by_disk": (
-                    placed.max_partitions_per_node_by_disk
+                    floor_ignoring_float_error(
+                        node.disk_gib / partitions.disk_gib_per_partition
+                    )
                 ),
                 "read-only-kv.max_partitions_per_node_by_memory": (
-                    placed.max_partitions_per_node_by_memory
+                    floor_ignoring_float_error(
+                        node.memory_gib / partitions.memory_gib_per_partition
+                    )
                 ),
             }
         )
@@ -421,7 +435,7 @@ def _estimate_read_only_kv_cluster(
             ),
         )
 
-    assert placed.partitions is not None  # a partitioned placement
+    assert placed.layout is not None  # a partitioned placement
     cluster = RegionClusterCapacity(
         cluster_type="read-only-kv",
         count=placed.node_count,
@@ -431,7 +445,7 @@ def _estimate_read_only_kv_cluster(
     reserved_gib = _reserved_memory_gib(desires, args)
     upsert_params(
         cluster,
-        _cluster_params(partitions, node, placed.partitions, memory, reserved_gib),
+        _cluster_params(requirement, node, placed.layout, memory, reserved_gib),
     )
     penalties = _compute_penalties(
         instance=instance,
@@ -450,7 +464,7 @@ def _estimate_read_only_kv_cluster(
                 target_shape=instance,
             )
         ),
-        mem_gib=certain_float(per_copy_memory_gib * placed.partitions.replica_count),
+        mem_gib=certain_float(per_copy_memory_gib * placed.layout.replica_count),
         disk_gib=certain_float(0),  # Disk is placed by partition, not summed
         network_mbps=certain_float(simple_network_mbps(desires)),
         context={},
