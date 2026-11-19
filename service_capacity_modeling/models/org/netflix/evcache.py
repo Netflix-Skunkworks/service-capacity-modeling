@@ -51,7 +51,7 @@ from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import check_cluster_size_requirement
 from service_capacity_modeling.models.common import upsert_params
-from service_capacity_modeling.models.placement import ZoneRequirement
+from service_capacity_modeling.models.placement import Requirement
 from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -454,7 +454,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     if (min_count_for_data - 1) * max_data_per_node_gib >= needed_disk_gib:
         min_count_for_data -= 1
     cluster = size_stateful_zone(
-        ZoneRequirement(
+        Requirement(
             ncu=cpu_to_ncu(math.ceil(requirement.cpu_cores.mid), instance),
             disk_gib=needed_disk_gib,
             memory_gib=requirement.mem_gib.mid,
