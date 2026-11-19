@@ -120,7 +120,7 @@ def test_whole_partitions_need_more_nodes_than_dividing_evenly():
 
     assert isinstance(evenly, Placement) and evenly.node_count == 12
     assert isinstance(whole, Placement) and whole.node_count == 20
-    assert whole.partitions is not None and whole.partitions.partitions_per_node == 1
+    assert whole.layout is not None and whole.layout.partitions_per_node == 1
 
 
 def test_one_partition_puts_the_whole_dataset_on_every_node():
