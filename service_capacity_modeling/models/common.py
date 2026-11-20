@@ -1325,14 +1325,13 @@ class RequirementFromCurrentCapacity(BaseModel):
             )
         )
 
-    @property
-    def busy_ncu(self) -> float:
-        """The busy NCUs the zone needs, on no particular shape.
+    def cpu_requirement(self) -> Dict[str, Any]:
+        """The zone's CPU as ``Requirement`` fields, on no particular shape.
 
-        Current busy compute times the desired CPU buffer, then bounded by
-        any derived buffer against the current zone's usable NCUs (its NCUs
-        less its queueing headroom), the same units ``place`` divides by when
-        ``Requirement.ncu_is_busy`` is set.
+        ``ncu`` is current busy compute times the desired CPU buffer and any
+        derived scale, marked busy so each candidate node keeps its own
+        queueing headroom. A derived ceiling or floor bounds the zone's total
+        NCUs against the current zone's, as ``cpu()`` bounds cores.
         """
         current = self.current_instance
         current_ncu = cpu_to_ncu(
@@ -1342,13 +1341,19 @@ class RequirementFromCurrentCapacity(BaseModel):
         cpu_buffer = buffer_for_components(
             buffers=self.buffers, components=[BufferComponent.cpu]
         )
-        derived_buffers = DerivedBuffers.for_components(
+        derived = DerivedBuffers.for_components(
             self.buffers.derived, [BufferComponent.cpu]
         )
-        return derived_buffers.calculate_requirement(
-            current_usage=busy * cpu_buffer.ratio,
-            existing_capacity=current_ncu * (1 - cpu_headroom_target(current)),
-        )
+        return {
+            "ncu": derived.scale * busy * cpu_buffer.ratio,
+            "ncu_is_busy": True,
+            "min_total_ncu": (
+                None if derived.floor is None else derived.floor * current_ncu
+            ),
+            "max_total_ncu": (
+                None if derived.ceiling is None else derived.ceiling * current_ncu
+            ),
+        }
 
     @property
     def mem_gib(self) -> float:

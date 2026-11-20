@@ -128,6 +128,19 @@ class Requirement(BaseModel):
         "utilization, so each node keeps its cpu_headroom free. False when "
         "ncu already allows for queueing, as sqrt staffing does.",
     )
+    min_total_ncu: Optional[float] = Field(
+        default=None,
+        ge=0,
+        description="Fewest NCUs the nodes may have in total, counting all "
+        "of each node's NCUs, such as to keep a current cluster's CPU.",
+    )
+    max_total_ncu: Optional[float] = Field(
+        default=None,
+        gt=0,
+        description="Most NCUs the nodes may have in total, counting all of "
+        "each node's NCUs, such as to not grow past a current cluster's CPU. "
+        "min_total_ncu wins when the two conflict.",
+    )
     memory_gib: float = Field(default=0, ge=0)
     network_mbps: float = Field(default=0, ge=0)
     disk_gib: float = Field(default=0, ge=0)
@@ -151,6 +164,8 @@ class Requirement(BaseModel):
             "disk_gib": self.disk_gib,
             "disk_io_bytes_per_s": self.disk_io_bytes_per_s,
             "write_buffer_gib": self.write_buffer_gib,
+            "min_total_ncu": self.min_total_ncu,
+            "max_total_ncu": self.max_total_ncu,
         }
         set_totals = [name for name, value in totals.items() if value]
         if set_totals:
@@ -271,6 +286,20 @@ def usable_ncu(requirement: Requirement, node: NodeResources) -> float:
     return node.ncu
 
 
+def _cpu_count(requirement: Requirement, node: NodeResources) -> int:
+    """Nodes for CPU, then held between the total-NCU bounds."""
+    count = ceil_ignoring_float_error(requirement.ncu / usable_ncu(requirement, node))
+    if requirement.max_total_ncu is not None:
+        count = min(
+            count, ceil_ignoring_float_error(requirement.max_total_ncu / node.ncu)
+        )
+    if requirement.min_total_ncu is not None:
+        count = max(
+            count, ceil_ignoring_float_error(requirement.min_total_ncu / node.ncu)
+        )
+    return count
+
+
 def _memory_count(requirement: Requirement, node: NodeResources) -> Optional[int]:
     """Nodes for memory and the write buffer, or None if the node has no
     memory for a requirement that needs some."""
@@ -328,9 +357,7 @@ def _place_evenly(
         )
 
     return round_zone_count(
-        count_cpu=ceil_ignoring_float_error(
-            requirement.ncu / usable_ncu(requirement, node)
-        ),
+        count_cpu=_cpu_count(requirement, node),
         count_memory=count_memory,
         count_network=count_network,
         count_disk_capacity=count_disk_capacity,
