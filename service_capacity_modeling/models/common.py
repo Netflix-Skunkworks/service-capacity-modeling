@@ -709,6 +709,7 @@ def stateful_node_resources(
     local = instance.drive if _has_local_disk(instance) else None
     return NodeResources(
         ncu=cpu_to_ncu(instance.cpu, instance),
+        cpu_headroom=cpu_headroom_target(instance),
         memory_gib=memory_gib,
         network_mbps=instance.net_mbps,
         disk_gib=local.size_gib if local else 0,
@@ -1323,6 +1324,36 @@ class RequirementFromCurrentCapacity(BaseModel):
                 existing_capacity=current_total_cpu,
             )
         )
+
+    def cpu_requirement(self) -> Dict[str, Any]:
+        """The zone's CPU as ``Requirement`` fields, on no particular shape.
+
+        ``ncu`` is current busy compute times the desired CPU buffer and any
+        derived scale, marked busy so each candidate node keeps its own
+        queueing headroom. A derived ceiling or floor bounds the zone's total
+        NCUs against the current zone's, as ``cpu()`` bounds cores.
+        """
+        current = self.current_instance
+        current_ncu = cpu_to_ncu(
+            current.cpu * self.current_capacity.cluster_instance_count.mid, current
+        )
+        busy = self.current_capacity.cpu_utilization.mid / 100 * current_ncu
+        cpu_buffer = buffer_for_components(
+            buffers=self.buffers, components=[BufferComponent.cpu]
+        )
+        derived = DerivedBuffers.for_components(
+            self.buffers.derived, [BufferComponent.cpu]
+        )
+        return {
+            "ncu": derived.scale * busy * cpu_buffer.ratio,
+            "ncu_is_busy": True,
+            "min_total_ncu": (
+                None if derived.floor is None else derived.floor * current_ncu
+            ),
+            "max_total_ncu": (
+                None if derived.ceiling is None else derived.ceiling * current_ncu
+            ),
+        }
 
     @property
     def mem_gib(self) -> float:
