@@ -74,6 +74,17 @@ def _es_io_per_read(node_size_gib: float, segment_size_mb: int = 512) -> int:
     return levels
 
 
+def _zonal_ncu(desires: CapacityDesires, zones_in_region: int) -> float:
+    """A data zone's CPU in NCUs, on no particular shape.
+
+    Sqrt staffing already allows for queueing; half of the cores are kept
+    free for background work (merging mostly). The requirement's cpu_cores
+    is the same need in a candidate's vCPUs, for the plan to report.
+    """
+    cores = math.ceil(sqrt_staffed_cores(desires) * 1.5)
+    return cpu_to_ncu(cores, desires.reference_shape) / zones_in_region
+
+
 def _estimate_elasticsearch_requirement(  # noqa: E501 pylint: disable=too-many-positional-arguments
     node_type: str,
     instance: Instance,
@@ -320,7 +331,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
 
         data_cluster = size_stateful_zone(
             Requirement(
-                ncu=cpu_to_ncu(int(data_requirement.cpu_cores.mid), instance),
+                ncu=_zonal_ncu(desires, zones_in_region),
                 disk_gib=needed_disk_gib,
                 memory_gib=int(data_requirement.mem_gib.mid),
                 network_mbps=data_requirement.network_mbps.mid,
