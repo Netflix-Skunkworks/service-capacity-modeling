@@ -65,6 +65,7 @@ from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import size_stateful_zone
 from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import check_cluster_size_requirement
@@ -686,6 +687,10 @@ class _CassandraRequirementEstimate(BaseModel):
     disk_used_gib: float
     write_buffer_gib: float
     compaction_min_threshold: int
+    # The zone's CPU as Requirement fields, on no particular shape;
+    # requirement.cpu_cores is the same need in this instance's vCPUs, for
+    # the plan to report.
+    cpu: Dict[str, Any]
 
 
 # pylint: disable=too-many-locals
@@ -845,7 +850,29 @@ def _estimate_cassandra_requirement(
         disk_used_gib=disk_used_gib,
         write_buffer_gib=write_buffer_gib,
         compaction_min_threshold=min_threshold,
+        cpu=_zonal_cpu(desires, zones_per_region),
     )
+
+
+def _zonal_cpu(desires: CapacityDesires, zones_per_region: int) -> Dict[str, Any]:
+    """The zone's CPU as ``Requirement`` fields, on no particular shape.
+
+    From a current cluster it is busy NCUs, so each candidate node keeps its
+    own queueing headroom free, bounded by any derived buffer. Without one,
+    sqrt staffing already allows for queueing.
+    """
+    current_capacity = _get_current_capacity(desires)
+    if current_capacity and desires.current_clusters is not None:
+        return RequirementFromCurrentCapacity(
+            current_capacity=desires.current_clusters.zonal[0],
+            buffers=desires.buffers,
+        ).cpu_requirement()
+    cpu_buffer = buffer_for_components(
+        buffers=desires.buffers, components=[BACKGROUND_BUFFER]
+    )
+    cores = math.ceil(sqrt_staffed_cores(desires) * cpu_buffer.ratio)
+    ncu = cpu_to_ncu(cores, desires.reference_shape) / zones_per_region
+    return {"ncu": ncu, "ncu_is_busy": False}
 
 
 def _get_current_cluster_size(desires: CapacityDesires) -> int:
@@ -1525,7 +1552,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
 
     cluster = size_stateful_zone(
         Requirement(
-            ncu=cpu_to_ncu(int(requirement.cpu_cores.mid), instance),
+            **requirement_estimate.cpu,
             disk_gib=max(needed_disk_gib, initial_ebs_disk_gib or 0),
             memory_gib=int(requirement.mem_gib.mid),
             network_mbps=requirement.network_mbps.mid,
