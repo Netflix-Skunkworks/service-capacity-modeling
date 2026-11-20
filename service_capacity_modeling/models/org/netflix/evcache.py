@@ -15,6 +15,7 @@ from service_capacity_modeling.enum_utils import StrEnum
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import Bottleneck
@@ -235,8 +236,9 @@ def _estimate_evcache_requirement(
     return (
         CapacityRequirement(
             requirement_type=NflxEVCacheCapacityModel.cluster_type,
-            reference_shape=desires.reference_shape,
-            cpu_cores=certain_int(math.ceil(needed_cores)),
+            # Report the shape-free CPU the zone is sized for, in NCUs.
+            reference_shape=default_reference_shape,
+            cpu_cores=certain_float(_zonal_cpu(desires)["ncu"]),
             mem_gib=certain_float(needed_memory),
             disk_gib=certain_float(needed_disk),
             network_mbps=certain_float(needed_network_mbps),
@@ -247,6 +249,24 @@ def _estimate_evcache_requirement(
         ),
         regrets,
     )
+
+
+def _zonal_cpu(desires: CapacityDesires) -> Dict[str, Any]:
+    """The zone's CPU as ``Requirement`` fields, on no particular shape.
+
+    From a current cluster it is busy NCUs, so each candidate node keeps its
+    own queueing headroom free, bounded by any derived buffer. Without one,
+    sqrt staffing already allows for queueing. The requirement's cpu_cores
+    is the same need in a candidate's vCPUs, for the plan to report.
+    """
+    current_capacity = _current_evcache_cluster(desires)
+    if current_capacity:
+        return RequirementFromCurrentCapacity(
+            current_capacity=current_capacity, buffers=desires.buffers
+        ).cpu_requirement()
+    cpu_buffer = buffer_for_components(desires.buffers, [BufferComponent.cpu])
+    ncu = cpu_to_ncu(sqrt_staffed_cores(desires), desires.reference_shape)
+    return {"ncu": ncu * cpu_buffer.ratio, "ncu_is_busy": False}
 
 
 def _current_evcache_cluster(
@@ -455,7 +475,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         min_count_for_data -= 1
     cluster = size_stateful_zone(
         Requirement(
-            ncu=cpu_to_ncu(math.ceil(requirement.cpu_cores.mid), instance),
+            **_zonal_cpu(desires),
             disk_gib=needed_disk_gib,
             memory_gib=requirement.mem_gib.mid,
             network_mbps=requirement.network_mbps.mid,

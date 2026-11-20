@@ -1022,11 +1022,11 @@
   },
   {
     "annual_costs": {
-      "evcache.zonal-clusters": 3735.0
+      "evcache.zonal-clusters": 3942.0
     },
     "clusters": [
       {
-        "annual_cost": 1245.0,
+        "annual_cost": 1314.0,
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3,
@@ -1047,10 +1047,10 @@
         "cluster_type": "evcache",
         "count": 3,
         "deployment": "zonal",
-        "instance": "r5.large"
+        "instance": "r4.large"
       },
       {
-        "annual_cost": 1245.0,
+        "annual_cost": 1314.0,
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3,
@@ -1071,10 +1071,10 @@
         "cluster_type": "evcache",
         "count": 3,
         "deployment": "zonal",
-        "instance": "r5.large"
+        "instance": "r4.large"
       },
       {
-        "annual_cost": 1245.0,
+        "annual_cost": 1314.0,
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3,
@@ -1095,28 +1095,28 @@
         "cluster_type": "evcache",
         "count": 3,
         "deployment": "zonal",
-        "instance": "r5.large"
+        "instance": "r4.large"
       }
     ],
     "model": "org.netflix.evcache",
     "region": "us-east-1",
     "scenario": "evcache_tiny_with_spread",
     "service_tier": 1,
-    "total_annual_cost": 3735.0
+    "total_annual_cost": 3942.0
   },
   {
     "annual_costs": {
-      "evcache.zonal-clusters": 35360.64
+      "evcache.zonal-clusters": 32834.88
     },
     "clusters": [
       {
-        "annual_cost": 11786.88,
+        "annual_cost": 10944.96,
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3,
           "required_nodes_by_type": {
-            "cluster_size": 14,
-            "cpu": 14,
+            "cluster_size": 13,
+            "cpu": 13,
             "disk_capacity": 0,
             "disk_iops": 0,
             "memory": 2,
@@ -1126,18 +1126,18 @@
           "resource_bottleneck": "cpu"
         },
         "cluster_type": "evcache",
-        "count": 14,
+        "count": 13,
         "deployment": "zonal",
         "instance": "m8a.xlarge"
       },
       {
-        "annual_cost": 11786.88,
+        "annual_cost": 10944.96,
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3,
           "required_nodes_by_type": {
-            "cluster_size": 14,
-            "cpu": 14,
+            "cluster_size": 13,
+            "cpu": 13,
             "disk_capacity": 0,
             "disk_iops": 0,
             "memory": 2,
@@ -1147,18 +1147,18 @@
           "resource_bottleneck": "cpu"
         },
         "cluster_type": "evcache",
-        "count": 14,
+        "count": 13,
         "deployment": "zonal",
         "instance": "m8a.xlarge"
       },
       {
-        "annual_cost": 11786.88,
+        "annual_cost": 10944.96,
         "cluster_params": {
           "effective_disk_per_node_gib": 16384,
           "evcache.copies": 3,
           "required_nodes_by_type": {
-            "cluster_size": 14,
-            "cpu": 14,
+            "cluster_size": 13,
+            "cpu": 13,
             "disk_capacity": 0,
             "disk_iops": 0,
             "memory": 2,
@@ -1168,7 +1168,7 @@
           "resource_bottleneck": "cpu"
         },
         "cluster_type": "evcache",
-        "count": 14,
+        "count": 13,
         "deployment": "zonal",
         "instance": "m8a.xlarge"
       }
@@ -1177,7 +1177,7 @@
     "region": "us-east-1",
     "scenario": "evcache_small_no_replication",
     "service_tier": 1,
-    "total_annual_cost": 35360.64
+    "total_annual_cost": 32834.88
   },
   {
     "annual_costs": {
