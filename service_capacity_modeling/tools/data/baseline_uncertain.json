@@ -1481,74 +1481,74 @@
       },
       {
         "annual_costs": {
-          "kafka.zonal-clusters": 15523.56
+          "kafka.zonal-clusters": 10349.04
         },
         "clusters": [
           {
-            "annual_cost": 5174.52,
+            "annual_cost": 3449.68,
             "cluster_params": {
               "effective_disk_per_node_gib": 2328,
               "kafka.copies": 2,
               "required_nodes_by_type": {
-                "cluster_size": 3,
-                "cpu": 3,
+                "cluster_size": 2,
+                "cpu": 2,
                 "disk_capacity": 2,
                 "disk_iops": 0,
-                "memory": 2,
+                "memory": 1,
                 "min_count": 2,
                 "network": 1
               },
               "resource_bottleneck": "cpu"
             },
             "cluster_type": "kafka",
-            "count": 3,
+            "count": 2,
             "deployment": "zonal",
             "instance": "i7ie.xlarge"
           },
           {
-            "annual_cost": 5174.52,
+            "annual_cost": 3449.68,
             "cluster_params": {
               "effective_disk_per_node_gib": 2328,
               "kafka.copies": 2,
               "required_nodes_by_type": {
-                "cluster_size": 3,
-                "cpu": 3,
+                "cluster_size": 2,
+                "cpu": 2,
                 "disk_capacity": 2,
                 "disk_iops": 0,
-                "memory": 2,
+                "memory": 1,
                 "min_count": 2,
                 "network": 1
               },
               "resource_bottleneck": "cpu"
             },
             "cluster_type": "kafka",
-            "count": 3,
+            "count": 2,
             "deployment": "zonal",
             "instance": "i7ie.xlarge"
           },
           {
-            "annual_cost": 5174.52,
+            "annual_cost": 3449.68,
             "cluster_params": {
               "effective_disk_per_node_gib": 2328,
               "kafka.copies": 2,
               "required_nodes_by_type": {
-                "cluster_size": 3,
-                "cpu": 3,
+                "cluster_size": 2,
+                "cpu": 2,
                 "disk_capacity": 2,
                 "disk_iops": 0,
-                "memory": 2,
+                "memory": 1,
                 "min_count": 2,
                 "network": 1
               },
               "resource_bottleneck": "cpu"
             },
             "cluster_type": "kafka",
-            "count": 3,
+            "count": 2,
             "deployment": "zonal",
             "instance": "i7ie.xlarge"
           }
         ],
-        "total_annual_cost": 15523.56
+        "total_annual_cost": 10349.04
       }
     ],
     "mean": [
@@ -2060,17 +2060,17 @@
         },
         {
           "annual_costs": {
-            "kafka.zonal-clusters": 15743.07
+            "kafka.zonal-clusters": 17992.08
           },
           "clusters": [
             {
-              "annual_cost": 5247.69,
+              "annual_cost": 5997.36,
               "cluster_params": {
                 "effective_disk_per_node_gib": 1164,
                 "kafka.copies": 2,
                 "required_nodes_by_type": {
-                  "cluster_size": 7,
-                  "cpu": 7,
+                  "cluster_size": 8,
+                  "cpu": 8,
                   "disk_capacity": 6,
                   "disk_iops": 0,
                   "memory": 7,
@@ -2080,18 +2080,18 @@
                 "resource_bottleneck": "cpu"
               },
               "cluster_type": "kafka",
-              "count": 7,
+              "count": 8,
               "deployment": "zonal",
               "instance": "i3en.large"
             },
             {
-              "annual_cost": 5247.69,
+              "annual_cost": 5997.36,
               "cluster_params": {
                 "effective_disk_per_node_gib": 1164,
                 "kafka.copies": 2,
                 "required_nodes_by_type": {
-                  "cluster_size": 7,
-                  "cpu": 7,
+                  "cluster_size": 8,
+                  "cpu": 8,
                   "disk_capacity": 6,
                   "disk_iops": 0,
                   "memory": 7,
@@ -2101,18 +2101,18 @@
                 "resource_bottleneck": "cpu"
               },
               "cluster_type": "kafka",
-              "count": 7,
+              "count": 8,
               "deployment": "zonal",
               "instance": "i3en.large"
             },
             {
-              "annual_cost": 5247.69,
+              "annual_cost": 5997.36,
               "cluster_params": {
                 "effective_disk_per_node_gib": 1164,
                 "kafka.copies": 2,
                 "required_nodes_by_type": {
-                  "cluster_size": 7,
-                  "cpu": 7,
+                  "cluster_size": 8,
+                  "cpu": 8,
                   "disk_capacity": 6,
                   "disk_iops": 0,
                   "memory": 7,
@@ -2122,12 +2122,12 @@
                 "resource_bottleneck": "cpu"
               },
               "cluster_type": "kafka",
-              "count": 7,
+              "count": 8,
               "deployment": "zonal",
               "instance": "i3en.large"
             }
           ],
-          "total_annual_cost": 15743.07
+          "total_annual_cost": 17992.08
         }
       ]
     },

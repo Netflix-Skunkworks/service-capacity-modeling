@@ -947,17 +947,17 @@
   },
   {
     "annual_costs": {
-      "kafka.zonal-clusters": 85336.02
+      "kafka.zonal-clusters": 87921.96
     },
     "clusters": [
       {
-        "annual_cost": 28445.34,
+        "annual_cost": 29307.32,
         "cluster_params": {
           "effective_disk_per_node_gib": 1164,
           "kafka.copies": 2,
           "required_nodes_by_type": {
-            "cluster_size": 33,
-            "cpu": 33,
+            "cluster_size": 34,
+            "cpu": 34,
             "disk_capacity": 21,
             "disk_iops": 0,
             "memory": 30,
@@ -967,18 +967,18 @@
           "resource_bottleneck": "cpu"
         },
         "cluster_type": "kafka",
-        "count": 33,
+        "count": 34,
         "deployment": "zonal",
         "instance": "i7ie.large"
       },
       {
-        "annual_cost": 28445.34,
+        "annual_cost": 29307.32,
         "cluster_params": {
           "effective_disk_per_node_gib": 1164,
           "kafka.copies": 2,
           "required_nodes_by_type": {
-            "cluster_size": 33,
-            "cpu": 33,
+            "cluster_size": 34,
+            "cpu": 34,
             "disk_capacity": 21,
             "disk_iops": 0,
             "memory": 30,
@@ -988,18 +988,18 @@
           "resource_bottleneck": "cpu"
         },
         "cluster_type": "kafka",
-        "count": 33,
+        "count": 34,
         "deployment": "zonal",
         "instance": "i7ie.large"
       },
       {
-        "annual_cost": 28445.34,
+        "annual_cost": 29307.32,
         "cluster_params": {
           "effective_disk_per_node_gib": 1164,
           "kafka.copies": 2,
           "required_nodes_by_type": {
-            "cluster_size": 33,
-            "cpu": 33,
+            "cluster_size": 34,
+            "cpu": 34,
             "disk_capacity": 21,
             "disk_iops": 0,
             "memory": 30,
@@ -1009,7 +1009,7 @@
           "resource_bottleneck": "cpu"
         },
         "cluster_type": "kafka",
-        "count": 33,
+        "count": 34,
         "deployment": "zonal",
         "instance": "i7ie.large"
       }
@@ -1018,7 +1018,7 @@
     "region": "us-east-1",
     "scenario": "kafka_500mib_throughput",
     "service_tier": 1,
-    "total_annual_cost": 85336.02
+    "total_annual_cost": 87921.96
   },
   {
     "annual_costs": {

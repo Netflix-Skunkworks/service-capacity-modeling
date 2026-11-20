@@ -45,6 +45,7 @@ from service_capacity_modeling.models.common import cpu_to_ncu
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import size_stateful_zone
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import zonal_requirements_from_current
@@ -88,11 +89,14 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
     copies_per_region: int,
     hot_retention_seconds: float,
     zones_per_region: int = 3,
-) -> Tuple[CapacityRequirement, Tuple[str, ...]]:
+) -> Tuple[CapacityRequirement, Tuple[str, ...], Dict[str, Any]]:
     """Estimate the capacity required for one zone given a regional desire
 
     The input desires should be the **regional** desire, and this function will
-    return the zonal capacity requirement
+    return the zonal capacity requirement, its regrets, and the zone's CPU on
+    no particular shape (``Requirement`` fields ``ncu`` and ``ncu_is_busy``).
+    The requirement's cpu_cores is the same need in ``instance`` vCPUs, for
+    the plan to report.
     """
     normalized_to_mib = desires.model_copy(deep=True)
     read_mib_per_second = (
@@ -163,7 +167,20 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
         logger.debug(
             "kafka normalized needed cores: %s", capacity_requirement.cpu_cores
         )
+        # Busy NCUs, so each candidate node keeps its own queueing headroom.
+        cpu: Dict[str, Any] = RequirementFromCurrentCapacity(
+            current_capacity=normalize_midpoint_desires.current_clusters.zonal[0],
+            buffers=desires.buffers,
+        ).cpu_requirement()
     else:
+        # Sqrt staffing already allows for queueing.
+        cpu = {
+            "ncu": cpu_to_ncu(
+                sqrt_staffed_cores(normalized_to_mib), desires.reference_shape
+            )
+            / zones_per_region,
+            "ncu_is_busy": False,
+        }
         # We have no existing utilization to go from
         needed_cores = (
             normalize_cores(
@@ -219,6 +236,7 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
             },
         ),
         ("spend", "disk", "mem"),
+        cpu,
     )
 
 
@@ -319,7 +337,7 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
             f"instance is {instance.family}",
         )
 
-    requirement, regrets = _estimate_kafka_requirement(
+    requirement, regrets, cpu = _estimate_kafka_requirement(
         instance=instance,
         desires=desires,
         zones_per_region=zones_per_region,
@@ -391,7 +409,7 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     min_count_for_data = math.ceil(needed_disk_gib / max_disk_per_node_gib)
     cluster = size_stateful_zone(
         Requirement(
-            ncu=cpu_to_ncu(int(requirement.cpu_cores.mid), instance),
+            **cpu,
             disk_gib=int(requirement.disk_gib.mid),
             memory_gib=int(requirement.mem_gib.mid),
             network_mbps=requirement.network_mbps.mid,

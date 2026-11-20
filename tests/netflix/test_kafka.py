@@ -78,7 +78,7 @@ def test_kafka_basic():
     lr_cluster = lr.candidate_clusters.zonal
 
     assert 8_000 < lr.candidate_clusters.total_annual_cost < 20_000
-    assert lr_cluster[0].instance.family in ("i3en", "i4i", "r5", "r7a")
+    assert lr_cluster[0].instance.family in ("i3en", "i4i", "i7ie", "r5", "r7a")
 
 
 def test_kafka_large_scale():
