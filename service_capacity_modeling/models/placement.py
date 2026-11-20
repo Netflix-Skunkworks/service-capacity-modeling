@@ -41,6 +41,14 @@ class NodeResources(BaseModel):
     """What one node offers after reservations."""
 
     ncu: float = Field(gt=0, description="NCUs (normalized compute units).")
+    cpu_headroom: float = Field(
+        default=0,
+        ge=0,
+        lt=1,
+        description="Fraction of ncu kept free so requests do not queue, "
+        "which shrinks as a node has more vCPUs. Applied only to a "
+        "requirement whose NCUs are busy NCUs.",
+    )
     disk_gib: float = Field(
         default=0, ge=0, description="Local disk. 0 when the node has none."
     )
@@ -114,6 +122,12 @@ class Requirement(BaseModel):
     """
 
     ncu: float = Field(ge=0, description="NCUs (normalized compute units).")
+    ncu_is_busy: bool = Field(
+        default=False,
+        description="True when ncu is measured busy compute, such as current "
+        "utilization, so each node keeps its cpu_headroom free. False when "
+        "ncu already allows for queueing, as sqrt staffing does.",
+    )
     memory_gib: float = Field(default=0, ge=0)
     network_mbps: float = Field(default=0, ge=0)
     disk_gib: float = Field(default=0, ge=0)
@@ -249,6 +263,14 @@ def place(  # pylint: disable=too-many-arguments
     return fit.unpinned()
 
 
+def usable_ncu(requirement: Requirement, node: NodeResources) -> float:
+    """NCUs of one node the requirement may use: all of them, or for busy
+    NCUs, what is left after the node's queueing headroom."""
+    if requirement.ncu_is_busy:
+        return node.ncu * (1 - node.cpu_headroom)
+    return node.ncu
+
+
 def _memory_count(requirement: Requirement, node: NodeResources) -> Optional[int]:
     """Nodes for memory and the write buffer, or None if the node has no
     memory for a requirement that needs some."""
@@ -306,7 +328,9 @@ def _place_evenly(
         )
 
     return round_zone_count(
-        count_cpu=ceil_ignoring_float_error(requirement.ncu / node.ncu),
+        count_cpu=ceil_ignoring_float_error(
+            requirement.ncu / usable_ncu(requirement, node)
+        ),
         count_memory=count_memory,
         count_network=count_network,
         count_disk_capacity=count_disk_capacity,
@@ -357,7 +381,7 @@ class _PartitionFit(BaseModel):
 
     def replicas_needed(self, nodes_for_one_copy: int) -> int:
         """The fewest copies that meet the minimum and the CPU need."""
-        cpu_per_copy = nodes_for_one_copy * self.node.ncu
+        cpu_per_copy = nodes_for_one_copy * usable_ncu(self.requirement, self.node)
         return max(
             self.partitions.min_replicas,
             ceil_ignoring_float_error(self.requirement.ncu / cpu_per_copy),

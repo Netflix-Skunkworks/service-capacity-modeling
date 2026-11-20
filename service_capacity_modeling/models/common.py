@@ -709,6 +709,7 @@ def stateful_node_resources(
     local = instance.drive if _has_local_disk(instance) else None
     return NodeResources(
         ncu=cpu_to_ncu(instance.cpu, instance),
+        cpu_headroom=cpu_headroom_target(instance),
         memory_gib=memory_gib,
         network_mbps=instance.net_mbps,
         disk_gib=local.size_gib if local else 0,
@@ -1322,6 +1323,31 @@ class RequirementFromCurrentCapacity(BaseModel):
                 current_usage=used_cpu,
                 existing_capacity=current_total_cpu,
             )
+        )
+
+    @property
+    def busy_ncu(self) -> float:
+        """The busy NCUs the zone needs, on no particular shape.
+
+        Current busy compute times the desired CPU buffer, then bounded by
+        any derived buffer against the current zone's usable NCUs (its NCUs
+        less its queueing headroom), the same units ``place`` divides by when
+        ``Requirement.ncu_is_busy`` is set.
+        """
+        current = self.current_instance
+        current_ncu = cpu_to_ncu(
+            current.cpu * self.current_capacity.cluster_instance_count.mid, current
+        )
+        busy = self.current_capacity.cpu_utilization.mid / 100 * current_ncu
+        cpu_buffer = buffer_for_components(
+            buffers=self.buffers, components=[BufferComponent.cpu]
+        )
+        derived_buffers = DerivedBuffers.for_components(
+            self.buffers.derived, [BufferComponent.cpu]
+        )
+        return derived_buffers.calculate_requirement(
+            current_usage=busy * cpu_buffer.ratio,
+            existing_capacity=current_ncu * (1 - cpu_headroom_target(current)),
         )
 
     @property
