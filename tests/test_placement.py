@@ -5,6 +5,7 @@ import pytest
 from service_capacity_modeling.hardware import shapes
 from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import BufferIntent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
@@ -178,27 +179,39 @@ def test_busy_ncus_leave_each_node_its_headroom():
 
 
 @pytest.mark.parametrize(
-    "candidate", ["i4i.2xlarge", "i4i.8xlarge", "m5d.4xlarge", "r6id.12xlarge"]
+    "candidate", ["i4i.xlarge", "i4i.8xlarge", "m5d.4xlarge", "r6id.12xlarge"]
 )
-def test_busy_ncus_place_like_the_per_candidate_cores(candidate):
-    """One busy-NCU requirement asks each shape for the CPU node count the
-    per-candidate core requirement asked for."""
+@pytest.mark.parametrize(
+    "cpu_percent, derived",
+    [
+        (40.0, None),
+        # Hot CPU that may not grow past the current zone's NCUs.
+        (80.0, Buffer(intent=BufferIntent.scale_down, ratio=2, components=["cpu"])),
+        # Cold CPU that keeps the current zone's NCUs.
+        (5.0, Buffer(intent=BufferIntent.preserve, components=["cpu"])),
+    ],
+)
+def test_busy_ncus_place_like_the_per_candidate_cores(candidate, cpu_percent, derived):
+    """One shape-free CPU requirement asks each shape for the CPU node count
+    the per-candidate core requirement asked for, derived bounds included."""
     current = shapes.instance("i4i.2xlarge")
     zone = RequirementFromCurrentCapacity(
         current_capacity=CurrentZoneClusterCapacity(
             cluster_instance_name=current.name,
             cluster_instance=current,
             cluster_instance_count=certain_int(12),
-            cpu_utilization=certain_float(40.0),
+            cpu_utilization=certain_float(cpu_percent),
         ),
-        buffers=Buffers(desired={"compute": Buffer(ratio=1.5, components=["compute"])}),
+        buffers=Buffers(
+            desired={"compute": Buffer(ratio=1.5, components=["compute"])},
+            derived={} if derived is None else {"compute": derived},
+        ),
     )
     instance = shapes.instance(candidate)
     cores = normalize_cores_float(zone.cpu(instance), instance, current)
 
     placement = place(
-        Requirement(ncu=zone.busy_ncu, ncu_is_busy=True),
-        stateful_node_resources(instance),
+        Requirement(**zone.cpu_requirement()), stateful_node_resources(instance)
     )
 
     assert isinstance(placement, Placement)
