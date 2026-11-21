@@ -796,6 +796,60 @@ scenarios.append(
     )
 )
 
+# Cassandra EBS with IOPS evidence — the model overestimates this cluster's
+# IO count, and the deployed 64 r7a.4xlarge nodes/zone peak at 8,000 IOPS.
+# Calibration scales IOPS and throughput down together; uncalibrated
+# throughput would exceed the 1,000 MiB/s cap and add nodes.
+cassandra_ebs_calibrated = CapacityDesires(
+    service_tier=1,
+    query_pattern=QueryPattern(
+        estimated_read_per_second=certain_int(3_000_000),
+        estimated_write_per_second=certain_int(300_000),
+    ),
+    data_shape=DataShape(estimated_state_size_gib=certain_int(70_000)),
+    current_clusters=CurrentClusters(
+        zonal=[
+            CurrentZoneClusterCapacity(
+                cluster_instance_name="r7a.4xlarge",
+                cluster_drive=Drive(
+                    name="gp3",
+                    drive_type="attached-ssd",
+                    size_gib=1200,
+                ),
+                cluster_instance_count=certain_int(64),
+                cpu_utilization=certain_float(20),
+                disk_utilization_gib=certain_float(900),
+                network_utilization_mbps=certain_float(100),
+            ),
+        ]
+        * 3
+    ),
+)
+
+scenarios.append(
+    (
+        "org.netflix.cassandra",
+        "us-east-1",
+        cassandra_ebs_calibrated,
+        {
+            "require_local_disks": False,
+            "require_attached_disks": True,
+            "cluster_size_mode": "unrestricted",
+            "ebs_iops_evidence": {
+                "peak_iops_per_node": 8_000,
+                "configured_iops_per_node": 16_000,
+                "observed_regional_workload": {
+                    "read_per_second": 3_000_000,
+                    "write_per_second": 300_000,
+                    "mean_read_size_bytes": 1024,
+                    "mean_write_size_bytes": 256,
+                },
+            },
+        },
+        "cassandra_ebs_calibrated",
+    )
+)
+
 # Kafka scenarios - Kafka uses throughput-based sizing via write_size
 # 100 MiB/s throughput with 2 consumers, 1 producer
 throughput = 100 * 1024 * 1024  # 100 MiB/s
