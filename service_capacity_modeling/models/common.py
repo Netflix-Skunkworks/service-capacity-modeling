@@ -638,7 +638,7 @@ def check_cluster_size_requirement(
 def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     instance: Instance,
     drive: Drive,
-    needed_cores: int,
+    needed_cores: float,
     needed_disk_gib: float,
     needed_memory_gib: float,
     needed_network_mbps: float,
@@ -667,7 +667,7 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     max_node_disk_gib: Callable[[Drive], int] = lambda d: math.ceil(d.max_size_gib / 3),
 ) -> ZoneClusterCapacity:
     # CPU
-    count_cpu = math.ceil(needed_cores / instance.cpu)
+    count_cpu = ceil_ignoring_float_error(needed_cores / instance.cpu)
 
     # Memory (write-buffer floor bumps count when writes dominate)
     memory_per_node_gib = usable_memory_gib(instance, reserve_memory)
@@ -1266,6 +1266,36 @@ class RequirementFromCurrentCapacity(BaseModel):
                 existing_capacity=current_total_cpu,
             )
         )
+
+    def exact_cpu(self, instance_candidate: Instance) -> float:
+        """vCPUs of instance_candidate the zone needs, unrounded.
+
+        Busy compute times the desired CPU buffer and any derived scale,
+        over the share of each candidate vCPU left after the candidate's own
+        queueing headroom, then held between any derived floor and ceiling
+        of the current zone's compute. Unlike ``cpu()``, nothing is rounded
+        until the node count, so a zone needs the same compute on every
+        shape.
+        """
+        current = self.current_instance
+        current_ncu = cpu_to_ncu(
+            current.cpu * self.current_capacity.cluster_instance_count.mid, current
+        )
+        busy_ncu = self.current_capacity.cpu_utilization.mid / 100 * current_ncu
+        cpu_ratio = buffer_for_components(
+            buffers=self.buffers, components=[BufferComponent.cpu]
+        ).ratio
+        derived = DerivedBuffers.for_components(
+            self.buffers.derived, [BufferComponent.cpu]
+        )
+        ncu_per_vcpu = cpu_to_ncu(1, instance_candidate)
+        usable = 1 - cpu_headroom_target(instance_candidate)
+        cores = derived.scale * busy_ncu * cpu_ratio / (ncu_per_vcpu * usable)
+        if derived.ceiling is not None:
+            cores = min(cores, derived.ceiling * current_ncu / ncu_per_vcpu)
+        if derived.floor is not None:
+            cores = max(cores, derived.floor * current_ncu / ncu_per_vcpu)
+        return cores
 
     @property
     def mem_gib(self) -> float:

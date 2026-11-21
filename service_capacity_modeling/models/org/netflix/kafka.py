@@ -45,6 +45,8 @@ from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.common import normalize_cores_float
+from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import zonal_requirements_from_current
@@ -87,11 +89,13 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
     copies_per_region: int,
     hot_retention_seconds: float,
     zones_per_region: int = 3,
-) -> Tuple[CapacityRequirement, Tuple[str, ...]]:
+) -> Tuple[CapacityRequirement, Tuple[str, ...], float]:
     """Estimate the capacity required for one zone given a regional desire
 
     The input desires should be the **regional** desire, and this function will
-    return the zonal capacity requirement
+    return the zonal capacity requirement, its regrets, and the vCPUs of
+    ``instance`` to size the zone's CPU for, rounded only at the node count.
+    The requirement's cpu_cores is the rounded figure the plan reports.
     """
     normalized_to_mib = desires.model_copy(deep=True)
     read_mib_per_second = (
@@ -162,7 +166,21 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
         logger.debug(
             "kafka normalized needed cores: %s", capacity_requirement.cpu_cores
         )
+        # Busy compute over each vCPU's share after the instance's headroom.
+        sizing_cores = RequirementFromCurrentCapacity(
+            current_capacity=normalize_midpoint_desires.current_clusters.zonal[0],
+            buffers=desires.buffers,
+        ).exact_cpu(instance)
     else:
+        # Sqrt staffing already allows for queueing.
+        sizing_cores = (
+            normalize_cores_float(
+                sqrt_staffed_cores(normalized_to_mib),
+                instance,
+                desires.reference_shape,
+            )
+            / zones_per_region
+        )
         # We have no existing utilization to go from
         needed_cores = (
             normalize_cores(
@@ -218,6 +236,7 @@ def _estimate_kafka_requirement(  # pylint: disable=too-many-positional-argument
             },
         ),
         ("spend", "disk", "mem"),
+        sizing_cores,
     )
 
 
@@ -318,7 +337,7 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
             f"instance is {instance.family}",
         )
 
-    requirement, regrets = _estimate_kafka_requirement(
+    requirement, regrets, sizing_cores = _estimate_kafka_requirement(
         instance=instance,
         desires=desires,
         zones_per_region=zones_per_region,
@@ -391,7 +410,7 @@ def _estimate_kafka_cluster_zonal(  # noqa: C901
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
-        needed_cores=int(requirement.cpu_cores.mid),
+        needed_cores=sizing_cores,
         needed_disk_gib=int(requirement.disk_gib.mid),
         needed_memory_gib=int(requirement.mem_gib.mid),
         needed_network_mbps=requirement.network_mbps.mid,
