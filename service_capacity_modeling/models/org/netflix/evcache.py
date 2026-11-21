@@ -48,6 +48,7 @@ from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.common import normalize_cores_float
 from service_capacity_modeling.models.common import check_cluster_size_requirement
 from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
@@ -233,8 +234,10 @@ def _estimate_evcache_requirement(
     return (
         CapacityRequirement(
             requirement_type=NflxEVCacheCapacityModel.cluster_type,
-            reference_shape=desires.reference_shape,
-            cpu_cores=certain_int(math.ceil(needed_cores)),
+            # The vCPUs of this instance the zone is sized for; plan
+            # comparison converts cpu_cores from reference_shape to NCUs.
+            reference_shape=instance,
+            cpu_cores=certain_float(_zonal_sizing_cores(desires, instance)),
             mem_gib=certain_float(needed_memory),
             disk_gib=certain_float(needed_disk),
             network_mbps=certain_float(needed_network_mbps),
@@ -245,6 +248,27 @@ def _estimate_evcache_requirement(
         ),
         regrets,
     )
+
+
+def _zonal_sizing_cores(desires: CapacityDesires, instance: Instance) -> float:
+    """vCPUs of ``instance`` the zone needs, rounded only at the node count.
+
+    From a current cluster, busy compute over the share each vCPU has left
+    after the instance's queueing headroom, bounded by any derived buffer.
+    Without one, sqrt staffing (which already allows for queueing) times the
+    CPU buffer. The requirement's cpu_cores is the rounded figure the plan
+    reports.
+    """
+    current_capacity = _current_evcache_cluster(desires)
+    if current_capacity:
+        return RequirementFromCurrentCapacity(
+            current_capacity=current_capacity, buffers=desires.buffers
+        ).exact_cpu(instance)
+    cpu_buffer = buffer_for_components(desires.buffers, [BufferComponent.cpu])
+    cores = normalize_cores_float(
+        sqrt_staffed_cores(desires), instance, desires.reference_shape
+    )
+    return cores * cpu_buffer.ratio
 
 
 def _current_evcache_cluster(
@@ -454,7 +478,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     cluster = compute_stateful_zone(
         instance=instance,
         drive=drive,
-        needed_cores=math.ceil(requirement.cpu_cores.mid),
+        needed_cores=_zonal_sizing_cores(desires, instance),
         needed_disk_gib=needed_disk_gib,
         needed_memory_gib=requirement.mem_gib.mid,
         reserve_memory=reserve_memory,

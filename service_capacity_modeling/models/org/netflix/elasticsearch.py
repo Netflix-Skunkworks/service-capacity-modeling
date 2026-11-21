@@ -38,6 +38,7 @@ from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
+from service_capacity_modeling.models.common import normalize_cores_float
 from service_capacity_modeling.models.common import check_cluster_size_requirement
 from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import usable_memory_gib
@@ -71,6 +72,22 @@ def _es_io_per_read(node_size_gib: float, segment_size_mb: int = 512) -> int:
     # 10 segments per tier, plus 1 for L0 (avg)
     levels = 1 + int(math.ceil(math.log(segments, 10)))
     return levels
+
+
+def _zonal_sizing_cores(
+    desires: CapacityDesires, instance: Instance, zones_in_region: int
+) -> float:
+    """vCPUs of ``instance`` a data zone needs, rounded only at the node count.
+
+    Sqrt staffing already allows for queueing; half of the cores are kept
+    free for background work (merging mostly). The requirement's cpu_cores
+    is the rounded figure the plan reports.
+    """
+    cores = math.ceil(sqrt_staffed_cores(desires) * 1.5)
+    return (
+        normalize_cores_float(cores, instance, desires.reference_shape)
+        / zones_in_region
+    )
 
 
 def _estimate_elasticsearch_requirement(  # noqa: E501 pylint: disable=too-many-positional-arguments
@@ -320,7 +337,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         data_cluster = compute_stateful_zone(
             instance=instance,
             drive=drive,
-            needed_cores=int(data_requirement.cpu_cores.mid),
+            needed_cores=_zonal_sizing_cores(desires, instance, zones_in_region),
             needed_disk_gib=needed_disk_gib,
             needed_memory_gib=int(data_requirement.mem_gib.mid),
             needed_network_mbps=data_requirement.network_mbps.mid,
