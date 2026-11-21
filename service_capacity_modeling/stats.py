@@ -44,9 +44,9 @@ def _gamma_fn_from_params(
     # Then we can use numeric methods to solve for the remaining shape parameter
 
     def f(k: float) -> float:
-        zero = high / low
-        high_x = high_p * k / mid
-        low_x = low_p * k / mid
+        zero = high_p / low_p
+        high_x = high * k / mid
+        low_x = low * k / mid
         result = gammaf(k, high_x) / gammaf(k, low_x) - zero
         # Use .item() to convert NumPy scalar to Python float
         return result.item() if hasattr(result, "item") else float(result)
@@ -67,11 +67,12 @@ def _gamma_dist_from_interval(
     minimum = interval.minimum
     lower = interval.low - minimum
     mean = interval.mid - minimum
+    upper = interval.high - minimum
 
     if lower == 0:
         lower = EPSILON
 
-    f = _gamma_fn_from_params(lower, mean, interval.high, interval.confidence)
+    f = _gamma_fn_from_params(lower, mean, upper, interval.confidence)
     result = root(f, 2)
     shape = result.x[0]
 

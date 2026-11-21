@@ -48,6 +48,21 @@ def test_gamma_precise():
     assert p[1] > interval.mid
 
 
+def test_gamma_matches_interval_tails():
+    for interval in (
+        Interval(low=100, mid=200, high=400, confidence=0.98),
+        Interval(low=8000, mid=10000, high=12000, confidence=0.90),
+    ):
+        g = gamma_for_interval(interval)
+        tail = (1 - interval.confidence) / 2
+
+        assert abs(g.mean() - interval.mid) < 0.01
+        # low and high are the requested percentiles, so only about `tail`
+        # of the mass should sit outside each of them
+        assert abs(g.cdf(interval.low) - tail) < 0.01
+        assert g.cdf(interval.high) > 1 - 2 * tail
+
+
 def test_simulate_interval():
     int_1 = Interval(low=1000, mid=10000, high=100000, confidence=0.98)
     int_2 = certain_float(100)
