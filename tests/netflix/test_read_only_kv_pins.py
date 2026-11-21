@@ -3,6 +3,8 @@
 from typing import Any
 from typing import Dict
 
+import math
+
 import pytest
 from pydantic import ValidationError
 
@@ -16,11 +18,25 @@ from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import DataShape
 from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.models.placement import DoesNotFit
+from service_capacity_modeling.models.placement import NodeResources
+from service_capacity_modeling.models.placement import place
+from service_capacity_modeling.models.placement import Placement
 from service_capacity_modeling.models.org.netflix.read_only_kv import (
     _estimate_read_only_kv_cluster,
 )
+from service_capacity_modeling.models.org.netflix.read_only_kv import MIN_NODES
 from service_capacity_modeling.models.org.netflix.read_only_kv import (
     NflxReadOnlyKVArguments,
+)
+from service_capacity_modeling.models.org.netflix.read_only_kv import (
+    NflxReadOnlyKVCapacityModel,
+)
+from service_capacity_modeling.models.org.netflix.read_only_kv import (
+    read_only_kv_requirement,
+)
+from service_capacity_modeling.models.org.netflix.read_only_kv import (
+    read_only_kv_node,
 )
 
 HARDWARE = shapes.region("us-east-1")
@@ -76,7 +92,8 @@ def test_pinning_a_plans_own_layout_reproduces_the_plan():
 
 
 def test_a_shape_that_cannot_host_a_pinned_layout_is_excused():
-    """i3en.6xlarge's dense layout does not fit m6id.2xlarge's disk."""
+    """i3en.6xlarge's dense layout does not fit m6id.2xlarge's disk, and its
+    copies are too few for m6id.2xlarge's CPU."""
     dense = _layout(_plan("i3en.6xlarge"))
 
     excuse = _plan(
@@ -87,6 +104,7 @@ def test_a_shape_that_cannot_host_a_pinned_layout_is_excused():
 
     assert isinstance(excuse, Excuse)
     assert excuse.bottleneck == Bottleneck.disk_capacity
+    assert excuse.context == {"bottlenecks": ["disk_capacity", "cpu"]}
 
 
 def test_a_required_count_names_the_short_resource():
@@ -121,3 +139,74 @@ def test_a_required_count_uses_the_densest_layout_within_the_cap():
 def test_a_layout_pin_needs_both_density_and_replicas():
     with pytest.raises(ValidationError):
         NflxReadOnlyKVArguments(total_num_partitions=12, partitions_per_node=4)
+
+
+def test_a_container_size_is_placed_from_the_same_demand():
+    """A node that is not an EC2 shape, such as a container, places the same
+    requirement; one too small for a partition says which resource is short."""
+    desires = DESIRES.merge_with(
+        NflxReadOnlyKVCapacityModel.default_desires(DESIRES, {})
+    )
+    args = NflxReadOnlyKVArguments(total_num_partitions=12)
+    requirement = read_only_kv_requirement(desires, args)
+    assert requirement is not None
+
+    limits = {"min_count": MIN_NODES, "max_count": args.max_regional_size}
+
+    container = NodeResources(ncu=12, disk_gib=600, memory_gib=40)
+    placed = place(requirement, container, **limits)
+    assert isinstance(placed, Placement)
+    assert requirement.partitions is not None and placed.layout is not None
+    per_partition_gib = requirement.partitions.disk_gib_per_partition
+    assert placed.layout.partitions_per_node * per_partition_gib <= 600
+    assert placed.node_count * container.ncu >= requirement.ncu
+
+    too_small = place(requirement, NodeResources(ncu=12, disk_gib=50), **limits)
+    assert isinstance(too_small, DoesNotFit)
+    assert too_small.bottlenecks == [Bottleneck.disk_capacity]
+
+
+def test_an_ec2_node_places_like_the_model_plans():
+    desires = DESIRES.merge_with(
+        NflxReadOnlyKVCapacityModel.default_desires(DESIRES, {})
+    )
+    args = NflxReadOnlyKVArguments(total_num_partitions=12)
+    requirement = read_only_kv_requirement(desires, args)
+    assert requirement is not None
+    compared = 0
+    for name, instance in HARDWARE.instances.items():
+        node = read_only_kv_node(instance, desires, args)
+        plan = _estimate_read_only_kv_cluster(instance, desires, args)
+        if node is None or not isinstance(plan, CapacityPlan):
+            continue
+        compared += 1
+        placed = place(
+            requirement, node, min_count=MIN_NODES, max_count=args.max_regional_size
+        )
+        assert isinstance(placed, Placement), name
+        assert requirement.partitions is not None, name
+        assert placed.layout is not None, name
+        assert _layout(plan) == {
+            "count": placed.node_count,
+            "read-only-kv.partitions_per_node": placed.layout.partitions_per_node,
+            "read-only-kv.replica_count": placed.layout.replica_count,
+            "read-only-kv.nodes_for_one_copy": math.ceil(
+                requirement.partitions.count / placed.layout.partitions_per_node
+            ),
+        }, name
+    assert compared > 10
+
+
+def test_a_cpu_need_on_a_whole_number_of_cores_plans_no_extra_node():
+    """966 NCUs is exactly 552 i4i.2xlarge vCPUs (1.75 NCUs each), so 69
+    nodes of 8. Converting the need to the shape's vCPUs first gives
+    552.0000000000001, which rounded up to 553 vCPUs and 70 nodes."""
+    args = NflxReadOnlyKVArguments(
+        total_num_partitions=1, min_replica_count=1, needed_cores=966
+    )
+    plan = _estimate_read_only_kv_cluster(
+        HARDWARE.instances["i4i.2xlarge"], DESIRES, args
+    )
+    assert isinstance(plan, CapacityPlan)
+    assert plan.candidate_clusters.regional[0].count == 69
+    assert plan.requirements.regional[0].cpu_cores.mid == 552
