@@ -634,7 +634,7 @@ def check_cluster_size_requirement(
 def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     instance: Instance,
     drive: Drive,
-    needed_cores: int,
+    needed_cores: float,
     needed_disk_gib: float,
     needed_memory_gib: float,
     needed_network_mbps: float,
@@ -1354,6 +1354,25 @@ class RequirementFromCurrentCapacity(BaseModel):
                 None if derived.ceiling is None else derived.ceiling * current_ncu
             ),
         }
+
+    def exact_cpu(self, instance_candidate: Instance) -> float:
+        """vCPUs of instance_candidate the zone needs, unrounded.
+
+        ``cpu_requirement()`` in the candidate's vCPUs: busy compute over
+        each vCPU's share after the candidate's own queueing headroom, held
+        between any derived floor and ceiling of the current zone's compute.
+        Unlike ``cpu()``, nothing is rounded until the node count, so a zone
+        needs the same compute on every shape.
+        """
+        fields = self.cpu_requirement()
+        ncu_per_vcpu = cpu_to_ncu(1, instance_candidate)
+        usable = 1 - cpu_headroom_target(instance_candidate)
+        cores: float = fields["ncu"] / (ncu_per_vcpu * usable)
+        if fields["max_total_ncu"] is not None:
+            cores = min(cores, fields["max_total_ncu"] / ncu_per_vcpu)
+        if fields["min_total_ncu"] is not None:
+            cores = max(cores, fields["min_total_ncu"] / ncu_per_vcpu)
+        return cores
 
     @property
     def mem_gib(self) -> float:

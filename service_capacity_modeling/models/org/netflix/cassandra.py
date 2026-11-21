@@ -1541,10 +1541,18 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         if not is_ebs:
             return 0
         modeled_read_iops, modeled_write_iops = modeled_disk_ios(_size, count)
+        # Throughput is IO count times IO size, so it uses the same calibrated
+        # IO count as required_disk_ios. Uncalibrated, a cluster the model
+        # overestimates 19x in IOPS also looks 19x over the throughput cap and
+        # gets nodes it does not need.
         expected_throughput_by_count[count] = (
-            modeled_read_iops * drive.rand_io_size_kib
-            + modeled_write_iops * drive.seq_io_size_kib
-        ) / 1024
+            (
+                modeled_read_iops * drive.rand_io_size_kib
+                + modeled_write_iops * drive.seq_io_size_kib
+            )
+            * iops_calibration_factor
+            / 1024
+        )
         return max(
             min_ebs_throughput_mib_per_s,
             expected_throughput_by_count[count] * disk_iops_buffer_ratio,

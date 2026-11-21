@@ -23,6 +23,7 @@ from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import cpu_headroom_target
 from service_capacity_modeling.models.common import cpu_to_ncu
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.common import network_services
@@ -631,3 +632,50 @@ def test_stateful_memory_rounding_at_exact_capacity(above_boundary):
     assert cluster.count == (24 if above_boundary else 23)
     assert cluster.count * per_node_memory >= needed_memory
     assert (cluster.count - 1) * per_node_memory < needed_memory
+
+
+def _current_zone(cpu_percent, derived=None):
+    current = shapes.instance("i4i.2xlarge")
+    return current, RequirementFromCurrentCapacity(
+        current_capacity=CurrentZoneClusterCapacity(
+            cluster_instance_name=current.name,
+            cluster_instance=current,
+            cluster_instance_count=Interval(low=12, mid=12, high=12),
+            cpu_utilization=certain_float(cpu_percent),
+        ),
+        buffers=Buffers(
+            desired={"compute": Buffer(ratio=1.5, components=["compute"])},
+            derived={} if derived is None else {"compute": derived},
+        ),
+    )
+
+
+@pytest.mark.parametrize("candidate", ["i4i.xlarge", "i4i.8xlarge", "m5d.4xlarge"])
+def test_exact_cpu_is_the_same_busy_compute_on_every_shape(candidate):
+    """What a candidate can spend after its own headroom is the zone's busy
+    NCUs times the CPU buffer, whatever the shape."""
+    current, zone = _current_zone(40.0)
+    instance = shapes.instance(candidate)
+
+    spendable = cpu_to_ncu(zone.exact_cpu(instance), instance) * (
+        1 - cpu_headroom_target(instance)
+    )
+
+    busy = 0.40 * cpu_to_ncu(current.cpu * 12, current)
+    assert spendable == pytest.approx(busy * 1.5)
+
+
+def test_exact_cpu_scale_down_caps_the_current_compute():
+    """A hot zone that may not grow keeps the current zone's NCUs on a
+    smaller shape, rather than its usable NCUs plus the smaller shape's
+    larger headroom."""
+    current, zone = _current_zone(
+        80.0, Buffer(intent=BufferIntent.scale_down, ratio=2, components=["cpu"])
+    )
+    smaller = shapes.instance("i4i.xlarge")
+
+    cores = zone.exact_cpu(smaller)
+
+    assert cpu_to_ncu(cores, smaller) == pytest.approx(
+        cpu_to_ncu(current.cpu * 12, current)
+    )
