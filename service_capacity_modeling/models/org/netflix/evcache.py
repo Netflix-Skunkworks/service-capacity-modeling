@@ -505,9 +505,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         counts.required_nodes_by_type[NodeCountConstraint.min_count] = max(
             min_count_for_data, min_count_for_cluster, required_cluster_size or 0
         )
-        cluster.cluster_params.update(
-            counts.model_dump(mode="json")
-        )
+        cluster.cluster_params.update(counts.model_dump(mode="json"))
         cluster.cluster_params["evcache.disk_io"] = io_context
     excuse = check_cluster_size_requirement(
         instance, drive, cluster, required_cluster_size
