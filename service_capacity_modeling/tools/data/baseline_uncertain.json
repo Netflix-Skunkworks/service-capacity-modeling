@@ -2697,6 +2697,21 @@
             "cluster_params": {
               "effective_disk_per_node_gib": 885,
               "evcache.copies": 3,
+              "evcache.disk_io": {
+                "buffer_ratio": 1.5,
+                "ceiling": null,
+                "floor": null,
+                "observation": {
+                  "read_bytes_per_second": 512000000.0,
+                  "read_ops_per_second": 125000.0,
+                  "write_bytes_per_second": 25600000.0,
+                  "write_ops_per_second": 6250.0
+                },
+                "required_nodes": 1,
+                "scale": 1.0,
+                "source": "requests",
+                "throughput_capacity_source": "iops_times_block_size"
+              },
               "required_nodes_by_type": {
                 "cluster_size": 29,
                 "cpu": 29,
@@ -2718,6 +2733,21 @@
             "cluster_params": {
               "effective_disk_per_node_gib": 885,
               "evcache.copies": 3,
+              "evcache.disk_io": {
+                "buffer_ratio": 1.5,
+                "ceiling": null,
+                "floor": null,
+                "observation": {
+                  "read_bytes_per_second": 512000000.0,
+                  "read_ops_per_second": 125000.0,
+                  "write_bytes_per_second": 25600000.0,
+                  "write_ops_per_second": 6250.0
+                },
+                "required_nodes": 1,
+                "scale": 1.0,
+                "source": "requests",
+                "throughput_capacity_source": "iops_times_block_size"
+              },
               "required_nodes_by_type": {
                 "cluster_size": 29,
                 "cpu": 29,
@@ -2739,6 +2769,21 @@
             "cluster_params": {
               "effective_disk_per_node_gib": 885,
               "evcache.copies": 3,
+              "evcache.disk_io": {
+                "buffer_ratio": 1.5,
+                "ceiling": null,
+                "floor": null,
+                "observation": {
+                  "read_bytes_per_second": 512000000.0,
+                  "read_ops_per_second": 125000.0,
+                  "write_bytes_per_second": 25600000.0,
+                  "write_ops_per_second": 6250.0
+                },
+                "required_nodes": 1,
+                "scale": 1.0,
+                "source": "requests",
+                "throughput_capacity_source": "iops_times_block_size"
+              },
               "required_nodes_by_type": {
                 "cluster_size": 29,
                 "cpu": 29,
@@ -2879,6 +2924,21 @@
             "cluster_params": {
               "effective_disk_per_node_gib": 1676,
               "evcache.copies": 3,
+              "evcache.disk_io": {
+                "buffer_ratio": 1.5,
+                "ceiling": null,
+                "floor": null,
+                "observation": {
+                  "read_bytes_per_second": 512000000.0,
+                  "read_ops_per_second": 125000.0,
+                  "write_bytes_per_second": 25600000.0,
+                  "write_ops_per_second": 6250.0
+                },
+                "required_nodes": 1,
+                "scale": 1.0,
+                "source": "requests",
+                "throughput_capacity_source": "iops_times_block_size"
+              },
               "required_nodes_by_type": {
                 "cluster_size": 11,
                 "cpu": 11,
@@ -2900,6 +2960,21 @@
             "cluster_params": {
               "effective_disk_per_node_gib": 1676,
               "evcache.copies": 3,
+              "evcache.disk_io": {
+                "buffer_ratio": 1.5,
+                "ceiling": null,
+                "floor": null,
+                "observation": {
+                  "read_bytes_per_second": 512000000.0,
+                  "read_ops_per_second": 125000.0,
+                  "write_bytes_per_second": 25600000.0,
+                  "write_ops_per_second": 6250.0
+                },
+                "required_nodes": 1,
+                "scale": 1.0,
+                "source": "requests",
+                "throughput_capacity_source": "iops_times_block_size"
+              },
               "required_nodes_by_type": {
                 "cluster_size": 11,
                 "cpu": 11,
@@ -2921,6 +2996,21 @@
             "cluster_params": {
               "effective_disk_per_node_gib": 1676,
               "evcache.copies": 3,
+              "evcache.disk_io": {
+                "buffer_ratio": 1.5,
+                "ceiling": null,
+                "floor": null,
+                "observation": {
+                  "read_bytes_per_second": 512000000.0,
+                  "read_ops_per_second": 125000.0,
+                  "write_bytes_per_second": 25600000.0,
+                  "write_ops_per_second": 6250.0
+                },
+                "required_nodes": 1,
+                "scale": 1.0,
+                "source": "requests",
+                "throughput_capacity_source": "iops_times_block_size"
+              },
               "required_nodes_by_type": {
                 "cluster_size": 11,
                 "cpu": 11,
@@ -3066,6 +3156,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 885,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 87498654.79152091,
+                    "read_ops_per_second": 21361.97626746116,
+                    "write_bytes_per_second": 9215189.261506736,
+                    "write_ops_per_second": 2249.802065797543
+                  },
+                  "required_nodes": 1,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 29,
                   "cpu": 29,
@@ -3087,6 +3192,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 885,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 87498654.79152091,
+                    "read_ops_per_second": 21361.97626746116,
+                    "write_bytes_per_second": 9215189.261506736,
+                    "write_ops_per_second": 2249.802065797543
+                  },
+                  "required_nodes": 1,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 29,
                   "cpu": 29,
@@ -3108,6 +3228,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 885,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 87498654.79152091,
+                    "read_ops_per_second": 21361.97626746116,
+                    "write_bytes_per_second": 9215189.261506736,
+                    "write_ops_per_second": 2249.802065797543
+                  },
+                  "required_nodes": 1,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 29,
                   "cpu": 29,
@@ -3245,6 +3380,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 1676,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 87498654.79152091,
+                    "read_ops_per_second": 21361.97626746116,
+                    "write_bytes_per_second": 9215189.261506736,
+                    "write_ops_per_second": 2249.802065797543
+                  },
+                  "required_nodes": 1,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 11,
                   "cpu": 11,
@@ -3266,6 +3416,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 1676,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 87498654.79152091,
+                    "read_ops_per_second": 21361.97626746116,
+                    "write_bytes_per_second": 9215189.261506736,
+                    "write_ops_per_second": 2249.802065797543
+                  },
+                  "required_nodes": 1,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 11,
                   "cpu": 11,
@@ -3287,6 +3452,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 1676,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 87498654.79152091,
+                    "read_ops_per_second": 21361.97626746116,
+                    "write_bytes_per_second": 9215189.261506736,
+                    "write_ops_per_second": 2249.802065797543
+                  },
+                  "required_nodes": 1,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 11,
                   "cpu": 11,
@@ -3429,6 +3609,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 885,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 419846196.6386983,
+                    "read_ops_per_second": 102501.5128512447,
+                    "write_bytes_per_second": 23495360.02919746,
+                    "write_ops_per_second": 5736.171882128286
+                  },
+                  "required_nodes": 1,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 29,
                   "cpu": 29,
@@ -3450,6 +3645,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 885,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 419846196.6386983,
+                    "read_ops_per_second": 102501.5128512447,
+                    "write_bytes_per_second": 23495360.02919746,
+                    "write_ops_per_second": 5736.171882128286
+                  },
+                  "required_nodes": 1,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 29,
                   "cpu": 29,
@@ -3471,6 +3681,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 885,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 419846196.6386983,
+                    "read_ops_per_second": 102501.5128512447,
+                    "write_bytes_per_second": 23495360.02919746,
+                    "write_ops_per_second": 5736.171882128286
+                  },
+                  "required_nodes": 1,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 29,
                   "cpu": 29,
@@ -3611,6 +3836,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 1676,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 419846196.6386983,
+                    "read_ops_per_second": 102501.5128512447,
+                    "write_bytes_per_second": 23495360.02919746,
+                    "write_ops_per_second": 5736.171882128286
+                  },
+                  "required_nodes": 1,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 11,
                   "cpu": 11,
@@ -3632,6 +3872,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 1676,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 419846196.6386983,
+                    "read_ops_per_second": 102501.5128512447,
+                    "write_bytes_per_second": 23495360.02919746,
+                    "write_ops_per_second": 5736.171882128286
+                  },
+                  "required_nodes": 1,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 11,
                   "cpu": 11,
@@ -3653,6 +3908,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 1676,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 419846196.6386983,
+                    "read_ops_per_second": 102501.5128512447,
+                    "write_bytes_per_second": 23495360.02919746,
+                    "write_ops_per_second": 5736.171882128286
+                  },
+                  "required_nodes": 1,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 11,
                   "cpu": 11,
@@ -3795,6 +4065,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 885,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 1218770396.642359,
+                    "read_ops_per_second": 297551.36636776343,
+                    "write_bytes_per_second": 47002508.323701195,
+                    "write_ops_per_second": 11475.221758716112
+                  },
+                  "required_nodes": 2,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 29,
                   "cpu": 29,
@@ -3816,6 +4101,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 885,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 1218770396.642359,
+                    "read_ops_per_second": 297551.36636776343,
+                    "write_bytes_per_second": 47002508.323701195,
+                    "write_ops_per_second": 11475.221758716112
+                  },
+                  "required_nodes": 2,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 29,
                   "cpu": 29,
@@ -3837,6 +4137,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 885,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 1218770396.642359,
+                    "read_ops_per_second": 297551.36636776343,
+                    "write_bytes_per_second": 47002508.323701195,
+                    "write_ops_per_second": 11475.221758716112
+                  },
+                  "required_nodes": 2,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 29,
                   "cpu": 29,
@@ -3977,6 +4292,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 1676,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 1218770396.642359,
+                    "read_ops_per_second": 297551.36636776343,
+                    "write_bytes_per_second": 47002508.323701195,
+                    "write_ops_per_second": 11475.221758716112
+                  },
+                  "required_nodes": 1,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 11,
                   "cpu": 11,
@@ -3998,6 +4328,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 1676,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 1218770396.642359,
+                    "read_ops_per_second": 297551.36636776343,
+                    "write_bytes_per_second": 47002508.323701195,
+                    "write_ops_per_second": 11475.221758716112
+                  },
+                  "required_nodes": 1,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 11,
                   "cpu": 11,
@@ -4019,6 +4364,21 @@
               "cluster_params": {
                 "effective_disk_per_node_gib": 1676,
                 "evcache.copies": 3,
+                "evcache.disk_io": {
+                  "buffer_ratio": 1.5,
+                  "ceiling": null,
+                  "floor": null,
+                  "observation": {
+                    "read_bytes_per_second": 1218770396.642359,
+                    "read_ops_per_second": 297551.36636776343,
+                    "write_bytes_per_second": 47002508.323701195,
+                    "write_ops_per_second": 11475.221758716112
+                  },
+                  "required_nodes": 1,
+                  "scale": 1.0,
+                  "source": "requests",
+                  "throughput_capacity_source": "iops_times_block_size"
+                },
                 "required_nodes_by_type": {
                   "cluster_size": 11,
                   "cpu": 11,
