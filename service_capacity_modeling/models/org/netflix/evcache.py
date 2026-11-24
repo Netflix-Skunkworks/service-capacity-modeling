@@ -43,8 +43,8 @@ from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models import RANK_PENALTIES
 from service_capacity_modeling.models.common import buffer_for_components
-from service_capacity_modeling.models.common import cpu_to_ncu
 from service_capacity_modeling.models.common import size_stateful_zone
+from service_capacity_modeling.models.common import stateful_node_resources
 from service_capacity_modeling.models.common import DerivedBuffers
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
@@ -52,6 +52,11 @@ from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import check_cluster_size_requirement
 from service_capacity_modeling.models.common import upsert_params
+from service_capacity_modeling.models.placement import cpu_to_ncu
+from service_capacity_modeling.models.placement import CPURequirement
+from service_capacity_modeling.models.placement import DiskRequirement
+from service_capacity_modeling.models.placement import DoesNotFit
+from service_capacity_modeling.models.placement import MemoryRequirement
 from service_capacity_modeling.models.placement import Requirement
 from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import simple_network_mbps
@@ -233,12 +238,14 @@ def _estimate_evcache_requirement(
         working_set,
     )
 
+    cpu = _zonal_cpu(desires)
     return (
         CapacityRequirement(
             requirement_type=NflxEVCacheCapacityModel.cluster_type,
-            # Report the shape-free CPU the zone is sized for, in NCUs.
+            # Report the shape-free CPU the zone is sized for, in vCPUs of
+            # default_reference_shape.
             reference_shape=default_reference_shape,
-            cpu_cores=certain_float(_zonal_cpu(desires)["ncu"]),
+            cpu_cores=certain_float(cpu_to_ncu(cpu.count, cpu.reference_shape)),
             mem_gib=certain_float(needed_memory),
             disk_gib=certain_float(needed_disk),
             network_mbps=certain_float(needed_network_mbps),
@@ -251,13 +258,12 @@ def _estimate_evcache_requirement(
     )
 
 
-def _zonal_cpu(desires: CapacityDesires) -> Dict[str, Any]:
-    """The zone's CPU as ``Requirement`` fields, on no particular shape.
+def _zonal_cpu(desires: CapacityDesires) -> CPURequirement:
+    """The zone's CPU, on no particular shape.
 
-    From a current cluster it is busy NCUs, so each candidate node keeps its
-    own queueing headroom free, bounded by any derived buffer. Without one,
-    sqrt staffing already allows for queueing. The requirement's cpu_cores
-    is the same need in a candidate's vCPUs, for the plan to report.
+    From a current cluster it is measured busy CPU, so each candidate node
+    keeps its own queueing headroom free, bounded by any derived buffer.
+    Without one, sqrt staffing already allows for queueing.
     """
     current_capacity = _current_evcache_cluster(desires)
     if current_capacity:
@@ -265,8 +271,10 @@ def _zonal_cpu(desires: CapacityDesires) -> Dict[str, Any]:
             current_capacity=current_capacity, buffers=desires.buffers
         ).cpu_requirement()
     cpu_buffer = buffer_for_components(desires.buffers, [BufferComponent.cpu])
-    ncu = cpu_to_ncu(sqrt_staffed_cores(desires), desires.reference_shape)
-    return {"ncu": ncu * cpu_buffer.ratio, "ncu_is_busy": False}
+    return CPURequirement(
+        count=sqrt_staffed_cores(desires) * cpu_buffer.ratio,
+        reference_shape=desires.reference_shape,
+    )
 
 
 def _current_evcache_cluster(
@@ -475,19 +483,20 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         min_count_for_data -= 1
     cluster = size_stateful_zone(
         Requirement(
-            **_zonal_cpu(desires),
-            disk_gib=needed_disk_gib,
-            memory_gib=requirement.mem_gib.mid,
+            cpu=_zonal_cpu(desires),
+            memory=MemoryRequirement(gib=requirement.mem_gib.mid),
+            disk=DiskRequirement(
+                gib=needed_disk_gib,
+                io_bytes_per_s=adjusted_disk_io_needed,
+                read_fraction=read_write_ratio,
+            ),
             network_mbps=requirement.network_mbps.mid,
-            disk_io_bytes_per_s=adjusted_disk_io_needed,
         ),
-        instance,
+        stateful_node_resources(instance, reserve_memory=reserve_memory),
         drive,
-        reserve_memory=reserve_memory,
         min_count=max(
             min_count_for_data, min_count_for_cluster, required_cluster_size or 0
         ),
-        read_write_ratio=read_write_ratio,
         cluster_type=NflxEVCacheCapacityModel.cluster_type,
         # Communicate to the actual provision that if we want reduced RF
         cluster_params={
@@ -495,6 +504,8 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
             EFFECTIVE_DISK_PER_NODE_GIB: max_data_per_node_gib,
         },
     )
+    if isinstance(cluster, DoesNotFit):
+        return cluster.excuse(instance.name, drive.name)
     excuse = check_cluster_size_requirement(
         instance, drive, cluster, required_cluster_size
     )
