@@ -67,7 +67,7 @@ from service_capacity_modeling.interface import ExcludeUnsetModel
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.plan_comparison import ResourceType
-from service_capacity_modeling.models.common import cpu_to_ncu
+from service_capacity_modeling.models.placement import cpu_to_ncu
 
 # Order used to break ties when several dimensions share the max factor, so the
 # reported limiting dimension is deterministic.

@@ -13,8 +13,13 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from service_capacity_modeling.interface import Bottleneck
+from service_capacity_modeling.interface import default_reference_shape
+from service_capacity_modeling.models.placement import CPURequirement
 from service_capacity_modeling.models.placement import DoesNotFit
 from service_capacity_modeling.models.placement import Layout
+from service_capacity_modeling.models.placement import NodeCPU
+from service_capacity_modeling.models.placement import NodeDisk
+from service_capacity_modeling.models.placement import NodeMemory
 from service_capacity_modeling.models.placement import NodeResources
 from service_capacity_modeling.models.placement import Partitions
 from service_capacity_modeling.models.placement import place
@@ -23,6 +28,20 @@ from service_capacity_modeling.models.placement import Requirement
 
 # (requirement, node, max_nodes)
 Problem = Tuple[Requirement, NodeResources, int]
+
+
+def _cpu(count: float) -> CPURequirement:
+    """CPU in vCPUs of default_reference_shape, where one vCPU is one NCU."""
+    return CPURequirement(count=count, reference_shape=default_reference_shape)
+
+
+def _node(cpu: float, disk_gib: float = 0, memory_gib: float = 0) -> NodeResources:
+    return NodeResources(
+        shape=default_reference_shape,
+        cpu=NodeCPU(count=cpu),
+        memory=NodeMemory(gib=memory_gib),
+        disk=NodeDisk(gib=disk_gib),
+    )
 
 
 def _fewest(
@@ -64,7 +83,7 @@ def valid_problems(draw):
     )
 
     requirement = Requirement(
-        ncu=cpu_needed,
+        cpu=_cpu(cpu_needed),
         partitions=Partitions(
             count=n_partitions,
             disk_gib_per_partition=partition_size_gib,
@@ -72,8 +91,8 @@ def valid_problems(draw):
             min_replicas=min_rf,
         ),
     )
-    node = NodeResources(
-        ncu=cpu_per_node,
+    node = _node(
+        cpu=cpu_per_node,
         disk_gib=disk_per_node_gib,
         memory_gib=memory_per_node_gib,
     )
@@ -87,16 +106,16 @@ class TestAlgorithmBasics:
         """Algorithm returns None when a single partition doesn't fit on disk."""
         max_nodes = 100
         requirement = Requirement(
-            ncu=32,
+            cpu=_cpu(32),
             partitions=Partitions(
                 count=10,
                 disk_gib_per_partition=1000,  # 1TB partition
                 min_replicas=2,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=500,  # Only 500GB disk
-            ncu=16,
+            cpu=16,
         )
         result = _fewest(requirement, node, max_nodes)
         assert result is None
@@ -105,16 +124,16 @@ class TestAlgorithmBasics:
         """Algorithm returns None when no configuration fits within max_nodes."""
         max_nodes = 10  # Very restrictive
         requirement = Requirement(
-            ncu=1000,  # Needs many nodes for CPU
+            cpu=_cpu(1000),  # Needs many nodes for CPU
             partitions=Partitions(
                 count=100,
                 disk_gib_per_partition=500,
                 min_replicas=2,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=1000,  # 2 partitions per node
-            ncu=8,
+            cpu=8,
         )
         result = _fewest(requirement, node, max_nodes)
         assert result is None
@@ -123,16 +142,16 @@ class TestAlgorithmBasics:
         """Algorithm returns a valid result for a simple case."""
         max_nodes = 100
         requirement = Requirement(
-            ncu=32,  # 2 nodes worth of CPU
+            cpu=_cpu(32),  # 2 nodes worth of CPU
             partitions=Partitions(
                 count=10,
                 disk_gib_per_partition=100,
                 min_replicas=2,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=500,  # 5 partitions per node
-            ncu=16,
+            cpu=16,
         )
         result = _fewest(requirement, node, max_nodes)
 
@@ -144,7 +163,7 @@ class TestAlgorithmBasics:
         """Memory can limit partition placement while disk remains unchanged."""
         max_nodes = 100
         requirement = Requirement(
-            ncu=32,
+            cpu=_cpu(32),
             partitions=Partitions(
                 count=10,
                 disk_gib_per_partition=100,
@@ -152,10 +171,10 @@ class TestAlgorithmBasics:
                 min_replicas=2,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=500,
             memory_gib=50,
-            ncu=16,
+            cpu=16,
         )
 
         result = _fewest(requirement, node, max_nodes)
@@ -167,7 +186,7 @@ class TestAlgorithmBasics:
     def test_exact_float_boundary_keeps_valid_partition_fit(self):
         max_nodes = 8
         requirement = Requirement(
-            ncu=1,
+            cpu=_cpu(1),
             partitions=Partitions(
                 count=188,
                 disk_gib_per_partition=1,
@@ -175,10 +194,10 @@ class TestAlgorithmBasics:
                 min_replicas=2,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=10_000,
             memory_gib=53.39,
-            ncu=16,
+            cpu=16,
         )
 
         result = _fewest(requirement, node, max_nodes)
@@ -191,7 +210,7 @@ class TestAlgorithmBasics:
         """Algorithm rejects a partition that cannot fit in node memory."""
         max_nodes = 100
         requirement = Requirement(
-            ncu=32,
+            cpu=_cpu(32),
             partitions=Partitions(
                 count=10,
                 disk_gib_per_partition=100,
@@ -199,10 +218,10 @@ class TestAlgorithmBasics:
                 min_replicas=2,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=500,
             memory_gib=50,
-            ncu=16,
+            cpu=16,
         )
 
         assert _fewest(requirement, node, max_nodes) is None
@@ -211,7 +230,7 @@ class TestAlgorithmBasics:
         """Memory-driven nodes replace replicas that were needed only for CPU."""
         max_nodes = 100
         requirement = Requirement(
-            ncu=12,
+            cpu=_cpu(12),
             partitions=Partitions(
                 count=8,
                 disk_gib_per_partition=100,
@@ -219,10 +238,10 @@ class TestAlgorithmBasics:
                 min_replicas=2,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=500,
             memory_gib=50,
-            ncu=1,
+            cpu=1,
         )
 
         result = _fewest(requirement, node, max_nodes)
@@ -236,7 +255,7 @@ class TestAlgorithmBasics:
         """A node that offers no memory cannot host memory-placed partitions."""
         max_nodes = 100
         requirement = Requirement(
-            ncu=32,
+            cpu=_cpu(32),
             partitions=Partitions(
                 count=10,
                 disk_gib_per_partition=100,
@@ -244,7 +263,7 @@ class TestAlgorithmBasics:
                 min_replicas=2,
             ),
         )
-        node = NodeResources(ncu=16, disk_gib=500)
+        node = _node(cpu=16, disk_gib=500)
 
         placed = place(requirement, node, min_count=2, max_count=max_nodes)
 
@@ -254,7 +273,7 @@ class TestAlgorithmBasics:
     def test_a_partition_too_big_for_disk_and_memory_names_both(self):
         max_nodes = 100
         requirement = Requirement(
-            ncu=32,
+            cpu=_cpu(32),
             partitions=Partitions(
                 count=10,
                 disk_gib_per_partition=100,
@@ -262,7 +281,7 @@ class TestAlgorithmBasics:
                 min_replicas=2,
             ),
         )
-        node = NodeResources(ncu=16, disk_gib=50, memory_gib=10)
+        node = _node(cpu=16, disk_gib=50, memory_gib=10)
 
         placed = place(requirement, node, min_count=2, max_count=max_nodes)
 
@@ -273,16 +292,16 @@ class TestAlgorithmBasics:
         """A node with room for 140,000 tiny partitions still holds all 12."""
         max_nodes = 100
         requirement = Requirement(
-            ncu=16,
+            cpu=_cpu(16),
             partitions=Partitions(
                 count=12,
                 disk_gib_per_partition=0.1,
                 min_replicas=2,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=14_000,
-            ncu=16,
+            cpu=16,
         )
 
         result = _fewest(requirement, node, max_nodes)
@@ -300,16 +319,16 @@ class TestPlanSelection:
         """Dense packing minimizes nodes when the minimum RF dominates."""
         max_nodes = 1000  # Relaxed constraint
         requirement = Requirement(
-            ncu=64,  # 4 nodes worth
+            cpu=_cpu(64),  # 4 nodes worth
             partitions=Partitions(
                 count=100,
                 disk_gib_per_partition=100,
                 min_replicas=2,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=1000,  # max_ppn = 10
-            ncu=16,
+            cpu=16,
         )
         result = _fewest(requirement, node, max_nodes)
 
@@ -331,16 +350,16 @@ class TestPlanSelection:
         """
         max_nodes = 10000
         requirement = Requirement(
-            ncu=3200,
+            cpu=_cpu(3200),
             partitions=Partitions(
                 count=200,
                 disk_gib_per_partition=575,
                 min_replicas=2,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=2048,  # max_ppn = 3
-            ncu=16,
+            cpu=16,
         )
         result = _fewest(requirement, node, max_nodes)
 
@@ -353,16 +372,16 @@ class TestPlanSelection:
         """Algorithm returns None when no partition density fits the node limit."""
         max_nodes = 10  # Restrictive
         requirement = Requirement(
-            ncu=160,  # Need RF=4 at PPn=10
+            cpu=_cpu(160),  # Need RF=4 at PPn=10
             partitions=Partitions(
                 count=21,
                 disk_gib_per_partition=200,
                 min_replicas=2,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=2000,  # max_ppn = 10
-            ncu=8,
+            cpu=8,
         )
         # PPn=10: base=3, cpu_per_copy=24, needs RF=ceil(160/24)=7, nodes=21 > 10 ❌
         # PPn=5: base=5, cpu_per_copy=40, needs RF=4, nodes=20 > 10 ❌
@@ -378,16 +397,16 @@ class TestPlanSelection:
         """Algorithm evaluates valid configurations instead of returning the first."""
         max_nodes = 60
         requirement = Requirement(
-            ncu=800,  # Need 50 nodes
+            cpu=_cpu(800),  # Need 50 nodes
             partitions=Partitions(
                 count=100,
                 disk_gib_per_partition=100,
                 min_replicas=2,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=500,  # max_ppn = 5
-            ncu=16,
+            cpu=16,
         )
         # PPn=5: base=20, cpu_per_copy=320, needs RF=3, nodes=60
         # PPn=4: base=25, cpu_per_copy=400, needs RF=2, nodes=50
@@ -403,16 +422,16 @@ class TestPlanSelection:
         """Prefer higher RF when two configurations use the same node count."""
         max_nodes = 100
         requirement = Requirement(
-            ncu=80,  # 5 nodes worth
+            cpu=_cpu(80),  # 5 nodes worth
             partitions=Partitions(
                 count=30,
                 disk_gib_per_partition=100,
                 min_replicas=2,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=1500,  # max_ppn = 15
-            ncu=16,
+            cpu=16,
         )
         # PPn=15: base=2, needs RF=3, nodes=6
         # PPn=10: base=3, needs RF=2, nodes=6
@@ -440,16 +459,16 @@ class TestPlanSelection:
         )
         max_nodes = 1_000_000_000
         requirement = Requirement(
-            ncu=10_000,
+            cpu=_cpu(10_000),
             partitions=Partitions(
                 count=1_000_000,
                 disk_gib_per_partition=1,
                 min_replicas=2,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=100_000,
-            ncu=16,
+            cpu=16,
         )
 
         result = _fewest(requirement, node, max_nodes)
@@ -483,17 +502,17 @@ class TestAlgorithmProperties:
             result.layout.partitions_per_node
             * requirement.partitions.disk_gib_per_partition
         )
-        assert used_disk_gib <= math.nextafter(node.disk_gib, math.inf)
+        assert used_disk_gib <= math.nextafter(node.disk.gib, math.inf)
         if requirement.partitions.memory_gib_per_partition is not None:
             used_memory_gib = (
                 result.layout.partitions_per_node
                 * requirement.partitions.memory_gib_per_partition
             )
-            assert used_memory_gib <= math.nextafter(node.memory_gib, math.inf)
+            assert used_memory_gib <= math.nextafter(node.memory.gib, math.inf)
 
         # CPU constraint satisfied
-        total_cpu = result.node_count * node.ncu
-        assert total_cpu >= requirement.ncu
+        total_cpu = result.node_count * node.cpu.count
+        assert total_cpu >= requirement.cpu.count
 
     @given(problem=valid_problems())
     @settings(max_examples=500, deadline=None)
@@ -506,14 +525,14 @@ class TestAlgorithmProperties:
 
         disk_ppn = math.floor(
             math.nextafter(
-                node.disk_gib / requirement.partitions.disk_gib_per_partition, math.inf
+                node.disk.gib / requirement.partitions.disk_gib_per_partition, math.inf
             )
         )
         max_ppn = disk_ppn
         if requirement.partitions.memory_gib_per_partition is not None:
             memory_ppn = math.floor(
                 math.nextafter(
-                    node.memory_gib / requirement.partitions.memory_gib_per_partition,
+                    node.memory.gib / requirement.partitions.memory_gib_per_partition,
                     math.inf,
                 )
             )
@@ -528,7 +547,7 @@ class TestAlgorithmProperties:
             base = math.ceil(requirement.partitions.count / ppn)
             rf = max(
                 requirement.partitions.min_replicas,
-                math.ceil(requirement.ncu / (base * node.ncu)),
+                math.ceil(requirement.cpu.count / (base * node.cpu.count)),
             )
             nodes = max(base * rf, 2)
             if nodes <= max_nodes:
@@ -564,16 +583,16 @@ class TestEdgeCases:
         """
         max_nodes = 100
         requirement = Requirement(
-            ncu=32,
+            cpu=_cpu(32),
             partitions=Partitions(
                 count=1,
                 disk_gib_per_partition=100,
                 min_replicas=2,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=500,  # max_ppn = 5
-            ncu=16,
+            cpu=16,
         )
         result = _fewest(requirement, node, max_nodes)
 
@@ -587,16 +606,16 @@ class TestEdgeCases:
         """Algorithm works with min_rf=1."""
         max_nodes = 100
         requirement = Requirement(
-            ncu=16,  # 1 node worth
+            cpu=_cpu(16),  # 1 node worth
             partitions=Partitions(
                 count=10,
                 disk_gib_per_partition=100,
                 min_replicas=1,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=1000,
-            ncu=16,
+            cpu=16,
         )
         result = _fewest(requirement, node, max_nodes)
 
@@ -607,7 +626,7 @@ class TestEdgeCases:
         """Algorithm handles exact fit scenarios."""
         max_nodes = 4  # Exactly fits 2 nodes * 2 RF
         requirement = Requirement(
-            ncu=32,
+            cpu=_cpu(32),
             partitions=Partitions(
                 count=10,
                 disk_gib_per_partition=100,
@@ -615,10 +634,10 @@ class TestEdgeCases:
                 min_replicas=2,
             ),
         )
-        node = NodeResources(
+        node = _node(
             disk_gib=500,  # Exactly 5 partitions per node
             memory_gib=50,
-            ncu=16,
+            cpu=16,
         )
         result = _fewest(requirement, node, max_nodes)
 
@@ -634,7 +653,7 @@ class TestPins:
 
     MAX_NODES = 100
     DEMAND = Requirement(
-        ncu=64,
+        cpu=_cpu(64),
         partitions=Partitions(
             count=12,
             disk_gib_per_partition=100,
@@ -643,7 +662,7 @@ class TestPins:
     )
 
     def test_a_layout_that_fits_is_placed_as_pinned(self):
-        node = NodeResources(ncu=16, disk_gib=400)
+        node = _node(cpu=16, disk_gib=400)
         layout = Layout(partitions_per_node=3, replica_count=2)
 
         placed = place(
@@ -654,7 +673,7 @@ class TestPins:
         assert (placed.node_count, placed.layout.partitions_per_node) == (8, 3)
 
     def test_a_layout_that_overfills_disk_names_disk(self):
-        node = NodeResources(ncu=16, disk_gib=250)
+        node = _node(cpu=16, disk_gib=250)
         layout = Layout(partitions_per_node=3, replica_count=2)
 
         placed = place(
@@ -670,7 +689,7 @@ class TestPins:
             update={"memory_gib_per_partition": 25}
         )
         requirement = self.DEMAND.model_copy(update={"partitions": partitions})
-        node = NodeResources(ncu=16, disk_gib=250, memory_gib=50)
+        node = _node(cpu=16, disk_gib=250, memory_gib=50)
         layout = Layout(partitions_per_node=3, replica_count=1)
 
         placed = place(
@@ -687,7 +706,7 @@ class TestPins:
     def test_a_count_uses_the_densest_layout_on_exactly_that_many_nodes(self):
         # All 12 partitions on one node would not fit, so the densest split
         # of 6 nodes is 2 nodes per copy, 3 copies.
-        node = NodeResources(ncu=16, disk_gib=700)
+        node = _node(cpu=16, disk_gib=700)
 
         placed = place(
             self.DEMAND, node, min_count=2, max_count=self.MAX_NODES, count=6
@@ -698,7 +717,7 @@ class TestPins:
         assert placed.layout.replica_count == 3
 
     def test_a_count_too_small_for_the_cpu_names_cpu(self):
-        node = NodeResources(ncu=16, disk_gib=1_200)
+        node = _node(cpu=16, disk_gib=1_200)
 
         placed = place(
             self.DEMAND, node, min_count=2, max_count=self.MAX_NODES, count=2
@@ -710,7 +729,7 @@ class TestPins:
     def test_a_count_no_split_fits_names_each_resource_of_the_sparsest(self):
         # On 2 nodes, even the sparser split (6 partitions per node, one copy)
         # overfills 250 GiB and has too few copies for the CPU need.
-        node = NodeResources(ncu=16, disk_gib=250)
+        node = _node(cpu=16, disk_gib=250)
 
         placed = place(
             self.DEMAND, node, min_count=2, max_count=self.MAX_NODES, count=2
@@ -727,7 +746,7 @@ def test_a_cpu_need_on_a_whole_number_of_cores_adds_no_node():
     node_cores = math.nextafter(14, 0)
     max_nodes = 1_000
     requirement = Requirement(
-        ncu=966,
+        cpu=_cpu(966),
         partitions=Partitions(
             count=1,
             disk_gib_per_partition=1,
@@ -737,7 +756,7 @@ def test_a_cpu_need_on_a_whole_number_of_cores_adds_no_node():
 
     placed = place(
         requirement,
-        NodeResources(ncu=node_cores, disk_gib=100),
+        _node(cpu=node_cores, disk_gib=100),
         min_count=2,
         max_count=max_nodes,
     )
