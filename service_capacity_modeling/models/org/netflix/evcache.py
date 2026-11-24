@@ -34,6 +34,7 @@ from service_capacity_modeling.interface import FixedInterval
 from service_capacity_modeling.interface import GlobalConsistency
 from service_capacity_modeling.interface import Instance
 from service_capacity_modeling.interface import Interval
+from service_capacity_modeling.interface import NodeCountConstraint
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.interface import RegionContext
 from service_capacity_modeling.interface import Requirements
@@ -55,6 +56,10 @@ from service_capacity_modeling.models.common import RequirementFromCurrentCapaci
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
+from service_capacity_modeling.models.org.netflix.evcache_disk_io import (
+    EVCacheDiskIO,
+    disk_io_requirement,
+)
 from service_capacity_modeling.stats import dist_for_interval
 
 logger = logging.getLogger(__name__)
@@ -359,6 +364,7 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     cross_region_replication: Replication = Replication.none,
     different_family_regret: float = 0.0,
     required_cluster_size: Optional[int] = None,
+    observed_disk_io: EVCacheDiskIO | None = None,
 ) -> Union[CapacityPlan, Excuse, None]:
     # EVCache doesn't like to deploy on single CPU instances
     if instance.cpu < 2:
@@ -443,21 +449,20 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     if current is not None and current.cluster_instance_count.mid == 1:
         min_count_for_cluster = 1
 
-    is_disk_io_constraint: bool = requirement.disk_gib.mid > 0.0
-    adjusted_disk_io_needed = 0.0
-    read_write_ratio = 0.0
-    if is_disk_io_constraint:
-        reads_per_sec = desires.query_pattern.estimated_read_per_second.mid
-        writes_per_sec = desires.query_pattern.estimated_write_per_second.mid
-        read_size = desires.query_pattern.estimated_mean_read_size_bytes.mid
-        write_size = desires.query_pattern.estimated_mean_write_size_bytes.mid
-        read_disk_io_needed = reads_per_sec * read_size
-        write_disk_io_needed = writes_per_sec * write_size
-        adjusted_disk_io_needed = read_disk_io_needed + write_disk_io_needed
-        # Giving headroom for cachewarming and region squeeze
-        adjusted_disk_io_needed = 1.4 * adjusted_disk_io_needed
-        total_requests = reads_per_sec + writes_per_sec
-        read_write_ratio = reads_per_sec / total_requests if total_requests else 0.0
+    io_count = 0
+    io_context = None
+    if requirement.disk_gib.mid > 0.0:
+        try:
+            io_count, io_context = disk_io_requirement(
+                instance, desires, observed_disk_io, current
+            )
+        except ValueError as exc:
+            return Excuse(
+                instance=instance.name,
+                drive=drive.name,
+                reason=str(exc),
+                bottleneck=Bottleneck.disk_iops,
+            )
 
     needed_disk_gib = requirement.disk_gib.mid
     disk_buffer_ratio = buffer_for_components(
@@ -484,11 +489,26 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         reserve_memory=reserve_memory,
         needed_network_mbps=requirement.network_mbps.mid,
         min_count=max(
-            min_count_for_data, min_count_for_cluster, required_cluster_size or 0
+            min_count_for_data,
+            min_count_for_cluster,
+            required_cluster_size or 0,
+            io_count,
         ),
-        adjusted_disk_io_needed=adjusted_disk_io_needed,
-        read_write_ratio=read_write_ratio,
     )
+    if io_context is not None:
+        counts = cluster.node_count_context
+        assert counts is not None
+        counts.required_nodes_by_type[NodeCountConstraint.disk_iops] = io_count
+        counts.required_nodes_by_type[NodeCountConstraint.cluster_size] = max(
+            counts.required_nodes_by_type[NodeCountConstraint.cluster_size], io_count
+        )
+        counts.required_nodes_by_type[NodeCountConstraint.min_count] = max(
+            min_count_for_data, min_count_for_cluster, required_cluster_size or 0
+        )
+        cluster.cluster_params.update(
+            counts.model_dump(mode="json")
+        )
+        cluster.cluster_params["evcache.disk_io"] = io_context
     excuse = check_cluster_size_requirement(
         instance, drive, cluster, required_cluster_size
     )
@@ -580,6 +600,13 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
 
 class NflxEVCacheArguments(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False)
+
+    observed_disk_io: EVCacheDiskIO | None = Field(
+        default=None,
+        description="Unbuffered disk read/write bytes and operations per second "
+        "for one complete replica. Uses direct observed demand instead of request "
+        "estimation. Event scaling and IO margins are applied by the model.",
+    )
 
     copies_per_region: int = Field(
         default=3,
@@ -695,7 +722,7 @@ class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
         desires: CapacityDesires,
         extra_model_arguments: Dict[str, Any],
     ) -> Union[CapacityPlan, Excuse, None]:
-        NflxEVCacheArguments(**extra_model_arguments)
+        arguments = NflxEVCacheArguments(**extra_model_arguments)
         # (Arun) EVCache defaults to RF=3 for tier 0 and tier 1
         default_copies = context.zones_in_region
         copies_per_region: int = int(
@@ -738,6 +765,7 @@ class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
             different_family_regret=different_family_regret,
             required_cluster_size=extra_model_arguments.get("required_cluster_size"),
             context=context,
+            observed_disk_io=arguments.observed_disk_io,
         )
 
     @staticmethod
