@@ -20,7 +20,6 @@ from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import CapacityDesires
 from service_capacity_modeling.interface import CapacityPlan
-from service_capacity_modeling.interface import CapacityRegretParameters
 from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import CapacityRequirement
 from service_capacity_modeling.interface import certain_float
@@ -82,23 +81,6 @@ def calculate_read_cpu_time_evcache_ms(read_size_bytes: float) -> float:
         (1 + math.pow(read_size_bytes / 13061.23, 0.180864)), 0.0002819491
     )
     return max(read_latency_ms, 0.005)
-
-
-def calculate_spread_cost(
-    cluster_size: int, max_cost: float = 100000, min_cost: float = 0.0
-) -> float:
-    """Dollar penalty for under-spread clusters.
-
-    Returns an additive cost penalty (in dollars) that increases as clusters
-    get smaller. This was originally injected into annual_costs as fake
-    dollars; now it's applied to plan.rank instead, keeping total_annual_cost
-    honest while preserving the same selection behavior in plan_certain().
-    """
-    if cluster_size > 10:
-        return min_cost
-    if cluster_size < 2:
-        return max_cost
-    return min_cost + (max_cost - cluster_size * (max_cost - min_cost) / 30.0)
 
 
 def calculate_vitals_for_capacity_planner(
@@ -301,7 +283,6 @@ def _current_evcache_cluster(
 def _compute_evcache_penalties(
     instance: Instance,
     desires: CapacityDesires,
-    cluster_count: int,
     compute_cost: float,
     different_family_regret: float,
 ) -> Dict[str, float]:
@@ -310,7 +291,6 @@ def _compute_evcache_penalties(
     Penalties inflate plan.rank without touching total_annual_cost:
         rank = total_annual_cost + sum(penalties.values())
 
-    - under_spread: discourages small / under-spread clusters.
     - family_migration: biases scale-up toward the instance family the cluster
       already runs; a different family must be meaningfully cheaper (on compute)
       to out-rank the incumbent. Soft, so a different family still wins when it
@@ -321,10 +301,6 @@ def _compute_evcache_penalties(
       current family, so ties and small price differences favor the current size.
     """
     penalties: Dict[str, float] = {}
-
-    spread_cost = calculate_spread_cost(cluster_count)
-    if spread_cost > 0:
-        penalties["under_spread"] = spread_cost
 
     current = _current_evcache_cluster(desires)
     if current is not None:
@@ -437,11 +413,11 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
             reason="Memory reservations leave no usable datastore memory",
             bottleneck=Bottleneck.memory,
         )
-    # Keep the two-node floor unless the current EVCache cluster has one node.
+    # Preserve existing small-cluster spread; larger clusters may shrink to ten.
     min_count_for_cluster = 2
     current = _current_evcache_cluster(desires)
-    if current is not None and current.cluster_instance_count.mid == 1:
-        min_count_for_cluster = 1
+    if current is not None:
+        min_count_for_cluster = math.ceil(min(current.cluster_instance_count.mid, 10))
 
     is_disk_io_constraint: bool = requirement.disk_gib.mid > 0.0
     adjusted_disk_io_needed = 0.0
@@ -550,7 +526,6 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     penalties = _compute_evcache_penalties(
         instance=instance,
         desires=desires,
-        cluster_count=cluster.count,
         compute_cost=compute_cost,
         different_family_regret=different_family_regret,
     )
@@ -638,22 +613,6 @@ class NflxEVCacheArguments(BaseModel):
 class NflxEVCacheCapacityModel(CapacityModel, CostAwareModel):
     service_name = "evcache"
     cluster_type = "evcache"
-
-    @staticmethod
-    def regret(
-        regret_params: CapacityRegretParameters,
-        optimal_plan: CapacityPlan,
-        proposed_plan: CapacityPlan,
-    ) -> Dict[str, float]:
-        regrets = CapacityModel.regret(regret_params, optimal_plan, proposed_plan)
-
-        if proposed_plan.candidate_clusters.zonal:
-            params = proposed_plan.candidate_clusters.zonal[0].cluster_params
-            penalties = params.get(RANK_PENALTIES, {})
-            if "under_spread" in penalties:
-                regrets["under_spread"] = penalties["under_spread"]
-
-        return regrets
 
     @staticmethod
     def service_costs(
