@@ -1,4 +1,5 @@
 import math
+from typing import Optional
 
 import pytest
 
@@ -22,6 +23,7 @@ from service_capacity_modeling.models.placement import CPURequirement
 from service_capacity_modeling.models.placement import DiskRequirement
 from service_capacity_modeling.models.placement import DoesNotFit
 from service_capacity_modeling.models.placement import Isolation
+from service_capacity_modeling.models.placement import Layout
 from service_capacity_modeling.models.placement import MemoryRequirement
 from service_capacity_modeling.models.placement import mixable
 from service_capacity_modeling.models.placement import NodeCPU
@@ -200,6 +202,31 @@ def test_disk_io_weighs_the_drives_read_and_write_iops(read_fraction):
     )
 
 
+def test_a_node_with_no_disk_io_does_not_fit_disk_io():
+    """A known 0 IOPS is no IO at all, not an unknown limit."""
+    requirement = Requirement(
+        cpu=vcpus(1), disk=DiskRequirement(gib=1, io_bytes_per_s=100)
+    )
+
+    def node(io_bytes_per_s: Optional[float]) -> NodeResources:
+        return NodeResources(
+            shape=default_reference_shape,
+            cpu=NodeCPU(count=8),
+            disk=NodeDisk(
+                gib=10,
+                read_bytes_per_s=io_bytes_per_s,
+                write_bytes_per_s=io_bytes_per_s,
+            ),
+        )
+
+    none = place(requirement, node(0))
+    unknown = place(requirement, node(None))
+
+    assert isinstance(none, DoesNotFit)
+    assert none.bottlenecks == [Bottleneck.disk_iops]
+    assert isinstance(unknown, Placement) and unknown.node_count == 1
+
+
 def test_parallelism_needs_physical_cores_not_vcpus():
     """m5.large and m7a.large both have 2 vCPUs, but m5.large has 1 physical
     core, so it cannot run 2 threads truly in parallel."""
@@ -348,6 +375,23 @@ def test_one_partition_puts_the_whole_dataset_on_every_node():
     assert isinstance(roomy, Placement) and roomy.node_count == 3
     assert isinstance(small, DoesNotFit)
     assert small.bottlenecks == [Bottleneck.memory]
+
+
+def test_min_count_nodes_hold_whole_copies():
+    """One partition, one replica needed, at least 4 nodes: each of the 4
+    nodes holds a full copy instead of 3 sitting empty."""
+    node = NodeResources(
+        shape=default_reference_shape, cpu=NodeCPU(count=8), disk=NodeDisk(gib=10)
+    )
+    requirement = Requirement(
+        cpu=vcpus(0),
+        partitions=Partitions(count=1, disk_gib_per_partition=1, min_replicas=1),
+    )
+
+    placed = place(requirement, node, min_count=4)
+
+    assert isinstance(placed, Placement) and placed.node_count == 4
+    assert placed.layout == Layout(partitions_per_node=1, replica_count=4)
 
 
 def test_partitions_bring_their_own_disk_and_memory():
