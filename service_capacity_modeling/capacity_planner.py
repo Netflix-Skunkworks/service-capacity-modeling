@@ -1313,8 +1313,10 @@ class CapacityPlanner:
             desires=desires,
             extra_model_arguments=extra_model_arguments,
             num_regions=num_regions,
+            lifecycles=lifecycles,
             instance_families=instance_families,
             instance_filters_by_model=instance_filters_by_model,
+            drives=drives,
         )
 
         uncertain_plan = UncertainCapacityPlan(
