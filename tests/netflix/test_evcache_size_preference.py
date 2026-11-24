@@ -63,11 +63,8 @@ def test_evcache_same_family_size_preference(
     compute_cost = sum(c.annual_cost for c in resized.candidate_clusters.zonal)
     penalties = resized.candidate_clusters.zonal[0].cluster_params[RANK_PENALTIES]
     assert penalties["size_migration"] == pytest.approx(compute_cost * 0.001)
-    assert set(penalties) <= {"size_migration", "under_spread"}
-    spread_cost = penalties.get("under_spread", 0)
+    assert set(penalties) == {"size_migration"}
     assert resized.rank == pytest.approx(
-        resized.candidate_clusters.total_annual_cost
-        + compute_cost * 0.001
-        + spread_cost
+        resized.candidate_clusters.total_annual_cost + compute_cost * 0.001
     )
     assert resized.candidate_clusters.total_annual_cost == pytest.approx(compute_cost)

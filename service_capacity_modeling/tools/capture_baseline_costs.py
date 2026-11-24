@@ -901,7 +901,7 @@ scenarios.extend(
 )
 
 # EVCache scenarios
-# Tiny EVCache - small cluster to show spread cost (< 10 instances = spread penalty)
+# Tiny EVCache - new cluster with a two-node minimum per zone
 evcache_tiny = CapacityDesires(
     service_tier=1,
     query_pattern=QueryPattern(
@@ -954,7 +954,7 @@ scenarios.extend(
             "us-east-1",
             evcache_tiny,
             {"cross_region_replication": "none"},
-            "evcache_tiny_with_spread",
+            "evcache_tiny_minimum_nodes",
         ),
         (
             "org.netflix.evcache",

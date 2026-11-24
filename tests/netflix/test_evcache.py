@@ -19,7 +19,6 @@ from service_capacity_modeling.interface import Interval
 from service_capacity_modeling.interface import QueryPattern
 from service_capacity_modeling.models.org.netflix.evcache import (
     calculate_read_cpu_time_evcache_ms,
-    calculate_spread_cost,
 )
 from tests.netflix.property_test_utils import capacity_desires_simple
 
@@ -53,7 +52,7 @@ def test_evcache_read_latency():
 
 
 @pytest.mark.parametrize("tier", [0, 1, 2, 3])
-@pytest.mark.parametrize("current_count", [None, 1, 2])
+@pytest.mark.parametrize("current_count", [None, 1, 2, 3, 8, 9, 10, 11, 20])
 def test_evcache_minimum_nodes_per_zone_for_service_tier(tier, current_count):
     desires = CapacityDesires(
         service_tier=tier,
@@ -87,7 +86,9 @@ def test_evcache_minimum_nodes_per_zone_for_service_tier(tier, current_count):
     for plan in plans:
         assert len(plan.candidate_clusters.zonal) == 3
         for cluster in plan.candidate_clusters.zonal:
-            assert cluster.count == (1 if current_count == 1 else 2)
+            assert cluster.count == (
+                2 if current_count is None else min(current_count, 10)
+            )
 
 
 def test_evcache_inmemory_low_latency_reads_cpu():
@@ -527,19 +528,7 @@ def test_evcache_string_arguments_coercion():
         assert len(candidate.candidate_clusters.zonal) > 0
 
 
-def test_spread_cost_function():
-    """calculate_spread_cost returns additive dollar penalty for small clusters."""
-    assert calculate_spread_cost(1) == 100000  # < 2 nodes → max penalty
-    assert calculate_spread_cost(0) == 100000
-    assert calculate_spread_cost(10) > 0  # threshold remains penalized
-    assert calculate_spread_cost(11) == 0  # above threshold
-    assert calculate_spread_cost(20) == 0
-    # Intermediate values decrease as cluster grows
-    assert calculate_spread_cost(2) > calculate_spread_cost(5)
-    assert calculate_spread_cost(5) > calculate_spread_cost(9)
-
-
-# Shared fixture for small-cluster spread cost tests
+# Shared workload for deterministic and stochastic ranking tests.
 _small_cluster_desires = CapacityDesires(
     service_tier=1,
     query_pattern=QueryPattern(
@@ -560,40 +549,29 @@ _small_cluster_desires = CapacityDesires(
 )
 
 
-def test_evcache_spread_deterministic():
-    """Deterministic smoke test: small clusters get rank penalty, no fake dollars."""
-    plan = planner.plan_certain(
+def test_evcache_small_cluster_rank_is_actual_cost():
+    plans = planner.plan_certain(
         model_name="org.netflix.evcache",
         region="us-east-1",
         desires=_small_cluster_desires,
     )
 
-    assert len(plan) > 0
-    found_penalized = False
-    for candidate in plan:
-        # No fake spread.cost dollars in annual_costs
-        for cost_key in candidate.candidate_clusters.annual_costs:
-            assert "spread.cost" not in cost_key
-
-        cluster_count = candidate.candidate_clusters.zonal[0].count
-        if cluster_count < 10:
-            assert candidate.rank > float(
-                candidate.candidate_clusters.total_annual_cost
-            ), f"Small cluster ({cluster_count} nodes) should have rank > cost"
-            found_penalized = True
-    assert found_penalized, "Expected at least one plan with < 10 nodes per zone"
+    assert plans
+    assert any(p.candidate_clusters.zonal[0].count < 10 for p in plans)
+    for candidate in plans:
+        assert candidate.rank == float(candidate.candidate_clusters.total_annual_cost)
+        for cluster in candidate.candidate_clusters.zonal:
+            assert not cluster.cluster_params.get("rank_penalties", {})
 
 
 @pytest.mark.parametrize("current_kind", ["none", "other", "ambiguous"])
-def test_evcache_without_identified_current_keeps_spread_penalty(current_kind):
-    from service_capacity_modeling.models import RANK_PENALTIES
-
+def test_evcache_without_identified_current_uses_new_cluster_floor(current_kind):
     desires = _small_cluster_desires.model_copy(deep=True)
     if current_kind != "none":
         current = CurrentZoneClusterCapacity(
             cluster_type="cassandra" if current_kind == "other" else None,
             cluster_instance_name="i4i.large",
-            cluster_instance_count=certain_float(3),
+            cluster_instance_count=certain_float(8),
         )
         zonal = [current]
         if current_kind == "ambiguous":
@@ -610,41 +588,52 @@ def test_evcache_without_identified_current_keeps_spread_penalty(current_kind):
 
     assert plans
     for plan in plans:
-        cluster = plan.candidate_clusters.zonal[0]
-        assert cluster.count <= 10
-        penalties = cluster.cluster_params[RANK_PENALTIES]
-        assert penalties == {"under_spread": calculate_spread_cost(cluster.count)}
+        assert plan.candidate_clusters.zonal[0].count == 2
+        assert plan.rank == float(plan.candidate_clusters.total_annual_cost)
 
 
-def test_evcache_spread_stochastic_regret():
-    """Stochastic path: regret() produces named 'under_spread' component."""
+@pytest.mark.parametrize("current_count", [None, 1, 8, 10, 20])
+def test_evcache_stochastic_plans_use_node_floor_without_spread_regret(current_count):
+    from service_capacity_modeling.interface import CapacityRegretParameters
+    from service_capacity_modeling.models.org.netflix.evcache import (
+        nflx_evcache_capacity_model,
+    )
+
+    desires = _small_cluster_desires.model_copy(deep=True)
+    if current_count is not None:
+        desires.current_clusters = CurrentClusters(
+            zonal=[
+                CurrentZoneClusterCapacity(
+                    cluster_type="evcache",
+                    cluster_instance_name="i4i.large",
+                    cluster_instance_count=certain_float(current_count),
+                    cpu_utilization=certain_float(0.1),
+                    memory_utilization_gib=certain_float(0.1),
+                    network_utilization_mbps=certain_float(0.1),
+                )
+            ]
+        )
     result = planner.plan(
         model_name="org.netflix.evcache",
         region="us-east-1",
-        desires=_small_cluster_desires,
-        num_results=3,
+        desires=desires,
+        instance_families=["i4i.large"],
+        simulations=32,
     )
 
-    assert len(result.least_regret) > 0
-    # At least one least-regret winner should carry under_spread penalty metadata.
-    # This verifies that regret() is wired correctly through the stochastic path:
-    # plan() → N simulations → plan_certain() per sim → regret() O(N²) → winners.
-    found_penalty = False
+    assert result.least_regret
+    expected_count = 2 if current_count is None else min(current_count, 10)
     for candidate in result.least_regret:
-        zonal = candidate.candidate_clusters.zonal
-        if not zonal:
-            continue
-        count = zonal[0].count
-        params = zonal[0].cluster_params or {}
-        penalties = params.get("rank_penalties", {})
-        if count < 10 and "under_spread" in penalties:
-            expected = calculate_spread_cost(count)
-            assert abs(penalties["under_spread"] - expected) < 0.01
-            found_penalty = True
-            break
-    assert found_penalty, (
-        "Expected at least one least-regret plan with under_spread penalty"
-    )
+        for cluster in candidate.candidate_clusters.zonal:
+            assert cluster.count == expected_count
+            assert "under_spread" not in cluster.cluster_params.get(
+                "rank_penalties", {}
+            )
+        regrets = nflx_evcache_capacity_model.regret(
+            CapacityRegretParameters(), candidate, candidate
+        )
+        assert "under_spread" not in regrets
+        assert all(value == 0 for value in regrets.values())
 
 
 @settings(
@@ -660,66 +649,20 @@ def test_evcache_spread_stochastic_regret():
         max_data_gib=500,
     )
 )
-def test_evcache_spread_invariants(desires):
-    """Property: For any EVCache workload, spread penalty invariants hold.
-
-    1. No plan's annual_costs contain fake 'spread.cost' dollars
-    2. Under-spread plans (< 10 nodes) have rank > cost (penalty inflated)
-    3. Plans are rank-sorted (plan_certain guarantees this)
-    4. Under-spread plans carry RANK_PENALTIES metadata with correct coefficient
-    """
-    plan = planner.plan_certain(
+def test_evcache_new_cluster_ranking_invariants(desires):
+    plans = planner.plan_certain(
         model_name="org.netflix.evcache",
         region="us-east-1",
         desires=desires,
     )
-    assume(len(plan) > 0)
+    assume(plans)
 
-    prev_rank = 0
-    for candidate in plan:
-        cost = float(candidate.candidate_clusters.total_annual_cost)
-        zonal = candidate.candidate_clusters.zonal
-
-        # Invariant 1: no fake spread dollars
-        for cost_key in candidate.candidate_clusters.annual_costs:
-            assert "spread.cost" not in cost_key
-
-        # Invariant 3: plans are rank-sorted
-        assert candidate.rank >= prev_rank
-        prev_rank = candidate.rank
-
-        if not zonal:
-            continue
-
-        count = zonal[0].count
-        params = zonal[0].cluster_params or {}
-        penalties = params.get("rank_penalties", {})
-
-        if count <= 10:
-            expected_spread = calculate_spread_cost(count)
-
-            if expected_spread > 0:
-                # Invariant 2: rank is inflated by spread cost
-                assert candidate.rank > cost, (
-                    f"count={count}, rank={candidate.rank}, cost={cost}"
-                )
-
-                # Invariant 4: penalty metadata present with correct dollar amount
-                assert "under_spread" in penalties, (
-                    f"count={count} should have under_spread penalty"
-                )
-                assert abs(penalties["under_spread"] - expected_spread) < 0.01
-
-                # Invariant 5: rank = cost + spread_cost (additive, same as old)
-                assert abs(candidate.rank - (cost + expected_spread)) < 0.01, (
-                    f"rank should be cost + spread: "
-                    f"rank={candidate.rank}, cost={cost}, spread={expected_spread}"
-                )
-            else:
-                assert "under_spread" not in penalties
-        else:
-            # Well-spread clusters should not have under_spread penalty
-            assert "under_spread" not in penalties
+    assert [p.rank for p in plans] == sorted(p.rank for p in plans)
+    for candidate in plans:
+        assert candidate.rank == float(candidate.candidate_clusters.total_annual_cost)
+        for cluster in candidate.candidate_clusters.zonal:
+            assert cluster.count >= 2
+            assert not cluster.cluster_params.get("rank_penalties", {})
 
 
 def _disk_heavy_evcache_desires(
