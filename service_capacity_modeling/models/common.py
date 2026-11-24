@@ -12,6 +12,7 @@ from typing import Optional
 from typing import Sequence
 from typing import Set
 from typing import Tuple
+from typing import Union
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -46,9 +47,16 @@ from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import utils
 from service_capacity_modeling.models.headroom_strategy import HeadroomStrategy
 from service_capacity_modeling.models.placement import ceil_ignoring_float_error
+from service_capacity_modeling.models.placement import cpu_to_ncu
+from service_capacity_modeling.models.placement import CPURequirement
+from service_capacity_modeling.models.placement import DiskRequirement
+from service_capacity_modeling.models.placement import DoesNotFit
+from service_capacity_modeling.models.placement import MemoryRequirement
+from service_capacity_modeling.models.placement import NodeCPU
+from service_capacity_modeling.models.placement import NodeDisk
+from service_capacity_modeling.models.placement import NodeMemory
 from service_capacity_modeling.models.placement import NodeResources
 from service_capacity_modeling.models.placement import place
-from service_capacity_modeling.models.placement import Placement
 from service_capacity_modeling.models.placement import Requirement
 from service_capacity_modeling.models.placement import round_zone_count
 from service_capacity_modeling.models.headroom_strategy import (
@@ -274,19 +282,6 @@ def normalize_cores_float(
     if reference_shape is None:
         reference_shape = default_reference_shape
     return cpu_to_ncu(core_count, reference_shape) / cpu_to_ncu(1, target_shape)
-
-
-def cpu_to_ncu(cpu: float, shape: Instance) -> float:
-    """Convert vCPUs of shape to NCUs (normalized compute units).
-
-    One NCU is one vCPU of default_reference_shape (2.3 GHz, cpu_ipc_scale
-    1.0), so NCUs compare and add up across instance types. A vCPU is worth
-    shape.cpu_ghz * shape.cpu_ipc_scale / 2.3 NCUs; cpu_ipc_scale already
-    folds in the hyperthreading factor, so pass vCPUs, not physical cores.
-    """
-    shape_speed = shape.cpu_ghz * shape.cpu_ipc_scale
-    ncu_speed = default_reference_shape.cpu_ghz * default_reference_shape.cpu_ipc_scale
-    return cpu * (shape_speed / ncu_speed)
 
 
 def _reserved_headroom(
@@ -663,33 +658,37 @@ def compute_stateful_zone(  # pylint: disable=too-many-positional-arguments
     max_node_disk_gib: Callable[[Drive], int] = lambda d: math.ceil(d.max_size_gib / 3),
 ) -> ZoneClusterCapacity:
     """Size one zone from needs in ``instance``'s cores; see size_stateful_zone."""
-    return size_stateful_zone(
+    cluster = size_stateful_zone(
         Requirement(
-            ncu=cpu_to_ncu(needed_cores, instance),
-            memory_gib=needed_memory_gib,
+            cpu=CPURequirement(count=needed_cores, reference_shape=instance),
+            memory=MemoryRequirement(
+                gib=needed_memory_gib, write_buffer_gib=required_write_buffer_gib
+            ),
+            disk=DiskRequirement(
+                gib=needed_disk_gib,
+                io_bytes_per_s=adjusted_disk_io_needed,
+                read_fraction=read_write_ratio,
+            ),
             network_mbps=needed_network_mbps,
-            disk_gib=needed_disk_gib,
-            disk_io_bytes_per_s=adjusted_disk_io_needed,
-            write_buffer_gib=required_write_buffer_gib,
         ),
-        instance,
+        stateful_node_resources(instance, reserve_memory, write_buffer),
         drive,
         required_disk_ios=required_disk_ios,
         required_disk_throughput=required_disk_throughput,
-        reserve_memory=reserve_memory,
-        write_buffer=write_buffer,
         cluster_size=cluster_size,
         min_count=min_count,
-        read_write_ratio=read_write_ratio,
         max_node_disk_gib=max_node_disk_gib,
     )
+    # Without parallelism or isolation, every requirement fits a node with
+    # memory, which stateful_node_resources ensures.
+    assert isinstance(cluster, ZoneClusterCapacity), cluster
+    return cluster
 
 
 def stateful_node_resources(
     instance: Instance,
     reserve_memory: Callable[[float], float] = lambda x: 0,
     write_buffer: Callable[[float], float] = lambda x: 0,
-    read_write_ratio: float = 0.0,
 ) -> NodeResources:
     """What one node of ``instance`` offers a stateful zone.
 
@@ -708,21 +707,27 @@ def stateful_node_resources(
         )
     local = instance.drive if _has_local_disk(instance) else None
     return NodeResources(
-        ncu=cpu_to_ncu(instance.cpu, instance),
-        cpu_headroom=cpu_headroom_target(instance),
-        memory_gib=memory_gib,
-        network_mbps=instance.net_mbps,
-        disk_gib=local.size_gib if local else 0,
-        disk_io_bytes_per_s=(
-            _local_disk_io_bytes_per_s(local, read_write_ratio) if local else None
+        shape=instance,
+        cpu=NodeCPU(count=instance.cpu, headroom=cpu_headroom_target(instance)),
+        memory=NodeMemory(
+            gib=memory_gib, write_buffer_gib=write_buffer(instance.ram_gib)
         ),
-        write_buffer_gib=write_buffer(instance.ram_gib),
+        disk=(
+            NodeDisk(
+                gib=local.size_gib,
+                read_bytes_per_s=_io_bytes_per_s(local, local.read_io_per_s),
+                write_bytes_per_s=_io_bytes_per_s(local, local.write_io_per_s),
+            )
+            if local
+            else NodeDisk()
+        ),
+        network_mbps=instance.net_mbps,
     )
 
 
 def size_stateful_zone(  # pylint: disable=too-many-arguments
     requirement: Requirement,
-    instance: Instance,
+    node: NodeResources,
     drive: Drive,
     *,
     # Cloud drives may need to scale for IOs, and datastores might need more
@@ -733,57 +738,50 @@ def size_stateful_zone(  # pylint: disable=too-many-arguments
     count: (0, 0),
     # Provisioned attached-drive throughput in MiB/s, same contract as disk ios
     required_disk_throughput: Callable[[float, int], float] = lambda size_gib, count: 0,
-    # Some stateful clusters have sidecars that take memory
-    reserve_memory: Callable[[float], float] = lambda x: 0,
-    # How much write buffer we get per instance (usually a percentage of
-    # the reserved memory, e.g. for buffering writes in heap)
-    write_buffer: Callable[[float], float] = lambda x: 0,
     # Round the raw node count to a technology-specific cluster size
     # (for example even counts, powers of two, or an existing base size).
     cluster_size: Callable[[int], int] = lambda x: x,
     min_count: int = 0,
-    read_write_ratio: float = 0.0,
     # Maximum EBS volume size per node. Default caps at 1/3 max to leave
     # growth headroom. Models can override for clusters with known disk needs.
     max_node_disk_gib: Callable[[Drive], int] = lambda d: math.ceil(d.max_size_gib / 3),
     cluster_type: str = "stateful-cluster",
     # Model parameters reported after the per-resource node counts.
     cluster_params: Optional[Dict[str, Any]] = None,
-) -> ZoneClusterCapacity:
-    """Size one zone of ``instance`` nodes for an evenly divided ``requirement``.
+) -> Union[ZoneClusterCapacity, DoesNotFit]:
+    """Size one zone of ``node`` for an evenly divided ``requirement``.
 
-    ``place`` counts nodes for CPU, memory, network and local disk. On an
-    instance without local disk, the zone's disk goes on ``drive`` volumes
-    sized for the node count the other resources need.
+    ``place`` counts nodes for CPU, memory, network and local disk. On a
+    node without local disk, the zone's disk goes on ``drive`` volumes sized
+    for the node count the other resources need. Returns ``place``'s
+    ``DoesNotFit`` when the node cannot serve the requirement, for the model
+    to report as an ``Excuse``.
     """
     if requirement.partitions is not None:
         raise ValueError(
             "size_stateful_zone divides the requirement evenly; place a "
             "partitioned requirement with place()"
         )
-    node = stateful_node_resources(
-        instance, reserve_memory, write_buffer, read_write_ratio
-    )
-    on_attached_drives = node.disk_gib == 0
+    instance = node.shape
+    on_attached_drives = node.disk.gib == 0
     placement = place(
-        requirement.model_copy(update={"disk_gib": 0, "disk_io_bytes_per_s": 0})
+        requirement.model_copy(update={"disk": DiskRequirement()})
         if on_attached_drives
         else requirement,
         node,
         cluster_size=cluster_size,
         min_count=min_count,
     )
-    # stateful_node_resources rejects a shape with no memory, and an instance
-    # always has CPU and network, so every requirement places.
-    assert isinstance(placement, Placement), placement
+    if isinstance(placement, DoesNotFit):
+        return placement
     assert placement.node_counts is not None
 
     attached_drives: List[Drive] = []
-    if on_attached_drives and requirement.disk_gib > 0:
+    if on_attached_drives and requirement.disk.gib > 0:
         by_type = placement.node_counts.required_nodes_by_type
         attached_drive_plan = _attached_drive_plan(
             drive=drive,
-            needed_disk_gib=requirement.disk_gib,
+            needed_disk_gib=requirement.disk.gib,
             count_cpu=by_type[NodeCountConstraint.cpu],
             count_memory=by_type[NodeCountConstraint.memory],
             count_network=by_type[NodeCountConstraint.network],
@@ -808,10 +806,10 @@ def size_stateful_zone(  # pylint: disable=too-many-arguments
     assert placement.node_counts is not None
     count = placement.node_count
     logger.debug(
-        "For (ncu, memory_gib, disk_gib) = (%s, %s, %s) need (%s, %s, %s, %s)",
-        requirement.ncu,
-        requirement.memory_gib,
-        requirement.disk_gib,
+        "For (cpu, memory_gib, disk_gib) = (%s, %s, %s) need (%s, %s, %s, %s)",
+        requirement.cpu,
+        requirement.memory.gib,
+        requirement.disk.gib,
         count,
         instance.name,
         attached_drives,
@@ -835,22 +833,11 @@ def _has_local_disk(instance: Instance) -> bool:
     return instance.drive is not None and instance.drive.size_gib > 0
 
 
-def _local_disk_io_bytes_per_s(
-    drive: Drive, read_write_ratio: float
-) -> Optional[float]:
-    """Local disk IO in bytes/s at this read/write mix, or None when the
-    drive lists no IOPS."""
-    read_iops = drive.read_io_per_s if drive.read_io_per_s is not None else 0
-    write_iops = drive.write_io_per_s if drive.write_io_per_s is not None else 0
-    io_bytes = (
-        (
-            read_write_ratio * float(read_iops)
-            + (1.0 - read_write_ratio) * float(write_iops)
-        )
-        * drive.block_size_kib
-        * 1024.0
-    )
-    return io_bytes or None
+def _io_bytes_per_s(drive: Drive, io_per_s: Optional[int]) -> Optional[float]:
+    """A local drive's IOPS in bytes/s, or None when it lists none."""
+    if io_per_s is None:
+        return None
+    return float(io_per_s) * drive.block_size_kib * 1024.0
 
 
 class _AttachedDrivePlanResult(NamedTuple):
@@ -1325,53 +1312,61 @@ class RequirementFromCurrentCapacity(BaseModel):
             )
         )
 
-    def cpu_requirement(self) -> Dict[str, Any]:
-        """The zone's CPU as ``Requirement`` fields, on no particular shape.
+    def cpu_requirement(self) -> CPURequirement:
+        """The zone's CPU in vCPUs of the current instance.
 
-        ``ncu`` is current busy compute times the desired CPU buffer and any
-        derived scale, marked busy so each candidate node keeps its own
-        queueing headroom. A derived ceiling or floor bounds the zone's total
-        NCUs against the current zone's, as ``cpu()`` bounds cores.
+        ``count`` is current busy vCPUs times the desired CPU buffer and any
+        derived scale, with ``add_headroom`` so each candidate node keeps its
+        own queueing headroom. A derived ceiling or floor bounds the zone's
+        total CPU against the current zone's, as ``cpu()`` bounds cores.
         """
         current = self.current_instance
-        current_ncu = cpu_to_ncu(
-            current.cpu * self.current_capacity.cluster_instance_count.mid, current
-        )
-        busy = self.current_capacity.cpu_utilization.mid / 100 * current_ncu
+        current_vcpus = current.cpu * self.current_capacity.cluster_instance_count.mid
+        busy = self.current_capacity.cpu_utilization.mid / 100 * current_vcpus
         cpu_buffer = buffer_for_components(
             buffers=self.buffers, components=[BufferComponent.cpu]
         )
         derived = DerivedBuffers.for_components(
             self.buffers.derived, [BufferComponent.cpu]
         )
-        return {
-            "ncu": derived.scale * busy * cpu_buffer.ratio,
-            "ncu_is_busy": True,
-            "min_total_ncu": (
-                None if derived.floor is None else derived.floor * current_ncu
+        return CPURequirement(
+            count=derived.scale * busy * cpu_buffer.ratio,
+            reference_shape=current,
+            add_headroom=True,
+            min_total=None if derived.floor is None else derived.floor * current_vcpus,
+            max_total=(
+                None if derived.ceiling is None else derived.ceiling * current_vcpus
             ),
-            "max_total_ncu": (
-                None if derived.ceiling is None else derived.ceiling * current_ncu
-            ),
-        }
+        )
 
     def exact_cpu(self, instance_candidate: Instance) -> float:
         """vCPUs of instance_candidate the zone needs, unrounded.
 
-        ``cpu_requirement()`` in the candidate's vCPUs: busy compute over
-        each vCPU's share after the candidate's own queueing headroom, held
-        between any derived floor and ceiling of the current zone's compute.
-        Unlike ``cpu()``, nothing is rounded until the node count, so a zone
-        needs the same compute on every shape.
+        Busy compute times the desired CPU buffer and any derived scale,
+        over the share of each candidate vCPU left after the candidate's own
+        queueing headroom, then held between any derived floor and ceiling
+        of the current zone's compute. Unlike ``cpu()``, nothing is rounded
+        until the node count, so a zone needs the same compute on every
+        shape.
         """
-        fields = self.cpu_requirement()
+        current = self.current_instance
+        current_ncu = cpu_to_ncu(
+            current.cpu * self.current_capacity.cluster_instance_count.mid, current
+        )
+        busy_ncu = self.current_capacity.cpu_utilization.mid / 100 * current_ncu
+        cpu_ratio = buffer_for_components(
+            buffers=self.buffers, components=[BufferComponent.cpu]
+        ).ratio
+        derived = DerivedBuffers.for_components(
+            self.buffers.derived, [BufferComponent.cpu]
+        )
         ncu_per_vcpu = cpu_to_ncu(1, instance_candidate)
         usable = 1 - cpu_headroom_target(instance_candidate)
-        cores: float = fields["ncu"] / (ncu_per_vcpu * usable)
-        if fields["max_total_ncu"] is not None:
-            cores = min(cores, fields["max_total_ncu"] / ncu_per_vcpu)
-        if fields["min_total_ncu"] is not None:
-            cores = max(cores, fields["min_total_ncu"] / ncu_per_vcpu)
+        cores = derived.scale * busy_ncu * cpu_ratio / (ncu_per_vcpu * usable)
+        if derived.ceiling is not None:
+            cores = min(cores, derived.ceiling * current_ncu / ncu_per_vcpu)
+        if derived.floor is not None:
+            cores = max(cores, derived.floor * current_ncu / ncu_per_vcpu)
         return cores
 
     @property
