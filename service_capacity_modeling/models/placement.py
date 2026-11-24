@@ -236,7 +236,8 @@ class NodeDisk(BaseModel):
     write_bytes_per_s: Optional[float] = Field(
         default=None,
         ge=0,
-        description="None when unknown. A node with neither places no IO limit.",
+        description="None when unknown. An unknown side the requirement uses "
+        "places no IO limit; a known 0 offers none.",
     )
 
 
@@ -360,7 +361,8 @@ def place(  # pylint: disable=too-many-arguments
 
     With partitions, as many whole partitions go on each node as fit on its
     disk and in its memory, and the node count is nodes per replica times
-    replicas: at least ``min_replicas``, more if CPU needs them. The fewest
+    replicas: at least ``min_replicas``, more if CPU needs them or if
+    ``min_count`` leaves room for whole copies. The fewest
     nodes win, between ``min_count`` and ``max_count``; ties go to more
     replicas, then denser packing. ``layout`` pins the layout and ``count``
     the node count; with only ``count``, the densest layout on exactly that
@@ -501,6 +503,16 @@ def _place_evenly(
     needs_network = requirement.network_mbps > 0
     disk = requirement.disk
     needs_disk = disk.gib > 0
+    read, write = node.disk.read_bytes_per_s, node.disk.write_bytes_per_s
+    # An unknown (None) side the requirement uses places no IO limit; a known
+    # 0 offers no IO at all.
+    node_io_bytes_per_s: Optional[float] = None
+    if (read is not None or disk.read_fraction == 0) and (
+        write is not None or disk.read_fraction == 1
+    ):
+        node_io_bytes_per_s = disk.read_fraction * (read or 0) + (
+            1 - disk.read_fraction
+        ) * (write or 0)
     # Name every resource the node lacks, so adding one does not reveal the next.
     missing = []
     if count_memory is None:
@@ -509,6 +521,8 @@ def _place_evenly(
         missing.append(Bottleneck.network)
     if needs_disk and node.disk.gib <= 0:
         missing.append(Bottleneck.disk_capacity)
+    if disk.io_bytes_per_s > 0 and node_io_bytes_per_s == 0:
+        missing.append(Bottleneck.disk_iops)
     if missing or count_memory is None:
         names = " or ".join(bottleneck.value for bottleneck in missing)
         return DoesNotFit(
@@ -525,10 +539,7 @@ def _place_evenly(
         count_disk_capacity = math.ceil(disk.gib / node.disk.gib)
 
     count_disk_iops = 0
-    node_io_bytes_per_s = disk.read_fraction * (node.disk.read_bytes_per_s or 0) + (
-        1 - disk.read_fraction
-    ) * (node.disk.write_bytes_per_s or 0)
-    if disk.io_bytes_per_s > 0 and node_io_bytes_per_s > 0:
+    if disk.io_bytes_per_s > 0 and node_io_bytes_per_s:
         count_disk_iops = math.ceil(disk.io_bytes_per_s / node_io_bytes_per_s)
 
     return round_zone_count(
@@ -642,7 +653,11 @@ class _PartitionFit(BaseModel):
         ppn = min(self.max_partitions_per_node, self.partitions.count)
         while ppn > 0:
             nodes_for_one_copy = math.ceil(self.partitions.count / ppn)
-            rf = self.replicas_needed(nodes_for_one_copy)
+            # Nodes min_count adds beyond the need hold whole copies where they fit.
+            rf = max(
+                self.replicas_needed(nodes_for_one_copy),
+                self.min_count // nodes_for_one_copy,
+            )
             nodes = max(nodes_for_one_copy * rf, self.min_count)
             if self._within_max(nodes):
                 candidate = (nodes, -rf, -ppn)
