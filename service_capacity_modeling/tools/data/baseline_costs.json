@@ -1438,12 +1438,6 @@
             "buffer_ratio": 1.5,
             "ceiling": null,
             "floor": null,
-            "observation": {
-              "read_bytes_per_second": 512000000.0,
-              "read_ops_per_second": 125000.0,
-              "write_bytes_per_second": 25600000.0,
-              "write_ops_per_second": 6250.0
-            },
             "required_nodes": 1,
             "scale": 1.0,
             "source": "requests",
@@ -1474,12 +1468,6 @@
             "buffer_ratio": 1.5,
             "ceiling": null,
             "floor": null,
-            "observation": {
-              "read_bytes_per_second": 512000000.0,
-              "read_ops_per_second": 125000.0,
-              "write_bytes_per_second": 25600000.0,
-              "write_ops_per_second": 6250.0
-            },
             "required_nodes": 1,
             "scale": 1.0,
             "source": "requests",
@@ -1527,12 +1515,6 @@
             "buffer_ratio": 1.5,
             "ceiling": null,
             "floor": null,
-            "observation": {
-              "read_bytes_per_second": 512000000.0,
-              "read_ops_per_second": 125000.0,
-              "write_bytes_per_second": 25600000.0,
-              "write_ops_per_second": 6250.0
-            },
             "required_nodes": 1,
             "scale": 1.0,
             "source": "requests",
@@ -1563,12 +1545,6 @@
             "buffer_ratio": 1.5,
             "ceiling": null,
             "floor": null,
-            "observation": {
-              "read_bytes_per_second": 512000000.0,
-              "read_ops_per_second": 125000.0,
-              "write_bytes_per_second": 25600000.0,
-              "write_ops_per_second": 6250.0
-            },
             "required_nodes": 1,
             "scale": 1.0,
             "source": "requests",
@@ -1599,12 +1575,6 @@
             "buffer_ratio": 1.5,
             "ceiling": null,
             "floor": null,
-            "observation": {
-              "read_bytes_per_second": 512000000.0,
-              "read_ops_per_second": 125000.0,
-              "write_bytes_per_second": 25600000.0,
-              "write_ops_per_second": 6250.0
-            },
             "required_nodes": 1,
             "scale": 1.0,
             "source": "requests",

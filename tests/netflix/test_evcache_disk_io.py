@@ -17,6 +17,7 @@ from service_capacity_modeling.interface import (
     certain_float,
 )
 from service_capacity_modeling.models.org.netflix import evcache
+from service_capacity_modeling.tools.capture_baseline_costs import _format_cluster
 
 
 def plan(
@@ -212,3 +213,27 @@ def test_explicit_throughput_can_be_the_binding_limit():
 def test_missing_drive_capability_does_not_mean_unlimited_io():
     with pytest.raises(ValueError, match="Missing read IO capacity"):
         evcache.EVCacheDiskIO(**observation()).node_load(Drive(name="unknown"))
+
+
+def test_request_diagnostics_snapshot_ignores_sampled_rate_drift():
+    cluster = plan().candidate_clusters.zonal[0]
+    changed = cluster.model_copy(deep=True)
+    changed.cluster_params["evcache.disk_io"]["observation"][
+        "write_bytes_per_second"
+    ] += 0.001
+    assert _format_cluster(cluster, "zonal") == _format_cluster(changed, "zonal")
+    assert (
+        cluster.cluster_params["evcache.disk_io"]["observation"]
+        != changed.cluster_params["evcache.disk_io"]["observation"]
+    )
+    changed.cluster_params["evcache.disk_io"]["required_nodes"] += 1
+    assert _format_cluster(cluster, "zonal") != _format_cluster(changed, "zonal")
+
+
+def test_explicit_disk_observations_remain_in_snapshot():
+    cluster = plan(observation=observation()).candidate_clusters.zonal[0]
+    changed = cluster.model_copy(deep=True)
+    changed.cluster_params["evcache.disk_io"]["observation"][
+        "write_bytes_per_second"
+    ] += 0.001
+    assert _format_cluster(cluster, "zonal") != _format_cluster(changed, "zonal")

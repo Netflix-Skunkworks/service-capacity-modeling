@@ -346,9 +346,15 @@ def _format_cluster(cluster: ClusterCapacity, deployment: str) -> dict[str, Any]
 
     # Add cluster_params if present (e.g., replica_count, partitions_per_node)
     if cluster.cluster_params:
-        info["cluster_params"] = _round_cost_leaves(
-            dict(sorted(cluster.cluster_params.items()))
-        )
+        params = dict(sorted(cluster.cluster_params.items()))
+        disk_io = params.get("evcache.disk_io")
+        if disk_io is not None and disk_io["source"] == "requests":
+            # Sampled request rates drift across SciPy platforms. Keep the
+            # resulting IO constraint and policy, plus all explicit observations.
+            params["evcache.disk_io"] = {
+                key: value for key, value in disk_io.items() if key != "observation"
+            }
+        info["cluster_params"] = _round_cost_leaves(params)
 
     return cast(dict[str, Any], _round_cost_leaves(info))
 
