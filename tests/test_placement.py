@@ -18,7 +18,6 @@ from service_capacity_modeling.models.common import normalize_cores_float
 from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import size_stateful_zone
 from service_capacity_modeling.models.common import stateful_node_resources
-from service_capacity_modeling.models.placement import Consistency
 from service_capacity_modeling.models.placement import CPURequirement
 from service_capacity_modeling.models.placement import DiskRequirement
 from service_capacity_modeling.models.placement import DoesNotFit
@@ -255,58 +254,41 @@ def test_a_container_slice_has_its_share_of_physical_cores():
 
 
 @pytest.mark.parametrize(
-    "isolation, consistency, fits",
+    "isolation, names, mixes",
     [
-        (Isolation.performance, Consistency.high, True),
-        (Isolation.performance, Consistency.medium, False),
-        (Isolation.performance, None, False),
-        (Isolation.balanced, Consistency.medium, True),
-        (Isolation.balanced, None, True),
-        (Isolation.balanced, Consistency.low, False),
-        (Isolation.efficient, Consistency.low, True),
-        (None, Consistency.low, True),
+        (Isolation.performance, ["m7a.2xlarge", "m7a.2xlarge"], True),
+        (Isolation.performance, ["c7a.2xlarge", "m7a.2xlarge"], False),
+        (Isolation.balanced, ["c7a.2xlarge", "m7a.2xlarge", "r7a.2xlarge"], True),
+        (Isolation.balanced, ["m7a.2xlarge", "m7a.4xlarge"], True),
+        (Isolation.balanced, ["m7a.2xlarge", "m7i.2xlarge"], False),
+        (Isolation.balanced, ["c5.large", "m5.large"], False),
+        (Isolation.efficient, ["m7a.2xlarge", "m7i.2xlarge"], True),
+        (None, ["m7a.2xlarge", "m7i.2xlarge"], True),
     ],
 )
-def test_isolation_admits_nodes_by_core_consistency(isolation, consistency, fits):
-    node = CONTAINER.model_copy(
-        update={"cpu": NodeCPU(count=8, consistency=consistency)}
+def test_isolation_decides_which_shapes_one_cluster_runs(isolation, names, mixes):
+    """Performance runs one shape. Balanced runs shapes with one CPU: c7a,
+    m7a and r7a share theirs, m7i and c5 have their own. Efficient runs any."""
+    nodes = [
+        NodeResources(shape=shapes.instance(name), cpu=NodeCPU(count=2))
+        for name in names
+    ]
+
+    mixed = mixable(Requirement(cpu=vcpus(16), isolation=isolation), nodes)
+
+    assert (mixed is None) is mixes
+    if mixed is not None:
+        assert mixed.bottlenecks == [Bottleneck.cpu]
+
+
+def test_isolation_does_not_reject_one_shape():
+    """Isolation only limits mixing, so a performance requirement places on
+    any single shape."""
+    placement = place(
+        Requirement(cpu=vcpus(16), isolation=Isolation.performance), CONTAINER
     )
 
-    placement = place(Requirement(cpu=vcpus(16), isolation=isolation), node)
-
-    assert isinstance(placement, Placement) is fits
-    if not fits:
-        assert placement.bottlenecks == [Bottleneck.cpu]
-
-
-def test_performance_clusters_run_one_shape():
-    steady = NodeCPU(count=8, consistency=Consistency.high)
-    i4i = NodeResources(shape=shapes.instance("i4i.2xlarge"), cpu=steady)
-    r6id = NodeResources(shape=shapes.instance("r6id.2xlarge"), cpu=steady)
-    requirement = Requirement(cpu=vcpus(16), isolation=Isolation.performance)
-
-    assert mixable(requirement, [i4i, i4i]) is None
-    mixed = mixable(requirement, [i4i, r6id])
-    assert isinstance(mixed, DoesNotFit) and "one shape" in mixed.reason
-    assert (
-        mixable(
-            requirement.model_copy(update={"isolation": Isolation.balanced}),
-            [i4i, r6id],
-        )
-        is None
-    )
-
-
-def test_mixable_rejects_a_node_the_isolation_level_rejects():
-    low = CONTAINER.model_copy(
-        update={"cpu": NodeCPU(count=8, consistency=Consistency.low)}
-    )
-
-    mixed = mixable(
-        Requirement(cpu=vcpus(16), isolation=Isolation.balanced), [CONTAINER, low]
-    )
-
-    assert isinstance(mixed, DoesNotFit) and mixed.bottlenecks == [Bottleneck.cpu]
+    assert isinstance(placement, Placement) and placement.node_count == 2
 
 
 def test_an_ineligible_node_is_reported_not_asserted():
