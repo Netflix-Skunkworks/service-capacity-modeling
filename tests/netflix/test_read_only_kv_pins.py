@@ -16,9 +16,14 @@ from service_capacity_modeling.interface import CapacityPlan
 from service_capacity_modeling.interface import certain_float
 from service_capacity_modeling.interface import certain_int
 from service_capacity_modeling.interface import DataShape
+from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import QueryPattern
+from service_capacity_modeling.models.placement import cpu_to_ncu
 from service_capacity_modeling.models.placement import DoesNotFit
+from service_capacity_modeling.models.placement import NodeCPU
+from service_capacity_modeling.models.placement import NodeDisk
+from service_capacity_modeling.models.placement import NodeMemory
 from service_capacity_modeling.models.placement import NodeResources
 from service_capacity_modeling.models.placement import place
 from service_capacity_modeling.models.placement import Placement
@@ -153,15 +158,27 @@ def test_a_container_size_is_placed_from_the_same_demand():
 
     limits = {"min_count": MIN_NODES, "max_count": args.max_regional_size}
 
-    container = NodeResources(ncu=12, disk_gib=600, memory_gib=40)
+    container = NodeResources(
+        shape=default_reference_shape,
+        cpu=NodeCPU(count=12),
+        memory=NodeMemory(gib=40),
+        disk=NodeDisk(gib=600),
+    )
     placed = place(requirement, container, **limits)
     assert isinstance(placed, Placement)
     assert requirement.partitions is not None and placed.layout is not None
     per_partition_gib = requirement.partitions.disk_gib_per_partition
     assert placed.layout.partitions_per_node * per_partition_gib <= 600
-    assert placed.node_count * container.ncu >= requirement.ncu
+    cpu = requirement.cpu
+    assert placed.node_count * container.cpu.count >= cpu_to_ncu(
+        cpu.count, cpu.reference_shape
+    )
 
-    too_small = place(requirement, NodeResources(ncu=12, disk_gib=50), **limits)
+    too_small = place(
+        requirement,
+        container.model_copy(update={"disk": NodeDisk(gib=50)}),
+        **limits,
+    )
     assert isinstance(too_small, DoesNotFit)
     assert too_small.bottlenecks == [Bottleneck.disk_capacity]
 
