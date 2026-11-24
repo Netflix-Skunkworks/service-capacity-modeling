@@ -34,16 +34,20 @@ from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import ChildDesiresConfig
 from service_capacity_modeling.models.common import buffer_for_components
-from service_capacity_modeling.models.common import cpu_to_ncu
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import normalize_cores
 from service_capacity_modeling.models.common import check_cluster_size_requirement
 from service_capacity_modeling.models.common import size_stateful_zone
+from service_capacity_modeling.models.common import stateful_node_resources
 from service_capacity_modeling.models.common import usable_memory_gib
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
+from service_capacity_modeling.models.placement import CPURequirement
+from service_capacity_modeling.models.placement import DiskRequirement
+from service_capacity_modeling.models.placement import DoesNotFit
+from service_capacity_modeling.models.placement import MemoryRequirement
 from service_capacity_modeling.models.placement import Requirement
 from service_capacity_modeling.stats import dist_for_interval
 
@@ -74,15 +78,17 @@ def _es_io_per_read(node_size_gib: float, segment_size_mb: int = 512) -> int:
     return levels
 
 
-def _zonal_ncu(desires: CapacityDesires, zones_in_region: int) -> float:
-    """A data zone's CPU in NCUs, on no particular shape.
+def _zonal_cpu(desires: CapacityDesires, zones_in_region: int) -> CPURequirement:
+    """A data zone's CPU, on no particular shape.
 
     Sqrt staffing already allows for queueing; half of the cores are kept
     free for background work (merging mostly). The requirement's cpu_cores
     is the same need in a candidate's vCPUs, for the plan to report.
     """
     cores = math.ceil(sqrt_staffed_cores(desires) * 1.5)
-    return cpu_to_ncu(cores, desires.reference_shape) / zones_in_region
+    return CPURequirement(
+        count=cores / zones_in_region, reference_shape=desires.reference_shape
+    )
 
 
 def _estimate_elasticsearch_requirement(  # noqa: E501 pylint: disable=too-many-positional-arguments
@@ -218,6 +224,7 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
         return desires
 
     @staticmethod
+    # pylint: disable=too-many-return-statements
     def capacity_plan(
         instance: Instance,
         drive: Drive,
@@ -331,12 +338,12 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
 
         data_cluster = size_stateful_zone(
             Requirement(
-                ncu=_zonal_ncu(desires, zones_in_region),
-                disk_gib=needed_disk_gib,
-                memory_gib=int(data_requirement.mem_gib.mid),
+                cpu=_zonal_cpu(desires, zones_in_region),
+                memory=MemoryRequirement(gib=int(data_requirement.mem_gib.mid)),
+                disk=DiskRequirement(gib=needed_disk_gib),
                 network_mbps=data_requirement.network_mbps.mid,
             ),
-            instance,
+            stateful_node_resources(instance, reserve_memory=reserve_memory),
             drive,
             # Take into account the reads per read
             # from the per node dataset using leveled compaction
@@ -347,7 +354,6 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
             # Elasticsearch clusters can auto-balance via shard placement
             cluster_size=lambda x: x,
             min_count=max(min_count, required_cluster_size or 0),
-            reserve_memory=reserve_memory,
             cluster_type="elasticsearch-data",
             # Communicate to the actual provision that if we want reduced RF
             cluster_params={
@@ -355,6 +361,8 @@ class NflxElasticsearchDataCapacityModel(CapacityModel):
                 EFFECTIVE_DISK_PER_NODE_GIB: max_data_per_node_gib,
             },
         )
+        if isinstance(data_cluster, DoesNotFit):
+            return data_cluster.excuse(instance.name, drive.name)
         excuse = check_cluster_size_requirement(
             instance, drive, data_cluster, required_cluster_size
         )
