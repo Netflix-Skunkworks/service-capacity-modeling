@@ -24,7 +24,7 @@ from service_capacity_modeling.interface import Requirements
 from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import cpu_headroom_target
-from service_capacity_modeling.models.common import cpu_to_ncu
+from service_capacity_modeling.models.placement import cpu_to_ncu
 from service_capacity_modeling.models.common import merge_plan
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
