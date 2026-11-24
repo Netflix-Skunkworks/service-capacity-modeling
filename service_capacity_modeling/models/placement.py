@@ -16,8 +16,6 @@ internally, so one requirement can be placed on any shape.
 
 import math
 from typing import Callable
-from typing import Dict
-from typing import FrozenSet
 from typing import List
 from typing import Optional
 from typing import Sequence
@@ -60,19 +58,11 @@ def cpu_to_ncu(cpu: float, shape: Instance) -> float:
 
 
 class Isolation(StrEnum):
-    """How much interference and variance a workload tolerates."""
+    """Which node shapes one cluster may mix, as ``mixable`` checks."""
 
-    performance = "performance"  # CPU pressure near zero, consistent cores
-    balanced = "balanced"  # default for tier 0 and 1
-    efficient = "efficient"  # a small steady-state CPU queue is fine
-
-
-class Consistency(StrEnum):
-    """Measured per-core performance consistency within one node."""
-
-    high = "high"  # under 10% per-core variation
-    medium = "medium"  # under 25%
-    low = "low"  # more, or a shared host
+    performance = "performance"  # one shape
+    balanced = "balanced"  # one CPU, any memory: c7a, m7a and r7a mix
+    efficient = "efficient"  # any shapes
 
 
 class CPURequirement(BaseModel):
@@ -157,8 +147,8 @@ class Requirement(BaseModel):
     Without ``partitions``, every total divides evenly over the nodes, like
     water poured across them. That is the fewest nodes that could work, and
     close to exact when the data's partitions are much smaller than a node,
-    as in Cassandra and Kafka. ``cpu.parallelism`` and ``isolation`` hold for
-    every node.
+    as in Cassandra and Kafka. ``cpu.parallelism`` holds for every node, and
+    ``isolation`` limits which shapes ``mixable`` lets one cluster run.
 
     With ``partitions``, disk and memory come from the per-partition sizes,
     and CPU is met by adding whole replicas. Leave the other totals at 0;
@@ -171,7 +161,7 @@ class Requirement(BaseModel):
     disk: DiskRequirement = DiskRequirement()
     network_mbps: float = Field(default=0, ge=0)
     isolation: Optional[Isolation] = Field(
-        default=None, description="None places on any node."
+        default=None, description="None mixes any shapes."
     )
     partitions: Optional[Partitions] = None
 
@@ -211,9 +201,6 @@ class NodeCPU(BaseModel):
         description="Fraction of count kept idle so requests do not queue, "
         "which shrinks as a node has more vCPUs. Applied only to a CPU "
         "requirement with add_headroom.",
-    )
-    consistency: Optional[Consistency] = Field(
-        default=None, description="None when unmeasured."
     )
 
 
@@ -303,15 +290,6 @@ class Placement(BaseModel):
     layout: Optional[Layout] = None
 
 
-# Core consistency each isolation level accepts; an unmeasured node passes
-# every level but performance.
-_ALLOWED_CONSISTENCY: Dict[Isolation, FrozenSet[Optional[Consistency]]] = {
-    Isolation.performance: frozenset({Consistency.high}),
-    Isolation.balanced: frozenset({Consistency.high, Consistency.medium, None}),
-    Isolation.efficient: frozenset({*Consistency, None}),
-}
-
-
 def round_zone_count(  # pylint: disable=too-many-arguments
     *,
     count_cpu: int,
@@ -369,9 +347,9 @@ def place(  # pylint: disable=too-many-arguments
     many nodes wins. ``cluster_size`` does not apply.
 
     Returns ``DoesNotFit`` with every bottleneck when the node has fewer
-    physical cores than ``cpu.parallelism``, cores too inconsistent for
-    ``isolation``, lacks a resource the requirement needs, when one partition
-    does not fit on a node, or when a limit or pin cannot be met.
+    physical cores than ``cpu.parallelism``, lacks a resource the requirement
+    needs, when one partition does not fit on a node, or when a limit or pin
+    cannot be met.
     """
     if requirement.partitions is None:
         if layout is not None or count is not None or max_count is not None:
@@ -405,18 +383,30 @@ def mixable(
     """Whether one cluster may run all of these nodes at the requirement's
     isolation: None when it may, else why not.
 
-    Each node's core consistency must suit the isolation level, and a
-    performance cluster runs one shape only. A spread limit on per-node CPU
-    for balanced clusters is not set yet.
+    Every node needs the physical cores ``cpu.parallelism`` asks for. A
+    performance cluster runs one shape. A balanced cluster runs shapes with
+    one CPU (clock, IPC and cores per vCPU), so only memory and size differ,
+    the way c7a, m7a and r7a do.
     """
     for node in nodes:
         unfit = _unfit_cpu(requirement, node)
         if unfit is not None:
             return unfit
+    isolation = requirement.isolation
     shapes = sorted({node.shape.name for node in nodes})
-    if requirement.isolation == Isolation.performance and len(shapes) > 1:
+    cpus = {
+        (
+            node.shape.cpu_ghz,
+            node.shape.cpu_ipc_scale,
+            node.shape.cores / node.shape.cpu,
+        )
+        for node in nodes
+    }
+    if (isolation == Isolation.performance and len(shapes) > 1) or (
+        isolation == Isolation.balanced and len(cpus) > 1
+    ):
         return DoesNotFit(
-            reason=f"A performance cluster runs one shape, not {', '.join(shapes)}",
+            reason=f"A {isolation} cluster cannot run {', '.join(shapes)} together",
             bottlenecks=[Bottleneck.cpu],
         )
     return None
@@ -429,15 +419,6 @@ def _unfit_cpu(requirement: Requirement, node: NodeResources) -> Optional[DoesNo
         return DoesNotFit(
             reason=f"{node.shape.name} has {cores:g} physical cores, fewer than "
             f"the {requirement.cpu.parallelism} the workload runs in parallel",
-            bottlenecks=[Bottleneck.cpu],
-        )
-    isolation = requirement.isolation
-    if isolation is not None and (
-        node.cpu.consistency not in _ALLOWED_CONSISTENCY[isolation]
-    ):
-        return DoesNotFit(
-            reason=f"{node.shape.name} cores are {node.cpu.consistency or 'unmeasured'}"
-            f", too inconsistent for {isolation} isolation",
             bottlenecks=[Bottleneck.cpu],
         )
     return None
