@@ -47,6 +47,7 @@ from service_capacity_modeling.interface import ZoneClusterCapacity
 from service_capacity_modeling.models import utils
 from service_capacity_modeling.models.headroom_strategy import HeadroomStrategy
 from service_capacity_modeling.models.placement import ceil_ignoring_float_error
+from service_capacity_modeling.models.placement import count_limit_not_met
 from service_capacity_modeling.models.placement import cpu_to_ncu
 from service_capacity_modeling.models.placement import CPURequirement
 from service_capacity_modeling.models.placement import DiskRequirement
@@ -742,6 +743,8 @@ def size_stateful_zone(  # pylint: disable=too-many-arguments
     # (for example even counts, powers of two, or an existing base size).
     cluster_size: Callable[[int], int] = lambda x: x,
     min_count: int = 0,
+    count: Optional[int] = None,
+    max_count: Optional[int] = None,
     # Maximum EBS volume size per node. Default caps at 1/3 max to leave
     # growth headroom. Models can override for clusters with known disk needs.
     max_node_disk_gib: Callable[[Drive], int] = lambda d: math.ceil(d.max_size_gib / 3),
@@ -753,9 +756,10 @@ def size_stateful_zone(  # pylint: disable=too-many-arguments
 
     ``place`` counts nodes for CPU, memory, network and local disk. On a
     node without local disk, the zone's disk goes on ``drive`` volumes sized
-    for the node count the other resources need. Returns ``place``'s
-    ``DoesNotFit`` when the node cannot serve the requirement, for the model
-    to report as an ``Excuse``.
+    for the node count the other resources need. ``count`` and
+    ``max_count`` are ``place``'s, held on the final count. Returns
+    ``place``'s ``DoesNotFit`` when the node cannot serve the requirement or
+    a count limit is not met, for the model to report as an ``Excuse``.
     """
     if requirement.partitions is not None:
         raise ValueError(
@@ -771,10 +775,13 @@ def size_stateful_zone(  # pylint: disable=too-many-arguments
         node,
         cluster_size=cluster_size,
         min_count=min_count,
+        count=count,
+        max_count=max_count,
     )
     if isinstance(placement, DoesNotFit):
         return placement
     assert placement.node_counts is not None
+    min_count = max(min_count, count or 0)
 
     attached_drives: List[Drive] = []
     if on_attached_drives and requirement.disk.gib > 0:
@@ -802,6 +809,10 @@ def size_stateful_zone(  # pylint: disable=too-many-arguments
             min_count=min_count,
         )
 
+    # Attached drives can need more nodes than place() counted.
+    over = count_limit_not_met(placement, count, max_count, [instance.name])
+    if over is not None:
+        return over
     # Both placements above divide evenly, so each has node_counts.
     assert placement.node_counts is not None
     count = placement.node_count
