@@ -689,7 +689,10 @@ class TestPins:
         partitions = self.DEMAND.partitions.model_copy(
             update={"memory_gib_per_partition": 25}
         )
-        requirement = self.DEMAND.model_copy(update={"partitions": partitions})
+        # One copy is 4 nodes of 16, so 100 vCPUs need a second copy.
+        requirement = self.DEMAND.model_copy(
+            update={"partitions": partitions, "cpu": _cpu(100)}
+        )
         node = _node(cpu=16, disk_gib=250, memory_gib=50)
         layout = Layout(partitions_per_node=3, replica_count=1)
 

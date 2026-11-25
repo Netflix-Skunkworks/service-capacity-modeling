@@ -675,17 +675,20 @@ class _PartitionFit(BaseModel):
     def _within_max(self, node_count: int) -> bool:
         return self.max_count is None or node_count <= self.max_count
 
-    def replicas_needed(self, nodes_for_one_copy: int) -> int:
-        """The fewest copies that meet the minimum and the CPU need, on the
-        node with the least usable CPU."""
+    def replicas_for_cpu(self, nodes_for_one_copy: int) -> int:
+        """The fewest copies the CPU needs, on the node with the least
+        usable CPU."""
         cpu = self.requirement.cpu
         usable = min(_usable_ncu(cpu, node) for node in self.nodes)
         cpu_per_copy = nodes_for_one_copy * usable
+        return ceil_ignoring_float_error(
+            cpu_to_ncu(cpu.count, cpu.reference_shape) / cpu_per_copy
+        )
+
+    def replicas_needed(self, nodes_for_one_copy: int) -> int:
+        """The fewest copies that meet the minimum and the CPU need."""
         return max(
-            self.partitions.min_replicas,
-            ceil_ignoring_float_error(
-                cpu_to_ncu(cpu.count, cpu.reference_shape) / cpu_per_copy
-            ),
+            self.partitions.min_replicas, self.replicas_for_cpu(nodes_for_one_copy)
         )
 
     def at_layout(self, layout: Layout) -> Optional[Placement]:
@@ -703,8 +706,8 @@ class _PartitionFit(BaseModel):
 
     def bottlenecks_for(self, layout: Layout) -> List[Bottleneck]:
         """Every resource that keeps a node from hosting this layout, in the
-        order disk, memory, CPU. Empty when the limit is the node count or the
-        partition cap instead."""
+        order disk, memory, CPU. Empty when the limit is the node count, the
+        partition cap or the replica minimum instead."""
         found = []
         if layout.partitions_per_node > self.by_disk:
             found.append(Bottleneck.disk_capacity)
@@ -714,7 +717,7 @@ class _PartitionFit(BaseModel):
         nodes_for_one_copy = math.ceil(
             self.partitions.count / layout.partitions_per_node
         )
-        if layout.replica_count < self.replicas_needed(nodes_for_one_copy):
+        if layout.replica_count < self.replicas_for_cpu(nodes_for_one_copy):
             found.append(Bottleneck.cpu)
         return found
 
@@ -764,9 +767,15 @@ class _PartitionFit(BaseModel):
         if placed is not None and count in (None, placed.node_count):
             return placed
         on_count = "" if count is None else f" on {count} nodes"
+        minimum = self.partitions.min_replicas
+        below = (
+            f", fewer than the minimum of {minimum}"
+            if layout.replica_count < minimum
+            else ""
+        )
         return LimitNotMet(
             reason=f"Cannot host {layout.partitions_per_node} partitions per node "
-            f"at {layout.replica_count} replicas{on_count}",
+            f"at {layout.replica_count} replicas{below}{on_count}",
             shapes=_names(self.nodes),
             bottlenecks=self.bottlenecks_for(layout),
         )
