@@ -170,21 +170,19 @@ def disk_io_requirement(
         current_instance = RequirementFromCurrentCapacity(
             current_capacity=current, buffers=desires.buffers
         ).current_instance
-        current_drive = current_instance.drive
-        if current.cluster_drive is not None:
-            if (
-                current_drive is None
-                or current.cluster_drive.drive_type != current_drive.drive_type
-            ):
-                current_drive = current.cluster_drive
-            else:
-                # Size-only current observations must not erase known hardware
-                # capabilities. Preserve explicit non-null drive overrides.
-                current_drive = current_drive.model_copy(
-                    update=current.cluster_drive.model_dump(
-                        exclude_unset=True, exclude_none=True
-                    )
+        current_drive = current.cluster_drive or current_instance.drive
+        if (
+            current.cluster_drive is not None
+            and current_instance.drive is not None
+            and current.cluster_drive.drive_type == current_instance.drive.drive_type
+        ):
+            # Size-only current observations must not erase known hardware
+            # capabilities. Preserve explicit non-null drive overrides.
+            current_drive = current_instance.drive.model_copy(
+                update=current.cluster_drive.model_dump(
+                    exclude_unset=True, exclude_none=True
                 )
+            )
         if current_drive is None:
             raise ValueError(
                 "Disk IO capacity bounds require current local-drive capacity"
