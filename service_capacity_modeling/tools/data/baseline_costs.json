@@ -1425,6 +1425,15 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 885,
           "evcache.copies": 2,
+          "evcache.disk_io": {
+            "buffer_ratio": 1.5,
+            "ceiling": null,
+            "floor": null,
+            "required_nodes": 1,
+            "scale": 1.0,
+            "source": "requests",
+            "throughput_capacity_source": "iops_times_block_size"
+          },
           "required_nodes_by_type": {
             "cluster_size": 29,
             "cpu": 29,
@@ -1446,6 +1455,15 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 885,
           "evcache.copies": 2,
+          "evcache.disk_io": {
+            "buffer_ratio": 1.5,
+            "ceiling": null,
+            "floor": null,
+            "required_nodes": 1,
+            "scale": 1.0,
+            "source": "requests",
+            "throughput_capacity_source": "iops_times_block_size"
+          },
           "required_nodes_by_type": {
             "cluster_size": 29,
             "cpu": 29,
@@ -1484,6 +1502,15 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 885,
           "evcache.copies": 3,
+          "evcache.disk_io": {
+            "buffer_ratio": 1.5,
+            "ceiling": null,
+            "floor": null,
+            "required_nodes": 1,
+            "scale": 1.0,
+            "source": "requests",
+            "throughput_capacity_source": "iops_times_block_size"
+          },
           "required_nodes_by_type": {
             "cluster_size": 29,
             "cpu": 29,
@@ -1505,6 +1532,15 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 885,
           "evcache.copies": 3,
+          "evcache.disk_io": {
+            "buffer_ratio": 1.5,
+            "ceiling": null,
+            "floor": null,
+            "required_nodes": 1,
+            "scale": 1.0,
+            "source": "requests",
+            "throughput_capacity_source": "iops_times_block_size"
+          },
           "required_nodes_by_type": {
             "cluster_size": 29,
             "cpu": 29,
@@ -1526,6 +1562,15 @@
         "cluster_params": {
           "effective_disk_per_node_gib": 885,
           "evcache.copies": 3,
+          "evcache.disk_io": {
+            "buffer_ratio": 1.5,
+            "ceiling": null,
+            "floor": null,
+            "required_nodes": 1,
+            "scale": 1.0,
+            "source": "requests",
+            "throughput_capacity_source": "iops_times_block_size"
+          },
           "required_nodes_by_type": {
             "cluster_size": 29,
             "cpu": 29,
