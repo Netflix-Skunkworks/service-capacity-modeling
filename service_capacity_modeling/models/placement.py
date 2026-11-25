@@ -32,6 +32,7 @@ from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import Excuse
 from service_capacity_modeling.interface import Instance
+from service_capacity_modeling.interface import NodeCountConstraint
 from service_capacity_modeling.interface import NodeCountContext
 
 
@@ -164,8 +165,9 @@ class Requirement(BaseModel):
     memory: MemoryRequirement = MemoryRequirement()
     disk: DiskRequirement = DiskRequirement()
     network_mbps: float = Field(default=0, ge=0)
-    isolation: Optional[Isolation] = Field(
-        default=None, description="None mixes any shapes."
+    isolation: Isolation = Field(
+        default=Isolation.performance,
+        description="Mixing shapes in one cluster is opt-in.",
     )
     partitions: Optional[Partitions] = None
 
@@ -359,7 +361,8 @@ def place(  # pylint: disable=too-many-arguments
     Without partitions, each resource total asks for ceil(total / per-node
     amount) nodes. The most any resource asks for is rounded by
     ``cluster_size`` (such as to a power of two), then raised to
-    ``min_count``.
+    ``min_count``. ``count`` pins the node count, as when the cluster scales
+    by shape at a fixed count, and ``max_count`` caps it.
 
     With partitions, as many whole partitions go on each node as fit on its
     disk and in its memory, and the node count is nodes per replica times
@@ -381,8 +384,8 @@ def place(  # pylint: disable=too-many-arguments
     every bottleneck.
     """
     if requirement.partitions is None:
-        if layout is not None or count is not None or max_count is not None:
-            raise ValueError("layout, count and max_count need partitions")
+        if layout is not None:
+            raise ValueError("layout needs partitions")
     elif cluster_size is not None:
         raise ValueError("cluster_size does not apply to partitions")
     nodes = [node, *mixed_with]
@@ -395,20 +398,51 @@ def place(  # pylint: disable=too-many-arguments
             return unfit
     if requirement.partitions is None:
         return _place_evenly(
-            requirement, nodes, cluster_size or (lambda nodes: nodes), min_count
+            requirement,
+            nodes,
+            cluster_size or (lambda nodes: nodes),
+            min_count,
+            count,
+            max_count,
         )
-    fit = _PartitionFit(
+    return _PartitionFit(
         requirement=requirement,
         partitions=requirement.partitions,
         nodes=nodes,
         min_count=min_count,
         max_count=max_count,
+    ).place(layout, count)
+
+
+def count_limit_not_met(
+    placement: Placement,
+    count: Optional[int],
+    max_count: Optional[int],
+    shapes: List[str],
+) -> Optional[LimitNotMet]:
+    """Why an evenly divided placement misses a pinned ``count`` or
+    ``max_count``, or None. Names each resource that alone needs more nodes."""
+    limits = [limit for limit in (count, max_count) if limit is not None]
+    if not limits or placement.node_count <= min(limits):
+        return None
+    limit = min(limits)
+    assert placement.node_counts is not None
+    by_type = placement.node_counts.required_nodes_by_type
+    return LimitNotMet(
+        reason=f"Needs {placement.node_count} nodes, more than {limit}",
+        shapes=shapes,
+        bottlenecks=[
+            bottleneck
+            for bottleneck in (
+                Bottleneck.cpu,
+                Bottleneck.memory,
+                Bottleneck.network,
+                Bottleneck.disk_capacity,
+                Bottleneck.disk_iops,
+            )
+            if by_type.get(NodeCountConstraint(bottleneck.value), 0) > limit
+        ],
     )
-    if layout is not None:
-        return fit.at_pinned_layout(layout, count)
-    if count is not None:
-        return fit.at_pinned_count(count)
-    return fit.unpinned()
 
 
 def _names(nodes: Sequence[NodeResources]) -> List[str]:
@@ -509,12 +543,14 @@ def _memory_count(memory: MemoryRequirement, node: NodeMemory) -> Optional[int]:
     return count
 
 
-def _place_evenly(
+def _place_evenly(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     requirement: Requirement,
     nodes: Sequence[NodeResources],
     cluster_size: Callable[[int], int],
     min_count: int,
-) -> Union[Placement, NodeCannotServe]:
+    count: Optional[int],
+    max_count: Optional[int],
+) -> Union[Placement, NodeCannotServe, LimitNotMet]:
     """Each resource asks for the most nodes any of the shapes needs for it
     alone, since every node holds an equal share."""
     per_node = []
@@ -524,15 +560,16 @@ def _place_evenly(
             return counts
         per_node.append(counts)
     most = {name: max(counts[name] for counts in per_node) for name in per_node[0]}
-    return round_zone_count(
+    placed = round_zone_count(
         count_cpu=most["count_cpu"],
         count_memory=most["count_memory"],
         count_network=most["count_network"],
         count_disk_capacity=most["count_disk_capacity"],
         count_disk_iops=most["count_disk_iops"],
         cluster_size=cluster_size,
-        min_count=min_count,
+        min_count=max(min_count, count or 0),
     )
+    return count_limit_not_met(placed, count, max_count, _names(nodes)) or placed
 
 
 def _even_counts(
@@ -750,15 +787,29 @@ class _PartitionFit(BaseModel):
             bottlenecks=[] if blamed is None else self.bottlenecks_for(blamed),
         )
 
-    def unpinned(self) -> Union[Placement, NodeCannotServe, LimitNotMet]:
+    def place(
+        self, layout: Optional[Layout], count: Optional[int]
+    ) -> Union[Placement, NodeCannotServe, LimitNotMet]:
+        if self.max_partitions_per_node < 1:
+            return self.no_room_for_one()
+        if layout is not None:
+            return self.at_pinned_layout(layout, count)
+        if count is not None:
+            return self.at_pinned_count(count)
+        return self.unpinned()
+
+    def unpinned(self) -> Union[Placement, LimitNotMet]:
         placed = self.fewest_nodes()
         if placed is not None:
             return placed
-        if self.max_partitions_per_node >= 1:
-            return LimitNotMet(
-                reason=f"Needs more than {self.max_count} nodes",
-                shapes=_names(self.nodes),
-            )
+        return LimitNotMet(
+            reason=f"Needs more than {self.max_count} nodes",
+            shapes=_names(self.nodes),
+        )
+
+    def no_room_for_one(self) -> NodeCannotServe:
+        """Each node without disk or memory for one partition, and what it
+        lacks."""
         disk, memory = (
             self.partitions.disk_gib_per_partition,
             self.partitions.memory_gib_per_partition,
