@@ -1669,7 +1669,9 @@
       {
         "annual_cost": 149967.0,
         "cluster_params": {
-          "effective_disk_per_node_gib": 2328,
+          "effective_disk_per_node_gib": 2328.0,
+          "read-only-kv.cpu_utilization": 0.1446774193548387,
+          "read-only-kv.disk_gib_per_node": 2264.0624999999995,
           "read-only-kv.min_replica_count": 4,
           "read-only-kv.nodes_for_cpu": 15,
           "read-only-kv.nodes_for_one_copy": 25,
@@ -1697,7 +1699,9 @@
       {
         "annual_cost": 14523.96,
         "cluster_params": {
-          "effective_disk_per_node_gib": 873,
+          "effective_disk_per_node_gib": 873.0,
+          "read-only-kv.cpu_utilization": 0.9285714285714286,
+          "read-only-kv.disk_gib_per_node": 803.275,
           "read-only-kv.min_replica_count": 3,
           "read-only-kv.nodes_for_cpu": 12,
           "read-only-kv.nodes_for_one_copy": 2,
@@ -1725,7 +1729,9 @@
       {
         "annual_cost": 7816.65,
         "cluster_params": {
-          "effective_disk_per_node_gib": 441,
+          "effective_disk_per_node_gib": 441.0,
+          "read-only-kv.cpu_utilization": 0.9714285714285714,
+          "read-only-kv.disk_gib_per_node": 69.0,
           "read-only-kv.min_replica_count": 4,
           "read-only-kv.nodes_for_cpu": 5,
           "read-only-kv.nodes_for_one_copy": 1,
