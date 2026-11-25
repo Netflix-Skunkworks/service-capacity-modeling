@@ -772,7 +772,7 @@ def size_stateful_zone(  # pylint: disable=too-many-arguments
         requirement.model_copy(update={"disk": DiskRequirement()})
         if on_attached_drives
         else requirement,
-        node,
+        [node],
         cluster_size=cluster_size,
         min_count=min_count,
         count=count,
