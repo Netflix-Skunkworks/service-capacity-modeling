@@ -69,6 +69,9 @@ def _zero_demand_capacity_ratio(
     ratios = []
     for direction in ("read", "write"):
         current_ops = getattr(current_drive, f"{direction}_io_per_s") or 0
+        # A shared throughput limit does not add an unsupported IO direction.
+        if current_ops <= 0:
+            continue
         candidate_ops = getattr(candidate_drive, f"{direction}_io_per_s") or 0
         if candidate_ops <= 0 < current_ops:
             raise ValueError(

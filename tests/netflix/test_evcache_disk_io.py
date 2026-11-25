@@ -350,3 +350,32 @@ def test_zero_demand_floor_uses_effective_drive_bandwidth(
     assert disk_io_requirement(instance, desires, zero, current)[0] == expected
     # Positive traffic supplies a mix; zero traffic must preserve every axis.
     assert disk_io_requirement(instance, desires, small, current)[0] == small_expected
+
+
+@pytest.mark.parametrize("direction", ["read", "write"])
+@pytest.mark.parametrize(
+    "throughput_pair", [(4, None), (None, 4), (4, 4), (None, None)]
+)
+def test_zero_demand_preserves_only_supported_drive_directions(
+    bounded_io_case, direction, throughput_pair
+):
+    instance, current, desires = bounded_io_case
+    other = "write" if direction == "read" else "read"
+    for drive in (
+        instance.drive,
+        current.cluster_instance.drive,
+        current.cluster_drive,
+    ):
+        setattr(drive, f"{other}_io_per_s", None)
+    current.cluster_drive.throughput, instance.drive.throughput = throughput_pair
+    zero = {key: 0 for key in observation()}
+    small = {
+        **zero,
+        f"{direction}_ops_per_second": 1,
+        f"{direction}_bytes_per_second": 4096,
+    }
+    for rates in (small, zero):
+        count, _ = disk_io_requirement(
+            instance, desires, evcache.EVCacheDiskIO(**rates), current
+        )
+        assert count == 10
