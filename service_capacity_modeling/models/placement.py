@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from pydantic import Field
 from pydantic import model_validator
 
+from service_capacity_modeling.enum_utils import enum_docstrings
 from service_capacity_modeling.enum_utils import StrEnum
 from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import default_reference_shape
@@ -59,15 +60,21 @@ def cpu_to_ncu(cpu: float, shape: Instance) -> float:
     return cpu * (shape_speed / ncu_speed)
 
 
+@enum_docstrings
 class Isolation(StrEnum):
     """Which node shapes one cluster may mix, as ``place``'s ``mixed_with``
     checks."""
 
-    performance = "performance"  # one shape
-    # One CPU at one size, any memory: c7a.4xlarge, m7a.4xlarge and r7a.4xlarge
-    # mix, so any of them replaces another one for one.
+    performance = "performance"
+    """One shape."""
+
     balanced = "balanced"
-    efficient = "efficient"  # any shapes
+    """One CPU (clock, IPC and cores per vCPU) at one vCPU count, any memory:
+    c7a.4xlarge, m7a.4xlarge and r7a.4xlarge mix, so any of them replaces
+    another one for one."""
+
+    efficient = "efficient"
+    """Any shapes."""
 
 
 class CPURequirement(BaseModel):
@@ -389,13 +396,9 @@ def place(  # pylint: disable=too-many-arguments
     elif cluster_size is not None:
         raise ValueError("cluster_size does not apply to partitions")
     nodes = [node, *mixed_with]
-    conflict = _shapes_do_not_mix(requirement, nodes)
-    if conflict is not None:
-        return conflict
-    for member in nodes:
-        unfit = _unfit_cpu(requirement, member)
-        if unfit is not None:
-            return unfit
+    unfit = _unfit_nodes(requirement, nodes)
+    if unfit is not None:
+        return unfit
     if requirement.partitions is None:
         return _place_evenly(
             requirement,
@@ -405,13 +408,22 @@ def place(  # pylint: disable=too-many-arguments
             count,
             max_count,
         )
-    return _PartitionFit(
+    fit = _PartitionFit(
         requirement=requirement,
         partitions=requirement.partitions,
         nodes=nodes,
         min_count=min_count,
         max_count=max_count,
-    ).place(layout, count)
+    )
+    if fit.max_partitions_per_node < 1:
+        return fit.no_room_for_one()
+    if layout is not None:
+        return fit.at_pinned_layout(layout, count)
+    if count is not None:
+        return fit.at_pinned_count(count)
+    return fit.fewest_nodes() or LimitNotMet(
+        reason=f"Needs more than {max_count} nodes", shapes=_names(nodes)
+    )
 
 
 def count_limit_not_met(
@@ -450,13 +462,12 @@ def _names(nodes: Sequence[NodeResources]) -> List[str]:
     return list(dict.fromkeys(node.shape.name for node in nodes))
 
 
-def _shapes_do_not_mix(
+def _unfit_nodes(
     requirement: Requirement, nodes: Sequence[NodeResources]
-) -> Optional[ShapesDoNotMix]:
-    """Why the requirement's isolation keeps these nodes out of one cluster,
-    or None. A performance cluster runs one shape. A balanced cluster runs
-    one CPU (clock, IPC and cores per vCPU) at one vCPU count, so only memory
-    differs, the way c7a, m7a and r7a of one size do."""
+) -> Union[ShapesDoNotMix, NodeCannotServe, None]:
+    """Why these nodes cannot form the cluster at any count, or None: the
+    requirement's isolation forbids the mix, or a node has fewer physical
+    cores than ``cpu.parallelism``."""
     isolation = requirement.isolation
     cpus = {
         (
@@ -475,21 +486,16 @@ def _shapes_do_not_mix(
             reason=f"A {isolation} cluster cannot run {', '.join(names)} together",
             shapes=names,
         )
-    return None
-
-
-def _unfit_cpu(
-    requirement: Requirement, node: NodeResources
-) -> Optional[NodeCannotServe]:
-    """Why the node's CPU cannot serve the requirement at all, or None."""
-    cores = node.cpu.count * node.shape.cores / node.shape.cpu
-    if cores < requirement.cpu.parallelism:
-        return NodeCannotServe(
-            reason=f"{node.shape.name} has {cores:g} physical cores, fewer than "
-            f"the {requirement.cpu.parallelism} the workload runs in parallel",
-            shapes=[node.shape.name],
-            bottlenecks=[Bottleneck.cpu],
-        )
+    for node in nodes:
+        cores = node.cpu.count * node.shape.cores / node.shape.cpu
+        if cores < requirement.cpu.parallelism:
+            return NodeCannotServe(
+                reason=f"{node.shape.name} has {cores:g} physical cores, fewer "
+                f"than the {requirement.cpu.parallelism} the workload runs in "
+                "parallel",
+                shapes=[node.shape.name],
+                bottlenecks=[Bottleneck.cpu],
+            )
     return None
 
 
@@ -553,13 +559,13 @@ def _place_evenly(  # pylint: disable=too-many-arguments,too-many-positional-arg
 ) -> Union[Placement, NodeCannotServe, LimitNotMet]:
     """Each resource asks for the most nodes any of the shapes needs for it
     alone, since every node holds an equal share."""
-    per_node = []
+    most: Dict[str, int] = {}
     for node in nodes:
         counts = _even_counts(requirement, node)
         if isinstance(counts, NodeCannotServe):
             return counts
-        per_node.append(counts)
-    most = {name: max(counts[name] for counts in per_node) for name in per_node[0]}
+        for name, needed in counts.items():
+            most[name] = max(most.get(name, 0), needed)
     placed = round_zone_count(
         count_cpu=most["count_cpu"],
         count_memory=most["count_memory"],
@@ -794,26 +800,6 @@ class _PartitionFit(BaseModel):
             reason=f"Cannot host {count} nodes",
             shapes=_names(self.nodes),
             bottlenecks=[] if blamed is None else self.bottlenecks_for(blamed),
-        )
-
-    def place(
-        self, layout: Optional[Layout], count: Optional[int]
-    ) -> Union[Placement, NodeCannotServe, LimitNotMet]:
-        if self.max_partitions_per_node < 1:
-            return self.no_room_for_one()
-        if layout is not None:
-            return self.at_pinned_layout(layout, count)
-        if count is not None:
-            return self.at_pinned_count(count)
-        return self.unpinned()
-
-    def unpinned(self) -> Union[Placement, LimitNotMet]:
-        placed = self.fewest_nodes()
-        if placed is not None:
-            return placed
-        return LimitNotMet(
-            reason=f"Needs more than {self.max_count} nodes",
-            shapes=_names(self.nodes),
         )
 
     def no_room_for_one(self) -> NodeCannotServe:
