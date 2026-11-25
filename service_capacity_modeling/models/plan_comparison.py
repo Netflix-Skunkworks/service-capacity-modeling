@@ -86,7 +86,7 @@ from service_capacity_modeling.interface import (
 )
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_disk_size_gib
-from service_capacity_modeling.models.common import cpu_to_ncu
+from service_capacity_modeling.models.placement import cpu_to_ncu
 
 
 @enum_docstrings

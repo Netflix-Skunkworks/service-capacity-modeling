@@ -1543,6 +1543,9 @@ class Bottleneck(StrEnum):
     cluster_size = "cluster_size"
     """Cluster topology constraint — min/max node count"""
 
+    network = "network"
+    """Network bandwidth — Mbps per node"""
+
     cost = "cost"
     """Annual cost"""
 
