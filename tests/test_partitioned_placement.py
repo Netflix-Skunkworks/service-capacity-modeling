@@ -49,7 +49,7 @@ def _fewest(
     requirement: Requirement, node: NodeResources, max_nodes: int
 ) -> Optional[Placement]:
     """The unpinned placement on at least 2 nodes, or None when nothing fits."""
-    placed = place(requirement, node, min_count=2, max_count=max_nodes)
+    placed = place(requirement, [node], min_count=2, max_count=max_nodes)
     return placed if isinstance(placed, Placement) else None
 
 
@@ -266,7 +266,7 @@ class TestAlgorithmBasics:
         )
         node = _node(cpu=16, disk_gib=500)
 
-        placed = place(requirement, node, min_count=2, max_count=max_nodes)
+        placed = place(requirement, [node], min_count=2, max_count=max_nodes)
 
         assert isinstance(placed, NodeCannotServe)
         assert placed.bottlenecks == [Bottleneck.memory]
@@ -284,7 +284,7 @@ class TestAlgorithmBasics:
         )
         node = _node(cpu=16, disk_gib=50, memory_gib=10)
 
-        placed = place(requirement, node, min_count=2, max_count=max_nodes)
+        placed = place(requirement, [node], min_count=2, max_count=max_nodes)
 
         assert isinstance(placed, NodeCannotServe)
         assert placed.bottlenecks == [Bottleneck.disk_capacity, Bottleneck.memory]
@@ -667,7 +667,7 @@ class TestPins:
         layout = Layout(partitions_per_node=3, replica_count=2)
 
         placed = place(
-            self.DEMAND, node, min_count=2, max_count=self.MAX_NODES, layout=layout
+            self.DEMAND, [node], min_count=2, max_count=self.MAX_NODES, layout=layout
         )
 
         assert isinstance(placed, Placement)
@@ -678,7 +678,7 @@ class TestPins:
         layout = Layout(partitions_per_node=3, replica_count=2)
 
         placed = place(
-            self.DEMAND, node, min_count=2, max_count=self.MAX_NODES, layout=layout
+            self.DEMAND, [node], min_count=2, max_count=self.MAX_NODES, layout=layout
         )
 
         assert isinstance(placed, LimitNotMet)
@@ -697,7 +697,7 @@ class TestPins:
         layout = Layout(partitions_per_node=3, replica_count=1)
 
         placed = place(
-            requirement, node, min_count=2, max_count=self.MAX_NODES, layout=layout
+            requirement, [node], min_count=2, max_count=self.MAX_NODES, layout=layout
         )
 
         assert isinstance(placed, LimitNotMet)
@@ -713,7 +713,7 @@ class TestPins:
         node = _node(cpu=16, disk_gib=700)
 
         placed = place(
-            self.DEMAND, node, min_count=2, max_count=self.MAX_NODES, count=6
+            self.DEMAND, [node], min_count=2, max_count=self.MAX_NODES, count=6
         )
 
         assert isinstance(placed, Placement)
@@ -724,7 +724,7 @@ class TestPins:
         node = _node(cpu=16, disk_gib=1_200)
 
         placed = place(
-            self.DEMAND, node, min_count=2, max_count=self.MAX_NODES, count=2
+            self.DEMAND, [node], min_count=2, max_count=self.MAX_NODES, count=2
         )
 
         assert isinstance(placed, LimitNotMet)
@@ -736,7 +736,7 @@ class TestPins:
         node = _node(cpu=16, disk_gib=250)
 
         placed = place(
-            self.DEMAND, node, min_count=2, max_count=self.MAX_NODES, count=2
+            self.DEMAND, [node], min_count=2, max_count=self.MAX_NODES, count=2
         )
 
         assert isinstance(placed, LimitNotMet)
@@ -760,7 +760,7 @@ def test_a_cpu_need_on_a_whole_number_of_cores_adds_no_node():
 
     placed = place(
         requirement,
-        _node(cpu=node_cores, disk_gib=100),
+        [_node(cpu=node_cores, disk_gib=100)],
         min_count=2,
         max_count=max_nodes,
     )
