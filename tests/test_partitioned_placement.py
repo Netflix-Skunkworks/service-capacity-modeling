@@ -15,8 +15,9 @@ from hypothesis import strategies as st
 from service_capacity_modeling.interface import Bottleneck
 from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.models.placement import CPURequirement
-from service_capacity_modeling.models.placement import DoesNotFit
 from service_capacity_modeling.models.placement import Layout
+from service_capacity_modeling.models.placement import LimitNotMet
+from service_capacity_modeling.models.placement import NodeCannotServe
 from service_capacity_modeling.models.placement import NodeCPU
 from service_capacity_modeling.models.placement import NodeDisk
 from service_capacity_modeling.models.placement import NodeMemory
@@ -267,7 +268,7 @@ class TestAlgorithmBasics:
 
         placed = place(requirement, node, min_count=2, max_count=max_nodes)
 
-        assert isinstance(placed, DoesNotFit)
+        assert isinstance(placed, NodeCannotServe)
         assert placed.bottlenecks == [Bottleneck.memory]
 
     def test_a_partition_too_big_for_disk_and_memory_names_both(self):
@@ -285,7 +286,7 @@ class TestAlgorithmBasics:
 
         placed = place(requirement, node, min_count=2, max_count=max_nodes)
 
-        assert isinstance(placed, DoesNotFit)
+        assert isinstance(placed, NodeCannotServe)
         assert placed.bottlenecks == [Bottleneck.disk_capacity, Bottleneck.memory]
 
     def test_partitions_per_node_never_exceeds_the_partition_count(self):
@@ -680,7 +681,7 @@ class TestPins:
             self.DEMAND, node, min_count=2, max_count=self.MAX_NODES, layout=layout
         )
 
-        assert isinstance(placed, DoesNotFit)
+        assert isinstance(placed, LimitNotMet)
         assert placed.bottlenecks == [Bottleneck.disk_capacity]
 
     def test_a_layout_short_on_every_resource_names_each(self):
@@ -696,7 +697,7 @@ class TestPins:
             requirement, node, min_count=2, max_count=self.MAX_NODES, layout=layout
         )
 
-        assert isinstance(placed, DoesNotFit)
+        assert isinstance(placed, LimitNotMet)
         assert placed.bottlenecks == [
             Bottleneck.disk_capacity,
             Bottleneck.memory,
@@ -723,7 +724,7 @@ class TestPins:
             self.DEMAND, node, min_count=2, max_count=self.MAX_NODES, count=2
         )
 
-        assert isinstance(placed, DoesNotFit)
+        assert isinstance(placed, LimitNotMet)
         assert placed.bottlenecks == [Bottleneck.cpu]
 
     def test_a_count_no_split_fits_names_each_resource_of_the_sparsest(self):
@@ -735,7 +736,7 @@ class TestPins:
             self.DEMAND, node, min_count=2, max_count=self.MAX_NODES, count=2
         )
 
-        assert isinstance(placed, DoesNotFit)
+        assert isinstance(placed, LimitNotMet)
         assert placed.bottlenecks == [Bottleneck.disk_capacity, Bottleneck.cpu]
 
 
