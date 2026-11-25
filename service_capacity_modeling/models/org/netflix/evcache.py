@@ -15,6 +15,7 @@ from service_capacity_modeling.enum_utils import StrEnum
 from service_capacity_modeling.interface import AccessConsistency
 from service_capacity_modeling.interface import AccessPattern
 from service_capacity_modeling.interface import Buffer
+from service_capacity_modeling.interface import default_reference_shape
 from service_capacity_modeling.interface import BufferComponent
 from service_capacity_modeling.interface import Buffers
 from service_capacity_modeling.interface import Bottleneck
@@ -42,15 +43,21 @@ from service_capacity_modeling.models import CapacityModel
 from service_capacity_modeling.models import CostAwareModel
 from service_capacity_modeling.models import RANK_PENALTIES
 from service_capacity_modeling.models.common import buffer_for_components
-from service_capacity_modeling.models.common import compute_stateful_zone
+from service_capacity_modeling.models.common import size_stateful_zone
+from service_capacity_modeling.models.common import stateful_node_resources
 from service_capacity_modeling.models.common import DerivedBuffers
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
-from service_capacity_modeling.models.common import normalize_cores_float
 from service_capacity_modeling.models.common import check_cluster_size_requirement
 from service_capacity_modeling.models.common import upsert_params
+from service_capacity_modeling.models.placement import cpu_to_ncu
+from service_capacity_modeling.models.placement import CPURequirement
+from service_capacity_modeling.models.placement import DiskRequirement
+from service_capacity_modeling.models.placement import DoesNotFit
+from service_capacity_modeling.models.placement import MemoryRequirement
+from service_capacity_modeling.models.placement import Requirement
 from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
@@ -231,13 +238,14 @@ def _estimate_evcache_requirement(
         working_set,
     )
 
+    cpu = _zonal_cpu(desires)
     return (
         CapacityRequirement(
             requirement_type=NflxEVCacheCapacityModel.cluster_type,
-            # The vCPUs of this instance the zone is sized for; plan
-            # comparison converts cpu_cores from reference_shape to NCUs.
-            reference_shape=instance,
-            cpu_cores=certain_float(_zonal_sizing_cores(desires, instance)),
+            # Report the shape-free CPU the zone is sized for, in vCPUs of
+            # default_reference_shape.
+            reference_shape=default_reference_shape,
+            cpu_cores=certain_float(cpu_to_ncu(cpu.count, cpu.reference_shape)),
             mem_gib=certain_float(needed_memory),
             disk_gib=certain_float(needed_disk),
             network_mbps=certain_float(needed_network_mbps),
@@ -250,25 +258,23 @@ def _estimate_evcache_requirement(
     )
 
 
-def _zonal_sizing_cores(desires: CapacityDesires, instance: Instance) -> float:
-    """vCPUs of ``instance`` the zone needs, rounded only at the node count.
+def _zonal_cpu(desires: CapacityDesires) -> CPURequirement:
+    """The zone's CPU, on no particular shape.
 
-    From a current cluster, busy compute over the share each vCPU has left
-    after the instance's queueing headroom, bounded by any derived buffer.
-    Without one, sqrt staffing (which already allows for queueing) times the
-    CPU buffer. The requirement's cpu_cores is the rounded figure the plan
-    reports.
+    From a current cluster it is measured busy CPU, so each candidate node
+    keeps its own queueing headroom free, bounded by any derived buffer.
+    Without one, sqrt staffing already allows for queueing.
     """
     current_capacity = _current_evcache_cluster(desires)
     if current_capacity:
         return RequirementFromCurrentCapacity(
             current_capacity=current_capacity, buffers=desires.buffers
-        ).exact_cpu(instance)
+        ).cpu_requirement()
     cpu_buffer = buffer_for_components(desires.buffers, [BufferComponent.cpu])
-    cores = normalize_cores_float(
-        sqrt_staffed_cores(desires), instance, desires.reference_shape
+    return CPURequirement(
+        count=sqrt_staffed_cores(desires) * cpu_buffer.ratio,
+        reference_shape=desires.reference_shape,
     )
-    return cores * cpu_buffer.ratio
 
 
 def _current_evcache_cluster(
@@ -475,31 +481,36 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
     # Division can round an exact capacity boundary one ULP above an integer.
     if (min_count_for_data - 1) * max_data_per_node_gib >= needed_disk_gib:
         min_count_for_data -= 1
-    cluster = compute_stateful_zone(
-        instance=instance,
-        drive=drive,
-        needed_cores=_zonal_sizing_cores(desires, instance),
-        needed_disk_gib=needed_disk_gib,
-        needed_memory_gib=requirement.mem_gib.mid,
-        reserve_memory=reserve_memory,
-        needed_network_mbps=requirement.network_mbps.mid,
+    cluster = size_stateful_zone(
+        Requirement(
+            cpu=_zonal_cpu(desires),
+            memory=MemoryRequirement(gib=requirement.mem_gib.mid),
+            disk=DiskRequirement(
+                gib=needed_disk_gib,
+                io_bytes_per_s=adjusted_disk_io_needed,
+                read_fraction=read_write_ratio,
+            ),
+            network_mbps=requirement.network_mbps.mid,
+        ),
+        stateful_node_resources(instance, reserve_memory=reserve_memory),
+        drive,
         min_count=max(
             min_count_for_data, min_count_for_cluster, required_cluster_size or 0
         ),
-        adjusted_disk_io_needed=adjusted_disk_io_needed,
-        read_write_ratio=read_write_ratio,
+        cluster_type=NflxEVCacheCapacityModel.cluster_type,
+        # Communicate to the actual provision that if we want reduced RF
+        cluster_params={
+            "evcache.copies": copies_per_region,
+            EFFECTIVE_DISK_PER_NODE_GIB: max_data_per_node_gib,
+        },
     )
+    if isinstance(cluster, DoesNotFit):
+        return cluster.excuse(instance.name, drive.name)
     excuse = check_cluster_size_requirement(
         instance, drive, cluster, required_cluster_size
     )
     if excuse is not None:
         return excuse
-    # Communicate to the actual provision that if we want reduced RF
-    params = {
-        "evcache.copies": copies_per_region,
-        EFFECTIVE_DISK_PER_NODE_GIB: max_data_per_node_gib,
-    }
-    upsert_params(cluster, params)
 
     # evcache clusters generally should try to stay under some total number
     # of nodes. Orgs do this for all kinds of reasons such as
@@ -535,7 +546,6 @@ def _estimate_evcache_cluster_zonal(  # noqa: C901,E501 pylint: disable=too-many
         },
     )
 
-    cluster.cluster_type = NflxEVCacheCapacityModel.cluster_type
     zonal_clusters = [cluster] * copies_per_region
 
     compute_costs = NflxEVCacheCapacityModel.cluster_costs(
