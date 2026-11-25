@@ -276,7 +276,6 @@ def _whole(name: str, memory_gib: float = 0, disk_gib: float = 0) -> NodeResourc
         (Isolation.balanced, ["m7a.2xlarge", "m7i.2xlarge"], False),
         (Isolation.balanced, ["c5.large", "m5.large"], False),
         (Isolation.efficient, ["m7a.2xlarge", "m7i.2xlarge"], True),
-        (None, ["m7a.2xlarge", "m7i.2xlarge"], True),
     ],
 )
 def test_isolation_decides_which_shapes_one_cluster_runs(isolation, names, mixes):
@@ -295,6 +294,17 @@ def test_isolation_decides_which_shapes_one_cluster_runs(isolation, names, mixes
         assert isinstance(placed, ShapesDoNotMix)
         assert placed.shapes == list(dict.fromkeys(names))
         assert placed.bottlenecks == []
+
+
+def test_shapes_mix_only_when_the_requirement_asks():
+    """Isolation defaults to performance, so mixing is opt-in."""
+    placed = place(
+        Requirement(cpu=vcpus(16)),
+        _whole("m7a.2xlarge"),
+        mixed_with=[_whole("m7i.2xlarge")],
+    )
+
+    assert isinstance(placed, ShapesDoNotMix)
 
 
 def test_isolation_does_not_reject_one_shape():
@@ -345,7 +355,9 @@ def test_a_mixed_partition_layout_fits_on_every_member():
 
 
 def test_a_mixed_cluster_names_the_member_that_cannot_serve():
-    requirement = Requirement(cpu=vcpus(4, parallelism=2))
+    requirement = Requirement(
+        cpu=vcpus(4, parallelism=2), isolation=Isolation.efficient
+    )
 
     placed = place(
         requirement,
@@ -465,9 +477,63 @@ def test_partitions_bring_their_own_disk_and_memory():
         )
 
 
-def test_pins_need_partitions():
-    with pytest.raises(ValueError, match="need partitions"):
-        place(Requirement(cpu=vcpus(1)), CONTAINER, count=3)
+def test_a_layout_pin_needs_partitions():
+    with pytest.raises(ValueError, match="needs partitions"):
+        place(
+            Requirement(cpu=vcpus(1)),
+            CONTAINER,
+            layout=Layout(partitions_per_node=1, replica_count=1),
+        )
+
+
+def test_a_pinned_count_holds_evenly_divided_data():
+    """16 vCPUs need 2 nodes of 8. A cluster that scales by shape at 4
+    nodes runs 4, and at 1 node, or capped at 1, the CPU does not fit."""
+    requirement = Requirement(cpu=vcpus(16))
+
+    pinned = place(requirement, CONTAINER, count=4)
+    too_few = place(requirement, CONTAINER, count=1)
+    capped = place(requirement, CONTAINER, max_count=1)
+
+    assert isinstance(pinned, Placement) and pinned.node_count == 4
+    for placed in (too_few, capped):
+        assert isinstance(placed, LimitNotMet)
+        assert placed.bottlenecks == [Bottleneck.cpu]
+    assert place(requirement, CONTAINER, max_count=3) == place(requirement, CONTAINER)
+
+
+def test_max_count_holds_after_attached_drives_add_nodes():
+    """20,000 GiB on gp3 volumes of at most a third of their maximum size
+    needs more nodes than the CPU does, so a cap of 2 nodes fails on disk."""
+    m7a = shapes.instance("m7a.2xlarge")
+    requirement = Requirement(cpu=vcpus(1), disk=DiskRequirement(gib=20_000))
+    gp3 = shapes.region("us-east-1").drives["gp3"]
+
+    uncapped = size_stateful_zone(requirement, stateful_node_resources(m7a), gp3)
+    capped = size_stateful_zone(
+        requirement, stateful_node_resources(m7a), gp3, max_count=2
+    )
+
+    assert not isinstance(uncapped, DoesNotFit) and uncapped.count > 2
+    assert isinstance(capped, LimitNotMet)
+    assert capped.bottlenecks == [Bottleneck.disk_capacity]
+
+
+def test_a_node_without_room_for_one_partition_cannot_serve_any_pin():
+    requirement = Requirement(
+        cpu=vcpus(1),
+        partitions=Partitions(count=6, disk_gib_per_partition=100, min_replicas=1),
+    )
+    node = _whole("m7a.2xlarge", disk_gib=50)
+
+    for pin in (
+        {"layout": Layout(partitions_per_node=1, replica_count=1)},
+        {"count": 6},
+        {},
+    ):
+        placed = place(requirement, node, **pin)
+        assert isinstance(placed, NodeCannotServe)
+        assert placed.bottlenecks == [Bottleneck.disk_capacity]
 
 
 def test_measured_cpu_leaves_each_node_its_headroom():
