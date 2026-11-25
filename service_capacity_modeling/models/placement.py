@@ -62,8 +62,8 @@ def cpu_to_ncu(cpu: float, shape: Instance) -> float:
 
 @enum_docstrings
 class Isolation(StrEnum):
-    """Which node shapes one cluster may mix, as ``place``'s ``mixed_with``
-    checks."""
+    """Which node shapes one cluster may mix, as ``place`` checks across its
+    ``node_types``."""
 
     performance = "performance"
     """One shape."""
@@ -160,7 +160,7 @@ class Requirement(BaseModel):
     water poured across them. That is the fewest nodes that could work, and
     close to exact when the data's partitions are much smaller than a node,
     as in Cassandra and Kafka. ``cpu.parallelism`` holds for every node, and
-    ``isolation`` limits which shapes ``place``'s ``mixed_with`` may add.
+    ``isolation`` limits which shapes ``place``'s ``node_types`` may mix.
 
     With ``partitions``, disk and memory come from the per-partition sizes,
     and CPU is met by adding whole replicas. Leave the other totals at 0;
@@ -354,16 +354,22 @@ def round_zone_count(  # pylint: disable=too-many-arguments
 
 def place(  # pylint: disable=too-many-arguments
     requirement: Requirement,
-    node: NodeResources,
+    node_types: Sequence[NodeResources],
     *,
-    mixed_with: Sequence[NodeResources] = (),
     cluster_size: Optional[Callable[[int], int]] = None,
     min_count: int = 0,
     max_count: Optional[int] = None,
     layout: Optional[Layout] = None,
     count: Optional[int] = None,
 ) -> Union[Placement, NodeCannotServe, LimitNotMet, ShapesDoNotMix]:
-    """Count how many nodes like ``node`` the ``requirement`` needs.
+    """Count how many nodes, of any mix of ``node_types``, the
+    ``requirement`` needs.
+
+    Each entry is one kind of node the cluster may run, and the caller picks
+    which to launch. Every node takes an equal share, so the count is the one
+    any mix of them can run: the most any of them needs alone, and for
+    partitions a layout that fits on each. More than one kind needs the
+    requirement's ``isolation`` to let them mix.
 
     Without partitions, each resource total asks for ceil(total / per-node
     amount) nodes. The most any resource asks for is rounded by
@@ -380,30 +386,26 @@ def place(  # pylint: disable=too-many-arguments
     the node count; with only ``count``, the densest layout on exactly that
     many nodes wins. ``cluster_size`` does not apply.
 
-    ``mixed_with`` adds shapes the cluster may also run, when the
-    requirement's ``isolation`` lets them mix. Every node takes an equal share,
-    so the count is the one any mix of the shapes can run: the most any of
-    them needs alone, and for partitions a layout that fits on each.
-
     Returns ``ShapesDoNotMix`` when the isolation forbids the mix,
     ``NodeCannotServe`` when a node lacks something at any count, and
     ``LimitNotMet`` when ``max_count`` or a pin cannot be met, each with
     every bottleneck.
     """
+    if not node_types:
+        raise ValueError("place() needs at least one node type")
     if requirement.partitions is None:
         if layout is not None:
             raise ValueError("layout needs partitions")
     elif cluster_size is not None:
         raise ValueError("cluster_size does not apply to partitions")
-    nodes = [node, *mixed_with]
-    unfit = _unfit_nodes(requirement, nodes)
+    unfit = _unfit_nodes(requirement, node_types)
     if unfit is not None:
         return unfit
     if requirement.partitions is None:
         return _place_evenly(
             requirement,
-            nodes,
-            cluster_size or (lambda nodes: nodes),
+            node_types,
+            cluster_size or (lambda count: count),
             min_count,
             count,
             max_count,
@@ -411,7 +413,7 @@ def place(  # pylint: disable=too-many-arguments
     fit = _PartitionFit(
         requirement=requirement,
         partitions=requirement.partitions,
-        nodes=nodes,
+        node_types=list(node_types),
         min_count=min_count,
         max_count=max_count,
     )
@@ -422,7 +424,7 @@ def place(  # pylint: disable=too-many-arguments
     if count is not None:
         return fit.at_pinned_count(count)
     return fit.fewest_nodes() or LimitNotMet(
-        reason=f"Needs more than {max_count} nodes", shapes=_names(nodes)
+        reason=f"Needs more than {max_count} nodes", shapes=_names(node_types)
     )
 
 
@@ -457,13 +459,13 @@ def count_limit_not_met(
     )
 
 
-def _names(nodes: Sequence[NodeResources]) -> List[str]:
+def _names(node_types: Sequence[NodeResources]) -> List[str]:
     """Each shape name once, in the order given."""
-    return list(dict.fromkeys(node.shape.name for node in nodes))
+    return list(dict.fromkeys(node.shape.name for node in node_types))
 
 
 def _unfit_nodes(
-    requirement: Requirement, nodes: Sequence[NodeResources]
+    requirement: Requirement, node_types: Sequence[NodeResources]
 ) -> Union[ShapesDoNotMix, NodeCannotServe, None]:
     """Why these nodes cannot form the cluster at any count, or None: the
     requirement's isolation forbids the mix, or a node has fewer physical
@@ -476,9 +478,9 @@ def _unfit_nodes(
             node.shape.cores / node.shape.cpu,
             node.cpu.count,
         )
-        for node in nodes
+        for node in node_types
     }
-    names = _names(nodes)
+    names = _names(node_types)
     if (isolation == Isolation.performance and len(names) > 1) or (
         isolation == Isolation.balanced and len(cpus) > 1
     ):
@@ -486,7 +488,7 @@ def _unfit_nodes(
             reason=f"A {isolation} cluster cannot run {', '.join(names)} together",
             shapes=names,
         )
-    for node in nodes:
+    for node in node_types:
         cores = node.cpu.count * node.shape.cores / node.shape.cpu
         if cores < requirement.cpu.parallelism:
             return NodeCannotServe(
@@ -551,7 +553,7 @@ def _memory_count(memory: MemoryRequirement, node: NodeMemory) -> Optional[int]:
 
 def _place_evenly(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     requirement: Requirement,
-    nodes: Sequence[NodeResources],
+    node_types: Sequence[NodeResources],
     cluster_size: Callable[[int], int],
     min_count: int,
     count: Optional[int],
@@ -560,7 +562,7 @@ def _place_evenly(  # pylint: disable=too-many-arguments,too-many-positional-arg
     """Each resource asks for the most nodes any of the shapes needs for it
     alone, since every node holds an equal share."""
     most: Dict[str, int] = {}
-    for node in nodes:
+    for node in node_types:
         counts = _even_counts(requirement, node)
         if isinstance(counts, NodeCannotServe):
             return counts
@@ -575,7 +577,7 @@ def _place_evenly(  # pylint: disable=too-many-arguments,too-many-positional-arg
         cluster_size=cluster_size,
         min_count=max(min_count, count or 0),
     )
-    return count_limit_not_met(placed, count, max_count, _names(nodes)) or placed
+    return count_limit_not_met(placed, count, max_count, _names(node_types)) or placed
 
 
 def _even_counts(
@@ -647,7 +649,7 @@ class _PartitionFit(BaseModel):
 
     requirement: Requirement
     partitions: Partitions
-    nodes: List[NodeResources]
+    node_types: List[NodeResources]
     min_count: int
     max_count: Optional[int]
 
@@ -656,7 +658,7 @@ class _PartitionFit(BaseModel):
         per_partition = self.partitions.disk_gib_per_partition
         return min(
             floor_ignoring_float_error(node.disk.gib / per_partition)
-            for node in self.nodes
+            for node in self.node_types
         )
 
     @property
@@ -666,7 +668,7 @@ class _PartitionFit(BaseModel):
             return None
         return min(
             floor_ignoring_float_error(node.memory.gib / per_partition)
-            for node in self.nodes
+            for node in self.node_types
         )
 
     @property
@@ -685,7 +687,7 @@ class _PartitionFit(BaseModel):
         """The fewest copies the CPU needs, on the node with the least
         usable CPU."""
         cpu = self.requirement.cpu
-        usable = min(_usable_ncu(cpu, node) for node in self.nodes)
+        usable = min(_usable_ncu(cpu, node) for node in self.node_types)
         cpu_per_copy = nodes_for_one_copy * usable
         return ceil_ignoring_float_error(
             cpu_to_ncu(cpu.count, cpu.reference_shape) / cpu_per_copy
@@ -782,7 +784,7 @@ class _PartitionFit(BaseModel):
         return LimitNotMet(
             reason=f"Cannot host {layout.partitions_per_node} partitions per node "
             f"at {layout.replica_count} replicas{below}{on_count}",
-            shapes=_names(self.nodes),
+            shapes=_names(self.node_types),
             bottlenecks=self.bottlenecks_for(layout),
         )
 
@@ -798,7 +800,7 @@ class _PartitionFit(BaseModel):
                 blamed = candidate
         return LimitNotMet(
             reason=f"Cannot host {count} nodes",
-            shapes=_names(self.nodes),
+            shapes=_names(self.node_types),
             bottlenecks=[] if blamed is None else self.bottlenecks_for(blamed),
         )
 
@@ -811,12 +813,12 @@ class _PartitionFit(BaseModel):
         )
         no_disk = [
             node
-            for node in self.nodes
+            for node in self.node_types
             if floor_ignoring_float_error(node.disk.gib / disk) < 1
         ]
         no_memory = [
             node
-            for node in self.nodes
+            for node in self.node_types
             if memory is not None
             and floor_ignoring_float_error(node.memory.gib / memory) < 1
         ]
