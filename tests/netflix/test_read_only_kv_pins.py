@@ -164,7 +164,7 @@ def test_a_container_size_is_placed_from_the_same_demand():
         memory=NodeMemory(gib=40),
         disk=NodeDisk(gib=600),
     )
-    placed = place(requirement, container, **limits)
+    placed = place(requirement, [container], **limits)
     assert isinstance(placed, Placement)
     assert requirement.partitions is not None and placed.layout is not None
     per_partition_gib = requirement.partitions.disk_gib_per_partition
@@ -176,7 +176,7 @@ def test_a_container_size_is_placed_from_the_same_demand():
 
     too_small = place(
         requirement,
-        container.model_copy(update={"disk": NodeDisk(gib=50)}),
+        [container.model_copy(update={"disk": NodeDisk(gib=50)})],
         **limits,
     )
     assert isinstance(too_small, DoesNotFit)
@@ -198,7 +198,7 @@ def test_an_ec2_node_places_like_the_model_plans():
             continue
         compared += 1
         placed = place(
-            requirement, node, min_count=MIN_NODES, max_count=args.max_regional_size
+            requirement, [node], min_count=MIN_NODES, max_count=args.max_regional_size
         )
         assert isinstance(placed, Placement), name
         assert requirement.partitions is not None, name

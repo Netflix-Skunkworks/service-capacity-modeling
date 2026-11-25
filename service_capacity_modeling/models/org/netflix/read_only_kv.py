@@ -421,7 +421,7 @@ def _estimate_read_only_kv_cluster(
     layout = _pins(args)
     placed = place(
         requirement,
-        node,
+        [node],
         min_count=MIN_NODES,
         max_count=args.max_regional_size,
         layout=layout,
