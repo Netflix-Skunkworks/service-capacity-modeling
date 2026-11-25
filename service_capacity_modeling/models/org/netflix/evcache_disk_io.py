@@ -62,6 +62,34 @@ class EVCacheDiskIO(BaseModel):
         return max(operations, bandwidth)
 
 
+def _zero_demand_capacity_ratio(
+    current_drive: Drive, candidate_drive: Drive, observed: bool
+) -> float:
+    # No traffic supplies a read/write mix, so preserve each capacity axis.
+    ratios = []
+    for direction in ("read", "write"):
+        current_ops = getattr(current_drive, f"{direction}_io_per_s") or 0
+        candidate_ops = getattr(candidate_drive, f"{direction}_io_per_s") or 0
+        if candidate_ops <= 0 < current_ops:
+            raise ValueError(
+                f"Missing {direction} IO capacity for {candidate_drive.name}"
+            )
+        if candidate_ops > 0:
+            ratios.append(current_ops / candidate_ops)
+        current_bandwidth = current_ops * current_drive.block_size_kib * 1024
+        candidate_bandwidth = candidate_ops * candidate_drive.block_size_kib * 1024
+        if observed:
+            if current_drive.throughput is not None:
+                current_bandwidth = current_drive.throughput * 1024**2
+            if candidate_drive.throughput is not None:
+                candidate_bandwidth = candidate_drive.throughput * 1024**2
+        if candidate_bandwidth <= 0 < current_bandwidth:
+            raise ValueError(f"Missing bandwidth capacity for {candidate_drive.name}")
+        if candidate_bandwidth > 0:
+            ratios.append(current_bandwidth / candidate_bandwidth)
+    return max(ratios, default=0)
+
+
 def disk_io_requirement(
     instance: Instance,
     desires: CapacityDesires,
@@ -142,7 +170,21 @@ def disk_io_requirement(
         current_instance = RequirementFromCurrentCapacity(
             current_capacity=current, buffers=desires.buffers
         ).current_instance
-        current_drive = current.cluster_drive or current_instance.drive
+        current_drive = current_instance.drive
+        if current.cluster_drive is not None:
+            if (
+                current_drive is None
+                or current.cluster_drive.drive_type != current_drive.drive_type
+            ):
+                current_drive = current.cluster_drive
+            else:
+                # Size-only current observations must not erase known hardware
+                # capabilities. Preserve explicit non-null drive overrides.
+                current_drive = current_drive.model_copy(
+                    update=current.cluster_drive.model_dump(
+                        exclude_unset=True, exclude_none=True
+                    )
+                )
         if current_drive is None:
             raise ValueError(
                 "Disk IO capacity bounds require current local-drive capacity"
@@ -155,20 +197,11 @@ def disk_io_requirement(
         else:
             # Zero traffic has no read/write mix. Preserve capacity in every
             # direction for a floor; do not infer a mix from absent traffic.
-            ratios = [
-                (getattr(current_drive, f"{direction}_io_per_s") or 0)
-                / max(1, getattr(instance.drive, f"{direction}_io_per_s") or 0)
-                for direction in ("read", "write")
-            ]
-            ratios.extend(
-                [
-                    ratio * current_drive.block_size_kib / instance.drive.block_size_kib
-                    for ratio in ratios
-                ]
+            existing_capacity = current.cluster_instance_count.mid * (
+                _zero_demand_capacity_ratio(
+                    current_drive, instance.drive, source == "observed"
+                )
             )
-            if current_drive.throughput is not None and instance.drive.throughput:
-                ratios.append(current_drive.throughput / instance.drive.throughput)
-            existing_capacity = current.cluster_instance_count.mid * max(ratios)
     count = ceil_ignoring_float_error(
         policy.calculate_requirement(
             current_usage=load,

@@ -17,6 +17,9 @@ from service_capacity_modeling.interface import (
     certain_float,
 )
 from service_capacity_modeling.models.org.netflix import evcache
+from service_capacity_modeling.models.org.netflix.evcache_disk_io import (
+    disk_io_requirement,
+)
 from service_capacity_modeling.tools.capture_baseline_costs import _format_cluster
 
 
@@ -237,3 +240,113 @@ def test_explicit_disk_observations_remain_in_snapshot():
         "write_bytes_per_second"
     ] += 0.001
     assert _format_cluster(cluster, "zonal") != _format_cluster(changed, "zonal")
+
+
+@pytest.fixture
+def bounded_io_case():
+    instance = shapes.instance("i4i.large").model_copy(deep=True)
+    instance.drive.read_io_per_s = 1024
+    instance.drive.write_io_per_s = 1024
+    instance.drive.block_size_kib = 4
+    current = CurrentZoneClusterCapacity(
+        cluster_type="evcache",
+        cluster_instance_name=instance.name,
+        cluster_instance=instance.model_copy(deep=True),
+        cluster_instance_count=certain_float(10),
+        cluster_drive=instance.drive.model_copy(deep=True),
+        disk_utilization_gib=certain_float(20),
+    )
+    desires = CapacityDesires(
+        query_pattern=QueryPattern(
+            estimated_read_per_second=certain_float(1),
+            estimated_write_per_second=certain_float(0),
+            estimated_mean_read_size_bytes=certain_float(4096),
+        ),
+        data_shape=DataShape(estimated_state_size_gib=certain_float(200)),
+        current_clusters=CurrentClusters(zonal=[current]),
+        buffers=Buffers(
+            default=Buffer(ratio=1),
+            derived={
+                "preserve_io": Buffer(
+                    ratio=1,
+                    intent=BufferIntent.scale_up,
+                    components=["disk_iops"],
+                )
+            },
+        ),
+    )
+    return instance, current, desires
+
+
+@pytest.mark.parametrize("source", ["observed", "requests"])
+@pytest.mark.parametrize("override_iops,expected", [(None, 10), (512, 5)])
+def test_sparse_current_drive_uses_known_hardware_capabilities(
+    bounded_io_case, source, override_iops, expected
+):
+    instance, current, desires = bounded_io_case
+    drive = {"name": instance.drive.name, "size_gib": instance.drive.size_gib}
+    if override_iops is not None:
+        drive["read_io_per_s"] = override_iops
+    current.cluster_drive = Drive(**drive)
+    args = (
+        {
+            "observed_disk_io": observation(
+                read_ops_per_second=1, read_bytes_per_second=4096
+            )
+        }
+        if source == "observed"
+        else {}
+    )
+    result = evcache.NflxEVCacheCapacityModel.capacity_plan(
+        instance, instance.drive, RegionContext(), desires, args
+    )
+    assert io_params(result)["required_nodes"] == expected
+
+
+@pytest.mark.parametrize("source", ["observed", "requests"])
+def test_sparse_current_drive_preserves_zero_traffic_capacity(bounded_io_case, source):
+    instance, current, desires = bounded_io_case
+    current.cluster_drive = Drive(
+        name=instance.drive.name, size_gib=instance.drive.size_gib
+    )
+    desires.query_pattern.estimated_read_per_second = certain_float(0)
+    args = (
+        {"observed_disk_io": {key: 0 for key in observation()}}
+        if source == "observed"
+        else {}
+    )
+    result = evcache.NflxEVCacheCapacityModel.capacity_plan(
+        instance, instance.drive, RegionContext(), desires, args
+    )
+    assert io_params(result)["required_nodes"] == 10
+
+
+@pytest.mark.parametrize(
+    "profile,expected,small_expected",
+    [
+        ((1, 1, 1024, 4), 10, 10),
+        ((None, 2, 4, 4), 20, 20),
+        ((2, None, 4, 4), 10, 5),
+        ((8, None, 4, 4), 20, 10),
+        ((None, None, 8, 4), 20, 10),
+    ],
+)
+def test_zero_demand_floor_uses_effective_drive_bandwidth(
+    bounded_io_case,
+    profile,
+    expected,
+    small_expected,
+):
+    current_throughput, candidate_throughput, current_block, candidate_block = profile
+    instance, current, desires = bounded_io_case
+    current.cluster_drive.throughput = current_throughput
+    current.cluster_drive.block_size_kib = current_block
+    instance.drive.throughput = candidate_throughput
+    instance.drive.block_size_kib = candidate_block
+    zero = evcache.EVCacheDiskIO(**{key: 0 for key in observation()})
+    small = evcache.EVCacheDiskIO(
+        **observation(read_ops_per_second=1, read_bytes_per_second=4096)
+    )
+    assert disk_io_requirement(instance, desires, zero, current)[0] == expected
+    # Positive traffic supplies a mix; zero traffic must preserve every axis.
+    assert disk_io_requirement(instance, desires, small, current)[0] == small_expected
