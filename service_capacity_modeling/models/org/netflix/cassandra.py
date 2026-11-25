@@ -57,7 +57,6 @@ from service_capacity_modeling.models.common import buffer_for_components
 from service_capacity_modeling.models.common import (
     ATTACHED_DRIVE_IOPS_ROUNDING_INCREMENT,
 )
-from service_capacity_modeling.models.common import compute_stateful_zone
 from service_capacity_modeling.models.common import cloud_gib_for_io
 from service_capacity_modeling.models.common import DerivedBuffers
 from service_capacity_modeling.models.common import EFFECTIVE_DISK_PER_NODE_GIB
@@ -65,14 +64,20 @@ from service_capacity_modeling.models.common import get_disk_size_gib
 from service_capacity_modeling.models.common import get_effective_disk_per_node_gib
 from service_capacity_modeling.models.common import network_services
 from service_capacity_modeling.models.common import normalize_cores
-from service_capacity_modeling.models.common import normalize_cores_float
 from service_capacity_modeling.models.common import RequirementFromCurrentCapacity
+from service_capacity_modeling.models.common import size_stateful_zone
+from service_capacity_modeling.models.common import stateful_node_resources
 from service_capacity_modeling.models.common import upsert_params
 from service_capacity_modeling.models.common import check_cluster_size_requirement
 from service_capacity_modeling.models.common import simple_network_mbps
 from service_capacity_modeling.models.common import sqrt_staffed_cores
 from service_capacity_modeling.models.common import working_set_from_drive_and_slo
 from service_capacity_modeling.models.common import zonal_requirements_from_current
+from service_capacity_modeling.models.placement import CPURequirement
+from service_capacity_modeling.models.placement import DiskRequirement
+from service_capacity_modeling.models.placement import DoesNotFit
+from service_capacity_modeling.models.placement import MemoryRequirement
+from service_capacity_modeling.models.placement import Requirement
 from service_capacity_modeling.models.org.netflix.cassandra_memory import (
     DEFAULT_MAX_PAGE_CACHE_GIB,
     base_memory_gib,
@@ -686,9 +691,9 @@ class _CassandraRequirementEstimate(BaseModel):
     disk_used_gib: float
     write_buffer_gib: float
     compaction_min_threshold: int
-    # vCPUs of this instance to size the zone's CPU for, unrounded;
-    # requirement.cpu_cores is the rounded figure the plan reports.
-    sizing_cores: float
+    # The zone's CPU on no particular shape; requirement.cpu_cores is the
+    # same need in this instance's vCPUs, for the plan to report.
+    cpu: CPURequirement
 
 
 # pylint: disable=too-many-locals
@@ -848,32 +853,29 @@ def _estimate_cassandra_requirement(
         disk_used_gib=disk_used_gib,
         write_buffer_gib=write_buffer_gib,
         compaction_min_threshold=min_threshold,
-        sizing_cores=_zonal_sizing_cores(desires, instance, zones_per_region),
+        cpu=_zonal_cpu(desires, zones_per_region),
     )
 
 
-def _zonal_sizing_cores(
-    desires: CapacityDesires, instance: Instance, zones_per_region: int
-) -> float:
-    """vCPUs of ``instance`` the zone needs, rounded only at the node count.
+def _zonal_cpu(desires: CapacityDesires, zones_per_region: int) -> CPURequirement:
+    """The zone's CPU, on no particular shape.
 
-    From a current cluster, busy compute over the share each vCPU has left
-    after the instance's queueing headroom, bounded by any derived buffer.
-    Without one, sqrt staffing (which already allows for queueing) per zone.
+    From a current cluster it is measured busy CPU, so each candidate node
+    keeps its own queueing headroom free, bounded by any derived buffer.
+    Without one, sqrt staffing already allows for queueing.
     """
     current_capacity = _get_current_capacity(desires)
     if current_capacity and desires.current_clusters is not None:
         return RequirementFromCurrentCapacity(
             current_capacity=desires.current_clusters.zonal[0],
             buffers=desires.buffers,
-        ).exact_cpu(instance)
+        ).cpu_requirement()
     cpu_buffer = buffer_for_components(
         buffers=desires.buffers, components=[BACKGROUND_BUFFER]
     )
     cores = math.ceil(sqrt_staffed_cores(desires) * cpu_buffer.ratio)
-    return (
-        normalize_cores_float(cores, instance, desires.reference_shape)
-        / zones_per_region
+    return CPURequirement(
+        count=cores / zones_per_region, reference_shape=desires.reference_shape
     )
 
 
@@ -1249,7 +1251,7 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         )
 
     # For existing EBS clusters, raise disk caps to at least the observed
-    # values so _get_min_count and compute_stateful_zone don't reject the
+    # values so _get_min_count and size_stateful_zone don't reject the
     # current topology or inflate node count.
     current_zonal = (
         list(desires.current_clusters.zonal)
@@ -1560,13 +1562,22 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
             expected_throughput_by_count[count] * disk_iops_buffer_ratio,
         )
 
-    cluster = compute_stateful_zone(
-        instance=instance,
-        drive=drive,
-        needed_cores=requirement_estimate.sizing_cores,
-        needed_disk_gib=max(needed_disk_gib, initial_ebs_disk_gib or 0),
-        needed_memory_gib=int(requirement.mem_gib.mid),
-        needed_network_mbps=requirement.network_mbps.mid,
+    cluster = size_stateful_zone(
+        Requirement(
+            cpu=requirement_estimate.cpu,
+            memory=MemoryRequirement(
+                gib=int(requirement.mem_gib.mid),
+                write_buffer_gib=requirement_estimate.write_buffer_gib,
+            ),
+            disk=DiskRequirement(gib=max(needed_disk_gib, initial_ebs_disk_gib or 0)),
+            network_mbps=requirement.network_mbps.mid,
+        ),
+        stateful_node_resources(
+            instance,
+            reserve_memory=lambda x: x - memory_layout(x).page_cache_capacity_gib,
+            write_buffer=lambda x: heap_fn(x) * max_write_buffer_percent * 0.25,
+        ),
+        drive,
         # Take into account the reads per read
         # from the per node dataset using leveled compaction
         required_disk_ios=required_disk_ios,
@@ -1574,11 +1585,11 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         # Critical C* clusters grow by doubling from the current cluster size.
         cluster_size=cluster_size_lambda,
         min_count=min_count,
-        reserve_memory=lambda x: x - memory_layout(x).page_cache_capacity_gib,
-        write_buffer=lambda x: heap_fn(x) * max_write_buffer_percent * 0.25,
-        required_write_buffer_gib=requirement_estimate.write_buffer_gib,
         max_node_disk_gib=max_node_disk,
+        cluster_type=NflxCassandraCapacityModel.cluster_type,
     )
+    if isinstance(cluster, DoesNotFit):
+        return cluster.excuse(instance.name, drive_name)
     sampled_ebs_volume_gib = None
     if initial_ebs_disk_gib is not None and cluster.attached_drives:
         attached = cluster.attached_drives[0]
@@ -1797,7 +1808,6 @@ def _estimate_cassandra_cluster_zonal(  # pylint: disable=too-many-positional-ar
         },
     )
 
-    cluster.cluster_type = NflxCassandraCapacityModel.cluster_type
     zonal_clusters = [cluster] * zones_per_region
     cap_services.extend(
         NflxCassandraCapacityModel.node_service_costs(
