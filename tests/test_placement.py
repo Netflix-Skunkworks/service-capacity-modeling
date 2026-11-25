@@ -519,6 +519,24 @@ def test_max_count_holds_after_attached_drives_add_nodes():
     assert capped.bottlenecks == [Bottleneck.disk_capacity]
 
 
+def test_a_pin_below_the_replica_minimum_does_not_blame_cpu():
+    """One copy where two are the minimum is not short on CPU when one copy
+    serves the CPU."""
+    requirement = Requirement(
+        cpu=vcpus(1),
+        partitions=Partitions(count=2, disk_gib_per_partition=100, min_replicas=2),
+    )
+    node = _whole("m7a.2xlarge", disk_gib=200)
+
+    placed = place(
+        requirement, node, layout=Layout(partitions_per_node=2, replica_count=1)
+    )
+
+    assert isinstance(placed, LimitNotMet)
+    assert placed.bottlenecks == []
+    assert "fewer than the minimum of 2" in placed.reason
+
+
 def test_a_node_without_room_for_one_partition_cannot_serve_any_pin():
     requirement = Requirement(
         cpu=vcpus(1),
