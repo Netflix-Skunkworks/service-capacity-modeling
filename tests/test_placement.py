@@ -23,8 +23,9 @@ from service_capacity_modeling.models.placement import DiskRequirement
 from service_capacity_modeling.models.placement import DoesNotFit
 from service_capacity_modeling.models.placement import Isolation
 from service_capacity_modeling.models.placement import Layout
+from service_capacity_modeling.models.placement import LimitNotMet
 from service_capacity_modeling.models.placement import MemoryRequirement
-from service_capacity_modeling.models.placement import mixable
+from service_capacity_modeling.models.placement import NodeCannotServe
 from service_capacity_modeling.models.placement import NodeCPU
 from service_capacity_modeling.models.placement import NodeDisk
 from service_capacity_modeling.models.placement import NodeMemory
@@ -33,6 +34,7 @@ from service_capacity_modeling.models.placement import Partitions
 from service_capacity_modeling.models.placement import place
 from service_capacity_modeling.models.placement import Placement
 from service_capacity_modeling.models.placement import Requirement
+from service_capacity_modeling.models.placement import ShapesDoNotMix
 
 
 def vcpus(count: float, **bounds) -> CPURequirement:
@@ -113,7 +115,8 @@ def test_disk_on_a_node_without_disk_does_not_fit():
 
     placement = place(Requirement(cpu=vcpus(1), disk=DiskRequirement(gib=10)), diskless)
 
-    assert isinstance(placement, DoesNotFit)
+    assert isinstance(placement, NodeCannotServe)
+    assert placement.shapes == [default_reference_shape.name]
     assert placement.bottlenecks == [Bottleneck.disk_capacity]
 
 
@@ -130,7 +133,7 @@ def test_a_node_missing_several_resources_names_each():
         bare,
     )
 
-    assert isinstance(placement, DoesNotFit)
+    assert isinstance(placement, NodeCannotServe)
     assert placement.bottlenecks == [
         Bottleneck.memory,
         Bottleneck.network,
@@ -236,7 +239,7 @@ def test_parallelism_needs_physical_cores_not_vcpus():
         requirement, stateful_node_resources(shapes.instance("m7a.large"))
     )
 
-    assert isinstance(one_core, DoesNotFit)
+    assert isinstance(one_core, NodeCannotServe)
     assert one_core.bottlenecks == [Bottleneck.cpu]
     assert isinstance(two_cores, Placement)
 
@@ -253,13 +256,23 @@ def test_a_container_slice_has_its_share_of_physical_cores():
     )
 
 
+def _whole(name: str, memory_gib: float = 0, disk_gib: float = 0) -> NodeResources:
+    shape = shapes.instance(name)
+    return NodeResources(
+        shape=shape,
+        cpu=NodeCPU(count=shape.cpu),
+        memory=NodeMemory(gib=memory_gib),
+        disk=NodeDisk(gib=disk_gib),
+    )
+
+
 @pytest.mark.parametrize(
     "isolation, names, mixes",
     [
         (Isolation.performance, ["m7a.2xlarge", "m7a.2xlarge"], True),
         (Isolation.performance, ["c7a.2xlarge", "m7a.2xlarge"], False),
         (Isolation.balanced, ["c7a.2xlarge", "m7a.2xlarge", "r7a.2xlarge"], True),
-        (Isolation.balanced, ["m7a.2xlarge", "m7a.4xlarge"], True),
+        (Isolation.balanced, ["m7a.2xlarge", "m7a.4xlarge"], False),
         (Isolation.balanced, ["m7a.2xlarge", "m7i.2xlarge"], False),
         (Isolation.balanced, ["c5.large", "m5.large"], False),
         (Isolation.efficient, ["m7a.2xlarge", "m7i.2xlarge"], True),
@@ -267,18 +280,21 @@ def test_a_container_slice_has_its_share_of_physical_cores():
     ],
 )
 def test_isolation_decides_which_shapes_one_cluster_runs(isolation, names, mixes):
-    """Performance runs one shape. Balanced runs shapes with one CPU: c7a,
-    m7a and r7a share theirs, m7i and c5 have their own. Efficient runs any."""
-    nodes = [
-        NodeResources(shape=shapes.instance(name), cpu=NodeCPU(count=2))
-        for name in names
-    ]
+    """Performance runs one shape. Balanced runs one CPU at one size: c7a,
+    m7a and r7a of one size share it; another size, m7i and c5 do not.
+    Efficient runs any."""
+    first, *rest = [_whole(name) for name in names]
 
-    mixed = mixable(Requirement(cpu=vcpus(16), isolation=isolation), nodes)
+    placed = place(
+        Requirement(cpu=vcpus(16), isolation=isolation), first, mixed_with=rest
+    )
 
-    assert (mixed is None) is mixes
-    if mixed is not None:
-        assert mixed.bottlenecks == [Bottleneck.cpu]
+    if mixes:
+        assert isinstance(placed, Placement)
+    else:
+        assert isinstance(placed, ShapesDoNotMix)
+        assert placed.shapes == list(dict.fromkeys(names))
+        assert placed.bottlenecks == []
 
 
 def test_isolation_does_not_reject_one_shape():
@@ -289,6 +305,70 @@ def test_isolation_does_not_reject_one_shape():
     )
 
     assert isinstance(placement, Placement) and placement.node_count == 2
+
+
+def test_a_mixed_cluster_needs_what_its_smallest_member_needs():
+    """Every node holds an equal share, so 100 GiB needs 7 nodes of 16 GiB
+    whether they are c7a or a mix with r7a, which alone would need 2."""
+    requirement = Requirement(
+        cpu=vcpus(16),
+        memory=MemoryRequirement(gib=100),
+        isolation=Isolation.balanced,
+    )
+    c7a = _whole("c7a.2xlarge", memory_gib=16)
+    r7a = _whole("r7a.2xlarge", memory_gib=64)
+
+    alone = [place(requirement, node) for node in (c7a, r7a)]
+    mixed = place(requirement, r7a, mixed_with=[c7a])
+
+    assert [p.node_count for p in alone if isinstance(p, Placement)] == [7, 2]
+    assert isinstance(mixed, Placement) and mixed.node_count == 7
+
+
+def test_a_mixed_partition_layout_fits_on_every_member():
+    """Partitions of 100 GiB fit 3 to a 300 GiB node but 1 to a 100 GiB one,
+    so a mixed cluster holds 1 per node."""
+    requirement = Requirement(
+        cpu=vcpus(1),
+        partitions=Partitions(count=6, disk_gib_per_partition=100, min_replicas=1),
+    )
+    big = _whole("m7a.2xlarge", disk_gib=300)
+    small = _whole("m7a.2xlarge", disk_gib=100)
+
+    alone = place(requirement, big)
+    mixed = place(requirement, big, mixed_with=[small])
+
+    assert isinstance(alone, Placement) and alone.node_count == 2
+    assert isinstance(mixed, Placement)
+    assert mixed.node_count == 6
+    assert mixed.layout == Layout(partitions_per_node=1, replica_count=1)
+
+
+def test_a_mixed_cluster_names_the_member_that_cannot_serve():
+    requirement = Requirement(cpu=vcpus(4, parallelism=2))
+
+    placed = place(
+        requirement,
+        stateful_node_resources(shapes.instance("m7a.large")),
+        mixed_with=[stateful_node_resources(shapes.instance("m5.large"))],
+    )
+
+    assert isinstance(placed, NodeCannotServe)
+    assert placed.shapes == ["m5.large"]
+
+
+def test_a_count_limit_is_not_a_node_that_cannot_serve():
+    """Twelve partitions on nodes that hold one each need 12 nodes, so a
+    max_count of 6 is a limit the caller set, not a lack in the node."""
+    requirement = Requirement(
+        cpu=vcpus(1),
+        partitions=Partitions(count=12, disk_gib_per_partition=100, min_replicas=1),
+    )
+
+    placed = place(requirement, _whole("m7a.2xlarge", disk_gib=100), max_count=6)
+
+    assert isinstance(placed, LimitNotMet)
+    assert placed.shapes == ["m7a.2xlarge"]
 
 
 def test_an_ineligible_node_is_reported_not_asserted():
