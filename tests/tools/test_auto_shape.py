@@ -1,12 +1,17 @@
+import copy
+
 import botocore
 import pytest
 from botocore.stub import Stubber
 from pytest import approx
 
+from service_capacity_modeling.interface import Platform
+from service_capacity_modeling.tools import auto_shape
 from service_capacity_modeling.tools.auto_shape import deduce_cpu_perf
 from service_capacity_modeling.tools.auto_shape import deduce_io_perf
 from service_capacity_modeling.tools.auto_shape import guess_iops_per_gib
 from service_capacity_modeling.tools.auto_shape import pull_family
+from service_capacity_modeling.tools.auto_shape import pull_rds_family
 from service_capacity_modeling.tools.auto_shape import CPUPerformance
 from service_capacity_modeling.tools.auto_shape import deduce_cpu_ipc_scale
 from tests.tools import mock_data
@@ -59,6 +64,7 @@ def test_pull_family_r6id(mock_ec2):
     # AWS reports decimal MB/s; gp3 throughput is MiB/s.
     assert shape.ebs_baseline_throughput_mib_per_s == 298.02
     assert shape.ebs_max_throughput_mib_per_s == 1192.09
+    assert shape.platforms == [Platform.amd64, Platform.amd64_intel]
 
 
 def test_pull_family_m7a(mock_ec2):
@@ -87,6 +93,65 @@ def test_pull_family_m7a(mock_ec2):
     assert shape.ebs_max_iops == 60000
     assert shape.ebs_baseline_throughput_mib_per_s == 1788.14
     assert shape.ebs_max_throughput_mib_per_s == 1788.14
+    assert shape.platforms == [Platform.amd64, Platform.amd64_amd]
+
+
+@pytest.mark.parametrize(
+    "archs,manufacturer,expected",
+    [
+        (["arm64"], "AWS", [Platform.arm64, Platform.arm64_graviton]),
+        (["i386", "x86_64"], "Intel", [Platform.amd64, Platform.amd64_intel]),
+        # Unknown vendors get no subtag rather than a guess
+        (["x86_64"], "Hygon", [Platform.amd64]),
+        (["x86_64"], None, [Platform.amd64]),
+    ],
+)
+def test_pull_family_platform_tags(mock_ec2, archs, manufacturer, expected):
+    response = copy.deepcopy(mock_data["m7a"])
+    processor = response["InstanceTypes"][0]["ProcessorInfo"]
+    processor["SupportedArchitectures"] = archs
+    processor.pop("Manufacturer")
+    if manufacturer is not None:
+        processor["Manufacturer"] = manufacturer
+    stub = Stubber(mock_ec2)
+    stub.add_response(
+        "describe_instance_types",
+        response,
+        {"Filters": [{"Name": "instance-type", "Values": ["m7a.*"]}]},
+    )
+    stub.activate()
+
+    shapes = pull_family(ec2_client=mock_ec2, family="m7a")
+    assert [s.platforms for s in shapes] == [expected]
+
+
+def test_pull_rds_family_has_no_ec2_platform_tags(monkeypatch):
+    # Managed shapes must never carry amd64/arm64 (or vendor) tags, otherwise
+    # they would become candidates for EC2-only models.
+    rds = botocore.session.get_session().create_client("rds", region_name="us-east-1")
+    stub = Stubber(rds)
+    stub.add_response(
+        "describe_orderable_db_instance_options",
+        {
+            "OrderableDBInstanceOptions": [
+                {"DBInstanceClass": "db.r7g.large", "Engine": "aurora-postgresql"},
+                {"DBInstanceClass": "db.r7g.xlarge", "Engine": "aurora-postgresql"},
+            ]
+        },
+        {"Engine": "aurora-postgresql"},
+    )
+    stub.activate()
+    monkeypatch.setattr(auto_shape.boto3, "client", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        auto_shape,
+        "lookup_ec2_instance_specs",
+        lambda *a, **kw: (2, 1, 2.6, 16.0, 12500.0),
+    )
+
+    shapes = pull_rds_family(rds, family="r7g", db_engines=["aurora-postgresql"])
+
+    assert [s.name for s in shapes] == ["db.r7g.large", "db.r7g.xlarge"]
+    assert all(s.platforms == [Platform.aurora_postgres] for s in shapes)
 
 
 def test_guess_iops_per_gib():

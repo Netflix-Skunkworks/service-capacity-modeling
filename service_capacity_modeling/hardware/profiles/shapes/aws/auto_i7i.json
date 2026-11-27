@@ -22,7 +22,11 @@
           "minimum_value": 0.026,
           "maximum_value": 2.153
         }
-      }
+      },
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "i7i.xlarge": {
       "name": "i7i.xlarge",
@@ -46,7 +50,11 @@
           "minimum_value": 0.026,
           "maximum_value": 2.153
         }
-      }
+      },
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "i7i.2xlarge": {
       "name": "i7i.2xlarge",
@@ -70,7 +78,11 @@
           "minimum_value": 0.026,
           "maximum_value": 2.153
         }
-      }
+      },
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "i7i.4xlarge": {
       "name": "i7i.4xlarge",
@@ -94,7 +106,11 @@
           "minimum_value": 0.026,
           "maximum_value": 2.153
         }
-      }
+      },
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "i7i.8xlarge": {
       "name": "i7i.8xlarge",
@@ -118,7 +134,11 @@
           "minimum_value": 0.026,
           "maximum_value": 2.153
         }
-      }
+      },
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "i7i.12xlarge": {
       "name": "i7i.12xlarge",
@@ -142,7 +162,11 @@
           "minimum_value": 0.026,
           "maximum_value": 2.153
         }
-      }
+      },
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "i7i.16xlarge": {
       "name": "i7i.16xlarge",
@@ -166,7 +190,11 @@
           "minimum_value": 0.026,
           "maximum_value": 2.153
         }
-      }
+      },
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "i7i.24xlarge": {
       "name": "i7i.24xlarge",
@@ -190,7 +218,11 @@
           "minimum_value": 0.026,
           "maximum_value": 2.153
         }
-      }
+      },
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     },
     "i7i.48xlarge": {
       "name": "i7i.48xlarge",
@@ -214,7 +246,11 @@
           "minimum_value": 0.026,
           "maximum_value": 2.153
         }
-      }
+      },
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     }
   }
 }

@@ -23,7 +23,11 @@
           "maximum_value": 2.0
         }
       },
-      "lifecycle": "alpha"
+      "lifecycle": "alpha",
+      "platforms": [
+        "amd64",
+        "amd64 Intel"
+      ]
     }
   }
 }
